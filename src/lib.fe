@@ -1,0 +1,364 @@
+use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
+use std::io::{Write, host, write, write_char, writeln}
+use std::native::{Arg, Args}
+
+const MAX_CODE: usize = 4096
+const STACK_LIMIT: usize = 1024
+
+const OK: i32 = 0
+const ERR_USAGE: i32 = 2
+const ERR_BAD_HEX: i32 = 3
+const ERR_ODD_HEX: i32 = 4
+const ERR_CODE_TOO_LONG: i32 = 5
+const ERR_STACK_UNDERFLOW: i32 = 10
+const ERR_STACK_OVERFLOW: i32 = 11
+const ERR_TRUNCATED_PUSH: i32 = 12
+const ERR_UNSUPPORTED_OPCODE: i32 = 13
+
+struct Program {
+    bytes: [u8; MAX_CODE],
+    len: usize,
+    status: i32,
+}
+
+struct Vm {
+    stack: [u256; STACK_LIMIT],
+    sp: usize,
+    pc: usize,
+    status: i32,
+    unsupported_opcode: i32,
+}
+
+fn hex_digit(_ value: u8) -> i32 {
+    if value < 10 {
+        (value as i32) + 48
+    } else {
+        (value as i32) + 87
+    }
+}
+
+fn write_hex_u256(_ value: u256)
+uses (w: mut Write)
+{
+    write("0x")
+    let mut i: usize = 0
+    while i < 64 {
+        let shift = ((63 - i) as u256) * 4
+        let nibble: u8 = ((value >> shift) & 15).downcast_unchecked()
+        write_char(hex_digit(nibble))
+        i += 1
+    }
+    write_char(10)
+}
+
+fn write_hex_byte(_ value: i32)
+uses (w: mut Write)
+{
+    let hi: u8 = (value / 16).downcast_unchecked()
+    let lo: u8 = (value % 16).downcast_unchecked()
+    write_char(hex_digit(hi))
+    write_char(hex_digit(lo))
+}
+
+fn is_prefixed_hex(_ arg: Arg) -> bool {
+    arg.len() >= 2 && arg.byte_at(0) == 48 && (arg.byte_at(1) == 120 || arg.byte_at(1) == 88)
+}
+
+fn hex_value(_ byte: u8) -> i32 {
+    if byte >= 48 && byte <= 57 {
+        return (byte as i32) - 48
+    }
+    if byte >= 65 && byte <= 70 {
+        return (byte as i32) - 55
+    }
+    if byte >= 97 && byte <= 102 {
+        return (byte as i32) - 87
+    }
+    0 - 1
+}
+
+fn parse_hex_program(_ arg: Arg) -> Program {
+    let mut bytes: [u8; MAX_CODE] = [0; MAX_CODE]
+    let len = arg.len()
+    let mut i: usize = 0
+    if is_prefixed_hex(arg) {
+        i = 2
+    }
+
+    if (len - i) % 2 != 0 {
+        return Program { bytes: bytes, len: 0, status: ERR_ODD_HEX }
+    }
+
+    let mut out_len: usize = 0
+    while i < len {
+        if out_len >= MAX_CODE {
+            return Program { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
+        }
+
+        let hi = hex_value(arg.byte_at(i))
+        let lo = hex_value(arg.byte_at(i + 1))
+        if hi < 0 || lo < 0 {
+            return Program { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
+        }
+
+        bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
+        out_len += 1
+        i += 2
+    }
+
+    Program { bytes: bytes, len: out_len, status: OK }
+}
+
+impl Vm {
+    fn new() -> Self {
+        Vm {
+            stack: [0; STACK_LIMIT],
+            sp: 0,
+            pc: 0,
+            status: OK,
+            unsupported_opcode: 0,
+        }
+    }
+
+    fn ok(self) -> bool {
+        self.status == OK
+    }
+
+    fn fault(mut self, _ status: i32) {
+        if self.status == OK {
+            self.status = status
+        }
+    }
+
+    fn push(mut self, _ value: u256) {
+        if self.sp >= STACK_LIMIT {
+            self.fault(ERR_STACK_OVERFLOW)
+            return
+        }
+
+        self.stack[self.sp] = value
+        self.sp += 1
+    }
+
+    fn pop(mut self) -> u256 {
+        if self.sp == 0 {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return 0
+        }
+
+        self.sp -= 1
+        self.stack[self.sp]
+    }
+
+    fn push_bool(mut self, _ value: bool) {
+        if value {
+            self.push(1)
+        } else {
+            self.push(0)
+        }
+    }
+
+    fn binary_arith(mut self, _ op: i32) {
+        let rhs = self.pop()
+        let lhs = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        match op {
+            0x01 => self.push(lhs.wrapping_add(rhs)),
+            0x02 => self.push(lhs.wrapping_mul(rhs)),
+            0x03 => self.push(lhs.wrapping_sub(rhs)),
+            0x04 => if rhs == 0 { self.push(0) } else { self.push(lhs / rhs) },
+            0x06 => if rhs == 0 { self.push(0) } else { self.push(lhs % rhs) },
+            0x10 => self.push_bool(lhs < rhs),
+            0x11 => self.push_bool(lhs > rhs),
+            0x14 => self.push_bool(lhs == rhs),
+            0x16 => self.push(lhs & rhs),
+            0x17 => self.push(lhs | rhs),
+            0x18 => self.push(lhs ^ rhs),
+            0x1b => if rhs >= 256 { self.push(0) } else { self.push(lhs << rhs) },
+            0x1c => if rhs >= 256 { self.push(0) } else { self.push(lhs >> rhs) },
+            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+        }
+    }
+
+    fn unary(mut self, _ op: i32) {
+        let value = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        match op {
+            0x15 => self.push_bool(value == 0),
+            0x19 => self.push(!value),
+            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+        }
+    }
+
+    fn dup(mut self, _ index: usize) {
+        if self.sp < index {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+
+        self.push(self.stack[self.sp - index])
+    }
+
+    fn swap(mut self, _ index: usize) {
+        if self.sp <= index {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+
+        let top = self.sp - 1
+        let other = top - index
+        let tmp = self.stack[top]
+        self.stack[top] = self.stack[other]
+        self.stack[other] = tmp
+    }
+
+    fn unsupported(mut self, _ op: i32) {
+        self.unsupported_opcode = op
+        self.fault(ERR_UNSUPPORTED_OPCODE)
+    }
+
+    fn step(mut self, _ op: i32) {
+        if op == 0x50 {
+            let _ = self.pop()
+            return
+        }
+
+        if op >= 0x01 && op <= 0x1c && op != 0x05 && op != 0x07 && op != 0x08 && op != 0x09 && op != 0x0a && op != 0x0b && op != 0x12 && op != 0x13 && op != 0x1a {
+            if op == 0x15 || op == 0x19 {
+                self.unary(op)
+            } else {
+                self.binary_arith(op)
+            }
+            return
+        }
+
+        if op >= 0x80 && op <= 0x8f {
+            self.dup((op - 0x7f).downcast_unchecked())
+            return
+        }
+
+        if op >= 0x90 && op <= 0x9f {
+            self.swap((op - 0x8f).downcast_unchecked())
+            return
+        }
+
+        self.unsupported(op)
+    }
+}
+
+fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
+    if vm.pc + len > program.len {
+        vm.fault(ERR_TRUNCATED_PUSH)
+        return 0
+    }
+
+    let mut value: u256 = 0
+    let mut i: usize = 0
+    while i < len {
+        value = (value << 8) | (program.bytes[vm.pc] as u256)
+        vm.pc += 1
+        i += 1
+    }
+    value
+}
+
+fn execute(_ program: Program) -> Vm {
+    let mut vm = Vm::new()
+    while vm.pc < program.len && vm.ok() {
+        let op = program.bytes[vm.pc] as i32
+        vm.pc += 1
+
+        if op == 0x00 {
+            return vm
+        }
+
+        if op == 0x5f {
+            vm.push(0)
+        } else {
+            if op >= 0x60 && op <= 0x7f {
+                let len: usize = (op - 0x5f).downcast_unchecked()
+                let value = read_push_value(mut vm, program, len)
+                if vm.ok() {
+                    vm.push(value)
+                }
+            } else {
+                vm.step(op)
+            }
+        }
+    }
+    vm
+}
+
+fn usage() -> i32
+uses (w: mut Write)
+{
+    writeln("usage: fevm <hex-bytecode>")
+    ERR_USAGE
+}
+
+fn write_parse_error(_ status: i32)
+uses (w: mut Write)
+{
+    match status {
+        ERR_BAD_HEX => writeln("invalid hex bytecode"),
+        ERR_ODD_HEX => writeln("hex bytecode has an odd number of digits"),
+        ERR_CODE_TOO_LONG => writeln("bytecode is too large"),
+        _ => writeln("failed to parse bytecode"),
+    }
+}
+
+fn write_vm_error(_ vm: Vm)
+uses (w: mut Write)
+{
+    match vm.status {
+        ERR_STACK_UNDERFLOW => writeln("stack underflow"),
+        ERR_STACK_OVERFLOW => writeln("stack overflow"),
+        ERR_TRUNCATED_PUSH => writeln("truncated push data"),
+        ERR_UNSUPPORTED_OPCODE => {
+            write("unsupported opcode 0x")
+            write_hex_byte(vm.unsupported_opcode)
+            write_char(10)
+        },
+        _ => writeln("execution failed"),
+    }
+}
+
+fn write_result(_ vm: Vm)
+uses (w: mut Write)
+{
+    if vm.sp == 0 {
+        writeln("empty")
+    } else {
+        write_hex_u256(vm.stack[vm.sp - 1])
+    }
+}
+
+pub fn main(argc: i32, argv: **u8) -> i32 {
+    let args = Args::new(argc, argv)
+    with (Write = host()) {
+        if args.len() != 2 {
+            return usage()
+        }
+
+        let program = parse_hex_program(args.get(1))
+        if program.status != OK {
+            write_parse_error(program.status)
+            return program.status
+        }
+
+        let vm = execute(program)
+        if vm.status != OK {
+            write_vm_error(vm)
+            return vm.status
+        }
+
+        write_result(vm)
+        OK
+    }
+}
