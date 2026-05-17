@@ -5,9 +5,10 @@ use std::native::{Arg, Args}
 
 const MAX_CODE: usize = 4096
 const MEMORY_LIMIT: usize = 8192
+const RETURN_LIMIT: usize = 4096
 const STACK_LIMIT: usize = 1024
 
-const OK: i32 = 0
+pub const OK: i32 = 0
 const ERR_USAGE: i32 = 2
 const ERR_BAD_HEX: i32 = 3
 const ERR_ODD_HEX: i32 = 4
@@ -20,22 +21,64 @@ const ERR_TODO_OPCODE: i32 = 14
 const ERR_MEMORY_LIMIT: i32 = 15
 const ERR_INVALID_JUMP: i32 = 16
 const ERR_INVALID_OPCODE: i32 = 17
+const ERR_RETURN_DATA_OOB: i32 = 18
+pub const ERR_REVERT: i32 = 19
 
 const I256_MIN: i256 = -57896044618658097711785492504343953926634992332820282019728792003956564819968
 
-struct Program {
-    bytes: [u8; MAX_CODE],
-    len: usize,
-    status: i32,
+pub struct Program {
+    pub bytes: [u8; MAX_CODE],
+    pub len: usize,
+    pub status: i32,
+}
+
+pub struct ByteBuffer {
+    pub bytes: [u8; RETURN_LIMIT],
+    pub len: usize,
+    pub status: i32,
+}
+
+pub struct CallEnv {
+    pub address: u256,
+    pub caller: u256,
+    pub origin: u256,
+    pub callvalue: u256,
+    pub gasprice: u256,
+    pub gas: u256,
+    pub selfbalance: u256,
+}
+
+pub struct BlockEnv {
+    pub coinbase: u256,
+    pub timestamp: u256,
+    pub number: u256,
+    pub prevrandao: u256,
+    pub gaslimit: u256,
+    pub chainid: u256,
+    pub basefee: u256,
+    pub blobbasefee: u256,
+}
+
+pub struct ExecutionResult {
+    pub status: i32,
+    pub output: ByteBuffer,
+    pub output_valid: bool,
+    pub stack_top: u256,
+    pub stack_len: usize,
+    pub unsupported_opcode: i32,
 }
 
 struct Vm {
     memory: [u8; MEMORY_LIMIT],
     memory_size: usize,
+    output: [u8; RETURN_LIMIT],
+    output_len: usize,
+    output_valid: bool,
     stack: [u256; STACK_LIMIT],
     sp: usize,
     pc: usize,
     status: i32,
+    halted: bool,
     unsupported_opcode: i32,
 }
 
@@ -68,6 +111,18 @@ uses (w: mut Write)
     let lo: u8 = (value % 16).downcast_unchecked()
     write_char(hex_digit(hi))
     write_char(hex_digit(lo))
+}
+
+fn write_hex_bytes(_ bytes: [u8; RETURN_LIMIT], _ len: usize)
+uses (w: mut Write)
+{
+    write("0x")
+    let mut i: usize = 0
+    while i < len {
+        write_hex_byte(bytes[i] as i32)
+        i += 1
+    }
+    write_char(10)
 }
 
 fn write_opcode_name(_ op: i32)
@@ -136,6 +191,7 @@ uses (w: mut Write)
         0x57 => write("JUMPI"),
         0x58 => write("PC"),
         0x59 => write("MSIZE"),
+        0x5a => write("GAS"),
         0x5b => write("JUMPDEST"),
         0x5c => write("TLOAD"),
         0x5d => write("TSTORE"),
@@ -200,7 +256,7 @@ fn hex_value(_ byte: u8) -> i32 {
     0 - 1
 }
 
-fn parse_hex_program(_ arg: Arg) -> Program {
+pub fn parse_hex_program(_ arg: Arg) -> Program {
     let mut bytes: [u8; MAX_CODE] = [0; MAX_CODE]
     let len = arg.len()
     let mut i: usize = 0
@@ -232,15 +288,80 @@ fn parse_hex_program(_ arg: Arg) -> Program {
     Program { bytes: bytes, len: out_len, status: OK }
 }
 
+pub fn empty_bytes() -> ByteBuffer {
+    ByteBuffer { bytes: [0; RETURN_LIMIT], len: 0, status: OK }
+}
+
+fn parse_hex_bytes(_ arg: Arg) -> ByteBuffer {
+    let mut bytes: [u8; RETURN_LIMIT] = [0; RETURN_LIMIT]
+    let len = arg.len()
+    let mut i: usize = 0
+    if is_prefixed_hex(arg) {
+        i = 2
+    }
+
+    if (len - i) % 2 != 0 {
+        return ByteBuffer { bytes: bytes, len: 0, status: ERR_ODD_HEX }
+    }
+
+    let mut out_len: usize = 0
+    while i < len {
+        if out_len >= RETURN_LIMIT {
+            return ByteBuffer { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
+        }
+
+        let hi = hex_value(arg.byte_at(i))
+        let lo = hex_value(arg.byte_at(i + 1))
+        if hi < 0 || lo < 0 {
+            return ByteBuffer { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
+        }
+
+        bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
+        out_len += 1
+        i += 2
+    }
+
+    ByteBuffer { bytes: bytes, len: out_len, status: OK }
+}
+
+pub fn default_call_env() -> CallEnv {
+    CallEnv {
+        address: 0,
+        caller: 0,
+        origin: 0,
+        callvalue: 0,
+        gasprice: 0,
+        gas: 0,
+        selfbalance: 0,
+    }
+}
+
+pub fn default_block_env() -> BlockEnv {
+    BlockEnv {
+        coinbase: 0,
+        timestamp: 0,
+        number: 0,
+        prevrandao: 0,
+        gaslimit: 0,
+        chainid: 0,
+        basefee: 0,
+        blobbasefee: 0,
+    }
+}
+
 impl Vm {
     fn new() -> Self {
         Vm {
             memory: [0; MEMORY_LIMIT],
             memory_size: 0,
+            output: [0; RETURN_LIMIT],
+            output_len: 0,
+            output_valid: false,
             stack: [0; STACK_LIMIT],
             sp: 0,
             pc: 0,
             status: OK,
+            halted: false,
             unsupported_opcode: 0,
         }
     }
@@ -424,6 +545,104 @@ impl Vm {
                 self.memory[dst + i] = self.memory[src + i]
             }
         }
+    }
+
+    fn calldataload(mut self, _ calldata: ByteBuffer) {
+        let offset = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        let mut value: u256 = 0
+        let mut i: usize = 0
+        while i < 32 {
+            value = value << 8
+            let index_value = offset + (i as u256)
+            if index_value < calldata.len as u256 {
+                let index: usize = index_value.downcast_unchecked()
+                value = value | (calldata.bytes[index] as u256)
+            }
+            i += 1
+        }
+        self.push(value)
+    }
+
+    fn calldatacopy(mut self, _ calldata: ByteBuffer) {
+        let mem_offset = self.pop()
+        let data_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        if len > MEMORY_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let dst = self.ensure_memory(mem_offset, copy_len)
+        if !self.ok() {
+            return
+        }
+
+        let mut i: usize = 0
+        while i < copy_len {
+            let index_value = data_offset + (i as u256)
+            if index_value < calldata.len as u256 {
+                let index: usize = index_value.downcast_unchecked()
+                self.memory[dst + i] = calldata.bytes[index]
+            } else {
+                self.memory[dst + i] = 0
+            }
+            i += 1
+        }
+    }
+
+    fn returndatacopy(mut self) {
+        let mem_offset = self.pop()
+        let data_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        if data_offset != 0 || len != 0 {
+            self.fault(ERR_RETURN_DATA_OOB)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let _ = self.ensure_memory(mem_offset, copy_len)
+    }
+
+    fn finish_from_memory(mut self, _ status: i32) {
+        let offset = self.pop()
+        let len = self.pop()
+        if !self.ok() {
+            return
+        }
+
+        if len > RETURN_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let start = self.ensure_memory(offset, copy_len)
+        if !self.ok() {
+            return
+        }
+
+        let mut i: usize = 0
+        while i < copy_len {
+            self.output[i] = self.memory[start + i]
+            i += 1
+        }
+        self.output_len = copy_len
+        self.output_valid = true
+        self.status = status
+        self.halted = true
     }
 
     fn exp(mut self, _ base: u256, _ exponent: u256) {
@@ -634,7 +853,7 @@ impl Vm {
         self.pc = pc
     }
 
-    fn step(mut self, _ op: i32, _ program: Program) {
+    fn step(mut self, _ op: i32, _ program: Program, _ calldata: ByteBuffer, _ call: CallEnv, _ block: BlockEnv) {
         if op == 0x50 {
             let _ = self.pop()
             return
@@ -654,6 +873,41 @@ impl Vm {
             return
         }
 
+        if op == 0x30 {
+            self.push(call.address)
+            return
+        }
+
+        if op == 0x32 {
+            self.push(call.origin)
+            return
+        }
+
+        if op == 0x33 {
+            self.push(call.caller)
+            return
+        }
+
+        if op == 0x34 {
+            self.push(call.callvalue)
+            return
+        }
+
+        if op == 0x35 {
+            self.calldataload(calldata)
+            return
+        }
+
+        if op == 0x36 {
+            self.push(calldata.len as u256)
+            return
+        }
+
+        if op == 0x37 {
+            self.calldatacopy(calldata)
+            return
+        }
+
         if op == 0x38 {
             self.push(program.len as u256)
             return
@@ -661,6 +915,66 @@ impl Vm {
 
         if op == 0x39 {
             self.codecopy(program)
+            return
+        }
+
+        if op == 0x3a {
+            self.push(call.gasprice)
+            return
+        }
+
+        if op == 0x3d {
+            self.push(0)
+            return
+        }
+
+        if op == 0x3e {
+            self.returndatacopy()
+            return
+        }
+
+        if op == 0x41 {
+            self.push(block.coinbase)
+            return
+        }
+
+        if op == 0x42 {
+            self.push(block.timestamp)
+            return
+        }
+
+        if op == 0x43 {
+            self.push(block.number)
+            return
+        }
+
+        if op == 0x44 {
+            self.push(block.prevrandao)
+            return
+        }
+
+        if op == 0x45 {
+            self.push(block.gaslimit)
+            return
+        }
+
+        if op == 0x46 {
+            self.push(block.chainid)
+            return
+        }
+
+        if op == 0x47 {
+            self.push(call.selfbalance)
+            return
+        }
+
+        if op == 0x48 {
+            self.push(block.basefee)
+            return
+        }
+
+        if op == 0x4a {
+            self.push(block.blobbasefee)
             return
         }
 
@@ -706,6 +1020,11 @@ impl Vm {
             return
         }
 
+        if op == 0x5a {
+            self.push(call.gas)
+            return
+        }
+
         if op == 0x5b {
             return
         }
@@ -725,6 +1044,16 @@ impl Vm {
             return
         }
 
+        if op == 0xf3 {
+            self.finish_from_memory(OK)
+            return
+        }
+
+        if op == 0xfd {
+            self.finish_from_memory(ERR_REVERT)
+            return
+        }
+
         if is_todo_opcode(op) {
             self.todo(op)
         } else {
@@ -741,10 +1070,13 @@ fn is_todo_opcode(_ op: i32) -> bool {
     if op == 0x20 {
         return true
     }
-    if op >= 0x30 && op <= 0x37 {
+    if op == 0x31 {
         return true
     }
-    if op >= 0x3a && op <= 0x4a {
+    if op == 0x3b || op == 0x3c || op == 0x3f {
+        return true
+    }
+    if op == 0x40 || op == 0x49 {
         return true
     }
     if op >= 0x5c && op <= 0x5d {
@@ -753,10 +1085,10 @@ fn is_todo_opcode(_ op: i32) -> bool {
     if op >= 0xa0 && op <= 0xa4 {
         return true
     }
-    if op >= 0xf0 && op <= 0xf5 {
+    if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 {
         return true
     }
-    op == 0xfa || op == 0xfd || op == 0xff
+    op == 0xfa || op == 0xff
 }
 
 fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
@@ -775,13 +1107,14 @@ fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
     value
 }
 
-fn execute(_ program: Program) -> Vm {
+fn execute_vm(_ program: Program, _ calldata: ByteBuffer, _ call: CallEnv, _ block: BlockEnv) -> Vm {
     let mut vm = Vm::new()
-    while vm.pc < program.len && vm.ok() {
+    while vm.pc < program.len && vm.ok() && !vm.halted {
         let op = program.bytes[vm.pc] as i32
         vm.pc += 1
 
         if op == 0x00 {
+            vm.halted = true
             return vm
         }
 
@@ -795,17 +1128,33 @@ fn execute(_ program: Program) -> Vm {
                     vm.push(value)
                 }
             } else {
-                vm.step(op, program)
+                vm.step(op, program, calldata, call, block)
             }
         }
     }
     vm
 }
 
+fn vm_result(_ vm: Vm) -> ExecutionResult {
+    let stack_top: u256 = if vm.sp == 0 { 0 } else { vm.stack[vm.sp - 1] }
+    ExecutionResult {
+        status: vm.status,
+        output: ByteBuffer { bytes: vm.output, len: vm.output_len, status: OK },
+        output_valid: vm.output_valid,
+        stack_top: stack_top,
+        stack_len: vm.sp,
+        unsupported_opcode: vm.unsupported_opcode,
+    }
+}
+
+pub fn execute(_ program: Program, _ calldata: ByteBuffer, _ call: CallEnv, _ block: BlockEnv) -> ExecutionResult {
+    vm_result(execute_vm(program, calldata, call, block))
+}
+
 fn usage() -> i32
 uses (w: mut Write)
 {
-    writeln("usage: fevm <hex-bytecode>")
+    writeln("usage: fevm <hex-bytecode> [hex-calldata]")
     ERR_USAGE
 }
 
@@ -837,6 +1186,11 @@ uses (w: mut Write)
         ERR_MEMORY_LIMIT => writeln("memory limit exceeded"),
         ERR_INVALID_JUMP => writeln("invalid jump destination"),
         ERR_INVALID_OPCODE => writeln("invalid opcode"),
+        ERR_RETURN_DATA_OOB => writeln("return data out of bounds"),
+        ERR_REVERT => {
+            write("revert ")
+            write_hex_bytes(vm.output, vm.output_len)
+        },
         ERR_UNSUPPORTED_OPCODE => {
             write("unsupported opcode 0x")
             write_hex_byte(vm.unsupported_opcode)
@@ -851,17 +1205,21 @@ uses (w: mut Write)
 fn write_result(_ vm: Vm)
 uses (w: mut Write)
 {
-    if vm.sp == 0 {
-        writeln("empty")
+    if vm.output_valid {
+        write_hex_bytes(vm.output, vm.output_len)
     } else {
-        write_hex_u256(vm.stack[vm.sp - 1])
+        if vm.sp == 0 {
+            writeln("empty")
+        } else {
+            write_hex_u256(vm.stack[vm.sp - 1])
+        }
     }
 }
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
     let args = Args::new(argc, argv)
     with (Write = host()) {
-        if args.len() != 2 {
+        if args.len() != 2 && args.len() != 3 {
             return usage()
         }
 
@@ -871,7 +1229,16 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
             return program.status
         }
 
-        let vm = execute(program)
+        let mut calldata = empty_bytes()
+        if args.len() == 3 {
+            calldata = parse_hex_bytes(args.get(2))
+            if calldata.status != OK {
+                write_parse_error(calldata.status)
+                return calldata.status
+            }
+        }
+
+        let vm = execute_vm(program, calldata, default_call_env(), default_block_env())
         if vm.status != OK {
             write_vm_error(vm)
             return vm.status
