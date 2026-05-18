@@ -1,0 +1,6 @@
+[ingot]
+name = "fevm"
+version = "0.1.0"
+
+[dependencies]
+swisstable = true

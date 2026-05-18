@@ -1,0 +1,867 @@
+use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
+use std::evm::crypto::{addmod, mulmod}
+use ingot::constants::{
+    ERR_INVALID_JUMP,
+    ERR_INVALID_OPCODE,
+    ERR_MEMORY_LIMIT,
+    ERR_RETURN_DATA_OOB,
+    ERR_REVERT,
+    ERR_STACK_OVERFLOW,
+    ERR_STACK_UNDERFLOW,
+    ERR_STATE_LIMIT,
+    ERR_TODO_OPCODE,
+    ERR_TRUNCATED_PUSH,
+    ERR_UNSUPPORTED_OPCODE,
+    I256_MIN,
+    MAX_CODE,
+    MEMORY_LIMIT,
+    OK,
+    RETURN_LIMIT,
+    STACK_LIMIT,
+}
+use ingot::opcodes::is_todo_opcode
+use ingot::state::WorldState
+use ingot::types::{BlockEnv, ByteBuffer, CallEnv, ExecutionResult, Program}
+
+pub struct Vm {
+    pub memory: [u8; MEMORY_LIMIT],
+    pub memory_size: usize,
+    pub output: [u8; RETURN_LIMIT],
+    pub output_len: usize,
+    pub output_valid: bool,
+    pub stack: [u256; STACK_LIMIT],
+    pub sp: usize,
+    pub pc: usize,
+    pub status: i32,
+    pub halted: bool,
+    pub unsupported_opcode: i32,
+}
+
+impl Vm {
+    fn new() -> Self {
+        Vm {
+            memory: [0; MEMORY_LIMIT],
+            memory_size: 0,
+            output: [0; RETURN_LIMIT],
+            output_len: 0,
+            output_valid: false,
+            stack: [0; STACK_LIMIT],
+            sp: 0,
+            pc: 0,
+            status: OK,
+            halted: false,
+            unsupported_opcode: 0,
+        }
+    }
+
+    fn ok(self) -> bool {
+        self.status == OK
+    }
+
+    fn fault(mut self, _ status: i32) {
+        if self.status == OK {
+            self.status = status
+        }
+    }
+
+    fn push(mut self, _ value: u256) {
+        if self.sp >= STACK_LIMIT {
+            self.fault(ERR_STACK_OVERFLOW)
+            return
+        }
+
+        self.stack[self.sp] = value
+        self.sp += 1
+    }
+
+    fn pop(mut self) -> u256 {
+        if self.sp == 0 {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return 0
+        }
+
+        self.sp -= 1
+        self.stack[self.sp]
+    }
+
+    fn push_bool(mut self, _ value: bool) {
+        if value { self.push(1) } else { self.push(0) }
+    }
+
+    fn ensure_memory(mut self, _ offset: u256, _ len: usize) -> usize {
+        if len == 0 { return 0 }
+
+        if offset > MEMORY_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return 0
+        }
+
+        let start: usize = offset.downcast_unchecked()
+        let end = start + len
+        if end > MEMORY_LIMIT {
+            self.fault(ERR_MEMORY_LIMIT)
+            return 0
+        }
+
+        if end > self.memory_size {
+            self.memory_size = end
+        }
+        start
+    }
+
+    fn mload(mut self) {
+        let offset = self.pop()
+        if !self.ok() { return }
+
+        let start = self.ensure_memory(offset, 32)
+        if !self.ok() { return }
+
+        let mut value: u256 = 0
+        let mut i: usize = 0
+        while i < 32 {
+            value = (value << 8) | (self.memory[start + i] as u256)
+            i += 1
+        }
+        self.push(value)
+    }
+
+    fn mstore(mut self) {
+        let offset = self.pop()
+        let value = self.pop()
+        if !self.ok() { return }
+
+        let start = self.ensure_memory(offset, 32)
+        if !self.ok() { return }
+
+        let mut i: usize = 0
+        while i < 32 {
+            let shift = ((31 - i) as u256) * 8
+            self.memory[start + i] = ((value >> shift) & 255).downcast_unchecked()
+            i += 1
+        }
+    }
+
+    fn mstore8(mut self) {
+        let offset = self.pop()
+        let value = self.pop()
+        if !self.ok() { return }
+
+        let start = self.ensure_memory(offset, 1)
+        if self.ok() {
+            self.memory[start] = (value & 255).downcast_unchecked()
+        }
+    }
+
+    fn codecopy(mut self, _ program: Program) {
+        let mem_offset = self.pop()
+        let code_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+
+        if len > MEMORY_LIMIT as u256 || code_offset > MAX_CODE as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let dst = self.ensure_memory(mem_offset, copy_len)
+        if !self.ok() { return }
+
+        let src: usize = code_offset.downcast_unchecked()
+        let mut i: usize = 0
+        while i < copy_len {
+            let index = src + i
+            if index < program.len {
+                self.memory[dst + i] = program.bytes[index]
+            } else {
+                self.memory[dst + i] = 0
+            }
+            i += 1
+        }
+    }
+
+    fn mcopy(mut self) {
+        let dst_offset = self.pop()
+        let src_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+
+        if len > MEMORY_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let dst = self.ensure_memory(dst_offset, copy_len)
+        let src = self.ensure_memory(src_offset, copy_len)
+        if !self.ok() { return }
+
+        if dst < src {
+            let mut i: usize = 0
+            while i < copy_len {
+                self.memory[dst + i] = self.memory[src + i]
+                i += 1
+            }
+        } else {
+            let mut i: usize = copy_len
+            while i > 0 {
+                i -= 1
+                self.memory[dst + i] = self.memory[src + i]
+            }
+        }
+    }
+
+    fn calldataload(mut self, _ calldata: ByteBuffer) {
+        let offset = self.pop()
+        if !self.ok() { return }
+
+        let mut value: u256 = 0
+        let mut i: usize = 0
+        while i < 32 {
+            value = value << 8
+            let index_value = offset + (i as u256)
+            if index_value < calldata.len as u256 {
+                let index: usize = index_value.downcast_unchecked()
+                value = value | (calldata.bytes[index] as u256)
+            }
+            i += 1
+        }
+        self.push(value)
+    }
+
+    fn calldatacopy(mut self, _ calldata: ByteBuffer) {
+        let mem_offset = self.pop()
+        let data_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+
+        if len > MEMORY_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let dst = self.ensure_memory(mem_offset, copy_len)
+        if !self.ok() { return }
+
+        let mut i: usize = 0
+        while i < copy_len {
+            let index_value = data_offset + (i as u256)
+            if index_value < calldata.len as u256 {
+                let index: usize = index_value.downcast_unchecked()
+                self.memory[dst + i] = calldata.bytes[index]
+            } else {
+                self.memory[dst + i] = 0
+            }
+            i += 1
+        }
+    }
+
+    fn returndatacopy(mut self) {
+        let mem_offset = self.pop()
+        let data_offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+
+        if data_offset != 0 || len != 0 {
+            self.fault(ERR_RETURN_DATA_OOB)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let _ = self.ensure_memory(mem_offset, copy_len)
+    }
+
+    fn finish_from_memory(mut self, _ status: i32) {
+        let offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+
+        if len > RETURN_LIMIT as u256 {
+            self.fault(ERR_MEMORY_LIMIT)
+            return
+        }
+
+        let copy_len: usize = len.downcast_unchecked()
+        let start = self.ensure_memory(offset, copy_len)
+        if !self.ok() { return }
+
+        let mut i: usize = 0
+        while i < copy_len {
+            self.output[i] = self.memory[start + i]
+            i += 1
+        }
+        self.output_len = copy_len
+        self.output_valid = true
+        self.status = status
+        self.halted = true
+    }
+
+    fn exp(mut self, _ base: u256, _ exponent: u256) {
+        let mut result: u256 = 1
+        let mut factor = base
+        let mut power = exponent
+        while power != 0 {
+            if power & 1 == 1 {
+                result = result.wrapping_mul(factor)
+            }
+            factor = factor.wrapping_mul(factor)
+            power = power >> 1
+        }
+        self.push(result)
+    }
+
+    fn signextend(mut self, _ byte_index: u256, _ value: u256) {
+        if byte_index >= 31 {
+            self.push(value)
+            return
+        }
+
+        let bit_index = (byte_index * 8) + 7
+        let mask = (1 << (bit_index + 1)) - 1
+        if ((value >> bit_index) & 1) == 1 {
+            self.push(value | !mask)
+        } else {
+            self.push(value & mask)
+        }
+    }
+
+    fn byte(mut self, _ index: u256, _ value: u256) {
+        if index >= 32 {
+            self.push(0)
+            return
+        }
+
+        self.push((value >> ((31 - index) * 8)) & 255)
+    }
+
+    fn sar(mut self, _ shift: u256, _ value: u256) {
+        let signed = ((value >> 255) & 1) == 1
+        if shift == 0 {
+            self.push(value)
+        } else if shift >= 256 {
+            if signed {
+                self.push(!(0 as u256))
+            } else {
+                self.push(0)
+            }
+        } else {
+            let shifted = value >> shift
+            if signed {
+                self.push(shifted | !((1 << (256 - shift)) - 1))
+            } else {
+                self.push(shifted)
+            }
+        }
+    }
+
+    fn binary_arith(mut self, _ op: i32) {
+        let rhs = self.pop()
+        let lhs = self.pop()
+        if !self.ok() { return }
+
+        match op {
+            0x01 => self.push(lhs.wrapping_add(rhs)),
+            0x02 => self.push(lhs.wrapping_mul(rhs)),
+            0x03 => self.push(lhs.wrapping_sub(rhs)),
+            0x04 => if rhs == 0 {
+                self.push(0)
+            } else {
+                self.push(lhs / rhs)
+            },
+            0x05 => {
+                if rhs == 0 {
+                    self.push(0)
+                } else {
+                    let lhs_signed: i256 = lhs.downcast_unchecked()
+                    let rhs_signed: i256 = rhs.downcast_unchecked()
+                    if lhs_signed == I256_MIN && rhs_signed == -1 {
+                        self.push(lhs)
+                    } else {
+                        let result: u256 = (lhs_signed / rhs_signed).downcast_unchecked()
+                        self.push(result)
+                    }
+                }
+            },
+            0x06 => if rhs == 0 {
+                self.push(0)
+            } else {
+                self.push(lhs % rhs)
+            },
+            0x07 => {
+                if rhs == 0 {
+                    self.push(0)
+                } else {
+                    let lhs_signed: i256 = lhs.downcast_unchecked()
+                    let rhs_signed: i256 = rhs.downcast_unchecked()
+                    if rhs_signed == -1 {
+                        self.push(0)
+                    } else {
+                        let result: u256 = (lhs_signed % rhs_signed).downcast_unchecked()
+                        self.push(result)
+                    }
+                }
+            },
+            0x08 => {
+                let modulus = rhs
+                let b = lhs
+                let a = self.pop()
+                if self.ok() {
+                    self.push(addmod(a, b, modulus))
+                }
+            },
+            0x09 => {
+                let modulus = rhs
+                let b = lhs
+                let a = self.pop()
+                if self.ok() {
+                    self.push(mulmod(a, b, modulus))
+                }
+            },
+            0x0a => self.exp(lhs, rhs),
+            0x0b => self.signextend(rhs, lhs),
+            0x10 => self.push_bool(lhs < rhs),
+            0x11 => self.push_bool(lhs > rhs),
+            0x12 => {
+                let lhs_signed: i256 = lhs.downcast_unchecked()
+                let rhs_signed: i256 = rhs.downcast_unchecked()
+                self.push_bool(lhs_signed < rhs_signed)
+            },
+            0x13 => {
+                let lhs_signed: i256 = lhs.downcast_unchecked()
+                let rhs_signed: i256 = rhs.downcast_unchecked()
+                self.push_bool(lhs_signed > rhs_signed)
+            },
+            0x14 => self.push_bool(lhs == rhs),
+            0x16 => self.push(lhs & rhs),
+            0x17 => self.push(lhs | rhs),
+            0x18 => self.push(lhs ^ rhs),
+            0x1a => self.byte(rhs, lhs),
+            0x1b => if rhs >= 256 {
+                self.push(0)
+            } else {
+                self.push(lhs << rhs)
+            },
+            0x1c => if rhs >= 256 {
+                self.push(0)
+            } else {
+                self.push(lhs >> rhs)
+            },
+            0x1d => self.sar(rhs, lhs),
+            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+        }
+    }
+
+    fn unary(mut self, _ op: i32) {
+        let value = self.pop()
+        if !self.ok() { return }
+
+        match op {
+            0x15 => self.push_bool(value == 0),
+            0x19 => self.push(!value),
+            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+        }
+    }
+
+    fn dup(mut self, _ index: usize) {
+        if self.sp < index {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+
+        self.push(self.stack[self.sp - index])
+    }
+
+    fn swap(mut self, _ index: usize) {
+        if self.sp <= index {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+
+        let top = self.sp - 1
+        let other = top - index
+        let tmp = self.stack[top]
+        self.stack[top] = self.stack[other]
+        self.stack[other] = tmp
+    }
+
+    fn unsupported(mut self, _ op: i32) {
+        self.unsupported_opcode = op
+        self.fault(ERR_UNSUPPORTED_OPCODE)
+    }
+
+    fn todo(mut self, _ op: i32) {
+        self.unsupported_opcode = op
+        self.fault(ERR_TODO_OPCODE)
+    }
+
+    fn invalid(mut self, _ op: i32) {
+        self.unsupported_opcode = op
+        self.fault(ERR_INVALID_OPCODE)
+    }
+
+    fn jump(mut self, _ dest: u256, _ program: Program) {
+        if dest >= program.len as u256 {
+            self.fault(ERR_INVALID_JUMP)
+            return
+        }
+
+        let pc: usize = dest.downcast_unchecked()
+        if program.bytes[pc] != 0x5b {
+            self.fault(ERR_INVALID_JUMP)
+            return
+        }
+
+        self.pc = pc
+    }
+
+    fn sload(mut self, _ call: CallEnv, _ state: WorldState) {
+        let slot = self.pop()
+        if self.ok() {
+            self.push(state.storage_load(call.address, slot))
+        }
+    }
+
+    fn sstore(mut self, _ call: CallEnv, _ state: mut WorldState) {
+        let slot = self.pop()
+        let value = self.pop()
+        if self.ok() && !state.storage_store(call.address, slot, value) {
+            self.fault(ERR_STATE_LIMIT)
+        }
+    }
+
+    fn tload(mut self, _ call: CallEnv, _ state: WorldState) {
+        let slot = self.pop()
+        if self.ok() {
+            self.push(state.transient_load(call.address, slot))
+        }
+    }
+
+    fn tstore(mut self, _ call: CallEnv, _ state: mut WorldState) {
+        let slot = self.pop()
+        let value = self.pop()
+        if self.ok() && !state.transient_store(call.address, slot, value) {
+            self.fault(ERR_STATE_LIMIT)
+        }
+    }
+
+    fn step(
+        mut self,
+        _ op: i32,
+        _ program: Program,
+        _ calldata: ByteBuffer,
+        _ call: CallEnv,
+        _ block: BlockEnv,
+        _ state: mut WorldState,
+    ) {
+        if op == 0x50 {
+            let _ = self.pop()
+            return
+        }
+
+        if (op >= 0x01 && op <= 0x0b) || (op >= 0x10 && op <= 0x1d) {
+            if op == 0x15 || op == 0x19 {
+                self.unary(op)
+            } else {
+                self.binary_arith(op)
+            }
+            return
+        }
+
+        if op == 0x20 {
+            self.todo(op)
+            return
+        }
+
+        if op == 0x30 {
+            self.push(call.address)
+            return
+        }
+
+        if op == 0x31 {
+            let address = self.pop()
+            if self.ok() {
+                self.push(state.balance(address))
+            }
+            return
+        }
+
+        if op == 0x32 {
+            self.push(call.origin)
+            return
+        }
+
+        if op == 0x33 {
+            self.push(call.caller)
+            return
+        }
+
+        if op == 0x34 {
+            self.push(call.callvalue)
+            return
+        }
+
+        if op == 0x35 {
+            self.calldataload(calldata)
+            return
+        }
+
+        if op == 0x36 {
+            self.push(calldata.len as u256)
+            return
+        }
+
+        if op == 0x37 {
+            self.calldatacopy(calldata)
+            return
+        }
+
+        if op == 0x38 {
+            self.push(program.len as u256)
+            return
+        }
+
+        if op == 0x39 {
+            self.codecopy(program)
+            return
+        }
+
+        if op == 0x3a {
+            self.push(call.gasprice)
+            return
+        }
+
+        if op == 0x3d {
+            self.push(0)
+            return
+        }
+
+        if op == 0x3e {
+            self.returndatacopy()
+            return
+        }
+
+        if op == 0x40 {
+            let number = self.pop()
+            if self.ok() {
+                self.push(state.block_hash(number))
+            }
+            return
+        }
+
+        if op == 0x41 {
+            self.push(block.coinbase)
+            return
+        }
+
+        if op == 0x42 {
+            self.push(block.timestamp)
+            return
+        }
+
+        if op == 0x43 {
+            self.push(block.number)
+            return
+        }
+
+        if op == 0x44 {
+            self.push(block.prevrandao)
+            return
+        }
+
+        if op == 0x45 {
+            self.push(block.gaslimit)
+            return
+        }
+
+        if op == 0x46 {
+            self.push(block.chainid)
+            return
+        }
+
+        if op == 0x47 {
+            self.push(state.balance(call.address))
+            return
+        }
+
+        if op == 0x48 {
+            self.push(block.basefee)
+            return
+        }
+
+        if op == 0x4a {
+            self.push(block.blobbasefee)
+            return
+        }
+
+        if op == 0x51 {
+            self.mload()
+            return
+        }
+
+        if op == 0x52 {
+            self.mstore()
+            return
+        }
+
+        if op == 0x53 {
+            self.mstore8()
+            return
+        }
+
+        if op == 0x54 {
+            self.sload(call, state)
+            return
+        }
+
+        if op == 0x55 {
+            self.sstore(call, mut state)
+            return
+        }
+
+        if op == 0x56 {
+            let dest = self.pop()
+            if self.ok() {
+                self.jump(dest, program)
+            }
+            return
+        }
+
+        if op == 0x57 {
+            let dest = self.pop()
+            let condition = self.pop()
+            if self.ok() && condition != 0 {
+                self.jump(dest, program)
+            }
+            return
+        }
+
+        if op == 0x58 {
+            self.push((self.pc - 1) as u256)
+            return
+        }
+
+        if op == 0x59 {
+            self.push(self.memory_size as u256)
+            return
+        }
+
+        if op == 0x5a {
+            self.push(call.gas)
+            return
+        }
+
+        if op == 0x5b { return }
+
+        if op == 0x5c {
+            self.tload(call, state)
+            return
+        }
+
+        if op == 0x5d {
+            self.tstore(call, mut state)
+            return
+        }
+
+        if op == 0x5e {
+            self.mcopy()
+            return
+        }
+
+        if op >= 0x80 && op <= 0x8f {
+            self.dup((op - 0x7f).downcast_unchecked())
+            return
+        }
+
+        if op >= 0x90 && op <= 0x9f {
+            self.swap((op - 0x8f).downcast_unchecked())
+            return
+        }
+
+        if op == 0xf3 {
+            self.finish_from_memory(OK)
+            return
+        }
+
+        if op == 0xfd {
+            self.finish_from_memory(ERR_REVERT)
+            return
+        }
+
+        if is_todo_opcode(op) {
+            self.todo(op)
+        } else if op == 0xfe {
+            self.invalid(op)
+        } else {
+            self.unsupported(op)
+        }
+    }
+}
+
+fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
+    if vm.pc + len > program.len {
+        vm.fault(ERR_TRUNCATED_PUSH)
+        return 0
+    }
+
+    let mut value: u256 = 0
+    let mut i: usize = 0
+    while i < len {
+        value = (value << 8) | (program.bytes[vm.pc] as u256)
+        vm.pc += 1
+        i += 1
+    }
+    value
+}
+
+pub fn execute_vm(
+    _ program: Program,
+    _ calldata: ByteBuffer,
+    _ call: CallEnv,
+    _ block: BlockEnv,
+    _ state: mut WorldState,
+) -> Vm {
+    let mut vm = Vm::new()
+    while vm.pc < program.len && vm.ok() && !vm.halted {
+        let op = program.bytes[vm.pc] as i32
+        vm.pc += 1
+
+        if op == 0x00 {
+            vm.halted = true
+            return vm
+        }
+
+        if op == 0x5f {
+            vm.push(0)
+        } else if op >= 0x60 && op <= 0x7f {
+            let len: usize = (op - 0x5f).downcast_unchecked()
+            let value = read_push_value(mut vm, program, len)
+            if vm.ok() { vm.push(value) }
+        } else {
+            vm.step(op, program, calldata, call, block, mut state)
+        }
+    }
+    vm
+}
+
+fn vm_result(_ vm: Vm) -> ExecutionResult {
+    let stack_top: u256 = if vm.sp == 0 { 0 } else { vm.stack[vm.sp - 1] }
+    ExecutionResult {
+        status: vm.status,
+        output: ByteBuffer { bytes: vm.output, len: vm.output_len, status: OK },
+        output_valid: vm.output_valid,
+        stack_top: stack_top,
+        stack_len: vm.sp,
+        unsupported_opcode: vm.unsupported_opcode,
+    }
+}
+
+pub fn execute(
+    _ program: Program,
+    _ calldata: ByteBuffer,
+    _ call: CallEnv,
+    _ block: BlockEnv,
+    _ state: mut WorldState,
+) -> ExecutionResult {
+    vm_result(execute_vm(program, calldata, call, block, mut state))
+}

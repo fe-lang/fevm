@@ -1,0 +1,144 @@
+use core::default::Default
+use swisstable::{SwissKey, SwissTable, hash_u256}
+
+pub struct StorageKey { pub address: u256, pub slot: u256 }
+
+impl Copy for StorageKey {}
+
+impl Default for StorageKey {
+    fn default() -> Self {
+        StorageKey { address: 0, slot: 0 }
+    }
+}
+
+impl SwissKey for StorageKey {
+    fn hash(self) -> u256 {
+        hash_u256(self.address) ^ hash_u256(self.slot ^ 0x517cc1b727220a95)
+    }
+
+    fn equals(self, _ other: StorageKey) -> bool {
+        self.address == other.address && self.slot == other.slot
+    }
+}
+
+pub struct WorldState {
+    balances: SwissTable<u256, u256>,
+    nonces: SwissTable<u256, u256>,
+    storage: SwissTable<StorageKey, u256>,
+    transient_storage: SwissTable<StorageKey, u256>,
+    block_hashes: SwissTable<u256, u256>,
+}
+
+impl WorldState {
+    pub fn empty() -> Self {
+        WorldState {
+            balances: SwissTable<u256, u256>::empty(),
+            nonces: SwissTable<u256, u256>::empty(),
+            storage: SwissTable<StorageKey, u256>::empty(),
+            transient_storage: SwissTable<StorageKey, u256>::empty(),
+            block_hashes: SwissTable<u256, u256>::empty(),
+        }
+    }
+    pub fn balance(self, _ address: u256) -> u256 {
+        self.balances.get(address).value
+    }
+    pub fn set_balance(mut self, _ address: u256, _ value: u256) -> bool {
+        if value == 0 {
+            let _ = self.balances.remove(address)
+            return true
+        }
+        self.balances.insert(address, value)
+    }
+    pub fn nonce(self, _ address: u256) -> u256 {
+        self.nonces.get(address).value
+    }
+    pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
+        if value == 0 {
+            let _ = self.nonces.remove(address)
+            return true
+        }
+        self.nonces.insert(address, value)
+    }
+    pub fn storage_load(self, _ address: u256, _ slot: u256) -> u256 {
+        self.storage.get(StorageKey { address: address, slot: slot }).value
+    }
+    pub fn storage_store(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let key = StorageKey { address: address, slot: slot }
+        if value == 0 {
+            let _ = self.storage.remove(key)
+            return true
+        }
+        self.storage.insert(key, value)
+    }
+    pub fn transient_load(self, _ address: u256, _ slot: u256) -> u256 {
+        self.transient_storage.get(StorageKey { address: address, slot: slot }).value
+    }
+    pub fn transient_store(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let key = StorageKey { address: address, slot: slot }
+        if value == 0 {
+            let _ = self.transient_storage.remove(key)
+            return true
+        }
+        self.transient_storage.insert(key, value)
+    }
+    pub fn clear_transient(mut self) {
+        self.transient_storage = SwissTable<StorageKey, u256>::empty()
+    }
+    pub fn block_hash(self, _ number: u256) -> u256 {
+        self.block_hashes.get(number).value
+    }
+    pub fn set_block_hash(mut self, _ number: u256, _ hash: u256) -> bool {
+        if hash == 0 {
+            let _ = self.block_hashes.remove(number)
+            return true
+        }
+        self.block_hashes.insert(number, hash)
+    }
+}
+
+impl Default for WorldState {
+    fn default() -> Self {
+        WorldState::empty()
+    }
+}
+
+#[test]
+fn world_state_defaults_to_zero() {
+    let state = WorldState::empty()
+    core::assert(state.balance(1) == 0)
+    core::assert(state.nonce(1) == 0)
+    core::assert(state.storage_load(1, 2) == 0)
+    core::assert(state.transient_load(1, 2) == 0)
+    core::assert(state.block_hash(3) == 0)
+}
+
+#[test]
+fn world_state_roundtrips_account_storage() {
+    let mut state = WorldState::empty()
+    core::assert(state.set_balance(0xaa, 100))
+    core::assert(state.set_nonce(0xaa, 7))
+    core::assert(state.storage_store(0xaa, 3, 44))
+    core::assert(state.transient_store(0xaa, 3, 55))
+    core::assert(state.set_block_hash(8, 0x1234))
+
+    core::assert(state.balance(0xaa) == 100)
+    core::assert(state.nonce(0xaa) == 7)
+    core::assert(state.storage_load(0xaa, 3) == 44)
+    core::assert(state.transient_load(0xaa, 3) == 55)
+    core::assert(state.block_hash(8) == 0x1234)
+}
+
+#[test]
+fn world_state_zero_values_clear_entries() {
+    let mut state = WorldState::empty()
+    core::assert(state.set_balance(0xaa, 100))
+    core::assert(state.storage_store(0xaa, 3, 44))
+    core::assert(state.transient_store(0xaa, 4, 55))
+    core::assert(state.set_balance(0xaa, 0))
+    core::assert(state.storage_store(0xaa, 3, 0))
+    core::assert(state.transient_store(0xaa, 4, 0))
+
+    core::assert(state.balance(0xaa) == 0)
+    core::assert(state.storage_load(0xaa, 3) == 0)
+    core::assert(state.transient_load(0xaa, 4) == 0)
+}

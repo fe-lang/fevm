@@ -1,0 +1,55 @@
+use ingot::constants::{MAX_CODE, OK, RETURN_LIMIT}
+
+pub struct Program { pub bytes: [u8; MAX_CODE], pub len: usize, pub status: i32 }
+
+pub struct ByteBuffer { pub bytes: [u8; RETURN_LIMIT], pub len: usize, pub status: i32 }
+
+pub struct CallEnv {
+    pub address: u256,
+    pub caller: u256,
+    pub origin: u256,
+    pub callvalue: u256,
+    pub gasprice: u256,
+    pub gas: u256,
+}
+
+pub struct BlockEnv {
+    pub coinbase: u256,
+    pub timestamp: u256,
+    pub number: u256,
+    pub prevrandao: u256,
+    pub gaslimit: u256,
+    pub chainid: u256,
+    pub basefee: u256,
+    pub blobbasefee: u256,
+}
+
+pub struct ExecutionResult {
+    pub status: i32,
+    pub output: ByteBuffer,
+    pub output_valid: bool,
+    pub stack_top: u256,
+    pub stack_len: usize,
+    pub unsupported_opcode: i32,
+}
+
+pub fn empty_bytes() -> ByteBuffer {
+    ByteBuffer { bytes: [0; RETURN_LIMIT], len: 0, status: OK }
+}
+
+pub fn default_call_env() -> CallEnv {
+    CallEnv { address: 0, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
+}
+
+pub fn default_block_env() -> BlockEnv {
+    BlockEnv {
+        coinbase: 0,
+        timestamp: 0,
+        number: 0,
+        prevrandao: 0,
+        gaslimit: 0,
+        chainid: 0,
+        basefee: 0,
+        blobbasefee: 0,
+    }
+}

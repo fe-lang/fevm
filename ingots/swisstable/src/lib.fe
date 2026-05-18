@@ -1,0 +1,238 @@
+use core::default::Default
+use core::ops::WrappingMul
+
+const TABLE_CAP: usize = 256
+const TABLE_CAP_U256: u256 = 256
+const TABLE_GROUP_WIDTH: usize = 16
+const TABLE_GROUPS: usize = 16
+const TABLE_EMPTY: u8 = 255
+const TABLE_DELETED: u8 = 128
+
+pub trait SwissKey {
+    fn hash(self) -> u256
+    fn equals(self, _ other: Self) -> bool
+}
+
+pub struct Lookup<V> { pub found: bool, pub value: V }
+
+struct TableSearch { found: bool, slot: usize, can_insert: bool, insert_slot: usize }
+
+pub struct SwissTable<K, V> {
+    ctrl: [u8; TABLE_CAP],
+    keys: [K; TABLE_CAP],
+    values: [V; TABLE_CAP],
+    len: usize,
+    deleted: usize,
+}
+
+impl<K, V> Copy for SwissTable<K, V> where K: Copy, V: Copy {}
+
+pub fn hash_u256(_ key: u256) -> u256 {
+    let mut x = key ^ 0x9e3779b97f4a7c15
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9)
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb)
+    x ^ (x >> 31)
+}
+
+fn h2(_ hash: u256) -> u8 {
+    ((hash >> 8) & 127).downcast_unchecked()
+}
+
+fn group_start(_ hash: u256) -> usize {
+    let slot: usize = (hash % TABLE_CAP_U256).downcast_unchecked()
+    (slot / TABLE_GROUP_WIDTH) * TABLE_GROUP_WIDTH
+}
+
+fn next_group(_ group: usize) -> usize {
+    let next = group + TABLE_GROUP_WIDTH
+    if next == TABLE_CAP { 0 } else { next }
+}
+
+impl SwissKey for u256 {
+    fn hash(self) -> u256 {
+        hash_u256(self)
+    }
+
+    fn equals(self, _ other: u256) -> bool {
+        self == other
+    }
+}
+
+impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Copy {
+    pub fn empty() -> Self {
+        SwissTable {
+            ctrl: [TABLE_EMPTY; TABLE_CAP],
+            keys: [K::default(); TABLE_CAP],
+            values: [V::default(); TABLE_CAP],
+            len: 0,
+            deleted: 0,
+        }
+    }
+    pub fn len(self) -> usize {
+        self.len
+    }
+    pub fn capacity(self) -> usize {
+        TABLE_CAP
+    }
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    fn search(self, _ key: K, _ hash: u256, _ fingerprint: u8) -> TableSearch {
+        let mut first_deleted: usize = 0
+        let mut saw_deleted = false
+        let mut group = group_start(hash)
+        let mut probe: usize = 0
+
+        while probe < TABLE_GROUPS {
+            let mut i: usize = 0
+            while i < TABLE_GROUP_WIDTH {
+                let slot = group + i
+                let ctrl = self.ctrl[slot]
+
+                if ctrl == fingerprint && self.keys[slot].equals(key) {
+                    return TableSearch {
+                        found: true,
+                        slot: slot,
+                        can_insert: false,
+                        insert_slot: 0,
+                    }
+                }
+
+                if ctrl == TABLE_DELETED && !saw_deleted {
+                    first_deleted = slot
+                    saw_deleted = true
+                } else if ctrl == TABLE_EMPTY {
+                    let insert_slot = if saw_deleted { first_deleted } else { slot }
+                    return TableSearch {
+                        found: false,
+                        slot: 0,
+                        can_insert: true,
+                        insert_slot: insert_slot,
+                    }
+                }
+
+                i += 1
+            }
+
+            group = next_group(group)
+            probe += 1
+        }
+
+        TableSearch { found: false, slot: 0, can_insert: saw_deleted, insert_slot: first_deleted }
+    }
+    pub fn get(self, _ key: K) -> Lookup<V> {
+        let hash = key.hash()
+        let search = self.search(key, hash, h2(hash))
+        if search.found {
+            return Lookup { found: true, value: self.values[search.slot] }
+        }
+        Lookup { found: false, value: V::default() }
+    }
+    pub fn contains(self, _ key: K) -> bool {
+        self.get(key).found
+    }
+    pub fn insert(mut self, _ key: K, _ value: V) -> bool {
+        let hash = key.hash()
+        let fingerprint = h2(hash)
+        let search = self.search(key, hash, fingerprint)
+        if search.found {
+            self.values[search.slot] = value
+            return true
+        }
+
+        if !search.can_insert {
+            return false
+        }
+
+        let slot = search.insert_slot
+        if self.ctrl[slot] == TABLE_DELETED {
+            self.deleted -= 1
+        }
+        self.ctrl[slot] = fingerprint
+        self.keys[slot] = key
+        self.values[slot] = value
+        self.len += 1
+        true
+    }
+    pub fn remove(mut self, _ key: K) -> bool {
+        let hash = key.hash()
+        let search = self.search(key, hash, h2(hash))
+        if !search.found {
+            return false
+        }
+
+        self.ctrl[search.slot] = TABLE_DELETED
+        self.len -= 1
+        self.deleted += 1
+        true
+    }
+}
+
+#[test]
+fn swisstable_basic_operations() {
+    let mut table = SwissTable<u256, u256>::empty()
+    core::assert(table.is_empty())
+    core::assert(table.capacity() == TABLE_CAP)
+    core::assert(table.len() == 0)
+    core::assert(!table.contains(17))
+
+    core::assert(table.insert(17, 99))
+    core::assert(table.len() == 1)
+    let first = table.get(17)
+    core::assert(first.found)
+    core::assert(first.value == 99)
+
+    core::assert(table.insert(17, 123))
+    core::assert(table.len() == 1)
+    let updated = table.get(17)
+    core::assert(updated.found)
+    core::assert(updated.value == 123)
+
+    core::assert(table.remove(17))
+    core::assert(table.len() == 0)
+    core::assert(!table.remove(17))
+    core::assert(!table.get(17).found)
+}
+
+#[test]
+fn swisstable_many_entries_roundtrip() {
+    let mut table = SwissTable<u256, u256>::empty()
+    let mut i: usize = 0
+    while i < 128 {
+        let key = (i as u256).wrapping_mul(257) + 11
+        core::assert(table.insert(key, key + 1000))
+        i += 1
+    }
+
+    i = 0
+    while i < 128 {
+        let key = (i as u256).wrapping_mul(257) + 11
+        let lookup = table.get(key)
+        core::assert(lookup.found)
+        core::assert(lookup.value == key + 1000)
+        i += 1
+    }
+    core::assert(table.len() == 128)
+}
+
+#[test]
+fn swisstable_tombstones_reuse_full_table_slots() {
+    let mut table = SwissTable<u256, u256>::empty()
+    let mut i: usize = 0
+    while i < TABLE_CAP {
+        core::assert(table.insert(i as u256, (i as u256) + 1))
+        i += 1
+    }
+
+    core::assert(table.len() == TABLE_CAP)
+    core::assert(!table.insert(10000, 1))
+    core::assert(table.remove(99))
+    core::assert(!table.contains(99))
+    core::assert(table.insert(10000, 777))
+
+    let inserted = table.get(10000)
+    core::assert(inserted.found)
+    core::assert(inserted.value == 777)
+    core::assert(table.len() == TABLE_CAP)
+}

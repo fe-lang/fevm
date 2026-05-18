@@ -1,0 +1,122 @@
+use std::io::{Write, write}
+
+pub fn write_opcode_name(_ op: i32) uses (w: mut Write) {
+    match op {
+        0x00 => write("STOP"),
+        0x01 => write("ADD"),
+        0x02 => write("MUL"),
+        0x03 => write("SUB"),
+        0x04 => write("DIV"),
+        0x05 => write("SDIV"),
+        0x06 => write("MOD"),
+        0x07 => write("SMOD"),
+        0x08 => write("ADDMOD"),
+        0x09 => write("MULMOD"),
+        0x0a => write("EXP"),
+        0x0b => write("SIGNEXTEND"),
+        0x10 => write("LT"),
+        0x11 => write("GT"),
+        0x12 => write("SLT"),
+        0x13 => write("SGT"),
+        0x14 => write("EQ"),
+        0x15 => write("ISZERO"),
+        0x16 => write("AND"),
+        0x17 => write("OR"),
+        0x18 => write("XOR"),
+        0x19 => write("NOT"),
+        0x1a => write("BYTE"),
+        0x1b => write("SHL"),
+        0x1c => write("SHR"),
+        0x1d => write("SAR"),
+        0x20 => write("SHA3"),
+        0x30 => write("ADDRESS"),
+        0x31 => write("BALANCE"),
+        0x32 => write("ORIGIN"),
+        0x33 => write("CALLER"),
+        0x34 => write("CALLVALUE"),
+        0x35 => write("CALLDATALOAD"),
+        0x36 => write("CALLDATASIZE"),
+        0x37 => write("CALLDATACOPY"),
+        0x38 => write("CODESIZE"),
+        0x39 => write("CODECOPY"),
+        0x3a => write("GASPRICE"),
+        0x3b => write("EXTCODESIZE"),
+        0x3c => write("EXTCODECOPY"),
+        0x3d => write("RETURNDATASIZE"),
+        0x3e => write("RETURNDATACOPY"),
+        0x3f => write("EXTCODEHASH"),
+        0x40 => write("BLOCKHASH"),
+        0x41 => write("COINBASE"),
+        0x42 => write("TIMESTAMP"),
+        0x43 => write("NUMBER"),
+        0x44 => write("PREVRANDAO"),
+        0x45 => write("GASLIMIT"),
+        0x46 => write("CHAINID"),
+        0x47 => write("SELFBALANCE"),
+        0x48 => write("BASEFEE"),
+        0x49 => write("BLOBHASH"),
+        0x4a => write("BLOBBASEFEE"),
+        0x50 => write("POP"),
+        0x51 => write("MLOAD"),
+        0x52 => write("MSTORE"),
+        0x53 => write("MSTORE8"),
+        0x54 => write("SLOAD"),
+        0x55 => write("SSTORE"),
+        0x56 => write("JUMP"),
+        0x57 => write("JUMPI"),
+        0x58 => write("PC"),
+        0x59 => write("MSIZE"),
+        0x5a => write("GAS"),
+        0x5b => write("JUMPDEST"),
+        0x5c => write("TLOAD"),
+        0x5d => write("TSTORE"),
+        0x5e => write("MCOPY"),
+        0x5f => write("PUSH0"),
+        0xfe => write("INVALID"),
+        0xff => write("SELFDESTRUCT"),
+        _ => {
+            if op >= 0x60 && op <= 0x7f {
+                write("PUSH")
+            } else if op >= 0x80 && op <= 0x8f {
+                write("DUP")
+            } else if op >= 0x90 && op <= 0x9f {
+                write("SWAP")
+            } else if op >= 0xa0 && op <= 0xa4 {
+                write("LOG")
+            } else if op == 0xf0 {
+                write("CREATE")
+            } else if op == 0xf1 {
+                write("CALL")
+            } else if op == 0xf2 {
+                write("CALLCODE")
+            } else if op == 0xf3 {
+                write("RETURN")
+            } else if op == 0xf4 {
+                write("DELEGATECALL")
+            } else if op == 0xf5 {
+                write("CREATE2")
+            } else if op == 0xfa {
+                write("STATICCALL")
+            } else if op == 0xfd {
+                write("REVERT")
+            } else {
+                write("UNKNOWN")
+            }
+        },
+    }
+}
+
+pub fn is_todo_opcode(_ op: i32) -> bool {
+    if op == 0x20 { return true }
+    if op == 0x3b || op == 0x3c || op == 0x3f {
+        return true
+    }
+    if op == 0x49 { return true }
+    if op >= 0xa0 && op <= 0xa4 {
+        return true
+    }
+    if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 {
+        return true
+    }
+    op == 0xfa || op == 0xff
+}
