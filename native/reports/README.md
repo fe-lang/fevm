@@ -5,6 +5,9 @@ These are diagnostic microbenchmarks collected during concurrent compiler and
 Lean workloads. They establish the benefit of specific division paths, not EVM
 throughput or competitiveness with production implementations. Linux has not run.
 
+The later [SwissTable hash/probe comparison](swisstable.md) uses the same final
+pinned compiler and has its own records and scope.
+
 ## Revisions and verification
 
 The baseline source matches Fe `1750a181810cb503aee1ff471edf3eeb2f9e1427`,

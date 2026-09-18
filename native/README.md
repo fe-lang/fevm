@@ -37,12 +37,18 @@ The compiler's Cargo dependencies still require network access or a populated
 Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
-The acceptance command checks the compiler hash, runs all three SwissTable tests
-at O0/O1/O2 and the complete arithmetic differential corpus, and writes JSON plus
+The acceptance command checks the compiler hash, runs all SwissTable tests and
+the SwissTable/arithmetic differential corpora at O0/O1/O2, and writes JSON plus
 per-command logs. An incomplete or failing suite exits nonzero. Run the same
 commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
+
+The [SwissTable suite](swisstable/README.md) compares full-key hashing against
+the original table, checks dictionary behavior and native probe counts, and
+measures uninstrumented lookups across key distributions, occupancy, and deletion
+histories. Acceptance runs its correctness matrix; timing is a separate command.
+Its baseline Git revision must be available locally.
 
 ## Arithmetic correctness and measurement
 

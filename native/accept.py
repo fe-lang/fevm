@@ -36,6 +36,8 @@ def main():
     report.write_text(json.dumps(record, indent=2) + '\n')
     commands = [([compiler, 'test', '--backend', 'native', '-O', level, ROOT / 'ingots/swisstable'],
                  f'swisstable-O{level}') for level in ['0', '1', '2']]
+    commands.append(([sys.executable, HERE / 'swisstable/run.py', '--fe', compiler,
+                      '--out', out / 'swisstable', '--check-only'], 'swisstable-differential'))
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
     if args.check_only:
         arithmetic.append('--check-only')
