@@ -1,0 +1,244 @@
+{
+  "schema": 1,
+  "complete": true,
+  "created_utc": "2026-09-18T06:08:53.055795+00:00",
+  "runner_sha256": "78c5ed7ccc14b90d09e54bf22919d3e707fb630c1fda58753ebd6df924454cde",
+  "host": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "platform": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M1 Pro",
+    "clock_ticks_per_second": 1000000,
+    "cc": "Apple clang version 17.0.0 (clang-1700.0.13.5)"
+  },
+  "compiler": {
+    "path": "/private/tmp/fevm-native-division-candidate/bin/fe",
+    "version": "fe 26.2.0 (1750a1818)",
+    "sha256": "191bf238a4223139ad3a44158f633355eae7c81ad0e881c4ca55a35426d4d0a1"
+  },
+  "harness_revision": "8ad13bc114ae70d75e6a5329c1eab254887bb15c",
+  "harness_dirty": true,
+  "timing": "process CPU clock, input/output and startup excluded; dependent op/xor loop; build includes compiler startup, link and report; relink measured separately",
+  "results": [
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "c471c2e6ce7c610dd81cd79419528b96bef31a93a1ffa7eb73be5c2cd336f44a",
+      "build_seconds": [
+        1.1685615410096943,
+        1.299093833193183,
+        1.0106817078776658
+      ],
+      "median_build_seconds": 1.1685615410096943,
+      "object_bytes": 6344,
+      "text_bytes": 5628,
+      "executable_bytes": 33624,
+      "relink_seconds": 0.06512491684406996,
+      "executable_sha256": "a590f05148fdd8e47985871a608c149d0806371b6300081fdcf89d396227dca8",
+      "measurements": [
+        {
+          "operands": "wide",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffedcba9876543",
+          "rhs": "0x8000000000000000000000000000000000000fedcba98765",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2340.9423828125,
+            2342.041015625,
+            2339.9658203125,
+            2339.7216796875,
+            2341.552734375,
+            2339.4775390625,
+            2340.4541015625
+          ],
+          "median_cpu_ns": 2340.4541015625,
+          "min_cpu_ns": 2339.4775390625,
+          "max_cpu_ns": 2342.041015625
+        },
+        {
+          "operands": "small",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rhs": "0x7",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2345.703125,
+            2964.2333984375,
+            2351.6845703125,
+            2348.2666015625,
+            2346.5576171875,
+            2341.9189453125,
+            2340.9423828125
+          ],
+          "median_cpu_ns": 2346.5576171875,
+          "min_cpu_ns": 2340.9423828125,
+          "max_cpu_ns": 2964.2333984375
+        },
+        {
+          "operands": "both_u64",
+          "lhs": "0x8000000000000011",
+          "rhs": "0x7",
+          "rounds": 524288,
+          "cpu_ns_per_iteration": [
+            7.9402923583984375,
+            8.0413818359375,
+            8.01849365234375,
+            7.9345703125,
+            7.915496826171875,
+            7.9174041748046875,
+            7.930755615234375
+          ],
+          "median_cpu_ns": 7.9345703125,
+          "min_cpu_ns": 7.915496826171875,
+          "max_cpu_ns": 8.0413818359375
+        },
+        {
+          "operands": "equal",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2340.9423828125,
+            2348.7548828125,
+            2341.9189453125,
+            2343.3837890625,
+            2345.703125,
+            2345.3369140625,
+            2343.1396484375
+          ],
+          "median_cpu_ns": 2343.3837890625,
+          "min_cpu_ns": 2340.9423828125,
+          "max_cpu_ns": 2348.7548828125
+        },
+        {
+          "operands": "numerator_smaller",
+          "lhs": "0x11",
+          "rhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rounds": 2097152,
+          "cpu_ns_per_iteration": [
+            6.778240203857422,
+            6.766796112060547,
+            6.775379180908203,
+            6.787300109863281,
+            6.812095642089844,
+            6.814002990722656,
+            6.870269775390625
+          ],
+          "median_cpu_ns": 6.787300109863281,
+          "min_cpu_ns": 6.766796112060547,
+          "max_cpu_ns": 6.870269775390625
+        }
+      ]
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "ca4a1bc8c5452ea0235b9ad591d122c275c766a5ad6d3f23dda826feffb6aeea",
+      "build_seconds": [
+        1.0761034577153623,
+        1.0756212500855327,
+        1.2573561668395996
+      ],
+      "median_build_seconds": 1.0761034577153623,
+      "object_bytes": 6344,
+      "text_bytes": 5628,
+      "executable_bytes": 33624,
+      "relink_seconds": 0.07538666715845466,
+      "executable_sha256": "946dd63c644f48a6ca6f2987b1d1949afad69bb411defbfaf59df8288d3d48a4",
+      "measurements": [
+        {
+          "operands": "wide",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffedcba9876543",
+          "rhs": "0x8000000000000000000000000000000000000fedcba98765",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2358.154296875,
+            2435.1806640625,
+            2348.14453125,
+            2351.07421875,
+            2347.900390625,
+            2343.26171875,
+            2342.7734375
+          ],
+          "median_cpu_ns": 2348.14453125,
+          "min_cpu_ns": 2342.7734375,
+          "max_cpu_ns": 2435.1806640625
+        },
+        {
+          "operands": "small",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rhs": "0x7",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2458.3740234375,
+            2343.6279296875,
+            2344.3603515625,
+            2384.6435546875,
+            2486.328125,
+            2349.9755859375,
+            2349.4873046875
+          ],
+          "median_cpu_ns": 2349.9755859375,
+          "min_cpu_ns": 2343.6279296875,
+          "max_cpu_ns": 2486.328125
+        },
+        {
+          "operands": "both_u64",
+          "lhs": "0x8000000000000011",
+          "rhs": "0x7",
+          "rounds": 524288,
+          "cpu_ns_per_iteration": [
+            9.157180786132812,
+            14.949798583984375,
+            12.537002563476562,
+            9.138107299804688,
+            9.126663208007812,
+            9.1400146484375,
+            9.185791015625
+          ],
+          "median_cpu_ns": 9.157180786132812,
+          "min_cpu_ns": 9.126663208007812,
+          "max_cpu_ns": 14.949798583984375
+        },
+        {
+          "operands": "equal",
+          "lhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rounds": 8192,
+          "cpu_ns_per_iteration": [
+            2393.06640625,
+            2343.75,
+            2342.4072265625,
+            2348.14453125,
+            2418.9453125,
+            2590.6982421875,
+            2346.3134765625
+          ],
+          "median_cpu_ns": 2348.14453125,
+          "min_cpu_ns": 2342.4072265625,
+          "max_cpu_ns": 2590.6982421875
+        },
+        {
+          "operands": "numerator_smaller",
+          "lhs": "0x11",
+          "rhs": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0",
+          "rounds": 2097152,
+          "cpu_ns_per_iteration": [
+            7.668495178222656,
+            7.049083709716797,
+            7.061004638671875,
+            9.509563446044922,
+            7.050991058349609,
+            7.077693939208984,
+            7.086277008056641
+          ],
+          "median_cpu_ns": 7.077693939208984,
+          "min_cpu_ns": 7.049083709716797,
+          "max_cpu_ns": 9.509563446044922
+        }
+      ]
+    }
+  ]
+}

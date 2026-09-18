@@ -80,3 +80,6 @@ Near-term expansion:
 - Direct runtime-code deployment before exact `CREATE`/`CREATE2` address derivation.
 - Environment fixtures for logs, calls, and nested execution.
 - A test corpus that compares selected programs against a reference EVM.
+
+Native compiler arithmetic checks, performance measurements, and reproducible
+build instructions are documented in [native/README.md](native/README.md).

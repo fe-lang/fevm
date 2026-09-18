@@ -2,3 +2,7 @@
 /ir-out/
 /.fe-lsp/
 /.fe-lsp.json
+
+# Native harness build products and Python caches
+/native/out/
+__pycache__/

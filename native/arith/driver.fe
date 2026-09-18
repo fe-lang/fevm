@@ -1,0 +1,70 @@
+// Protocol: '@', 8-byte round count, 32-byte lhs, 32-byte rhs; little endian.
+// Reply: 8-byte CPU clock tick count and 32-byte result; little endian.
+extern {
+    fn getchar() -> i32
+    fn putchar(_ value: i32) -> i32
+    fn clock() -> i64
+}
+fn read64() -> u64 {
+    let mut value: u64 = 0
+    let mut i: u64 = 0
+    while i < 8 {
+        let byte = getchar()
+        core::assert(byte >= 0)
+        let bits: u64 = byte.downcast_unchecked()
+        value = value | (bits << (i * 8))
+        i += 1
+    }
+    value
+}
+fn write64(_ value: u64) {
+    let mut i: u64 = 0
+    while i < 8 {
+        core::assert(
+            putchar(((value >> (i * 8)) & 255).downcast_unchecked()) >= 0,
+        )
+        i += 1
+    }
+}
+fn read_word() -> Word {
+    let a = read64()
+    let b = read64()
+    let c = read64()
+    let d = read64()
+    Word { a, b, c, d }
+}
+fn write_word(_ x: Word) {
+    write64(x.a)
+    write64(x.b)
+    write64(x.c)
+    write64(x.d)
+}
+fn pack(_ x: Word) -> u256 {
+    (x.a as u256) | ((x.b as u256) << 64) | ((x.c as u256) << 128) | ((x.d as u256) << 192)
+}
+fn unpack(_ x: u256) -> Word {
+    Word {
+        a: x.downcast_truncate(),
+        b: (x >> 64).downcast_truncate(),
+        c: (x >> 128).downcast_truncate(),
+        d: (x >> 192).downcast_truncate(),
+    }
+}
+pub fn main() -> i32 {
+    let mut marker = getchar()
+    while marker != -1 {
+        core::assert(marker == 64)
+        let rounds = read64()
+        core::assert(rounds > 0)
+        let lhs = read_word()
+        let rhs = read_word()
+        let started = clock()
+        let result = kernel(lhs, rhs, rounds)
+        let ended = clock()
+        core::assert(started >= 0 && ended >= started)
+        write64((ended - started).downcast_unchecked())
+        write_word(result)
+        marker = getchar()
+    }
+    0
+}

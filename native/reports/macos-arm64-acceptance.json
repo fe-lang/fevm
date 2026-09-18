@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "e923c4a0d97f9fbfea0480a843389f3b025ae5bd",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "8f5f6bccee3fe968fd6a6c4855433e4a84ccbb8f",
+      "cargo_lock_sha256": "81da7a79fcea8499a1e92580a5a5632bf79c58e77ebc74e6a68de4457c983f65",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local commits; supply repository paths or Git bundles until published",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "aarch64-apple-darwin",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "source_directory": "/Users/sean/code/fevm/native/out/toolchain-macos/fe",
+    "sonatina_source_directory": "/Users/sean/code/fevm/native/out/toolchain-macos/sonatina",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "node": "v26.5.0",
+    "npm": "11.17.0",
+    "cc": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+    "target_directory": "/private/tmp/fevm-fe-native/target",
+    "complete": true,
+    "compiler_build_seconds": 81.07521449960768,
+    "compiler": "/Users/sean/code/fevm/native/out/toolchain-macos/bin/fe",
+    "compiler_sha256": "b878f1ea582669b69db859cbf3e7c137626d8bf22eb2ea3772c71913a1825616",
+    "compiler_version": "fe 26.2.0 (e923c4a0d)"
+  },
+  "host": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "complete": true,
+  "scope": "native numeric kernels and SwissTable; full FeVM CLI/Cancun acceptance remains pending",
+  "checks": [
+    {
+      "name": "swisstable-O0",
+      "status": 0,
+      "seconds": 4.1945512080565095
+    },
+    {
+      "name": "swisstable-O1",
+      "status": 0,
+      "seconds": 1.1946778749115765
+    },
+    {
+      "name": "swisstable-O2",
+      "status": 0,
+      "seconds": 1.2310933750122786
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 51.842235415708274
+    }
+  ]
+}

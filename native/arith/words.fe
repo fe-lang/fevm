@@ -1,0 +1,171 @@
+// A scalar-limb control. No u256 arithmetic is used inside these operations.
+struct Word { a: u64, b: u64, c: u64, d: u64 }
+impl Copy for Word {}
+
+fn zero() -> Word {
+    Word { a: 0, b: 0, c: 0, d: 0 }
+}
+fn one() -> Word {
+    Word { a: 1, b: 0, c: 0, d: 0 }
+}
+fn is_zero(_ x: Word) -> bool {
+    (x.a | x.b | x.c | x.d) == 0
+}
+fn less(_ x: Word, _ y: Word) -> bool {
+    x.d < y.d
+        || (x.d == y.d && (x.c < y.c || (x.c == y.c && (x.b < y.b || (x.b == y.b && x.a < y.a)))))
+}
+fn xor(_ x: Word, _ y: Word) -> Word {
+    Word { a: x.a ^ y.a, b: x.b ^ y.b, c: x.c ^ y.c, d: x.d ^ y.d }
+}
+
+#[arithmetic(unchecked)]
+fn add(_ x: Word, _ y: Word) -> Word {
+    let a = (x.a as u128) + (y.a as u128)
+    let b = (x.b as u128) + (y.b as u128) + (a >> 64)
+    let c = (x.c as u128) + (y.c as u128) + (b >> 64)
+    let d = x.d + y.d + ((c >> 64).downcast_truncate())
+    Word { a: a.downcast_truncate(), b: b.downcast_truncate(), c: c.downcast_truncate(), d }
+}
+
+#[arithmetic(unchecked)]
+fn sub(_ x: Word, _ y: Word) -> Word {
+    let a = x.a - y.a
+    let b0 = x.b - y.b
+    let b = b0 - ((x.a < y.a) as u64)
+    let c0 = x.c - y.c
+    let c = c0 - (((x.b < y.b) || (b > b0)) as u64)
+    let d = x.d - y.d - (((x.c < y.c) || (c > c0)) as u64)
+    Word { a, b, c, d }
+}
+
+fn shl1(_ x: Word) -> Word {
+    Word {
+        a: x.a << 1,
+        b: (x.b << 1) | (x.a >> 63),
+        c: (x.c << 1) | (x.b >> 63),
+        d: (x.d << 1) | (x.c >> 63),
+    }
+}
+fn shr1(_ x: Word) -> Word {
+    Word {
+        a: (x.a >> 1) | (x.b << 63),
+        b: (x.b >> 1) | (x.c << 63),
+        c: (x.c >> 1) | (x.d << 63),
+        d: x.d >> 1,
+    }
+}
+
+struct QuotRem { quotient: Word, remainder: Word }
+fn divide(numerator: Word, denominator: Word) -> QuotRem {
+    core::assert(!is_zero(denominator))
+    let mut n = numerator
+    let mut q = zero()
+    let mut r = zero()
+    let mut i: u64 = 0
+    while i < 256 {
+        let overflow = (r.d >> 63) != 0
+        r = shl1(r)
+        r.a = r.a | (n.d >> 63)
+        n = shl1(n)
+        q = shl1(q)
+        if overflow || !less(r, denominator) {
+            r = sub(r, denominator)
+            q.a = q.a | 1
+        }
+        i += 1
+    }
+    QuotRem { quotient: q, remainder: r }
+}
+
+fn power(base: Word, exponent: Word) -> Word {
+    let mut x = base
+    let mut n = exponent
+    let mut result = one()
+    while !is_zero(n) {
+        if (n.a & 1) != 0 {
+            result = mul(result, x)
+        }
+        n = shr1(n)
+        if !is_zero(n) {
+            x = mul(x, x)
+        }
+    }
+    result
+}
+
+fn shift_left(value: Word, shift: Word) -> Word {
+    if (shift.b | shift.c | shift.d) != 0 || shift.a >= 256 {
+        return zero()
+    }
+    let mut x = value
+    let mut n = shift.a
+    while n >= 64 {
+        x = Word { a: 0, b: x.a, c: x.b, d: x.c }
+        n -= 64
+    }
+    if n == 0 { return x }
+    Word {
+        a: x.a << n,
+        b: (x.b << n) | (x.a >> (64 - n)),
+        c: (x.c << n) | (x.b >> (64 - n)),
+        d: (x.d << n) | (x.c >> (64 - n)),
+    }
+}
+fn shift_right(value: Word, shift: Word) -> Word {
+    if (shift.b | shift.c | shift.d) != 0 || shift.a >= 256 {
+        return zero()
+    }
+    let mut x = value
+    let mut n = shift.a
+    while n >= 64 {
+        x = Word { a: x.b, b: x.c, c: x.d, d: 0 }
+        n -= 64
+    }
+    if n == 0 { return x }
+    Word {
+        a: (x.a >> n) | (x.b << (64 - n)),
+        b: (x.b >> n) | (x.c << (64 - n)),
+        c: (x.c >> n) | (x.d << (64 - n)),
+        d: x.d >> n,
+    }
+}
+
+#[arithmetic(unchecked)]
+fn mul(_ x: Word, _ y: Word) -> Word {
+    let mut a: u64 = 0
+    let mut b: u64 = 0
+    let mut c: u64 = 0
+    let mut d: u64 = 0
+    let mut carry: u128 = 0
+    let product = (x.a as u128) * (y.a as u128) + (a as u128) + carry
+    a = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.a as u128) * (y.b as u128) + (b as u128) + carry
+    b = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.a as u128) * (y.c as u128) + (c as u128) + carry
+    c = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.a as u128) * (y.d as u128) + (d as u128) + carry
+    d = product.downcast_truncate()
+    let mut carry: u128 = 0
+    let product = (x.b as u128) * (y.a as u128) + (b as u128) + carry
+    b = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.b as u128) * (y.b as u128) + (c as u128) + carry
+    c = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.b as u128) * (y.c as u128) + (d as u128) + carry
+    d = product.downcast_truncate()
+    let mut carry: u128 = 0
+    let product = (x.c as u128) * (y.a as u128) + (c as u128) + carry
+    c = product.downcast_truncate()
+    carry = product >> 64
+    let product = (x.c as u128) * (y.b as u128) + (d as u128) + carry
+    d = product.downcast_truncate()
+    let mut carry: u128 = 0
+    let product = (x.d as u128) * (y.a as u128) + (d as u128) + carry
+    d = product.downcast_truncate()
+    Word { a, b, c, d }
+}

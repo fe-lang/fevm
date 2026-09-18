@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "fe_repository": "https://github.com/argotorg/fe",
+  "fe_revision": "1750a181810cb503aee1ff471edf3eeb2f9e1427",
+  "sonatina_repository": "https://github.com/fe-lang/sonatina",
+  "sonatina_revision": "6592ff4c8bf3559d5a7e3ec83f26cb0caa69a0da",
+  "cargo_lock_sha256": "afc344b223bc825b8547c20bd44c9f588cf3f51b9be1e11cab27e205fff3296b",
+  "rust_version": "1.98.1",
+  "features": [
+    "cranelift"
+  ],
+  "publication": "local commits; supply repository paths or Git bundles until published",
+  "hosts": [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ]
+}
