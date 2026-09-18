@@ -1,15 +1,15 @@
 use core::default::Default
-use core::ops::WrappingMul
+use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 
 const TABLE_CAP: usize = 256
-const TABLE_CAP_U256: u256 = 256
 const TABLE_GROUP_WIDTH: usize = 16
 const TABLE_GROUPS: usize = 16
 const TABLE_EMPTY: u8 = 255
 const TABLE_DELETED: u8 = 128
 
 pub trait SwissKey {
-    fn hash(self) -> u256
+    // Equal keys must have equal hashes; all key bits should affect the result.
+    fn hash(self) -> u64
     fn equals(self, _ other: Self) -> bool
 }
 
@@ -27,19 +27,62 @@ pub struct SwissTable<K, V> {
 
 impl<K, V> Copy for SwissTable<K, V> where K: Copy, V: Copy {}
 
-pub fn hash_u256(_ key: u256) -> u256 {
-    let mut x = key ^ 0x9e3779b97f4a7c15
-    x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9)
-    x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb)
-    x ^ (x >> 31)
+const HASH_PRIME1: u64 = 0x9e3779b185ebca87
+const HASH_PRIME2: u64 = 0xc2b2ae3d27d4eb4f
+const HASH_PRIME3: u64 = 0x165667b19e3779f9
+const HASH_PRIME4: u64 = 0x85ebca77c2b2ae63
+
+fn rotate_left(_ value: u64, by: u64) -> u64 {
+    (value << by) | (value >> (64 - by))
 }
 
-fn h2(_ hash: u256) -> u8 {
+fn hash_round(accumulator: u64, lane: u64) -> u64 {
+    let sum = accumulator.wrapping_add(lane.wrapping_mul(HASH_PRIME2))
+    rotate_left(sum, by: 31).wrapping_mul(HASH_PRIME1)
+}
+
+fn hash_merge(accumulator: u64, lane: u64) -> u64 {
+    (accumulator ^ hash_round(accumulator: 0, lane))
+        .wrapping_mul(HASH_PRIME1)
+        .wrapping_add(HASH_PRIME4)
+}
+
+// XXH64, seed zero, specialized to the key's 32 little-endian bytes.
+// https://github.com/Cyan4973/xxHash/blob/v0.8.3/doc/xxhash_spec.md
+// Deterministic and non-cryptographic; this is not hash-flood protection.
+pub fn hash_u256(_ key: u256) -> u64 {
+    let a = hash_round(
+        accumulator: HASH_PRIME1.wrapping_add(HASH_PRIME2),
+        lane: key.downcast_truncate(),
+    )
+    let b = hash_round(
+        accumulator: HASH_PRIME2,
+        lane: (key >> 64).downcast_truncate(),
+    )
+    let c = hash_round(accumulator: 0, lane: (key >> 128).downcast_truncate())
+    let d = hash_round(
+        accumulator: (0 as u64).wrapping_sub(HASH_PRIME1),
+        lane: (key >> 192).downcast_truncate(),
+    )
+    let mut hash = rotate_left(a, by: 1)
+        .wrapping_add(rotate_left(b, by: 7))
+        .wrapping_add(rotate_left(c, by: 12))
+        .wrapping_add(rotate_left(d, by: 18))
+    hash = hash_merge(accumulator: hash, lane: a)
+    hash = hash_merge(accumulator: hash, lane: b)
+    hash = hash_merge(accumulator: hash, lane: c)
+    hash = hash_merge(accumulator: hash, lane: d).wrapping_add(32)
+    hash = (hash ^ (hash >> 33)).wrapping_mul(HASH_PRIME2)
+    hash = (hash ^ (hash >> 29)).wrapping_mul(HASH_PRIME3)
+    hash ^ (hash >> 32)
+}
+
+fn h2(_ hash: u64) -> u8 {
     ((hash >> 8) & 127).downcast_unchecked()
 }
 
-fn group_start(_ hash: u256) -> usize {
-    let slot: usize = (hash % TABLE_CAP_U256).downcast_unchecked()
+fn group_start(_ hash: u64) -> usize {
+    let slot: usize = (hash & 255).downcast_unchecked()
     (slot / TABLE_GROUP_WIDTH) * TABLE_GROUP_WIDTH
 }
 
@@ -49,7 +92,7 @@ fn next_group(_ group: usize) -> usize {
 }
 
 impl SwissKey for u256 {
-    fn hash(self) -> u256 {
+    fn hash(self) -> u64 {
         hash_u256(self)
     }
 
@@ -78,7 +121,7 @@ impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Cop
         self.len == 0
     }
 
-    fn search(self, _ key: K, _ hash: u256, _ fingerprint: u8) -> TableSearch {
+    fn search(self, _ key: K, _ hash: u64, _ fingerprint: u8) -> TableSearch {
         let mut first_deleted: usize = 0
         let mut saw_deleted = false
         let mut group = group_start(hash)
@@ -167,6 +210,123 @@ impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Cop
         self.deleted += 1
         true
     }
+}
+
+#[test]
+fn swisstable_hash_reference_vectors() {
+    // xxhsum 0.8.3 -H64 over exactly 32 little-endian bytes, seed zero.
+    core::assert(hash_u256(0) == 0xf6e9be5d70632cf5)
+    core::assert(hash_u256(1) == 0xf186e28fede3a371)
+    core::assert(hash_u256(1 << 64) == 0x71c9f435fb0cdabe)
+    core::assert(hash_u256(1 << 128) == 0x3e71211b63c69dcc)
+    core::assert(hash_u256(1 << 192) == 0x7c5718911874b771)
+    core::assert(hash_u256(1 << 255) == 0xf4f2331f4d854e48)
+    core::assert(
+        hash_u256(
+                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+            )
+            == 0xff10223616c08787,
+    )
+    core::assert(
+        hash_u256(
+                0x1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100,
+            )
+            == 0xcbf59c5116ff32b4,
+    )
+}
+
+#[test]
+fn swisstable_hash_distributes_each_limb() {
+    let mut shift: u256 = 0
+    while shift < 256 {
+        let mut groups: [usize; TABLE_GROUPS] = [0; TABLE_GROUPS]
+        let mut fingerprints: [bool; 128] = [false; 128]
+        let mut distinct: usize = 0
+        let mut i: u256 = 0
+        while i < 256 {
+            let hash = hash_u256(i << shift)
+            let group = group_start(hash) / TABLE_GROUP_WIDTH
+            groups[group] += 1
+            let fingerprint = h2(hash) as usize
+            if !fingerprints[fingerprint] {
+                fingerprints[fingerprint] = true
+                distinct += 1
+            }
+            i += 1
+        }
+        let mut group: usize = 0
+        while group < TABLE_GROUPS {
+            core::assert(groups[group] >= 4 && groups[group] <= 32)
+            group += 1
+        }
+        core::assert(distinct >= 96)
+        shift += 64
+    }
+}
+
+// Deliberately collide in the final group to exercise wraparound and equality.
+struct CollidingKey { value: u256 }
+impl Copy for CollidingKey {}
+impl Default for CollidingKey {
+    fn default() -> Self {
+        CollidingKey { value: 0 }
+    }
+}
+impl SwissKey for CollidingKey {
+    fn hash(self) -> u64 {
+        240
+    }
+    fn equals(self, _ other: Self) -> bool {
+        self.value == other.value
+    }
+}
+
+#[test]
+fn swisstable_collisions_updates_and_churn() {
+    let mut table = SwissTable<CollidingKey, u256>::empty()
+    let mut i: usize = 0
+    while i < TABLE_CAP {
+        core::assert(
+            table.insert(CollidingKey { value: i as u256 }, (i as u256) + 1),
+        )
+        i += 1
+    }
+    core::assert(!table.insert(CollidingKey { value: 1000 }, 1))
+    // A tombstone before an existing key must not create a duplicate on update.
+    core::assert(table.remove(CollidingKey { value: 0 }))
+    core::assert(table.insert(CollidingKey { value: 255 }, 999))
+    core::assert(table.len() == 255)
+    core::assert(table.get(CollidingKey { value: 255 }).value == 999)
+    core::assert(table.insert(CollidingKey { value: 0 }, 1))
+    core::assert(table.insert(CollidingKey { value: 255 }, 256))
+
+    let mut generation: usize = 0
+    while generation < 4 {
+        i = 0
+        while i < TABLE_CAP {
+            let old = (generation * TABLE_CAP + i) as u256
+            let new = old + (TABLE_CAP as u256)
+            core::assert(table.get(CollidingKey { value: old }).value == old + 1)
+            core::assert(table.remove(CollidingKey { value: old }))
+            core::assert(!table.remove(CollidingKey { value: old }))
+            core::assert(!table.contains(CollidingKey { value: old }))
+            core::assert(table.insert(CollidingKey { value: new }, new + 1))
+            core::assert(table.len() == TABLE_CAP)
+            i += 1
+        }
+        generation += 1
+    }
+    i = 0
+    while i < TABLE_CAP {
+        let key = (generation * TABLE_CAP + i) as u256
+        core::assert(table.get(CollidingKey { value: key }).value == key + 1)
+        core::assert(table.remove(CollidingKey { value: key }))
+        i += 1
+    }
+    core::assert(table.is_empty())
+    core::assert(!table.contains(CollidingKey { value: 5000 }))
+    core::assert(table.insert(CollidingKey { value: 5000 }, 17))
+    core::assert(table.get(CollidingKey { value: 5000 }).value == 17)
 }
 
 #[test]
