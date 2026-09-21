@@ -5,8 +5,9 @@ These are diagnostic microbenchmarks collected during concurrent compiler and
 Lean workloads. They establish the benefit of specific division paths, not EVM
 throughput or competitiveness with production implementations. Linux has not run.
 
-The later [SwissTable hash/probe comparison](swisstable.md) uses the same final
-pinned compiler and has its own records and scope.
+The later [SwissTable hash/probe comparison](swisstable.md) uses the same
+recorded compiler and has its own records and scope. These measurements predate
+the current native integration; they do not establish acceptance of a newer pin.
 
 ## Revisions and verification
 
@@ -20,7 +21,7 @@ those literal strings and binary hashes. The harness was also uncommitted during
 measurement; generated source hashes identify the exact matched inputs.
 Both measured compilers came from release all-feature workspace test builds with
 Rust 1.98.1. `baseline-toolchain.json` pins the baseline source and lockfile for
-the bootstrap; the candidate uses `../toolchain.json`.
+the bootstrap; `candidate-toolchain.json` pins the measured candidate.
 
 The baseline includes the separately verified aggregate loop-lifetime fix, which
 allows the value-only four-limb division control to compile while continuing to
@@ -92,6 +93,9 @@ EVM comparisons nor whole-interpreter performance conclusions follow from this s
 Original generated sources, objects, IR and assembly remain under
 `/private/tmp/fevm-native-lifetime-matrix` and
 `/private/tmp/fevm-native-division-candidate-final` on the development machine.
-Recreate them with `arith/run.py` using the respective pinned compilers, then run
-`arith/compare.py` against their retained `results.json` files. The acceptance
-record from the final clean-source bootstrap is separate from these measurements.
+To rerun these older compilers, use the pre-migration harness at FeVM `4c7a9b1`,
+whose arithmetic runner hash matches these records. Run its `arith/run.py` with
+the respective compiler, then `arith/compare.py` against the retained results.
+The current drivers require the newer trusted standard-library I/O and timing
+APIs. The historical clean-source acceptance record is separate from the timing
+measurements and from current integration acceptance.

@@ -7,7 +7,8 @@ not a whole-EVM performance result.
 
 ## Inputs and method
 
-Measured on Apple M1 Pro / macOS with the unchanged pinned native compiler:
+Measured on Apple M1 Pro / macOS with the historical compiler pinned in
+[candidate-toolchain.json](candidate-toolchain.json):
 Fe `e923c4a0d97f9fbfea0480a843389f3b025ae5bd`, Sonatina
 `8f5f6bccee3fe968fd6a6c4855433e4a84ccbb8f`; compiler SHA-256
 `b878f1ea582669b69db859cbf3e7c137626d8bf22eb2ea3772c71913a1825616`.
@@ -107,3 +108,6 @@ IR, and assembly remain under `native/out/swisstable-check-2` and
 The driver template was formatted after timing; regenerating and formatting it
 produces all four measured O2 source files byte-for-byte. The records preserve
 the template hash that was present when each run started.
+
+To rerun this compiler, use the pre-migration FeVM harness at `4c7a9b1`.
+The current drivers use newer trusted standard-library I/O and timing APIs.

@@ -278,7 +278,7 @@ def build(fe, out, table, variant, level, profile):
              '--emit', 'ir,executable', '--out-dir', folder, '--report', '--report-out', report, src])
     seconds = time.perf_counter() - started
     executable = folder / 'kernel'
-    sizes = artifacts(executable, report, folder)
+    sizes = artifacts(executable, report, folder, object_name='kernel.o')
     return executable, {'variant': variant, 'level': level, 'profile': profile,
                         'source_sha256': digest(src.read_bytes()), 'build_seconds': seconds,
                         **sizes, 'checks': []}

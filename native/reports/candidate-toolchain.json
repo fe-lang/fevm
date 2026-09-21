@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/argotorg/fe",
-  "fe_revision": "75c9bdc8e703af8f77d7e0feef1ab6db1955a11c",
+  "fe_revision": "e923c4a0d97f9fbfea0480a843389f3b025ae5bd",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "1802b06ef54a1afb2f8ac8e24becaf81ad93d875",
-  "cargo_lock_sha256": "4214b751783b120438500af2f26d2bc4df41f4fe5703a2fb5e5f44357b89bc9b",
+  "sonatina_revision": "8f5f6bccee3fe968fd6a6c4855433e4a84ccbb8f",
+  "cargo_lock_sha256": "81da7a79fcea8499a1e92580a5a5632bf79c58e77ebc74e6a68de4457c983f65",
   "rust_version": "1.98.1",
   "features": [
     "cranelift"

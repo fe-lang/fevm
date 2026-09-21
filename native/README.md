@@ -1,8 +1,15 @@
-# Native arithmetic and acceptance tooling
+# Native FeVM and arithmetic acceptance tooling
 
-This suite tests Fe's host-native arithmetic independently of the unfinished
-FeVM interpreter integration. It uses the pinned compiler in `toolchain.json`.
-The full FeVM CLI and Cancun acceptance remain separate milestones.
+This suite checks the native FeVM workspace and CLI alongside arithmetic and
+SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`.
+CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
+separate interpreter milestones.
+
+The current integration is not yet accepted: the O0 CLI crashes while initializing
+a 4096-byte array because native aggregate construction creates a roughly 16 MiB
+stack frame. Keep O0 in acceptance while the compiler fix is pending. Earlier
+reports in `reports/` retain their own compiler manifests and do not certify the
+current pin.
 
 ## Hosts and prerequisites
 
@@ -37,9 +44,11 @@ The compiler's Cargo dependencies still require network access or a populated
 Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
-The acceptance command checks the compiler hash, runs all SwissTable tests and
-the SwissTable/arithmetic differential corpora at O0/O1/O2, and writes JSON plus
-per-command logs. An incomplete or failing suite exits nonzero. Run the same
+The acceptance command checks the compiler hash, runs every workspace test,
+CLI smoke cases, and the SwissTable/arithmetic differential corpora at O0/O1/O2.
+It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
+execution, calldata return, and exit status; they retain build/link times and
+artifact sizes. An incomplete or failing suite exits nonzero. Run the same
 commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
@@ -72,14 +81,14 @@ and exponentiation by squaring. It is a compiler diagnostic control, not a claim
 that a handwritten limb implementation is optimal. Conversion between the wire
 format and either representation happens outside the repeated kernel loop.
 
-Inputs arrive at runtime through scalar libc imports. The kernel is kept out of
+Inputs arrive at runtime through the trusted `std::io` host capabilities. The kernel is kept out of
 line and each iteration consumes the preceding result (`a = result XOR seed`),
 so the operation cannot be replaced with a compile-time constant. Each batch's
 final result is checked against the reference computation. Comparison and some
 operand classes can have short recurrence periods; this is not a random-input
 throughput benchmark or a complete EVM performance measurement.
 
-Timing uses the host process CPU clock around the kernel, excluding process
+Timing uses `std::native::cpu_clock_ticks()` around the kernel, excluding process
 startup, parsing and output. A compiled C probe verifies `clock_t` width and
 `CLOCKS_PER_SEC`. A warmup batch is discarded, batch size adapts to timer
 resolution, and all sample values are retained. CPU time is not wall latency;

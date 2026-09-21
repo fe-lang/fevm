@@ -73,11 +73,12 @@ python3 native/accept.py --build /tmp/fevm-native-linux/build.json \\
   --out /tmp/fevm-native-linux-acceptance --check-only
 ```
 
-Return `build.json`, `acceptance.json`, `arithmetic/results.json`, and the
+Return `build.json`, `acceptance.json`, `arithmetic/results.json`, `cli/results.json`, and the
 acceptance logs. For performance measurements, use an idle host and omit
 `--check-only`; retain all samples, emitted IR, objects and disassembly.
 A failing command must remain a failure in the report. This validates the native
-numeric kernels and SwissTable; full FeVM CLI/Cancun acceptance remains pending.
+workspace tests, CLI smoke, numeric kernels, and SwissTable; Cancun conformance
+remains pending.
 ''')
     print(out / 'README.md')
 

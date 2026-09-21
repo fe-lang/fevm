@@ -1,16 +1,13 @@
 // Generated alongside an exact snapshot of the table source. All wire integers
 // are little-endian. Parsing, setup, verification, and output are outside timing.
-extern {
-    fn getchar() -> i32
-    fn putchar(_ value: i32) -> i32
-    fn clock() -> i64
-}
+use std::io::{HostIo, Read, Write, host, read_char}
+use std::native::cpu_clock_ticks
 
-fn read64() -> u64 {
+fn read64() -> u64 uses (input: mut Read) {
     let mut value: u64 = 0
     let mut i: u64 = 0
     while i < 8 {
-        let byte = getchar()
+        let byte = read_char()
         core::assert(byte >= 0)
         let bits: u64 = byte.downcast_unchecked()
         value = value | (bits << (i * 8))
@@ -19,17 +16,16 @@ fn read64() -> u64 {
     value
 }
 
-fn write64(_ value: u64) {
+fn write64(_ value: u64) uses (output: mut HostIo) {
     let mut i: u64 = 0
     while i < 8 {
-        core::assert(
-            putchar(((value >> (i * 8)) & 255).downcast_unchecked()) >= 0,
-        )
+        output.write_char(c: ((value >> (i * 8)) & 255).downcast_unchecked())
+        core::assert(!output.failed())
         i += 1
     }
 }
 
-fn read256() -> u256 {
+fn read256() -> u256 uses (input: mut Read) {
     let a = read64() as u256
     let b = read64() as u256
     let c = read64() as u256
@@ -37,7 +33,7 @@ fn read256() -> u256 {
     a | (b << 64) | (c << 128) | (d << 192)
 }
 
-fn write256(_ value: u256) {
+fn write256(_ value: u256) uses (output: mut HostIo) {
     write64(value.downcast_truncate())
     write64((value >> 64).downcast_truncate())
     write64((value >> 128).downcast_truncate())
@@ -67,54 +63,56 @@ fn lookup_batch(
 }
 
 pub fn main() -> i32 {
-    let mut marker = getchar()
-    while marker != -1 {
-        core::assert(marker == 64)
-        let mut table = SwissTable<u256, u256>::empty()
-        let operations = read64()
-        let mut operation: u64 = 0
-        while operation < operations {
-            let kind = read64()
-            let key = read256()
-            let value = read256()
-            __PROFILE_OPERATION__
-            let success = if kind == 1 {
-                table.insert(key, value)
-            } else {
-                core::assert(kind == 2)
-                table.remove(key)
+    with (Read = host(), HostIo = host()) {
+        let mut marker = read_char()
+        while marker != -1 {
+            core::assert(marker == 64)
+            let mut table = SwissTable<u256, u256>::empty()
+            let operations = read64()
+            let mut operation: u64 = 0
+            while operation < operations {
+                let kind = read64()
+                let key = read256()
+                let value = read256()
+                __PROFILE_OPERATION__
+                let success = if kind == 1 {
+                    table.insert(key, value)
+                } else {
+                    core::assert(kind == 2)
+                    table.remove(key)
+                }
+                write64(success as u64)
+                write64(table.len().downcast_unchecked())
+                operation += 1
             }
-            write64(success as u64)
-            write64(table.len().downcast_unchecked())
-            operation += 1
+            write64(table.deleted.downcast_unchecked())
+            let count: usize = read64().downcast_unchecked()
+            core::assert(count > 0 && count <= 256)
+            let mut keys: [u256; 256] = [0; 256]
+            let mut i: usize = 0
+            while i < count {
+                let key = read256()
+                keys[i] = key
+                __PROFILE_QUERY__
+                let lookup = table.get(key)
+                write64(lookup.found as u64)
+                write256(lookup.value)
+                let hash = key.hash()
+                write64((hash as u256).downcast_truncate())
+                write64(group_start(hash).downcast_unchecked())
+                write64(h2(hash) as u64)
+                i += 1
+            }
+            let rounds = read64()
+            core::assert(rounds > 0)
+            let started = cpu_clock_ticks()
+            let checksum = lookup_batch(table, keys, count, rounds)
+            let ended = cpu_clock_ticks()
+            core::assert(started >= 0 && ended >= started)
+            write64((ended - started).downcast_unchecked())
+            write64(checksum)
+            marker = read_char()
         }
-        write64(table.deleted.downcast_unchecked())
-        let count: usize = read64().downcast_unchecked()
-        core::assert(count > 0 && count <= 256)
-        let mut keys: [u256; 256] = [0; 256]
-        let mut i: usize = 0
-        while i < count {
-            let key = read256()
-            keys[i] = key
-            __PROFILE_QUERY__
-            let lookup = table.get(key)
-            write64(lookup.found as u64)
-            write256(lookup.value)
-            let hash = key.hash()
-            write64((hash as u256).downcast_truncate())
-            write64(group_start(hash).downcast_unchecked())
-            write64(h2(hash) as u64)
-            i += 1
-        }
-        let rounds = read64()
-        core::assert(rounds > 0)
-        let started = clock()
-        let checksum = lookup_batch(table, keys, count, rounds)
-        let ended = clock()
-        core::assert(started >= 0 && ended >= started)
-        write64((ended - started).downcast_unchecked())
-        write64(checksum)
-        marker = getchar()
     }
     0
 }

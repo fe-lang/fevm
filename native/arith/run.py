@@ -143,13 +143,13 @@ def host_info(out):
             'cc': command(['cc', '--version']).decode().splitlines()[0]}
 
 
-def artifacts(executable, report, output):
+def artifacts(executable, report, output, *, object_name):
     # Extract only the compiler's object bytes; never unpack arbitrary archive paths.
     with tarfile.open(report) as archive:
-        objects = [m for m in archive.getmembers() if m.isfile() and Path(m.name).name == 'kernel.o']
+        objects = [m for m in archive.getmembers() if m.isfile() and Path(m.name).name == object_name]
         if len(objects) != 1:
             raise RuntimeError(f'expected one native object in {report}, found {len(objects)}')
-        object_path = output / 'kernel.o'
+        object_path = output / object_name
         object_path.write_bytes(archive.extractfile(objects[0]).read())
     started = time.perf_counter()
     command(['cc', object_path, '-o', output / 'relinked'])
@@ -254,7 +254,7 @@ def main():
                     build_seconds.append(time.perf_counter() - started)
                 executable = folder / 'kernel'
                 execute(executable, op, cases)
-                sizes = artifacts(executable, report, folder)
+                sizes = artifacts(executable, report, folder, object_name='kernel.o')
                 execute(folder / 'relinked', op, cases[:10])
                 row = {'operation': op, 'representation': representation, 'level': level,
                        'checked_cases': len(cases), 'source_sha256': hashlib.sha256(src.read_bytes()).hexdigest(),
