@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run as the setup script in a Cloud environment connected to private FeVM.
+# Run as the setup script in a Cloud environment connected to FeVM.
 set -euo pipefail
 
 test "$(uname -s)" = Linux

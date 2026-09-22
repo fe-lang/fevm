@@ -5,11 +5,11 @@ the exact commits; subsequent branch changes must not change an acceptance run.
 
 | Repository | Branch | Commit |
 |---|---|---|
-| [FeVM (private)](https://github.com/fe-lang/fevm/tree/native-acceptance) | `native-acceptance` | `cc5b1caffade446868fa1c24b15ef0596fce269a` |
+| [FeVM](https://github.com/fe-lang/fevm/tree/native-acceptance) | `native-acceptance` | `cc5b1caffade446868fa1c24b15ef0596fce269a` |
 | [Fe](https://github.com/argotorg/fe/tree/fevm-native-integration) | `fevm-native-integration` | `85e64e8404642eaddcdd1ec8d275d7c26ab7ac31` |
 | [Sonatina](https://github.com/sbillig/sonatina/tree/fix-native-aggregate-construction) | `fix-native-aggregate-construction` | `61fa661c23bbeeeab024c4e9936656b7a73bd8f4` |
 
-Use an **x86_64 Linux** environment with access to private FeVM and its full Git
+Use an **x86_64 Linux** environment with access to public FeVM and its full Git
 history. The first [Cloud task](https://chatgpt.com/codex/tasks/task_e_6ab1f64ec6b883289a119636c3641358)
 confirmed Linux x86_64 and the exact Fe revision/lockfile, but its network proxy
 rejected the FeVM fetch with HTTP 403. Bootstrap and every acceptance stage were
@@ -17,12 +17,14 @@ rejected the FeVM fetch with HTTP 403. Bootstrap and every acceptance stage were
 would otherwise succeed. Its report is retained in
 [the Cloud attempt record](reports/linux-cloud-attempt.md).
 
-Use a dedicated FeVM environment with the private GitHub repository connected.
+FeVM is now public; anonymous HTTPS fetching of `native-acceptance` succeeds.
+A [retry in the existing Fe environment](https://chatgpt.com/codex/tasks/task_e_6ab1f89f5b588328b0df74f3bd1951fc)
+is checking whether public access also works through its network proxy. A dedicated FeVM environment can alternatively
+check out the repository directly.
 Set its setup script to `bash native/cloud-setup.sh` on `native-acceptance` and
 enable task network access for GitHub and the Rust/Cargo/npm dependency downloads.
 The [setup script](cloud-setup.sh) checks the host/tools, installs pinned Rust and
 fetches the history needed for the SwissTable baseline. It does not run acceptance.
-Do not publish private source through Fe.
 
 The [native README](README.md) lists prerequisites. Install the exact Rust
 version and run from the pinned FeVM checkout, using fresh output directories:

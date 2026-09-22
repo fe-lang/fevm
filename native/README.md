@@ -22,7 +22,7 @@ version recorded in the manifest. No third-party Python packages are required.
 
 The compiler revisions are published on `argotorg/fe:fevm-native-integration`
 and `sbillig/sonatina:fix-native-aggregate-construction`. FeVM acceptance sources
-are on the private `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
+are on the public `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
 exact commits; it does not substitute a branch tip or patch compiler sources.
 See [Cloud/Linux handoff](cloud-linux.md) for access requirements and exact inputs.
 
