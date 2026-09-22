@@ -1,0 +1,23 @@
+running `fe test` for 3 inputs (jobs=8)
+
+COMPILING        swisstable /Users/sean/code/fevm/ingots/swisstable
+COMPILING        evm        /Users/sean/code/fevm/ingots/evm
+COMPILING        driver     /Users/sean/code/fevm/native/differential/driver
+READY [4.4988s]  swisstable running 6 tests
+PASS  [0.1405s]  swisstable swisstable_hash_distributes_each_limb
+PASS  [0.1408s]  swisstable swisstable_tombstones_reuse_full_table_slots
+PASS  [0.1409s]  swisstable swisstable_basic_operations
+PASS  [0.1409s]  swisstable swisstable_many_entries_roundtrip
+PASS  [0.1413s]  swisstable swisstable_hash_reference_vectors
+PASS  [0.1711s]  swisstable swisstable_collisions_updates_and_churn
+READY [97.428s]  driver     running 0 tests
+READY [162.98s]  evm        running 6 tests
+PASS  [0.2193s]  evm        world_state_defaults_to_zero
+PASS  [0.2202s]  evm        world_state_zero_values_clear_entries
+PASS  [0.2203s]  evm        world_state_roundtrips_account_storage
+PASS  [0.4422s]  evm        evm_sload_sstore_roundtrip
+PASS  [0.4422s]  evm        evm_tload_tstore_roundtrip
+PASS  [0.4424s]  evm        evm_balance_selfbalance_and_blockhash_use_state
+Warning: No tests found in /Users/sean/code/fevm/native/differential/driver
+
+test result: ok. 12 passed; 0 failed

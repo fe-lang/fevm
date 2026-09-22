@@ -101,17 +101,24 @@ def cases():
 
     for depth in range(1, 17):
         stack = b''.join(push(x) for x in range(depth + 1))
-        add(f'dup-{depth}', 'stack', stack + bytes([0x7f + depth]))
-        add(f'swap-{depth}', 'stack', stack + bytes([0x8f + depth]))
-        add(f'dup-underflow-{depth}', 'stack', b'\x5f' * (depth - 1) + bytes([0x7f + depth]))
-        add(f'swap-underflow-{depth}', 'stack', b'\x5f' * depth + bytes([0x8f + depth]))
+        add(f'dup-{depth}', 'stack', stack + bytes([0x7f + depth]),
+            expected=success(*range(depth + 1), 1))
+        add(f'swap-{depth}', 'stack', stack + bytes([0x8f + depth]),
+            expected=success(depth, *range(1, depth), 0))
+        add(f'dup-underflow-{depth}', 'stack', b'\x5f' * (depth - 1) + bytes([0x7f + depth]),
+            expected={'status': 'stack_underflow', 'stack': None, 'output': '0x'})
+        add(f'swap-underflow-{depth}', 'stack', b'\x5f' * depth + bytes([0x8f + depth]),
+            expected={'status': 'stack_underflow', 'stack': None, 'output': '0x'})
     for op in [*binary, 0x08, 0x09, 0x15, 0x19, 0x50, 0x56, 0x57]:
         arity = 3 if op in (8, 9) else 1 if op in (0x15, 0x19, 0x50, 0x56) else 2
         for available in range(arity):
-            add(f'underflow-{op:02x}-{available}', 'stack', b'\x5f' * available + bytes([op]))
-    add('stack-limit', 'stack', b'\x5f' * 1024)
-    add('stack-overflow', 'stack', b'\x5f' * 1025)
-    add('dup-overflow', 'stack', b'\x5f' * 1024 + b'\x80')
+            add(f'underflow-{op:02x}-{available}', 'stack', b'\x5f' * available + bytes([op]),
+                expected={'status': 'stack_underflow', 'stack': None, 'output': '0x'})
+    add('stack-limit', 'stack', b'\x5f' * 1024, expected=success(*([0] * 1024)))
+    add('stack-overflow', 'stack', b'\x5f' * 1025,
+        expected={'status': 'stack_overflow', 'stack': None, 'output': '0x'})
+    add('dup-overflow', 'stack', b'\x5f' * 1024 + b'\x80',
+        expected={'status': 'stack_overflow', 'stack': None, 'output': '0x'})
     for name, code, calldata in [
         ('stop', '00fe', ''),
         ('invalid', 'fe', ''),

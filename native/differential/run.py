@@ -53,8 +53,7 @@ def main():
               'compiler_version': subprocess.check_output([compiler, '--version'], text=True).strip(),
               'revision': subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),
               'dirty': bool(subprocess.check_output(['git', '-C', ROOT, 'status', '--porcelain'])),
-              'reference': {'crate': 'revm-interpreter', 'version': '31.1.0',
-                            'specification_revision': 'c335bc4e9e99f7b91024d9033bdc89ce54394848'},
+              'reference': {'specification_revision': 'c335bc4e9e99f7b91024d9033bdc89ce54394848'},
               'levels': []}
     report_path = out / 'results.json'
 
@@ -65,6 +64,13 @@ def main():
     try:
         command(['cargo', 'build', '--release', '--locked', '--manifest-path', HERE / 'reference/Cargo.toml'],
                 out / 'reference-build.log')
+        metadata = json.loads(subprocess.check_output(
+            ['cargo', 'metadata', '--locked', '--format-version', '1',
+             '--manifest-path', HERE / 'reference/Cargo.toml'], text=True))
+        (out / 'reference-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        report['reference']['packages'] = [
+            {'name': package['name'], 'version': package['version'], 'source': package['source']}
+            for package in metadata['packages'] if package['name'].startswith('revm-')]
         report['reference']['executable_sha256'] = digest(reference)
         corpus = cases()
         payload = ''.join(json.dumps({key: row[key] for key in ['code', 'calldata']}) + '\n' for row in corpus)

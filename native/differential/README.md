@@ -1,19 +1,20 @@
 # Cancun frame differential corpus
 
 This runner compares FeVM's single-frame execution with `revm-interpreter`
-**31.1.0**, explicitly configured for **Cancun**. Cargo.lock pins the reference's
+**31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
+explicitly configured for **Cancun**. Cargo.lock pins the reference and its
 dependencies. The corpus includes 1,602 terminating frames: arithmetic batches,
 all PUSH widths and truncation positions, valid and invalid jumps, stack limits,
-and returned/reverted bytes. Small specification-derived anchors also check the
-reference adapter independently.
+and returned/reverted bytes. Specification-derived anchors, including all stack cases, also check the
+reference independently.
 
-Current status: Fe's escape-decoding prerequisite is fixed in the pinned
-compiler. The first 1,475 O0 frames match, then `DUP1` on an empty stack exposes
-a reference discrepancy: revm-interpreter 31.1.0 reports stack overflow where
-the Cancun specification and FeVM report stack underflow. Its SWAP handler has
-the same classification issue. The corpus remains failed, and O1/O2 frames have
-not run. No cases or error categories have been changed to evade the discrepancy.
-See the [checkpoint report](../reports/cancun-frames.md).
+Current status: all **1,602 frames pass at O0/O1/O2 on AArch64 macOS**. Fe's
+escape-decoding fix supplies valid JSON, and the pinned reference correction
+distinguishes DUP/SWAP underflow from genuine overflow. The reference's successful
+instruction paths and gas charging remain unchanged. No cases or halt categories
+were removed. See the [acceptance report](../reports/cancun-frames.md).
+The earlier native baseline passed on Linux; this expanded frame gate still
+needs its own Linux run.
 
 ## Running
 
@@ -27,7 +28,8 @@ python3 native/differential/run.py --fe native/out/toolchain/bin/fe \
 
 The default builds and runs O0/O1/O2. `--levels 0` selects a focused run. Each
 output directory must be fresh. The result record includes compiler/reference
-hashes, source hashes, optimization levels and the first failure; generated
+hashes, resolved reference package versions and Git sources, source hashes,
+optimization levels and the first failure; generated
 `cases.jsonl` retains every input and expected frame. Sources must remain unchanged
 throughout a run. Compiler reports, IR, binaries and build logs are retained.
 

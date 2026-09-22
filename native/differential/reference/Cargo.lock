@@ -1270,8 +1270,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "revm-bytecode"
 version = "7.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2c6b5e6e8dd1e28a4a60e5f46615d4ef0809111c9e63208e55b5c7058200fb0"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "bitvec",
  "paste",
@@ -1283,8 +1282,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "13.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "431c9a14e4ef1be41ae503708fd02d974f80ef1f2b6b23b5e402e8d854d1b225"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -1299,8 +1297,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cce03e3780287b07abe58faf4a7f5d8be7e81321f93ccf3343c8f7755602bae"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "auto_impl",
  "either",
@@ -1312,8 +1309,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "31.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ec36405f7477b9dccdc6caa3be19adf5662a7a0dffa6270cdb13a090c077e5"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -1325,8 +1321,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29e161db429d465c09ba9cbff0df49e31049fe6b549e28eb0b7bd642fcbd4412"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -1337,8 +1332,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d8be953b7e374dbdea0773cf360debed8df394ea8d82a8b240a6b5da37592fc"
+source = "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
 dependencies = [
  "bitflags",
  "revm-bytecode",

@@ -1,0 +1,252 @@
+{
+  "schema": 1,
+  "scope": "native FeVM CLI smoke, not Cancun conformance",
+  "compiler_sha256": "46798d53619da19404cf86afd25c1b676687c25c4f1c27204701fd014114bcc6",
+  "host": "macOS-15.6.1-arm64-arm-64bit-Mach-O",
+  "complete": true,
+  "builds": [
+    {
+      "level": "0",
+      "build_seconds": 84.55284991674125,
+      "object_bytes": 8967488,
+      "text_bytes": 8848708,
+      "executable_bytes": 9061784,
+      "relink_seconds": 0.046519708819687366,
+      "executable_sha256": "e217abb09ae4c1fc706742fbc1b4bc40febed09e26a10a1eb433244128295e83",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "level": "1",
+      "build_seconds": 120.48594324989244,
+      "object_bytes": 6777528,
+      "text_bytes": 6670600,
+      "executable_bytes": 6856280,
+      "relink_seconds": 0.04971712501719594,
+      "executable_sha256": "729d545b0cce116dd8c155ad4a312164683bf195d368c89812e28319cda80a7b",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "level": "2",
+      "build_seconds": 120.91775795910507,
+      "object_bytes": 6777528,
+      "text_bytes": 6670600,
+      "executable_bytes": 6856280,
+      "relink_seconds": 0.048689874820411205,
+      "executable_sha256": "729d545b0cce116dd8c155ad4a312164683bf195d368c89812e28319cda80a7b",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        }
+      ]
+    }
+  ]
+}

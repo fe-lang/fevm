@@ -1,61 +1,87 @@
-# Cancun frame correctness checkpoint
+# Cancun frame acceptance
 
-Status: **blocked on the pinned reference's stack-underflow classification**.
-This is a draft checkpoint, not complete frame acceptance or Cancun conformance.
+Status: **PASS on AArch64 macOS** for the bounded frame slice and all seven
+native acceptance stages. This does not establish full Cancun conformance.
 
 ## Sources and compiler
 
-- Fe: `e51aebfc7027aa37eb81c7fc92046387a01998e2`, [escape fix PR1563](https://github.com/argotorg/fe/pull/1563).
+- Fe: `e51aebfc7027aa37eb81c7fc92046387a01998e2`, published as `argotorg/fe:fevm-native-acceptance-pinned`.
 - Sonatina: `61fa661c23bbeeeab024c4e9936656b7a73bd8f4`.
-- [Saved toolchain manifest](cancun-toolchain.json); Rust 1.98.1, `cranelift`.
+- [Saved compiler manifest](cancun-toolchain.json); Rust 1.98.1, `cranelift`.
 - Compiler SHA-256: `46798d53619da19404cf86afd25c1b676687c25c4f1c27204701fd014114bcc6`.
 - Host: Apple M1 Pro, AArch64 macOS 15.6.1.
-- Reference: revm-interpreter 31.1.0, revm-bytecode 7.1.1, revm-primitives 21.0.2, with Cargo.lock and explicit Cancun configuration.
+- Reference: [revm d613ef5735b9beb17acd53a5a1802ebc2198a18d](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d), based on the exact revm-interpreter 31.1.0 release source, explicitly configured for Cancun.
 - Execution specification: `c335bc4e9e99f7b91024d9033bdc89ce54394848`.
 
-The compiler was built from fresh remote-source checkouts. FeVM was based on
-`3518736` with the correctness slice uncommitted during execution. The frame
-record retains hashes for every interpreter, driver, corpus and reference source;
-those hashes still match this checkpoint. The original failing escape report at
-`native/out/cancun-frames` is retained separately.
+The compiler was built from fresh exact-revision checkouts and copied to an
+immutable executable. Its source and binary are unchanged from the preceding
+checkpoint. Fe's standalone [escape-decoding PR1563](https://github.com/argotorg/fe/pull/1563)
+now targets master; the accepted native integration remains separately published.
+The manifest's historical publication branch describes its original build.
+
+FeVM was based on `f32a238` with the reference pin, explicit stack anchors and
+reference-provenance recording uncommitted during this run. The frame record
+retains source hashes for the interpreter, driver, corpus, reference and lockfile;
+all match the committed implementation. Resolved reference package versions and
+Git identities are recorded directly from Cargo metadata.
 
 ## Results
 
 | Gate | Result |
 | --- | --- |
-| Fe full all-feature release suite | 3,414 passed, one configured skip |
-| Fe strict Clippy and nightly formatting | Passed, defaults and all features |
 | FeVM workspace | 12 passed at each of O0/O1/O2 |
 | CLI smoke | 10 passed at each of O0/O1/O2 |
+| Cancun frame corpus | 1,602 passed at each of O0/O1/O2; 4,806 comparisons |
 | Arithmetic matrix | 74,676 cases across 48 builds passed |
 | SwissTable matrix | 2,004 scenarios across 12 builds passed |
-| Cancun frame corpus | 1,475 O0 frames matched; next frame disagrees; O1/O2 not run |
 
-The frame prefix includes all arithmetic, PUSH and jump cases. The failure is
-`dup-underflow-1`, bytecode `80`, with empty calldata. FeVM returns
-`stack_underflow`; revm returns `stack_overflow`. Direct reference runs of `90`
-and `5f90` reproduce the corresponding SWAP issue. The reference's stack methods
-return false for insufficient depth, and its DUP/SWAP instruction handlers map
-that false result to StackOverflow. The execution-spec stack instructions require
-StackUnderflowError. The adapter passes through the reference classification.
-This is a halt-category discrepancy, not a demonstrated consensus-state failure.
+The frame corpus includes 9 initial specification anchors, 167 packed arithmetic
+frames, 593 PUSH cases, 704 jump cases, 121 stack cases and 8 frame/output cases.
+All stack cases now have independent expected results, including successful
+DUP/SWAP values, insufficient depth, full-capacity DUP and genuine PUSH overflow.
+The reference must agree with those anchors before any FeVM comparison runs.
 
-No output repair, error normalization, case removal or dependency patch was used.
-The complete acceptance command exits 1 and records complete=false. User direction
-was requested before addressing a newly discovered dependency bug. Timing
-comparisons were omitted (`--check-only`); these results make no throughput claim.
+The isolated reference correction preserves successful instruction paths and gas
+charging. Its full default workspace suite passes 340 tests with one skip; the
+all-feature interpreter passes 31 tests, and workspace documentation tests and
+strict interpreter Clippy pass. The additional no-default-feature test build
+exposes two pre-existing missing-import errors in unchanged files. Per user
+direction, those errors are recorded separately and left unchanged; FeVM uses
+the default standard-library feature.
 
-## Durable artifacts
+The acceptance command exits zero and records `complete: true`. Timing
+measurements were omitted (`--check-only`); these results make no throughput claim.
 
-All artifacts are under `/Users/sean/code/fevm/native/out/`:
+## Retained evidence and reproduction
 
-- `escape-toolchain/`: clean compiler sources, executable and build.json.
-- `cancun-escape-acceptance/`: acceptance.json, all stage logs and result records.
-- `cancun-escape-acceptance/cancun-frames/`: exact cases, first mismatch, source and binary hashes, O0 executable/IR/compiler report.
-- `retained/escape-*`: full compiler checks and bootstrap logs.
+- [Acceptance and compiler provenance](macos-arm64-cancun-acceptance.json).
+- [Frame results, reference identities and source hashes](macos-arm64-cancun-frames.json).
+- [CLI results](macos-arm64-cancun-cli.json).
+- [Arithmetic results](macos-arm64-cancun-arithmetic.json).
+- [SwissTable results](macos-arm64-cancun-swisstable.json.gz), deterministic gzip.
+- Workspace logs: [O0](macos-arm64-cancun-workspace-O0.log), [O1](macos-arm64-cancun-workspace-O1.log), [O2](macos-arm64-cancun-workspace-O2.log).
 
-The compiler and interpreter branches are published for review. The frame runner
-compares halt categories, successful/reverted stacks and output. Gas/memory
-accounting, external state, rollback and nested frames remain later milestones.
-Linux acceptance remains blocked by Cloud Git smart-HTTP access; the baseline
-attempts and exact inputs are in [the Cloud handoff](../cloud-linux.md).
+```sh
+python3 native/accept.py --build native/out/escape-toolchain/build.json \
+  --out native/out/cancun-reference-acceptance --check-only
+```
+
+Choose a fresh output directory when repeating the command. Complete generated
+cases, compiler reports, IR, executables and logs remain under
+`/Users/sean/code/fevm/native/out/cancun-reference-acceptance/`.
+The original failure remains under `native/out/cancun-escape-acceptance/`: 1,475
+O0 frames matched before revm misclassified DUP/SWAP underflow as overflow.
+The earlier JSON-escape failure remains under `native/out/cancun-frames/`.
+No adapter error normalization or case removal was used to pass either gate.
+
+## Remaining scope
+
+The frame runner compares halt categories, successful/reverted stacks and output.
+Memory/range semantics, gas accounting, external state, rollback and nested
+execution remain subsequent work. The next memory slice has separate retained
+probes for the already known MSIZE, source-offset and zero-length-copy gaps;
+those cases are outside this accepted corpus.
+
+The original six-stage native baseline has [passed on x86_64 Linux](linux-baseline-2026-09-22/README.md).
+That run used Fe 85e64e840 and predates the escape fix and expanded frame corpus.
+The expanded gate still requires a separate Linux run; see [the Cloud handoff](../cloud-linux.md).
