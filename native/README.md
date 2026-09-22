@@ -20,17 +20,19 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-Compiler revisions currently include **local, unpublished commits**. Until they
-are published, supply local repositories or Git bundles containing those exact
-commits. The bootstrap does not substitute a branch tip or patch compiler sources.
+The compiler revisions are published on `argotorg/fe:fevm-native-integration`
+and `sbillig/sonatina:fix-native-aggregate-construction`. FeVM acceptance sources
+are on the private `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
+exact commits; it does not substitute a branch tip or patch compiler sources.
+See [Cloud/Linux handoff](cloud-linux.md) for access requirements and exact inputs.
 
 ```sh
-python3 native/bootstrap.py --out /tmp/fevm-native-toolchain \
+python3 native/bootstrap.py --out native/out/toolchain \
   --toolchain 1.98.1 \
-  --fe-repository /path/to/fe \
-  --sonatina-repository /path/to/sonatina
-python3 native/accept.py --build /tmp/fevm-native-toolchain/build.json \
-  --out /tmp/fevm-native-acceptance --check-only
+  --fe-repository https://github.com/argotorg/fe.git \
+  --sonatina-repository https://github.com/sbillig/sonatina.git
+python3 native/accept.py --build native/out/toolchain/build.json \
+  --out native/out/acceptance --check-only
 ```
 
 Choose a fresh output directory for each bootstrap and arithmetic run.
@@ -63,8 +65,8 @@ Its baseline Git revision must be available locally.
 ## Arithmetic correctness and measurement
 
 ```sh
-python3 native/arith/run.py --fe /tmp/fevm-native-toolchain/bin/fe \
-  --out /tmp/fevm-native-arithmetic
+python3 native/arith/run.py --fe native/out/toolchain/bin/fe \
+  --out native/out/arithmetic
 ```
 
 The runner generates one standalone Fe executable per operation, representation
@@ -106,9 +108,9 @@ The object, emitted IR and disassembly are retained for attribution and review.
 Useful selections:
 
 ```sh
-python3 native/arith/run.py --fe /path/to/fe --out /tmp/div-check \
+python3 native/arith/run.py --fe /path/to/fe --out native/out/div-check \
   --operations div rem --levels 0 2 --check-only
-python3 native/arith/run.py --fe /path/to/fe --out /tmp/mul-profile \
+python3 native/arith/run.py --fe /path/to/fe --out native/out/mul-profile \
   --operations mul --samples 9 --batch-ms 50 --build-samples 5
 ```
 
@@ -120,8 +122,8 @@ After producing baseline and candidate runs, remeasure their common combinations
 in alternating order on the same host:
 
 ```sh
-python3 native/arith/compare.py --baseline /tmp/baseline/results.json \
-  --candidate /tmp/candidate/results.json --out /tmp/comparison
+python3 native/arith/compare.py --baseline native/out/baseline/results.json \
+  --candidate native/out/candidate/results.json --out native/out/comparison
 ```
 
 The comparison verifies artifact hashes and matching source hashes before running,
@@ -130,13 +132,14 @@ oracle. Start with a focused selection such as `div rem` at O2 when measuring a
 specific change. See `reports/` for the recorded local evidence and its limits.
 
 
-## Linux handoff while compiler commits are unpublished
+## Offline Linux handoff
 
-After committing the tooling and completing a bootstrap, create local Git bundles:
+For a runner without repository access, create local Git bundles after completing
+a bootstrap:
 
 ```sh
-python3 native/handoff.py --build /tmp/fevm-native-toolchain/build.json \
-  --out /tmp/fevm-native-linux-handoff
+python3 native/handoff.py --build native/out/toolchain/build.json \
+  --out native/out/linux-handoff
 ```
 
 The handoff contains only the three committed histories needed for the pinned

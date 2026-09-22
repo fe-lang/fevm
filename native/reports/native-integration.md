@@ -54,7 +54,7 @@ build with the pinned compiler on the unchanged FeVM source gives:
 
 The process stack limit and FeVM capacities were unchanged. The original standalone
 4,096-byte reproduction also passes O0/O1/O2, with retained development artifacts
-in `/private/tmp/fevm-native-array-stack-fixed`.
+in `native/out/retained/tmp/fevm-native-array-stack-fixed`.
 
 ## Current CLI artifacts
 
@@ -77,10 +77,13 @@ The acceptance run used `--check-only`; no runtime timing comparison was made.
   [O1](macos-arm64-integration-workspace-O1.log), and
   [O2](macos-arm64-integration-workspace-O2.log).
 
-The clean compiler and build record remain in
-`/private/tmp/fevm-native-construction-bootstrap`; generated sources, IR, objects,
-assembly, binaries, and logs remain in
-`/private/tmp/fevm-native-construction-acceptance`.
+The clean compiler and build record are preserved in
+`native/out/retained/tmp/fevm-native-construction-bootstrap`; generated sources,
+IR, objects, assembly, binaries, and logs are preserved in
+`native/out/retained/tmp/fevm-native-construction-acceptance`. Original records
+retain their original absolute paths. `build-relocated.json` supplies the current
+compiler/source paths, and `native/out/retained/artifact-relocations.json` records
+the verified copies and SHA-256 hashes.
 Use `native/bootstrap.py --manifest native/reports/integration-toolchain.json`
 and `native/accept.py --check-only` as documented in the [native README](../README.md).
-Unpublished Fe commits must be supplied through a local repository or Git bundle.
+The pinned sources are now [published for Cloud/Linux acceptance](../cloud-linux.md).

@@ -9,7 +9,7 @@
   "features": [
     "cranelift"
   ],
-  "publication": "local commits; supply repository paths or Git bundles until published",
+  "publication": "published: argotorg/fe fevm-native-integration; sbillig/sonatina fix-native-aggregate-construction",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"
