@@ -13,7 +13,6 @@ use ingot::constants::{
     ERR_STACK_UNDERFLOW,
     ERR_STATE_LIMIT,
     ERR_TODO_OPCODE,
-    ERR_TRUNCATED_PUSH,
     ERR_UNSUPPORTED_OPCODE,
     ERR_USAGE,
     OK,
@@ -48,7 +47,6 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
     match vm.status {
         ERR_STACK_UNDERFLOW => writeln("stack underflow"),
         ERR_STACK_OVERFLOW => writeln("stack overflow"),
-        ERR_TRUNCATED_PUSH => writeln("truncated push data"),
         ERR_TODO_OPCODE => {
             write("todo opcode 0x")
             write_hex_byte(vm.unsupported_opcode)

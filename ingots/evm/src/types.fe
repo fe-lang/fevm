@@ -1,6 +1,42 @@
 use ingot::constants::{MAX_CODE, OK, RETURN_LIMIT}
 
-pub struct Program { pub bytes: [u8; MAX_CODE], pub len: usize, pub status: i32 }
+// Code and its instruction-boundary analysis stay immutable together.
+pub struct Program {
+    bytes: [u8; MAX_CODE],
+    len: usize,
+    jumpdests: [u8; MAX_CODE / 8],
+    pub status: i32,
+}
+
+impl Program {
+    pub fn new(_ bytes: [u8; MAX_CODE], len: usize, status: i32) -> Self {
+        core::assert(len <= MAX_CODE)
+        let mut jumpdests: [u8; MAX_CODE / 8] = [0; MAX_CODE / 8]
+        let mut pc: usize = 0
+        while pc < len {
+            let op = bytes[pc]
+            if op == 0x5b {
+                let bit: u8 = (pc % 8).downcast_unchecked()
+                jumpdests[pc / 8] |= 1 << bit
+            } else if op >= 0x60 && op <= 0x7f {
+                pc += (op as usize) - 0x5f
+            }
+            pc += 1
+        }
+        Self { bytes: bytes, len: len, jumpdests: jumpdests, status: status }
+    }
+
+    pub fn len(self) -> usize { self.len }
+
+    pub fn byte_at(self, _ index: usize) -> u8 { self.bytes[index] }
+
+    pub fn is_jumpdest(self, _ destination: u256) -> bool {
+        if destination >= self.len as u256 { return false }
+        let pc: usize = destination.downcast_unchecked()
+        let bit: u8 = (pc % 8).downcast_unchecked()
+        self.jumpdests[pc / 8] & (1 << bit) != 0
+    }
+}
 
 pub struct ByteBuffer { pub bytes: [u8; RETURN_LIMIT], pub len: usize, pub status: i32 }
 

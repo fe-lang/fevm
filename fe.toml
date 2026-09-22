@@ -4,4 +4,5 @@ version = "0.1.0"
 members = [
   { path = "ingots/evm", name = "fevm" },
   { path = "ingots/swisstable", name = "swisstable" },
+  { path = "native/differential/driver", name = "fevm_frame" },
 ]

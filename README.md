@@ -2,10 +2,11 @@
 
 `fevm` is a native Fe implementation of the EVM. The project is intended to drive Fe native compilation, standard library, and language development with a real systems program.
 
-The repo is a Fe workspace with two ingots:
+The repo is a Fe workspace with three ingots:
 
 - `ingots/evm`: the interpreter library and CLI executable
 - `ingots/swisstable`: a generic fixed-capacity SwissTable-style hash table
+- `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
@@ -32,7 +33,7 @@ let result = fevm::execute(
 )
 ```
 
-The reusable API exposes `Program`, `ByteBuffer`, `CallEnv`, `BlockEnv`, `WorldState`, and `ExecutionResult`. `main` is only a CLI wrapper around that API.
+The reusable API exposes `Program`, `ByteBuffer`, `CallEnv`, `BlockEnv`, `WorldState`, and `ExecutionResult`. `main` is only a CLI wrapper around that API. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
 
 Implemented opcode slice:
 
@@ -75,11 +76,14 @@ Smoke samples:
 
 Near-term expansion:
 
+- Cancun memory/range semantics, gas accounting, and state rollback.
 - Keccak support for `SHA3` in native Fe.
 - Account code tables for external code opcodes.
 - Direct runtime-code deployment before exact `CREATE`/`CREATE2` address derivation.
 - Environment fixtures for logs, calls, and nested execution.
-- A test corpus that compares selected programs against a reference EVM.
+The [Cancun frame corpus](native/differential/README.md) compares selected frame
+results against pinned revm. Full Cancun conformance and performance comparisons
+remain future work.
 
 Native compiler arithmetic checks, performance measurements, and reproducible
 build instructions are documented in [native/README.md](native/README.md).

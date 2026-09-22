@@ -5,4 +5,5 @@
 
 # Native harness build products and Python caches
 /native/out/
+/native/differential/reference/target/
 __pycache__/

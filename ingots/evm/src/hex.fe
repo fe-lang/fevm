@@ -12,6 +12,11 @@ fn hex_digit(_ value: u8) -> i32 {
 }
 
 pub fn write_hex_u256(_ value: u256) uses (w: mut Write) {
+    write_hex_word(value)
+    write_char(10)
+}
+
+pub fn write_hex_word(_ value: u256) uses (w: mut Write) {
     write("0x")
     let mut i: usize = 0
     while i < 64 {
@@ -20,7 +25,6 @@ pub fn write_hex_u256(_ value: u256) uses (w: mut Write) {
         write_char(hex_digit(nibble))
         i += 1
     }
-    write_char(10)
 }
 
 pub fn write_hex_byte(_ value: i32) uses (w: mut Write) {
@@ -68,19 +72,19 @@ pub fn parse_hex_program(_ arg: Arg) -> Program {
     }
 
     if (len - i) % 2 != 0 {
-        return Program { bytes: bytes, len: 0, status: ERR_ODD_HEX }
+        return Program::new(bytes, len: 0, status: ERR_ODD_HEX)
     }
 
     let mut out_len: usize = 0
     while i < len {
         if out_len >= MAX_CODE {
-            return Program { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
+            return Program::new(bytes, len: out_len, status: ERR_CODE_TOO_LONG)
         }
 
         let hi = hex_value(arg.byte_at(i))
         let lo = hex_value(arg.byte_at(i + 1))
         if hi < 0 || lo < 0 {
-            return Program { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
+            return Program::new(bytes, len: out_len, status: ERR_BAD_HEX)
         }
 
         bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
@@ -88,7 +92,7 @@ pub fn parse_hex_program(_ arg: Arg) -> Program {
         i += 2
     }
 
-    Program { bytes: bytes, len: out_len, status: OK }
+    Program::new(bytes, len: out_len, status: OK)
 }
 
 pub fn parse_hex_bytes(_ arg: Arg) -> ByteBuffer {

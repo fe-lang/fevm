@@ -49,12 +49,12 @@ def main():
         bundles[name] = {'revision': revision, 'file': bundle.name,
                          'sha256': hashlib.sha256(bundle.read_bytes()).hexdigest()}
     out.joinpath('handoff.json').write_text(json.dumps({
-        'schema': 1, 'linux_execution': 'not run; no runner available',
+        'schema': 1, 'linux_execution': 'not run',
         'toolchain': manifest, 'bundles': bundles,
     }, indent=2) + '\n')
     out.joinpath('README.md').write_text(f'''# Native Linux acceptance handoff
 
-Prepared from committed sources without pushing any branches.
+Prepared from committed sources. The bundles contain the source histories.
 Linux execution is **not yet verified**. This handoff targets x86_64 Linux.
 Install Git, Python 3.10+, Node/npm, Rust {manifest['rust_version']} via rustup, CMake, a C compiler
 and binutils. Verify the bundle SHA-256 values in `handoff.json` before use.
@@ -66,19 +66,19 @@ git init fevm
 git -C fevm fetch ../fevm.bundle {repositories['fevm'][1]}
 git -C fevm checkout --detach FETCH_HEAD
 cd fevm
-python3 native/bootstrap.py --out /tmp/fevm-native-linux \\
+python3 native/bootstrap.py --out native/out/linux-toolchain \\
   --toolchain {manifest['rust_version']} \\
   --fe-repository ../fe.bundle --sonatina-repository ../sonatina.bundle
-python3 native/accept.py --build /tmp/fevm-native-linux/build.json \\
-  --out /tmp/fevm-native-linux-acceptance --check-only
+python3 native/accept.py --build native/out/linux-toolchain/build.json \\
+  --out native/out/linux-acceptance --check-only
 ```
 
-Return `build.json`, `acceptance.json`, `arithmetic/results.json`, `cli/results.json`, and the
-acceptance logs. For performance measurements, use an idle host and omit
+Return `build.json`, `acceptance.json`, `arithmetic/results.json`, `cli/results.json`,
+`swisstable/results.json`, `cancun-frames/results.json`, and the acceptance logs. For performance measurements, use an idle host and omit
 `--check-only`; retain all samples, emitted IR, objects and disassembly.
 A failing command must remain a failure in the report. This validates the native
-workspace tests, CLI smoke, numeric kernels, and SwissTable; Cancun conformance
-remains pending.
+workspace tests, CLI smoke, Cancun frame results, numeric kernels, and SwissTable;
+full Cancun conformance remains pending.
 ''')
     print(out / 'README.md')
 
