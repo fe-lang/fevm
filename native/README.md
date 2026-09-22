@@ -5,11 +5,12 @@ SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The current integration is not yet accepted: the O0 CLI crashes while initializing
-a 4096-byte array because native aggregate construction creates a roughly 16 MiB
-stack frame. Keep O0 in acceptance while the compiler fix is pending. Earlier
-reports in `reports/` retain their own compiler manifests and do not certify the
-current pin.
+The pinned integration passes native acceptance on AArch64 macOS at O0/O1/O2.
+The [current report](reports/native-integration.md) records the clean compiler
+bootstrap, workspace and CLI checks, and arithmetic/SwissTable differential
+results. Sonatina PR #321 fixes the aggregate-construction stack overflow.
+Linux execution remains pending. Earlier reports retain their own compiler
+manifests and describe separate measurements.
 
 ## Hosts and prerequisites
 

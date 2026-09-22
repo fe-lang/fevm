@@ -1,5 +1,9 @@
 # Native arithmetic evidence: AArch64 macOS
 
+For the current rebased compiler and full native workspace/CLI acceptance, see
+[native integration acceptance](native-integration.md). The measurements below
+use earlier compiler revisions.
+
 Measured on an Apple M1 Pro with macOS 15.6.1 and Apple Clang 17.0.0.
 These are diagnostic microbenchmarks collected during concurrent compiler and
 Lean workloads. They establish the benefit of specific division paths, not EVM
