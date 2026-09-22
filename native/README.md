@@ -1,16 +1,18 @@
 # Native FeVM and arithmetic acceptance tooling
 
-This suite checks the native FeVM workspace and CLI alongside arithmetic and
-SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`.
+This suite checks the native FeVM workspace and CLI, Cancun frame results,
+and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`.
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The pinned integration passes native acceptance on AArch64 macOS at O0/O1/O2.
-The [current report](reports/native-integration.md) records the clean compiler
-bootstrap, workspace and CLI checks, and arithmetic/SwissTable differential
-results. Sonatina PR #321 fixes the aggregate-construction stack overflow.
-Linux execution remains pending. Earlier reports retain their own compiler
-manifests and describe separate measurements.
+The current [Cancun acceptance](reports/cancun-frames.md) passes all seven stages
+on AArch64 macOS: workspace, CLI, 1,602 frames at each of O0/O1/O2, arithmetic
+and SwissTable. The reference pins a precise DUP/SWAP halt-classification fix.
+The original six-stage baseline has also [passed on x86_64 Linux](reports/linux-baseline-2026-09-22/README.md);
+the expanded frame gate still needs its own Linux run.
+The [earlier accepted integration](reports/native-integration.md) records the
+previous six-stage suite and the aggregate-construction fix in Sonatina PR #321.
+Historical reports retain their own compiler manifests.
 
 ## Hosts and prerequisites
 
@@ -20,7 +22,7 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The compiler revisions are published on `argotorg/fe:fevm-native-integration`
+The compiler revisions are published on `argotorg/fe:fevm-native-acceptance-pinned`
 and `sbillig/sonatina:fix-native-aggregate-construction`. FeVM acceptance sources
 are on the public `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
 exact commits; it does not substitute a branch tip or patch compiler sources.
@@ -48,13 +50,19 @@ Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
 The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the SwissTable/arithmetic differential corpora at O0/O1/O2.
+CLI smoke cases, and the Cancun/SwissTable/arithmetic differential corpora at O0/O1/O2.
 It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
 execution, calldata return, and exit status; they retain build/link times and
 artifact sizes. An incomplete or failing suite exits nonzero. Run the same
 commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
+
+The [Cancun frame suite](differential/README.md) compares 1,602 deterministic
+frames against a pinned revm interpreter. It checks halt status, complete
+successful/reverted stacks and output, covering arithmetic operand roles, PUSH
+padding, jump destinations and stack boundaries. Gas accounting, memory
+accounting, external state and nested calls remain separate milestones.
 
 The [SwissTable suite](swisstable/README.md) compares full-key hashing against
 the original table, checks dictionary behavior and native probe counts, and

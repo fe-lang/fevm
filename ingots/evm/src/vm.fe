@@ -10,7 +10,6 @@ use ingot::constants::{
     ERR_STACK_UNDERFLOW,
     ERR_STATE_LIMIT,
     ERR_TODO_OPCODE,
-    ERR_TRUNCATED_PUSH,
     ERR_UNSUPPORTED_OPCODE,
     I256_MIN,
     MAX_CODE,
@@ -171,8 +170,8 @@ impl Vm {
         let mut i: usize = 0
         while i < copy_len {
             let index = src + i
-            if index < program.len {
-                self.memory[dst + i] = program.bytes[index]
+            if index < program.len() {
+                self.memory[dst + i] = program.byte_at(index)
             } else {
                 self.memory[dst + i] = 0
             }
@@ -297,7 +296,7 @@ impl Vm {
         self.halted = true
     }
 
-    fn exp(mut self, _ base: u256, _ exponent: u256) {
+    fn exp(mut self, base: u256, exponent: u256) {
         let mut result: u256 = 1
         let mut factor = base
         let mut power = exponent
@@ -311,7 +310,7 @@ impl Vm {
         self.push(result)
     }
 
-    fn signextend(mut self, _ byte_index: u256, _ value: u256) {
+    fn signextend(mut self, byte_index: u256, value: u256) {
         if byte_index >= 31 {
             self.push(value)
             return
@@ -326,7 +325,7 @@ impl Vm {
         }
     }
 
-    fn byte(mut self, _ index: u256, _ value: u256) {
+    fn byte(mut self, index: u256, value: u256) {
         if index >= 32 {
             self.push(0)
             return
@@ -335,7 +334,7 @@ impl Vm {
         self.push((value >> ((31 - index) * 8)) & 255)
     }
 
-    fn sar(mut self, _ shift: u256, _ value: u256) {
+    fn sar(mut self, shift: u256, value: u256) {
         let signed = ((value >> 255) & 1) == 1
         if shift == 0 {
             self.push(value)
@@ -356,8 +355,10 @@ impl Vm {
     }
 
     fn binary_arith(mut self, _ op: i32) {
-        let rhs = self.pop()
+        // The top item is the first EVM operand; some opcodes give it a
+        // different role (shift amount, byte index, or sign-extension index).
         let lhs = self.pop()
+        let rhs = self.pop()
         if !self.ok() { return }
 
         match op {
@@ -403,23 +404,19 @@ impl Vm {
                 }
             },
             0x08 => {
-                let modulus = rhs
-                let b = lhs
-                let a = self.pop()
+                let modulus = self.pop()
                 if self.ok() {
-                    self.push(addmod(a, b, modulus))
+                    self.push(addmod(lhs, rhs, modulus))
                 }
             },
             0x09 => {
-                let modulus = rhs
-                let b = lhs
-                let a = self.pop()
+                let modulus = self.pop()
                 if self.ok() {
-                    self.push(mulmod(a, b, modulus))
+                    self.push(mulmod(lhs, rhs, modulus))
                 }
             },
-            0x0a => self.exp(lhs, rhs),
-            0x0b => self.signextend(rhs, lhs),
+            0x0a => self.exp(base: lhs, exponent: rhs),
+            0x0b => self.signextend(byte_index: lhs, value: rhs),
             0x10 => self.push_bool(lhs < rhs),
             0x11 => self.push_bool(lhs > rhs),
             0x12 => {
@@ -436,18 +433,18 @@ impl Vm {
             0x16 => self.push(lhs & rhs),
             0x17 => self.push(lhs | rhs),
             0x18 => self.push(lhs ^ rhs),
-            0x1a => self.byte(rhs, lhs),
-            0x1b => if rhs >= 256 {
+            0x1a => self.byte(index: lhs, value: rhs),
+            0x1b => if lhs >= 256 {
                 self.push(0)
             } else {
-                self.push(lhs << rhs)
+                self.push(rhs << lhs)
             },
-            0x1c => if rhs >= 256 {
+            0x1c => if lhs >= 256 {
                 self.push(0)
             } else {
-                self.push(lhs >> rhs)
+                self.push(rhs >> lhs)
             },
-            0x1d => self.sar(rhs, lhs),
+            0x1d => self.sar(shift: lhs, value: rhs),
             _ => self.fault(ERR_UNSUPPORTED_OPCODE),
         }
     }
@@ -501,18 +498,12 @@ impl Vm {
     }
 
     fn jump(mut self, _ dest: u256, _ program: Program) {
-        if dest >= program.len as u256 {
+        if !program.is_jumpdest(dest) {
             self.fault(ERR_INVALID_JUMP)
             return
         }
 
-        let pc: usize = dest.downcast_unchecked()
-        if program.bytes[pc] != 0x5b {
-            self.fault(ERR_INVALID_JUMP)
-            return
-        }
-
-        self.pc = pc
+        self.pc = dest.downcast_unchecked()
     }
 
     fn sload(mut self, _ call: CallEnv, _ state: WorldState) {
@@ -617,7 +608,7 @@ impl Vm {
         }
 
         if op == 0x38 {
-            self.push(program.len as u256)
+            self.push(program.len() as u256)
             return
         }
 
@@ -799,15 +790,13 @@ impl Vm {
 }
 
 fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
-    if vm.pc + len > program.len {
-        vm.fault(ERR_TRUNCATED_PUSH)
-        return 0
-    }
-
     let mut value: u256 = 0
     let mut i: usize = 0
     while i < len {
-        value = (value << 8) | (program.bytes[vm.pc] as u256)
+        value = value << 8
+        if vm.pc < program.len() {
+            value |= program.byte_at(vm.pc) as u256
+        }
         vm.pc += 1
         i += 1
     }
@@ -822,8 +811,8 @@ pub fn execute_vm(
     _ state: mut WorldState,
 ) -> Vm {
     let mut vm = Vm::new()
-    while vm.pc < program.len && vm.ok() && !vm.halted {
-        let op = program.bytes[vm.pc] as i32
+    while vm.pc < program.len() && vm.ok() && !vm.halted {
+        let op = program.byte_at(vm.pc) as i32
         vm.pc += 1
 
         if op == 0x00 {

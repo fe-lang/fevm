@@ -10,7 +10,6 @@ pub const ERR_ODD_HEX: i32 = 4
 pub const ERR_CODE_TOO_LONG: i32 = 5
 pub const ERR_STACK_UNDERFLOW: i32 = 10
 pub const ERR_STACK_OVERFLOW: i32 = 11
-pub const ERR_TRUNCATED_PUSH: i32 = 12
 pub const ERR_UNSUPPORTED_OPCODE: i32 = 13
 pub const ERR_TODO_OPCODE: i32 = 14
 pub const ERR_MEMORY_LIMIT: i32 = 15

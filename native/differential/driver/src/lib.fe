@@ -1,0 +1,54 @@
+use std::io::{Write, host, write, writeln}
+use std::native::Args
+use fevm::{WorldState, default_block_env, default_call_env}
+use fevm::hex::{parse_hex_bytes, parse_hex_program, write_hex_byte, write_hex_word}
+use fevm::vm::{Vm, execute_vm}
+
+fn write_frame(_ vm: Vm) uses (w: mut Write) {
+    write("{\"status\":\"")
+    match vm.status {
+        0 => write("success"),
+        10 => write("stack_underflow"),
+        11 => write("stack_overflow"),
+        16 => write("invalid_jump"),
+        17 => write("invalid_opcode"),
+        19 => write("revert"),
+        _ => write("unsupported_result"),
+    }
+    write("\",\"stack\":")
+    // Faulting frames have no successful final stack. Keep partial diagnostic
+    // stacks out of the portable comparison: engines consume operands differently.
+    if vm.status == 0 || vm.status == 19 {
+        write("[")
+        let mut i: usize = 0
+        while i < vm.sp {
+            if i != 0 { write(",") }
+            write("\"")
+            write_hex_word(vm.stack[i])
+            write("\"")
+            i += 1
+        }
+        write("]")
+    } else {
+        write("null")
+    }
+    write(",\"output\":\"0x")
+    let mut i: usize = 0
+    while i < vm.output_len {
+        write_hex_byte(vm.output[i] as i32)
+        i += 1
+    }
+    writeln("\"}")
+}
+
+pub fn main(argc: i32, argv: **u8) -> i32 {
+    let args = Args::new(argc, argv)
+    if args.len() != 3 { return 2 }
+    let program = parse_hex_program(args.get(1))
+    let calldata = parse_hex_bytes(args.get(2))
+    if program.status != 0 || calldata.status != 0 { return 2 }
+    let mut state = WorldState::empty()
+    let vm = execute_vm(program, calldata, default_call_env(), default_block_env(), mut state)
+    with (Write = host()) { write_frame(vm) }
+    0
+}

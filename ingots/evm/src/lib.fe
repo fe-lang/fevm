@@ -1,5 +1,5 @@
 pub use constants::{ERR_REVERT, OK}
-pub use hex::parse_hex_program
+pub use hex::{self, parse_hex_program}
 pub use state::{StorageKey, WorldState}
 pub use types::{
     BlockEnv,
@@ -11,7 +11,7 @@ pub use types::{
     default_call_env,
     empty_bytes,
 }
-pub use vm::execute
+pub use vm::{self, execute}
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
     cli::run(argc, argv)
@@ -29,7 +29,7 @@ fn evm_sload_sstore_roundtrip() {
     bytes[6] = 0x03
     bytes[7] = 0x54
     bytes[8] = 0x00
-    let program = Program { bytes: bytes, len: 9, status: OK }
+    let program = Program::new(bytes, len: 9, status: OK)
     let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
     let mut state = WorldState::empty()
     let result = execute(
@@ -58,7 +58,7 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     bytes[7] = 0x40
     bytes[8] = 0x01
     bytes[9] = 0x00
-    let program = Program { bytes: bytes, len: 10, status: OK }
+    let program = Program::new(bytes, len: 10, status: OK)
     let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
     let mut state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
@@ -89,7 +89,7 @@ fn evm_tload_tstore_roundtrip() {
     bytes[6] = 0x04
     bytes[7] = 0x5c
     bytes[8] = 0x00
-    let program = Program { bytes: bytes, len: 9, status: OK }
+    let program = Program::new(bytes, len: 9, status: OK)
     let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
     let mut state = WorldState::empty()
     let result = execute(

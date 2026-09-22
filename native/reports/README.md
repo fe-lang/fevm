@@ -7,7 +7,9 @@ use earlier compiler revisions.
 Measured on an Apple M1 Pro with macOS 15.6.1 and Apple Clang 17.0.0.
 These are diagnostic microbenchmarks collected during concurrent compiler and
 Lean workloads. They establish the benefit of specific division paths, not EVM
-throughput or competitiveness with production implementations. Linux has not run.
+throughput or competitiveness with production implementations. These timing
+comparisons have not run on Linux; the later native correctness baseline
+[has passed there](linux-baseline-2026-09-22/README.md).
 
 The later [SwissTable hash/probe comparison](swisstable.md) uses the same
 recorded compiler and has its own records and scope. These measurements predate

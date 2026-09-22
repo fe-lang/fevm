@@ -1,5 +1,11 @@
 # Cloud/Linux acceptance handoff
 
+The pinned baseline **passed on x86_64 Linux** in the
+[POST-enabled Cloud run](https://chatgpt.com/codex/tasks/task_e_6ab220070eec8328be8314131ea99b22).
+The [retained evidence](reports/linux-baseline-2026-09-22/README.md) includes
+exact compiler/source pins, complete acceptance records and stage logs. This
+covers the original six-stage baseline below, not the newer Cancun frame corpus.
+
 The accepted native stack is reachable through these branches. Always check out
 the exact commits; subsequent branch changes must not change an acceptance run.
 
@@ -18,9 +24,16 @@ would otherwise succeed. Its report is retained in
 [the Cloud attempt record](reports/linux-cloud-attempt.md).
 
 FeVM is now public; anonymous HTTPS fetching of `native-acceptance` succeeds.
-A [retry in the existing Fe environment](https://chatgpt.com/codex/tasks/task_e_6ab1f89f5b588328b0df74f3bd1951fc)
-is checking whether public access also works through its network proxy. A dedicated FeVM environment can alternatively
-check out the repository directly.
+The [public-repository retry](https://chatgpt.com/codex/tasks/task_e_6ab1f89f5b588328b0df74f3bd1951fc)
+also stopped before bootstrap: the proxy blocked public GitHub and installation
+of Rust 1.98.1. Its [report](reports/linux-cloud-public-attempt.md) records zero
+executed acceptance cases. The [third attempt](https://chatgpt.com/codex/tasks/task_e_6ab1fc5d8ce88328b5c550daa4ce9f28)
+reached GitHub pages and the Rust distribution server, but Git smart-HTTP still
+returned HTTP 403 for all three public repositories. Its
+[report](reports/linux-cloud-network-attempt.md) records the exact probes; no
+bootstrap or acceptance ran. Enabling POST resolved the Git smart-HTTP blocker;
+the fourth run fetched the exact pins and completed every acceptance stage.
+A dedicated FeVM environment can alternatively check out the repository directly.
 Set its setup script to `bash native/cloud-setup.sh` on `native-acceptance` and
 enable task network access for GitHub and the Rust/Cargo/npm dependency downloads.
 The [setup script](cloud-setup.sh) checks the host/tools, installs pinned Rust and

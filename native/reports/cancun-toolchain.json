@@ -9,7 +9,7 @@
   "features": [
     "cranelift"
   ],
-  "publication": "published: argotorg/fe fevm-native-acceptance-pinned; sbillig/sonatina fix-native-aggregate-construction",
+  "publication": "published: argotorg/fe fix-string-literal-escapes; sbillig/sonatina fix-native-aggregate-construction",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

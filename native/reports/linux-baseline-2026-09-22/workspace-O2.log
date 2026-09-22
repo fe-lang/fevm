@@ -1,0 +1,20 @@
+running `fe test` for 2 inputs (jobs=8)
+
+COMPILING        evm        /workspace/fevm-native-acceptance/fevm/ingots/evm
+COMPILING        swisstable /workspace/fevm-native-acceptance/fevm/ingots/swisstable
+READY [11.489s]  swisstable running 6 tests
+PASS  [0.0033s]  swisstable swisstable_hash_reference_vectors
+PASS  [0.0039s]  swisstable swisstable_basic_operations
+PASS  [0.0050s]  swisstable swisstable_tombstones_reuse_full_table_slots
+PASS  [0.0103s]  swisstable swisstable_many_entries_roundtrip
+PASS  [0.0106s]  swisstable swisstable_hash_distributes_each_limb
+PASS  [0.0621s]  swisstable swisstable_collisions_updates_and_churn
+READY [648.85s]  evm        running 6 tests
+PASS  [0.0107s]  evm        world_state_defaults_to_zero
+PASS  [0.0070s]  evm        world_state_zero_values_clear_entries
+PASS  [0.0111s]  evm        evm_tload_tstore_roundtrip
+PASS  [0.0123s]  evm        evm_balance_selfbalance_and_blockhash_use_state
+PASS  [0.0114s]  evm        world_state_roundtrips_account_storage
+PASS  [0.0174s]  evm        evm_sload_sstore_roundtrip
+
+test result: ok. 12 passed; 0 failed
