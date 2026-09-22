@@ -1,5 +1,11 @@
 # Cloud/Linux acceptance handoff
 
+The pinned baseline **passed on x86_64 Linux** in the
+[POST-enabled Cloud run](https://chatgpt.com/codex/tasks/task_e_6ab220070eec8328be8314131ea99b22).
+The [retained evidence](reports/linux-baseline-2026-09-22/README.md) includes
+exact compiler/source pins, complete acceptance records and stage logs. This
+covers the original six-stage baseline below, not the newer Cancun frame corpus.
+
 The accepted native stack is reachable through these branches. Always check out
 the exact commits; subsequent branch changes must not change an acceptance run.
 
@@ -25,8 +31,8 @@ executed acceptance cases. The [third attempt](https://chatgpt.com/codex/tasks/t
 reached GitHub pages and the Rust distribution server, but Git smart-HTTP still
 returned HTTP 403 for all three public repositories. Its
 [report](reports/linux-cloud-network-attempt.md) records the exact probes; no
-bootstrap or acceptance ran. Git access through the configured proxy remains the
-Linux blocker. Check both allowed domains and HTTP methods, including POST.
+bootstrap or acceptance ran. Enabling POST resolved the Git smart-HTTP blocker;
+the fourth run fetched the exact pins and completed every acceptance stage.
 A dedicated FeVM environment can alternatively check out the repository directly.
 Set its setup script to `bash native/cloud-setup.sh` on `native-acceptance` and
 enable task network access for GitHub and the Rust/Cargo/npm dependency downloads.

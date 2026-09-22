@@ -1,0 +1,21 @@
+Bootstrap command:
+python3 native/bootstrap.py --out native/out/linux-bootstrap --toolchain 1.98.1 --fe-repository https://github.com/argotorg/fe.git --sonatina-repository https://github.com/sbillig/sonatina.git
+
+Log capture setup warning (bootstrap continued):
+tee: native/out/linux-bootstrap.log: No such file or directory
+
+Observed source fetch/checkouts:
+From https://github.com/argotorg/fe
+ * branch 85e64e8404642eaddcdd1ec8d275d7c26ab7ac31 -> FETCH_HEAD
+HEAD is now at 85e64e840 Pin native aggregate construction storage reuse
+From https://github.com/sbillig/sonatina
+ * branch 61fa661c23bbeeeab024c4e9936656b7a73bd8f4 -> FETCH_HEAD
+HEAD is now at 61fa661c Reuse native aggregate construction storage for sole consumers
+
+Observed parser/build completion:
+added 3 packages, and audited 4 packages
+found 0 vulnerabilities
+rebuilt dependencies successfully
+Finished `release` profile [optimized] target(s) in 24m 17s
+Native compiler: /workspace/fevm-native-acceptance/fevm/native/out/linux-bootstrap/bin/fe
+bootstrap exit=0

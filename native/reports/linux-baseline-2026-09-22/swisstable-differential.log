@@ -1,0 +1,12 @@
+baseline-O0-timing: 167 scenarios passed; text=692094; build=4.55s
+baseline-O0-probes: 167 scenarios passed; text=699798; build=5.92s
+candidate-O0-timing: 167 scenarios passed; text=686174; build=4.33s
+candidate-O0-probes: 167 scenarios passed; text=693894; build=6.46s
+baseline-O1-timing: 167 scenarios passed; text=470280; build=9.77s
+baseline-O1-probes: 167 scenarios passed; text=484472; build=6.77s
+candidate-O1-timing: 167 scenarios passed; text=456864; build=5.99s
+candidate-O1-probes: 167 scenarios passed; text=466808; build=7.21s
+baseline-O2-timing: 167 scenarios passed; text=470280; build=5.52s
+baseline-O2-probes: 167 scenarios passed; text=484472; build=6.69s
+candidate-O2-timing: 167 scenarios passed; text=456864; build=6.88s
+candidate-O2-probes: 167 scenarios passed; text=466808; build=6.93s

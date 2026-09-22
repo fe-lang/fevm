@@ -8,7 +8,8 @@ separate interpreter milestones.
 The current [Cancun checkpoint](reports/cancun-frames.md) passes workspace,
 CLI, arithmetic and SwissTable checks on AArch64 macOS at O0/O1/O2. The new
 frame gate is blocked by a reference halt-classification discrepancy after
-1,475 matching O0 frames. Full frame acceptance and Linux execution remain pending.
+1,475 matching O0 frames. Full frame acceptance remains pending. The original
+six-stage baseline has now [passed on x86_64 Linux](reports/linux-baseline-2026-09-22/README.md).
 The [earlier accepted integration](reports/native-integration.md) records the
 previous six-stage suite and the aggregate-construction fix in Sonatina PR #321.
 Historical reports retain their own compiler manifests.

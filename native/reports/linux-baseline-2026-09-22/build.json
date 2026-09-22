@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "85e64e8404642eaddcdd1ec8d275d7c26ab7ac31",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "61fa661c23bbeeeab024c4e9936656b7a73bd8f4",
+    "cargo_lock_sha256": "bbb0e2a4e3a98c393c61658a98211c7d43aebd11b8de2a1f90e925809345b498",
+    "rust_version": "1.98.1",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "local commits; supply repository paths or Git bundles until published",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "source_directory": "/workspace/fevm-native-acceptance/fevm/native/out/linux-bootstrap/fe",
+  "sonatina_source_directory": "/workspace/fevm-native-acceptance/fevm/native/out/linux-bootstrap/sonatina",
+  "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+  "node": "v20.20.2",
+  "npm": "11.4.2",
+  "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "target_directory": "/workspace/fevm-native-acceptance/fevm/native/out/linux-bootstrap/target",
+  "complete": true,
+  "compiler_build_seconds": 1457.8478656730001,
+  "compiler": "/workspace/fevm-native-acceptance/fevm/native/out/linux-bootstrap/bin/fe",
+  "compiler_sha256": "66dc8e715be3f9ab13b498abb676c9fcbad7b872b0bf174ff78ca887e38ec7d9",
+  "compiler_version": "fe 26.3.0 (85e64e840)"
+}
