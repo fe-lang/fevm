@@ -6,8 +6,14 @@ The [retained evidence](reports/linux-baseline-2026-09-22/README.md) includes
 exact compiler/source pins, complete acceptance records and stage logs. This
 covers the original six-stage baseline below, not the newer Cancun frame corpus.
 
-The accepted native stack is reachable through these branches. Always check out
-the exact commits; subsequent branch changes must not change an acceptance run.
+The next Linux run should use the public `fe-lang/fevm:cancun-memory` branch and
+the exact compiler revisions in its `native/toolchain.json`. The
+[owned-buffer foundation](reports/owned-buffer-foundation.md) records the current
+AArch64 acceptance and compiler identities. Record the selected FeVM commit
+before running; do not substitute the older pins in the historical table below.
+The new gate includes Cancun frame results and memory-cost workspace tests.
+
+The earlier Linux baseline used these exact revisions:
 
 | Repository | Branch | Commit |
 |---|---|---|

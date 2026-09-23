@@ -1,0 +1,34 @@
+{
+  "compiler": "/Users/sean/code/fevm/native/out/memory-toolchain/bin/fe",
+  "compiler_sha256": "0fac504b3e7aa043323e924a969e646d344ad3d7f617111ac06b3fb37b552c82",
+  "fe_revision": "bde32240b93090d15b7139bab05e8ec660035882",
+  "sonatina_revision": "5374ab32a35d41a39ca82c138797ab9b033caf80",
+  "source_sha256": "371da075c153374186aa653e5832c1342146d06b735c555de3934bcf68787e4b",
+  "complete": true,
+  "runs": [
+    {
+      "level": "0",
+      "build_status": 0,
+      "build_seconds": 17.208408667240292,
+      "exit_status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "level": "1",
+      "build_status": 0,
+      "build_seconds": 17.72443312499672,
+      "exit_status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "level": "2",
+      "build_status": 0,
+      "build_seconds": 17.927145667374134,
+      "exit_status": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

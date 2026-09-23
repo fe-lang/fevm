@@ -1,0 +1,171 @@
+use core::Option
+
+// At 2^42 bytes, the quadratic term alone exceeds a u64 frame gas budget.
+// Affordable ranges therefore fit u64 before any host allocation is attempted.
+const UNPAYABLE_EXTENT: u64 = 1 << 42
+
+pub struct MemoryExpansion { pub size: u64, pub gas: u64 }
+
+fn required_extent(current: u64, offset: u256, len: u256) -> Option<u64> {
+    if len == 0 {
+        return Option::Some(current)
+    }
+    if offset >= UNPAYABLE_EXTENT as u256 || len >= UNPAYABLE_EXTENT as u256 {
+        return Option::None
+    }
+    // Each operand is below 2^42, so addition and rounding cannot overflow.
+    let start: u64 = offset.downcast_unchecked()
+    let length: u64 = len.downcast_unchecked()
+    let end = start + length
+    let rounded = ((end + 31) / 32) * 32
+    if rounded >= UNPAYABLE_EXTENT {
+        return Option::None
+    }
+    Option::Some(if rounded > current { rounded } else { current })
+}
+
+fn expansion(current: u64, size: u64) -> Option<MemoryExpansion> {
+    let before = (current / 32) as u128
+    let after = (size / 32) as u128
+    let before_cost = 3 * before + before * before / 512
+    let after_cost = 3 * after + after * after / 512
+    let gas = after_cost - before_cost
+    if gas > 0xffffffffffffffff {
+        return Option::None
+    }
+    Option::Some(MemoryExpansion { size, gas: gas.downcast_unchecked() })
+}
+
+/// Plan one range without allocating or changing active memory.
+/// `current` is the previously charged, word-rounded active extent.
+pub fn memory_expansion(current: u64, offset: u256, len: u256) -> Option<MemoryExpansion> {
+    core::assert(current % 32 == 0 && current < UNPAYABLE_EXTENT)
+    match required_extent(current, offset, len) {
+        Option::Some(size,) => expansion(current, size),
+        Option::None => Option::None,
+    }
+}
+
+/// MCOPY charges the union of both extents, including an unread source suffix.
+pub fn copy_expansion(current: u64, dest: u256, source: u256, len: u256) -> Option<
+    MemoryExpansion,
+> {
+    core::assert(current % 32 == 0 && current < UNPAYABLE_EXTENT)
+    match required_extent(current, offset: dest, len) {
+        Option::Some(size,) => match required_extent(current: size, offset: source, len) {
+            Option::Some(size,) => expansion(current, size),
+            Option::None => Option::None,
+        },
+        Option::None => Option::None,
+    }
+}
+
+/// Cancun's three gas per copied word, excluding opcode and expansion charges.
+pub fn copy_gas(_ len: u256) -> Option<u64> {
+    let words = len / 32 + if len % 32 == 0 { 0 } else { 1 }
+    // Even the maximum EVM length needs fewer than 2^252 words.
+    let gas = words * 3
+    if gas > 0xffffffffffffffff {
+        return Option::None
+    }
+    Option::Some(gas.downcast_unchecked())
+}
+
+#[test]
+fn memory_rounding_and_quadratic_cost() {
+    for (offset, len, size, gas) in [
+        (0, 0, 0, 0),
+        (0, 1, 32, 3),
+        (31, 1, 32, 3),
+        (32, 1, 64, 6),
+        (0, 33, 64, 6),
+        (0, 704, 704, 66),
+        (0, 736, 736, 70),
+        (0, 16352, 16352, 2043),
+        (0, 16384, 16384, 2048),
+    ] {
+        match memory_expansion(current: 0, offset, len) {
+            Option::Some(plan,) => {
+                core::assert(plan.size == size)
+                core::assert(plan.gas == gas)
+            },
+            Option::None => core::panic(),
+        }
+    }
+    match memory_expansion(current: 704, offset: 735, len: 1) {
+        Option::Some(plan,) => core::assert(plan.size == 736 && plan.gas == 4),
+        Option::None => core::panic(),
+    }
+    match memory_expansion(current: 736, offset: 0, len: 1) {
+        Option::Some(plan,) => core::assert(plan.size == 736 && plan.gas == 0),
+        Option::None => core::panic(),
+    }
+}
+
+#[test]
+fn memory_empty_and_unpayable_ranges() {
+    let max = !(0 as u256)
+    match copy_expansion(current: 64, dest: max, source: max, len: 0) {
+        Option::Some(plan,) => core::assert(plan.size == 64 && plan.gas == 0),
+        Option::None => core::panic(),
+    }
+    for (offset, len) in [
+        (max, 1),
+        (1, max),
+        (1 << 42, 1),
+        ((1 << 42) - 1, 1),
+        (0, (1 << 42) - 1),
+        (0, 1 << 42),
+    ] {
+        match memory_expansion(current: 0, offset, len) {
+            Option::Some(_,) => core::panic(),
+            Option::None => {},
+        }
+    }
+    match copy_gas(max) {
+        Option::Some(_,) => core::panic(),
+        Option::None => {},
+    }
+}
+
+#[test]
+fn memory_copy_combines_extents_and_word_costs() {
+    for (dest, source) in [(0, 65), (65, 0), (65, 65)] {
+        match copy_expansion(current: 32, dest, source, len: 32) {
+            Option::Some(plan,) => core::assert(plan.size == 128 && plan.gas == 9),
+            Option::None => core::panic(),
+        }
+    }
+    for (len, expected) in [(0, 0), (1, 3), (32, 3), (33, 6)] {
+        match copy_gas(len) {
+            Option::Some(gas,) => core::assert(gas == expected),
+            Option::None => core::panic(),
+        }
+    }
+}
+
+#[test]
+fn memory_cost_preserves_the_full_u64_gas_domain() {
+    // The last whole word whose total expansion charge fits u64::MAX.
+    match memory_expansion(current: 0, offset: 0, len: 3109888487392) {
+        Option::Some(plan,) => {
+            core::assert(plan.size == 3109888487392)
+            core::assert(plan.gas == 18446744073620873785)
+        },
+        Option::None => core::panic(),
+    }
+    match memory_expansion(current: 0, offset: 0, len: 3109888487393) {
+        Option::Some(_,) => core::panic(),
+        Option::None => {},
+    }
+    // Copy charging accepts its complete u64 domain even though a real copy
+    // of this size would independently fail its memory-expansion charge.
+    match copy_gas(196765270119568550560) {
+        Option::Some(gas,) => core::assert(gas == 0xffffffffffffffff),
+        Option::None => core::panic(),
+    }
+    match copy_gas(196765270119568550561) {
+        Option::Some(_,) => core::panic(),
+        Option::None => {},
+    }
+}

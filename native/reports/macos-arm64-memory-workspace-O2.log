@@ -1,0 +1,27 @@
+running `fe test` for 3 inputs (jobs=8)
+
+COMPILING        evm        /Users/sean/code/fevm/ingots/evm
+COMPILING        swisstable /Users/sean/code/fevm/ingots/swisstable
+COMPILING        driver     /Users/sean/code/fevm/native/differential/driver
+READY [4.8483s]  swisstable running 6 tests
+PASS  [0.1323s]  swisstable swisstable_hash_reference_vectors
+PASS  [0.1328s]  swisstable swisstable_tombstones_reuse_full_table_slots
+PASS  [0.1328s]  swisstable swisstable_basic_operations
+PASS  [0.1329s]  swisstable swisstable_many_entries_roundtrip
+PASS  [0.1329s]  swisstable swisstable_hash_distributes_each_limb
+PASS  [0.1643s]  swisstable swisstable_collisions_updates_and_churn
+READY [99.915s]  driver     running 0 tests
+READY [171.88s]  evm        running 10 tests
+PASS  [0.1928s]  evm        world_state_defaults_to_zero
+PASS  [0.0028s]  evm        world_state_roundtrips_account_storage
+PASS  [0.0030s]  evm        world_state_zero_values_clear_entries
+PASS  [0.3021s]  evm        memory_rounding_and_quadratic_cost
+PASS  [0.3022s]  evm        memory_copy_combines_extents_and_word_costs
+PASS  [0.3022s]  evm        memory_cost_preserves_the_full_u64_gas_domain
+PASS  [0.3022s]  evm        memory_empty_and_unpayable_ranges
+PASS  [0.5297s]  evm        evm_sload_sstore_roundtrip
+PASS  [0.5303s]  evm        evm_balance_selfbalance_and_blockhash_use_state
+PASS  [0.5305s]  evm        evm_tload_tstore_roundtrip
+Warning: No tests found in /Users/sean/code/fevm/native/differential/driver
+
+test result: ok. 16 passed; 0 failed

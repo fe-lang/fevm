@@ -5,9 +5,12 @@ and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The current [Cancun acceptance](reports/cancun-frames.md) passes all seven stages
-on AArch64 macOS: workspace, CLI, 1,602 frames at each of O0/O1/O2, arithmetic
-and SwissTable. The reference pins a precise DUP/SWAP halt-classification fix.
+The current [owned-buffer foundation](reports/owned-buffer-foundation.md) passes
+all seven stages on AArch64 macOS: workspace, CLI, 1,602 frames at each of
+O0/O1/O2, arithmetic and SwissTable. It also verifies memory-cost calculations
+and a reusable owned-buffer frame on the new compiler. VM memory integration
+remains the next step. The reference retains the precise DUP/SWAP correction
+from the [previous Cancun checkpoint](reports/cancun-frames.md).
 The original six-stage baseline has also [passed on x86_64 Linux](reports/linux-baseline-2026-09-22/README.md);
 the expanded frame gate still needs its own Linux run.
 The [earlier accepted integration](reports/native-integration.md) records the
@@ -22,9 +25,9 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The compiler revisions are published on `argotorg/fe:fevm-native-acceptance-pinned`
-and `sbillig/sonatina:fix-native-aggregate-construction`. FeVM acceptance sources
-are on the public `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
+The compiler revisions are published on `argotorg/fe:fevm-native-memory-integration`
+and `sbillig/sonatina:fevm-native-enum-integration`. FeVM acceptance sources
+are on the public `fe-lang/fevm:cancun-memory` branch. The bootstrap verifies
 exact commits; it does not substitute a branch tip or patch compiler sources.
 See [Cloud/Linux handoff](cloud-linux.md) for access requirements and exact inputs.
 
