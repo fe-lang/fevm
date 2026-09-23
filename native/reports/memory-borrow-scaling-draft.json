@@ -1,0 +1,42 @@
+{
+  "compiler_revision": "bde32240b93090d15b7139bab05e8ec660035882",
+  "compiler_sha256": "0fac504b3e7aa043323e924a969e646d344ad3d7f617111ac06b3fb37b552c82",
+  "host": "aarch64-apple-darwin",
+  "checks": {
+    "single_buffer_store": {
+      "status": 0,
+      "seconds": 0.5371211250312626,
+      "source_sha256": "0e7a48355c0671715efece74c2bc19fac76a5f5b5d4357cad072318e06bc4c25"
+    },
+    "single_buffer_loop": {
+      "status": 0,
+      "seconds": 0.5534915421158075,
+      "source_sha256": "419ab64c86efb232f3d245bbb93f097e1a8f3f177357c1eae1484d69b5c097a7"
+    },
+    "two_buffers_no_loop": {
+      "status": 0,
+      "seconds": 8.567996541969478,
+      "source_sha256": "1097104ab6ffb50e2de912a9492d83f14de155e6e4195fabac64e8ece95d19ef"
+    },
+    "two_buffers_one_loop": {
+      "status": 0,
+      "seconds": 12.387725041713566,
+      "source_sha256": "132708a8a42406bd22e4bc2ccebbfa92007b312cee7699a9bad4e5d878c1b7f0"
+    },
+    "two_buffers": {
+      "status": "timeout",
+      "seconds": 45.00820279214531,
+      "source_sha256": "58cd3a88a0640b460883ea7d70243c40b7a8e7606525786600428ba51804245d"
+    }
+  },
+  "full_vm_check": {
+    "status": "terminated after sampling",
+    "seconds_at_last_sample": 259,
+    "rss_kib_samples": [
+      11708144,
+      8044464
+    ],
+    "phase": "semantic borrow checking / invalidate_memory / capability joins / decision graph interning"
+  },
+  "scope": "bounded diagnostic observations, not uncontended benchmark measurements; no nontermination claim"
+}

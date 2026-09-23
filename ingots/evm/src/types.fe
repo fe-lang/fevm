@@ -1,4 +1,5 @@
-use ingot::constants::{MAX_CODE, OK, RETURN_LIMIT}
+use std::native::ByteBuffer
+use ingot::constants::{MAX_CODE, OK, INPUT_LIMIT}
 
 // Code and its instruction-boundary analysis stay immutable together.
 pub struct Program {
@@ -25,20 +26,23 @@ impl Program {
         }
         Self { bytes: bytes, len: len, jumpdests: jumpdests, status: status }
     }
-
-    pub fn len(self) -> usize { self.len }
-
-    pub fn byte_at(self, _ index: usize) -> u8 { self.bytes[index] }
-
+    pub fn len(self) -> usize {
+        self.len
+    }
+    pub fn byte_at(self, _ index: usize) -> u8 {
+        self.bytes[index]
+    }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
-        if destination >= self.len as u256 { return false }
+        if destination >= self.len as u256 {
+            return false
+        }
         let pc: usize = destination.downcast_unchecked()
         let bit: u8 = (pc % 8).downcast_unchecked()
         self.jumpdests[pc / 8] & (1 << bit) != 0
     }
 }
 
-pub struct ByteBuffer { pub bytes: [u8; RETURN_LIMIT], pub len: usize, pub status: i32 }
+pub struct InputData { pub bytes: [u8; INPUT_LIMIT], pub len: usize, pub status: i32 }
 
 pub struct CallEnv {
     pub address: u256,
@@ -46,7 +50,7 @@ pub struct CallEnv {
     pub origin: u256,
     pub callvalue: u256,
     pub gasprice: u256,
-    pub gas: u256,
+    pub gas_limit: u64,
 }
 
 pub struct BlockEnv {
@@ -63,18 +67,20 @@ pub struct BlockEnv {
 pub struct ExecutionResult {
     pub status: i32,
     pub output: ByteBuffer,
+    pub gas_remaining: u64,
+    pub gas_exact: bool,
     pub output_valid: bool,
     pub stack_top: u256,
     pub stack_len: usize,
     pub unsupported_opcode: i32,
 }
 
-pub fn empty_bytes() -> ByteBuffer {
-    ByteBuffer { bytes: [0; RETURN_LIMIT], len: 0, status: OK }
+pub fn empty_bytes() -> InputData {
+    InputData { bytes: [0; INPUT_LIMIT], len: 0, status: OK }
 }
 
 pub fn default_call_env() -> CallEnv {
-    CallEnv { address: 0, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
+    CallEnv { address: 0, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas_limit: 1_000_000 }
 }
 
 pub fn default_block_env() -> BlockEnv {
@@ -87,5 +93,11 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
+    }
+}
+
+impl ExecutionResult {
+    pub fn release(own self) {
+        self.output.release()
     }
 }

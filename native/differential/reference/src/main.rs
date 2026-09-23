@@ -10,19 +10,21 @@ use revm_interpreter::{
 use revm_primitives::{Bytes, hardfork::SpecId, hex};
 use serde::{Deserialize, Serialize};
 
-const GAS_LIMIT: u64 = 1_000_000;
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Case {
     code: String,
     calldata: String,
+    gas_limit: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct Frame {
-    status: &'static str,
+    outcome: &'static str,
+    reason: Option<&'static str>,
+    gas_remaining: u64,
     stack: Option<Vec<String>>,
+    memory: Option<String>,
     output: String,
 }
 
@@ -41,7 +43,7 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
         },
         false,
         SpecId::CANCUN,
-        GAS_LIMIT,
+        case.gas_limit,
     );
     let result = interpreter
         .run_plain(
@@ -50,16 +52,23 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
         )
         .into_result_return()
         .ok_or("nested frames are outside this corpus")?;
-    let status = match result.result {
-        InstructionResult::Stop | InstructionResult::Return => "success",
-        InstructionResult::Revert => "revert",
-        InstructionResult::StackUnderflow => "stack_underflow",
-        InstructionResult::StackOverflow => "stack_overflow",
-        InstructionResult::InvalidJump => "invalid_jump",
-        InstructionResult::InvalidFEOpcode | InstructionResult::OpcodeNotFound => "invalid_opcode",
+    let (outcome, reason) = match result.result {
+        InstructionResult::Stop | InstructionResult::Return => ("success", None),
+        InstructionResult::Revert => ("revert", None),
+        InstructionResult::StackUnderflow => ("exceptional", Some("stack_underflow")),
+        InstructionResult::StackOverflow => ("exceptional", Some("stack_overflow")),
+        InstructionResult::InvalidJump => ("exceptional", Some("invalid_jump")),
+        InstructionResult::InvalidFEOpcode | InstructionResult::OpcodeNotFound => {
+            ("exceptional", Some("invalid_opcode"))
+        }
+        InstructionResult::OutOfOffset => ("exceptional", Some("return_data_oob")),
+        InstructionResult::OutOfGas
+        | InstructionResult::MemoryOOG
+        | InstructionResult::InvalidOperandOOG => ("exceptional", Some("out_of_gas")),
         other => return Err(format!("reference result outside this corpus: {other:?}").into()),
     };
-    let stack = matches!(status, "success" | "revert").then(|| {
+    let completed = outcome != "exceptional";
+    let stack = completed.then(|| {
         interpreter
             .stack
             .data()
@@ -68,8 +77,18 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
             .collect()
     });
     Ok(Frame {
-        status,
+        outcome,
+        reason,
+        // The outer EVM consumes all frame gas on exceptional termination.
+        // Interpreter diagnostics may still contain an unspent partial budget.
+        gas_remaining: if completed { result.gas.remaining() } else { 0 },
         stack,
+        memory: completed.then(|| {
+            format!(
+                "0x{}",
+                hex::encode(interpreter.memory.context_memory().as_ref())
+            )
+        }),
         output: format!("0x{}", hex::encode(result.output)),
     })
 }
@@ -82,4 +101,42 @@ fn main() -> Result<(), Box<dyn Error>> {
         writeln!(output)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Case, execute};
+
+    #[test]
+    fn reports_exact_gas_and_exceptional_frame_consumption() {
+        for (gas_limit, outcome, remaining) in
+            [(1, "exceptional", 0), (2, "success", 0), (3, "success", 1)]
+        {
+            let frame = execute(Case {
+                code: "5f".into(),
+                calldata: String::new(),
+                gas_limit,
+            })
+            .unwrap();
+            assert_eq!(frame.outcome, outcome);
+            assert_eq!(frame.gas_remaining, remaining);
+            assert_eq!(frame.stack.is_some(), outcome == "success");
+            assert_eq!(frame.memory.is_some(), outcome == "success");
+        }
+    }
+
+    #[test]
+    fn retains_bounds_reason_when_memory_is_also_unpayable() {
+        let frame = execute(Case {
+            code: "600160017f80000000000000000000000000000000000000000000000000000000000000003e"
+                .into(),
+            calldata: String::new(),
+            gas_limit: 1_000_000,
+        })
+        .unwrap();
+        assert_eq!(frame.outcome, "exceptional");
+        assert_eq!(frame.reason, Some("return_data_oob"));
+        assert_eq!(frame.gas_remaining, 0);
+        assert_eq!(frame.output, "0x");
+    }
 }

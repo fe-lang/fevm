@@ -1,24 +1,72 @@
-use std::io::{Write, host, write, writeln}
-use std::native::Args
+use core::Option
+use std::io::{Write, host, write, write_char, writeln}
+use std::native::{Arg, Args}
 use fevm::{WorldState, default_block_env, default_call_env}
 use fevm::hex::{parse_hex_bytes, parse_hex_program, write_hex_byte, write_hex_word}
 use fevm::vm::{Vm, execute_vm}
 
-fn write_frame(_ vm: Vm) uses (w: mut Write) {
-    write("{\"status\":\"")
-    match vm.status {
-        0 => write("success"),
-        10 => write("stack_underflow"),
-        11 => write("stack_overflow"),
-        16 => write("invalid_jump"),
-        17 => write("invalid_opcode"),
-        19 => write("revert"),
-        _ => write("unsupported_result"),
+fn parse_gas(_ arg: Arg) -> Option<u64> {
+    if arg.len() == 0 {
+        return Option::None
     }
-    write("\",\"stack\":")
-    // Faulting frames have no successful final stack. Keep partial diagnostic
-    // stacks out of the portable comparison: engines consume operands differently.
-    if vm.status == 0 || vm.status == 19 {
+    let mut value: u64 = 0
+    let mut i: usize = 0
+    while i < arg.len() {
+        let byte = arg.byte_at(i)
+        if byte < 48 || byte > 57 {
+            return Option::None
+        }
+        let digit = (byte - 48) as u64
+        if value > (0xffffffffffffffff - digit) / 10 {
+            return Option::None
+        }
+        value = value * 10 + digit
+        i += 1
+    }
+    Option::Some(value)
+}
+
+fn write_gas(_ value: u64) uses (w: mut Write) {
+    let mut divisor: u64 = 1
+    while value / divisor >= 10 {
+        divisor *= 10
+    }
+    while divisor != 0 {
+        write_char((48 + (value / divisor) % 10).downcast_unchecked())
+        divisor /= 10
+    }
+}
+
+fn write_frame(_ vm: Vm) uses (w: mut Write) {
+    let completed = vm.status == 0 || vm.status == 19
+    write("{\"outcome\":\"")
+    if vm.status == 0 {
+        write("success")
+    } else if vm.status == 19 {
+        write("revert")
+    } else {
+        write("exceptional")
+    }
+    write("\",\"reason\":")
+    if completed {
+        write("null")
+    } else {
+        write("\"")
+        match vm.status {
+            10 => write("stack_underflow"),
+            11 => write("stack_overflow"),
+            15 => write("out_of_gas"),
+            16 => write("invalid_jump"),
+            17 => write("invalid_opcode"),
+            18 => write("return_data_oob"),
+            _ => core::panic(),
+        }
+        write("\"")
+    }
+    write(",\"gas_remaining\":")
+    write_gas(vm.gas_remaining)
+    write(",\"stack\":")
+    if completed {
         write("[")
         let mut i: usize = 0
         while i < vm.sp {
@@ -32,10 +80,22 @@ fn write_frame(_ vm: Vm) uses (w: mut Write) {
     } else {
         write("null")
     }
+    write(",\"memory\":")
+    if completed {
+        write("\"0x")
+        let mut i: u64 = 0
+        while i < vm.memory.len() {
+            write_hex_byte(vm.memory.byte_at(i) as i32)
+            i += 1
+        }
+        write("\"")
+    } else {
+        write("null")
+    }
     write(",\"output\":\"0x")
-    let mut i: usize = 0
-    while i < vm.output_len {
-        write_hex_byte(vm.output[i] as i32)
+    let mut i: u64 = 0
+    while i < vm.output.len() {
+        write_hex_byte(vm.output.byte_at(i) as i32)
         i += 1
     }
     writeln("\"}")
@@ -43,12 +103,34 @@ fn write_frame(_ vm: Vm) uses (w: mut Write) {
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
     let args = Args::new(argc, argv)
-    if args.len() != 3 { return 2 }
+    if args.len() != 4 {
+        return 2
+    }
     let program = parse_hex_program(args.get(1))
     let calldata = parse_hex_bytes(args.get(2))
-    if program.status != 0 || calldata.status != 0 { return 2 }
+    if program.status != 0 || calldata.status != 0 {
+        return 2
+    }
+    let mut call = default_call_env()
+    match parse_gas(args.get(3)) {
+        Option::Some(gas,) => call.gas_limit = gas,
+        Option::None => {
+            return 2
+        },
+    }
     let mut state = WorldState::empty()
-    let vm = execute_vm(program, calldata, default_call_env(), default_block_env(), mut state)
-    with (Write = host()) { write_frame(vm) }
+    let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
+    let supported = vm.status == 0
+        || (vm.status >= 15 && vm.status <= 19)
+        || vm.status == 10
+        || vm.status == 11
+    if !supported || !vm.gas_exact {
+        vm.release()
+        return 3
+    }
+    with (Write = host()) {
+        write_frame(vm)
+    }
+    vm.release()
     0
 }

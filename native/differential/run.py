@@ -7,9 +7,11 @@ import json
 from pathlib import Path
 import platform
 import subprocess
+import sys
 import time
 
 from corpus import cases
+from contract import assert_anchor, compare, validate
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -47,8 +49,8 @@ def main():
                       HERE / 'reference/src/main.rs'])
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
     reference = HERE / 'reference/target/release/fevm-reference'
-    report = {'schema': 1, 'fork': 'Cancun', 'scope': 'halt status, successful/reverted final stack, output; '
-              'gas, memory accounting and external state are not compared', 'complete': False,
+    report = {'schema': 2, 'fork': 'Cancun', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '
+              'simultaneous-fault reasons retained separately; external state is not compared', 'complete': False,
               'host': platform.platform(), 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
               'compiler_version': subprocess.check_output([compiler, '--version'], text=True).strip(),
               'revision': subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),
@@ -62,6 +64,8 @@ def main():
 
     save()
     try:
+        command([sys.executable, '-m', 'unittest', 'discover', '-s', HERE, '-p', 'test_*.py'],
+                out / 'contract-tests.log')
         command(['cargo', 'build', '--release', '--locked', '--manifest-path', HERE / 'reference/Cargo.toml'],
                 out / 'reference-build.log')
         metadata = json.loads(subprocess.check_output(
@@ -73,14 +77,15 @@ def main():
             for package in metadata['packages'] if package['name'].startswith('revm-')]
         report['reference']['executable_sha256'] = digest(reference)
         corpus = cases()
-        payload = ''.join(json.dumps({key: row[key] for key in ['code', 'calldata']}) + '\n' for row in corpus)
+        payload = ''.join(json.dumps({key: row[key] for key in ['code', 'calldata', 'gas_limit']}) + '\n' for row in corpus)
         data = command([reference], out / 'reference.jsonl', input=payload.encode(), timeout=60)
         expected = [json.loads(line) for line in data.splitlines()]
         if len(expected) != len(corpus):
             raise AssertionError('reference returned the wrong number of frames')
         for case, frame in zip(corpus, expected, strict=True):
-            if 'expected' in case and case['expected'] != frame:
-                raise AssertionError(f'reference disagrees with specification anchor {case["name"]}: {frame}')
+            validate(frame, case['gas_limit'])
+            if 'expected' in case:
+                assert_anchor(frame, case['expected'])
             case['expected'] = frame
         corpus_path = out / 'cases.jsonl'
         corpus_path.write_text(''.join(json.dumps(case) + '\n' for case in corpus))
@@ -90,7 +95,7 @@ def main():
         for level in args.levels:
             folder = out / f'O{level}'
             folder.mkdir()
-            row = {'level': level, 'complete': False, 'passed': 0}
+            row = {'level': level, 'complete': False, 'passed': 0, 'reason_differences': []}
             report['levels'].append(row)
             save()
             started = time.perf_counter()
@@ -100,14 +105,25 @@ def main():
             executable = folder / 'fevm_frame'
             row |= {'build_seconds': time.perf_counter() - started, 'executable_sha256': digest(executable)}
             for case in corpus:
-                observed = subprocess.run([str(executable), case['code'], case['calldata']],
+                observed = subprocess.run([str(executable), case['code'], case['calldata'], str(case['gas_limit'])],
                                           capture_output=True, timeout=10)
                 try:
                     frame = json.loads(observed.stdout)
                 except (ValueError, UnicodeDecodeError):
                     frame = None
-                if observed.returncode or observed.stderr or frame != case['expected']:
-                    row['failure'] = {'case': case, 'exit_status': observed.returncode, 'actual': frame,
+                error = None
+                try:
+                    if observed.returncode or observed.stderr:
+                        raise AssertionError('process failed')
+                    difference = compare(case, case['expected'], frame)
+                    if difference:
+                        row['reason_differences'].append(difference)
+                except AssertionError as failure:
+                    error = str(failure)
+                with (folder / 'frames.jsonl').open('a') as frames:
+                    frames.write(json.dumps({'case': case['name'], 'frame': frame}) + '\n')
+                if error:
+                    row['failure'] = {'error': error, 'case': case, 'exit_status': observed.returncode, 'actual': frame,
                                       'stdout': observed.stdout.decode(errors='replace'),
                                       'stderr': observed.stderr.decode(errors='replace')}
                     raise AssertionError(f'O{level} mismatch: {case["name"]}; see {report_path}')

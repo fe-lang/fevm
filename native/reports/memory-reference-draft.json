@@ -1,0 +1,13 @@
+{
+  "reference_frames": 1729,
+  "anchors_pass": true,
+  "fevm_execution": "not run: borrow-analysis resource explosion",
+  "reference_revision": "d613ef5735b9beb17acd53a5a1802ebc2198a18d",
+  "compiler_revision": "bde32240b93090d15b7139bab05e8ec660035882",
+  "source_sha256": {
+    "native/differential/corpus.py": "3f444f1df6b3c1ef9ad81806190a1c389dd7ab5c4e7ae255a2f5c2552b532c5d",
+    "native/differential/contract.py": "cc56933161a9d431783cd81a088a33c79d16b419d3f5c42794327e10e506bafe",
+    "native/differential/reference/src/main.rs": "668cfffcabd523e9a58cb059969c41d53b83bfc2827f0fbfca12572dc15b5715",
+    "native/differential/reference/Cargo.lock": "373755bc0058d83bde5fca5cb8b72bd578a4654d83424d9e9c971383eb7cddc4"
+  }
+}

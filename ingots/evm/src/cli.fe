@@ -5,7 +5,8 @@ use ingot::constants::{
     ERR_CODE_TOO_LONG,
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
-    ERR_MEMORY_LIMIT,
+    ERR_OUT_OF_GAS,
+    ERR_HOST_ALLOCATION,
     ERR_ODD_HEX,
     ERR_RETURN_DATA_OOB,
     ERR_REVERT,
@@ -54,14 +55,15 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
             write_opcode_name(vm.unsupported_opcode)
             write_char(10)
         },
-        ERR_MEMORY_LIMIT => writeln("memory limit exceeded"),
+        ERR_HOST_ALLOCATION => writeln("host allocation failed"),
+        ERR_OUT_OF_GAS => writeln("out of gas"),
         ERR_INVALID_JUMP => writeln("invalid jump destination"),
         ERR_INVALID_OPCODE => writeln("invalid opcode"),
         ERR_RETURN_DATA_OOB => writeln("return data out of bounds"),
         ERR_STATE_LIMIT => writeln("state table capacity exceeded"),
         ERR_REVERT => {
             write("revert ")
-            write_hex_bytes(vm.output, vm.output_len)
+            write_hex_bytes(vm.output)
         },
         ERR_UNSUPPORTED_OPCODE => {
             write("unsupported opcode 0x")
@@ -76,7 +78,7 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
 
 fn write_result(_ vm: Vm) uses (w: mut Write) {
     if vm.output_valid {
-        write_hex_bytes(vm.output, vm.output_len)
+        write_hex_bytes(vm.output)
     } else if vm.sp == 0 {
         writeln("empty")
     } else {
@@ -116,10 +118,13 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
         )
         if vm.status != OK {
             write_vm_error(vm)
-            return vm.status
+            let status = vm.status
+            vm.release()
+            return status
         }
 
         write_result(vm)
+        vm.release()
         OK
     }
 }

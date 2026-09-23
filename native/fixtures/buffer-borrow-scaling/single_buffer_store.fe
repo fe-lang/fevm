@@ -1,0 +1,8 @@
+use std::native::ByteBuffer
+pub fn main() -> i32 {
+    let mut memory = ByteBuffer::new()
+    core::assert(memory.try_resize(32))
+    memory.set_byte(index: 0, value: 7)
+    memory.release()
+    0
+}

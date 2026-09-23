@@ -1,7 +1,8 @@
+use std::native::ByteBuffer
 use std::io::{Write, write, write_char}
 use std::native::Arg
-use ingot::constants::{ERR_BAD_HEX, ERR_CODE_TOO_LONG, ERR_ODD_HEX, MAX_CODE, OK, RETURN_LIMIT}
-use ingot::types::{ByteBuffer, Program}
+use ingot::constants::{ERR_BAD_HEX, ERR_CODE_TOO_LONG, ERR_ODD_HEX, MAX_CODE, OK, INPUT_LIMIT}
+use ingot::types::{InputData, Program}
 
 fn hex_digit(_ value: u8) -> i32 {
     if value < 10 {
@@ -34,13 +35,11 @@ pub fn write_hex_byte(_ value: i32) uses (w: mut Write) {
     write_char(hex_digit(lo))
 }
 
-pub fn write_hex_bytes(_ bytes: [u8; RETURN_LIMIT], _ len: usize)
-uses (w: mut Write)
-{
+pub fn write_hex_bytes(_ bytes: ByteBuffer) uses (w: mut Write) {
     write("0x")
-    let mut i: usize = 0
-    while i < len {
-        write_hex_byte(bytes[i] as i32)
+    let mut i: u64 = 0
+    while i < bytes.len() {
+        write_hex_byte(bytes.byte_at(i) as i32)
         i += 1
     }
     write_char(10)
@@ -95,8 +94,8 @@ pub fn parse_hex_program(_ arg: Arg) -> Program {
     Program::new(bytes, len: out_len, status: OK)
 }
 
-pub fn parse_hex_bytes(_ arg: Arg) -> ByteBuffer {
-    let mut bytes: [u8; RETURN_LIMIT] = [0; RETURN_LIMIT]
+pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
+    let mut bytes: [u8; INPUT_LIMIT] = [0; INPUT_LIMIT]
     let len = arg.len()
     let mut i: usize = 0
     if is_prefixed_hex(arg) {
@@ -104,19 +103,19 @@ pub fn parse_hex_bytes(_ arg: Arg) -> ByteBuffer {
     }
 
     if (len - i) % 2 != 0 {
-        return ByteBuffer { bytes: bytes, len: 0, status: ERR_ODD_HEX }
+        return InputData { bytes: bytes, len: 0, status: ERR_ODD_HEX }
     }
 
     let mut out_len: usize = 0
     while i < len {
-        if out_len >= RETURN_LIMIT {
-            return ByteBuffer { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
+        if out_len >= INPUT_LIMIT {
+            return InputData { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
         }
 
         let hi = hex_value(arg.byte_at(i))
         let lo = hex_value(arg.byte_at(i + 1))
         if hi < 0 || lo < 0 {
-            return ByteBuffer { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
+            return InputData { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
         }
 
         bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
@@ -124,5 +123,5 @@ pub fn parse_hex_bytes(_ arg: Arg) -> ByteBuffer {
         i += 2
     }
 
-    ByteBuffer { bytes: bytes, len: out_len, status: OK }
+    InputData { bytes: bytes, len: out_len, status: OK }
 }

@@ -1,0 +1,26 @@
+use std::native::ByteBuffer
+
+struct Frame { memory: ByteBuffer, output: ByteBuffer }
+
+impl Frame {
+    fn new() -> Self { Self { memory: ByteBuffer::new(), output: ByteBuffer::new() } }
+
+    fn run(mut self, len: u64) {
+        core::assert(self.memory.try_resize(len))
+        core::assert(self.output.try_resize(len))
+        self.memory.set_byte(index: 0, value: 7)
+        self.output.set_byte(index: 0, value: self.memory.byte_at(0))
+    }
+
+    fn release(own self) {
+        self.memory.release()
+        self.output.release()
+    }
+}
+
+pub fn main() -> i32 {
+    let mut frame = Frame::new()
+    frame.run(len: 32)
+    frame.release()
+    0
+}

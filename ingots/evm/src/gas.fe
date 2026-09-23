@@ -1,0 +1,46 @@
+// Cancun base charges for the implemented frame instructions. Memory/copy and
+// exponent charges are added by the instruction before allocation/execution.
+// BALANCE/SLOAD/SSTORE retain prototype behavior and mark gas accounting inexact.
+pub fn base_cost(_ op: i32) -> u64 {
+    if op == 0x02 || (op >= 0x04 && op <= 0x07) || op == 0x0b || op == 0x47 {
+        return 5
+    }
+    if op == 0x08 || op == 0x09 || op == 0x56 {
+        return 8
+    }
+    if op == 0x0a || op == 0x57 {
+        return 10
+    }
+    if op == 0x40 { return 20 }
+    if op == 0x5b { return 1 }
+    if op == 0x5c || op == 0x5d {
+        return 100
+    }
+    if op == 0x01
+        || op == 0x03
+        || (op >= 0x10 && op <= 0x1d)
+        || op == 0x35
+        || op == 0x37
+        || op == 0x39
+        || op == 0x3e
+        || (op >= 0x51 && op <= 0x53)
+        || op == 0x5e
+        || (op >= 0x60 && op <= 0x9f) {
+        return 3
+    }
+    if op == 0x30
+        || (op >= 0x32 && op <= 0x34)
+        || op == 0x36
+        || op == 0x38
+        || op == 0x3a
+        || op == 0x3d
+        || (op >= 0x41 && op <= 0x46)
+        || op == 0x48
+        || op == 0x4a
+        || op == 0x50
+        || (op >= 0x58 && op <= 0x5a)
+        || op == 0x5f {
+        return 2
+    }
+    0
+}

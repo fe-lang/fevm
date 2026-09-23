@@ -1,9 +1,14 @@
+use core::Option
+use std::native::ByteBuffer
+use ingot::memory::{MemoryExpansion, memory_expansion, copy_expansion, copy_gas}
+use ingot::gas::base_cost
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
-    ERR_MEMORY_LIMIT,
+    ERR_OUT_OF_GAS,
+    ERR_HOST_ALLOCATION,
     ERR_RETURN_DATA_OOB,
     ERR_REVERT,
     ERR_STACK_OVERFLOW,
@@ -12,21 +17,18 @@ use ingot::constants::{
     ERR_TODO_OPCODE,
     ERR_UNSUPPORTED_OPCODE,
     I256_MIN,
-    MAX_CODE,
-    MEMORY_LIMIT,
     OK,
-    RETURN_LIMIT,
     STACK_LIMIT,
 }
 use ingot::opcodes::is_todo_opcode
 use ingot::state::WorldState
-use ingot::types::{BlockEnv, ByteBuffer, CallEnv, ExecutionResult, Program}
+use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program}
 
 pub struct Vm {
-    pub memory: [u8; MEMORY_LIMIT],
-    pub memory_size: usize,
-    pub output: [u8; RETURN_LIMIT],
-    pub output_len: usize,
+    pub memory: ByteBuffer,
+    pub output: ByteBuffer,
+    pub gas_remaining: u64,
+    pub gas_exact: bool,
     pub output_valid: bool,
     pub stack: [u256; STACK_LIMIT],
     pub sp: usize,
@@ -37,12 +39,12 @@ pub struct Vm {
 }
 
 impl Vm {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Vm {
-            memory: [0; MEMORY_LIMIT],
-            memory_size: 0,
-            output: [0; RETURN_LIMIT],
-            output_len: 0,
+            memory: ByteBuffer::new(),
+            output: ByteBuffer::new(),
+            gas_remaining: 0,
+            gas_exact: true,
             output_valid: false,
             stack: [0; STACK_LIMIT],
             sp: 0,
@@ -60,6 +62,14 @@ impl Vm {
     fn fault(mut self, _ status: i32) {
         if self.status == OK {
             self.status = status
+            if status == ERR_STACK_UNDERFLOW
+                || status == ERR_STACK_OVERFLOW
+                || status == ERR_INVALID_JUMP
+                || status == ERR_INVALID_OPCODE
+                || status == ERR_RETURN_DATA_OOB
+                || status == ERR_OUT_OF_GAS {
+                self.gas_remaining = 0
+            }
         }
     }
 
@@ -87,216 +97,275 @@ impl Vm {
         if value { self.push(1) } else { self.push(0) }
     }
 
-    fn ensure_memory(mut self, _ offset: u256, _ len: usize) -> usize {
-        if len == 0 { return 0 }
-
-        if offset > MEMORY_LIMIT as u256 {
-            self.fault(ERR_MEMORY_LIMIT)
-            return 0
+    fn charge(mut self, _ amount: u128) -> bool {
+        if amount > self.gas_remaining as u128 {
+            self.fault(ERR_OUT_OF_GAS)
+            return false
         }
+        self.gas_remaining -= amount.downcast_unchecked()
+        true
+    }
 
-        let start: usize = offset.downcast_unchecked()
-        let end = start + len
-        if end > MEMORY_LIMIT {
-            self.fault(ERR_MEMORY_LIMIT)
-            return 0
+    // Plan and charge before converting EVM words or touching host allocation.
+    fn plan_memory(mut self, offset: u256, len: u256, copying: bool) -> Option<MemoryExpansion> {
+        match memory_expansion(current: self.memory.len(), offset, len) {
+            Option::Some(plan,) => if self.charge_expansion(plan, len, copying) {
+                Option::Some(plan)
+            } else {
+                Option::None
+            },
+            Option::None => {
+                self.fault(ERR_OUT_OF_GAS)
+                Option::None
+            },
         }
+    }
 
-        if end > self.memory_size {
-            self.memory_size = end
+    fn charge_expansion(mut self, _ plan: MemoryExpansion, len: u256, copying: bool) -> bool {
+        let mut gas = plan.gas as u128
+        if copying {
+            match copy_gas(len) {
+                Option::Some(cost,) => gas += cost as u128,
+                Option::None => {
+                    self.fault(ERR_OUT_OF_GAS)
+                    return false
+                },
+            }
         }
-        start
+        self.charge(gas)
+    }
+
+    fn expand_memory(mut self, _ size: u64) -> bool {
+        if !self.memory.try_resize(size) {
+            self.fault(ERR_HOST_ALLOCATION)
+            return false
+        }
+        true
     }
 
     fn mload(mut self) {
         let offset = self.pop()
         if !self.ok() { return }
-
-        let start = self.ensure_memory(offset, 32)
-        if !self.ok() { return }
-
+        match self.plan_memory(offset, len: 32, copying: false) {
+            Option::Some(plan,) => if !self.expand_memory(plan.size) {
+                return
+            },
+            Option::None => {
+                return
+            },
+        }
+        let start: u64 = offset.downcast_unchecked()
         let mut value: u256 = 0
-        let mut i: usize = 0
+        let mut i: u64 = 0
         while i < 32 {
-            value = (value << 8) | (self.memory[start + i] as u256)
+            value = (value << 8) | (self.memory.byte_at(start + i) as u256)
             i += 1
         }
         self.push(value)
     }
 
-    fn mstore(mut self) {
+    fn mstore(mut self, byte_only: bool) {
         let offset = self.pop()
         let value = self.pop()
         if !self.ok() { return }
-
-        let start = self.ensure_memory(offset, 32)
-        if !self.ok() { return }
-
-        let mut i: usize = 0
-        while i < 32 {
-            let shift = ((31 - i) as u256) * 8
-            self.memory[start + i] = ((value >> shift) & 255).downcast_unchecked()
+        let len: u64 = if byte_only { 1 } else { 32 }
+        match self.plan_memory(offset, len: len as u256, copying: false) {
+            Option::Some(plan,) => if !self.expand_memory(plan.size) {
+                return
+            },
+            Option::None => {
+                return
+            },
+        }
+        let start: u64 = offset.downcast_unchecked()
+        let mut i: u64 = 0
+        while i < len {
+            let shift = ((len - 1 - i) as u256) * 8
+            self.memory
+                .set_byte(
+                    index: start + i,
+                    value: ((value >> shift) & 255).downcast_unchecked(),
+                )
             i += 1
         }
     }
 
-    fn mstore8(mut self) {
-        let offset = self.pop()
-        let value = self.pop()
-        if !self.ok() { return }
-
-        let start = self.ensure_memory(offset, 1)
-        if self.ok() {
-            self.memory[start] = (value & 255).downcast_unchecked()
-        }
-    }
-
     fn codecopy(mut self, _ program: Program) {
-        let mem_offset = self.pop()
-        let code_offset = self.pop()
+        let offset = self.pop()
+        let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-
-        if len > MEMORY_LIMIT as u256 || code_offset > MAX_CODE as u256 {
-            self.fault(ERR_MEMORY_LIMIT)
-            return
+        match self.plan_memory(offset, len, copying: true) {
+            Option::Some(plan,) => if !self.expand_memory(plan.size) {
+                return
+            },
+            Option::None => {
+                return
+            },
         }
-
-        let copy_len: usize = len.downcast_unchecked()
-        let dst = self.ensure_memory(mem_offset, copy_len)
-        if !self.ok() { return }
-
-        let src: usize = code_offset.downcast_unchecked()
-        let mut i: usize = 0
-        while i < copy_len {
-            let index = src + i
-            if index < program.len() {
-                self.memory[dst + i] = program.byte_at(index)
+        if len == 0 { return }
+        let dest: u64 = offset.downcast_unchecked()
+        let count: u64 = len.downcast_unchecked()
+        // Bound the source before narrowing or adding an index to it.
+        let available: u256 = if source < program.len() as u256 {
+            program.len() as u256 - source
+        } else {
+            0
+        }
+        let mut i: u64 = 0
+        while i < count {
+            let value = if (i as u256) < available {
+                let index: usize = (source + i as u256).downcast_unchecked()
+                program.byte_at(index)
             } else {
-                self.memory[dst + i] = 0
+                0
             }
+            self.memory.set_byte(index: dest + i, value)
             i += 1
         }
     }
 
     fn mcopy(mut self) {
-        let dst_offset = self.pop()
-        let src_offset = self.pop()
+        let dest = self.pop()
+        let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-
-        if len > MEMORY_LIMIT as u256 {
-            self.fault(ERR_MEMORY_LIMIT)
-            return
+        match copy_expansion(current: self.memory.len(), dest, source, len) {
+            Option::Some(plan,) => {
+                if !self.charge_expansion(plan, len, copying: true)
+                    || !self.expand_memory(plan.size) {
+                    return
+                }
+            },
+            Option::None => {
+                self.fault(ERR_OUT_OF_GAS)
+                return
+            },
         }
-
-        let copy_len: usize = len.downcast_unchecked()
-        let dst = self.ensure_memory(dst_offset, copy_len)
-        let src = self.ensure_memory(src_offset, copy_len)
-        if !self.ok() { return }
-
-        if dst < src {
-            let mut i: usize = 0
-            while i < copy_len {
-                self.memory[dst + i] = self.memory[src + i]
-                i += 1
-            }
-        } else {
-            let mut i: usize = copy_len
-            while i > 0 {
-                i -= 1
-                self.memory[dst + i] = self.memory[src + i]
-            }
+        if len != 0 {
+            self.memory
+                .copy_within(
+                    dest: dest.downcast_unchecked(),
+                    source: source.downcast_unchecked(),
+                    len: len.downcast_unchecked(),
+                )
         }
     }
 
-    fn calldataload(mut self, _ calldata: ByteBuffer) {
+    fn calldataload(mut self, _ calldata: InputData) {
         let offset = self.pop()
         if !self.ok() { return }
-
+        let available: u256 = if offset < calldata.len as u256 {
+            calldata.len as u256 - offset
+        } else {
+            0
+        }
         let mut value: u256 = 0
-        let mut i: usize = 0
+        let mut i: u256 = 0
         while i < 32 {
-            value = value << 8
-            let index_value = offset + (i as u256)
-            if index_value < calldata.len as u256 {
-                let index: usize = index_value.downcast_unchecked()
-                value = value | (calldata.bytes[index] as u256)
+            value <<= 8
+            if i < available {
+                let index: usize = (offset + i).downcast_unchecked()
+                value |= calldata.bytes[index] as u256
             }
             i += 1
         }
         self.push(value)
     }
 
-    fn calldatacopy(mut self, _ calldata: ByteBuffer) {
-        let mem_offset = self.pop()
-        let data_offset = self.pop()
+    fn calldatacopy(mut self, _ calldata: InputData) {
+        let offset = self.pop()
+        let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-
-        if len > MEMORY_LIMIT as u256 {
-            self.fault(ERR_MEMORY_LIMIT)
-            return
+        match self.plan_memory(offset, len, copying: true) {
+            Option::Some(plan,) => if !self.expand_memory(plan.size) {
+                return
+            },
+            Option::None => {
+                return
+            },
         }
-
-        let copy_len: usize = len.downcast_unchecked()
-        let dst = self.ensure_memory(mem_offset, copy_len)
-        if !self.ok() { return }
-
-        let mut i: usize = 0
-        while i < copy_len {
-            let index_value = data_offset + (i as u256)
-            if index_value < calldata.len as u256 {
-                let index: usize = index_value.downcast_unchecked()
-                self.memory[dst + i] = calldata.bytes[index]
+        if len == 0 { return }
+        let dest: u64 = offset.downcast_unchecked()
+        let count: u64 = len.downcast_unchecked()
+        let available: u256 = if source < calldata.len as u256 {
+            calldata.len as u256 - source
+        } else {
+            0
+        }
+        let mut i: u64 = 0
+        while i < count {
+            let value = if (i as u256) < available {
+                let index: usize = (source + i as u256).downcast_unchecked()
+                calldata.bytes[index]
             } else {
-                self.memory[dst + i] = 0
+                0
             }
+            self.memory.set_byte(index: dest + i, value)
             i += 1
         }
     }
 
     fn returndatacopy(mut self) {
-        let mem_offset = self.pop()
-        let data_offset = self.pop()
+        let offset = self.pop()
+        let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-
-        if data_offset != 0 || len != 0 {
-            self.fault(ERR_RETURN_DATA_OOB)
-            return
+        // The frame currently has no nested calls, hence empty return data.
+        // Charge first, then check bounds even for length zero, then allocate.
+        match self.plan_memory(offset, len, copying: true) {
+            Option::Some(plan,) => {
+                if source != 0 || len != 0 {
+                    self.fault(ERR_RETURN_DATA_OOB)
+                } else {
+                    let _ = self.expand_memory(plan.size)
+                }
+            },
+            Option::None => {},
         }
-
-        let copy_len: usize = len.downcast_unchecked()
-        let _ = self.ensure_memory(mem_offset, copy_len)
     }
 
     fn finish_from_memory(mut self, _ status: i32) {
         let offset = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-
-        if len > RETURN_LIMIT as u256 {
-            self.fault(ERR_MEMORY_LIMIT)
+        match self.plan_memory(offset, len, copying: false) {
+            Option::Some(plan,) => if !self.expand_memory(plan.size) {
+                return
+            },
+            Option::None => {
+                return
+            },
+        }
+        let count: u64 = len.downcast_unchecked()
+        if !self.output.try_resize(count) {
+            self.fault(ERR_HOST_ALLOCATION)
             return
         }
-
-        let copy_len: usize = len.downcast_unchecked()
-        let start = self.ensure_memory(offset, copy_len)
-        if !self.ok() { return }
-
-        let mut i: usize = 0
-        while i < copy_len {
-            self.output[i] = self.memory[start + i]
-            i += 1
+        if count != 0 {
+            let start: u64 = offset.downcast_unchecked()
+            let mut i: u64 = 0
+            while i < count {
+                self.output.set_byte(index: i, value: self.memory.byte_at(start + i))
+                i += 1
+            }
         }
-        self.output_len = copy_len
         self.output_valid = true
         self.status = status
         self.halted = true
     }
 
     fn exp(mut self, base: u256, exponent: u256) {
+        let mut significant = exponent
+        let mut gas: u128 = 0
+        while significant != 0 {
+            gas += 50
+            significant >>= 8
+        }
+        if !self.charge(gas) {
+            return
+        }
         let mut result: u256 = 1
         let mut factor = base
         let mut power = exponent
@@ -540,7 +609,7 @@ impl Vm {
         mut self,
         _ op: i32,
         _ program: Program,
-        _ calldata: ByteBuffer,
+        _ calldata: InputData,
         _ call: CallEnv,
         _ block: BlockEnv,
         _ state: mut WorldState,
@@ -691,12 +760,12 @@ impl Vm {
         }
 
         if op == 0x52 {
-            self.mstore()
+            self.mstore(byte_only: false)
             return
         }
 
         if op == 0x53 {
-            self.mstore8()
+            self.mstore(byte_only: true)
             return
         }
 
@@ -733,12 +802,12 @@ impl Vm {
         }
 
         if op == 0x59 {
-            self.push(self.memory_size as u256)
+            self.push(self.memory.len() as u256)
             return
         }
 
         if op == 0x5a {
-            self.push(call.gas)
+            self.push(self.gas_remaining as u256)
             return
         }
 
@@ -803,54 +872,91 @@ fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
     value
 }
 
+impl Vm {
+    pub fn run(
+        mut self,
+        _ program: Program,
+        _ calldata: InputData,
+        _ call: CallEnv,
+        _ block: BlockEnv,
+        _ state: mut WorldState,
+    ) {
+        self.memory.clear()
+        self.output.clear()
+        self.output_valid = false
+        self.sp = 0
+        self.pc = 0
+        self.status = OK
+        self.halted = false
+        self.unsupported_opcode = 0
+        self.gas_remaining = call.gas_limit
+        self.gas_exact = true
+        while self.pc < program.len() && self.ok() && !self.halted {
+            let op = program.byte_at(self.pc) as i32
+            self.pc += 1
+            // Dynamic transaction pricing for these prototype state operations
+            // is not implemented. Expose that boundary to callers and the corpus.
+            if op == 0x31 || op == 0x54 || op == 0x55 {
+                self.gas_exact = false
+            }
+            if !self.charge(base_cost(op) as u128) {
+                return
+            }
+            if op == 0x00 {
+                self.halted = true
+            } else if op == 0x5f {
+                self.push(0)
+            } else if op >= 0x60 && op <= 0x7f {
+                let len: usize = (op - 0x5f).downcast_unchecked()
+                let value = read_push_value(mut self, program, len)
+                self.push(value)
+            } else {
+                self.step(op, program, calldata, call, block, mut state)
+            }
+        }
+    }
+    pub fn release(own self) {
+        self.memory.release()
+        self.output.release()
+    }
+    pub fn into_result(own self) -> ExecutionResult {
+        let stack_top: u256 = if self.sp == 0 {
+            0
+        } else {
+            self.stack[self.sp - 1]
+        }
+        self.memory.release()
+        ExecutionResult {
+            status: self.status,
+            output: self.output,
+            output_valid: self.output_valid,
+            stack_top,
+            stack_len: self.sp,
+            unsupported_opcode: self.unsupported_opcode,
+            gas_remaining: self.gas_remaining,
+            gas_exact: self.gas_exact,
+        }
+    }
+}
+
 pub fn execute_vm(
     _ program: Program,
-    _ calldata: ByteBuffer,
+    _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut WorldState,
 ) -> Vm {
     let mut vm = Vm::new()
-    while vm.pc < program.len() && vm.ok() && !vm.halted {
-        let op = program.byte_at(vm.pc) as i32
-        vm.pc += 1
-
-        if op == 0x00 {
-            vm.halted = true
-            return vm
-        }
-
-        if op == 0x5f {
-            vm.push(0)
-        } else if op >= 0x60 && op <= 0x7f {
-            let len: usize = (op - 0x5f).downcast_unchecked()
-            let value = read_push_value(mut vm, program, len)
-            if vm.ok() { vm.push(value) }
-        } else {
-            vm.step(op, program, calldata, call, block, mut state)
-        }
-    }
+    vm.run(program, calldata, call, block, mut state)
     vm
-}
-
-fn vm_result(_ vm: Vm) -> ExecutionResult {
-    let stack_top: u256 = if vm.sp == 0 { 0 } else { vm.stack[vm.sp - 1] }
-    ExecutionResult {
-        status: vm.status,
-        output: ByteBuffer { bytes: vm.output, len: vm.output_len, status: OK },
-        output_valid: vm.output_valid,
-        stack_top: stack_top,
-        stack_len: vm.sp,
-        unsupported_opcode: vm.unsupported_opcode,
-    }
 }
 
 pub fn execute(
     _ program: Program,
-    _ calldata: ByteBuffer,
+    _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut WorldState,
 ) -> ExecutionResult {
-    vm_result(execute_vm(program, calldata, call, block, mut state))
+    execute_vm(program, calldata, call, block, mut state).into_result()
 }

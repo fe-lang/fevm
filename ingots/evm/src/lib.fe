@@ -3,7 +3,7 @@ pub use hex::{self, parse_hex_program}
 pub use state::{StorageKey, WorldState}
 pub use types::{
     BlockEnv,
-    ByteBuffer,
+    InputData,
     CallEnv,
     ExecutionResult,
     Program,
@@ -30,7 +30,14 @@ fn evm_sload_sstore_roundtrip() {
     bytes[7] = 0x54
     bytes[8] = 0x00
     let program = Program::new(bytes, len: 9, status: OK)
-    let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
+    let call = CallEnv {
+        address: 0xaa,
+        caller: 0,
+        origin: 0,
+        callvalue: 0,
+        gasprice: 0,
+        gas_limit: 1_000_000,
+    }
     let mut state = WorldState::empty()
     let result = execute(
         program,
@@ -43,6 +50,8 @@ fn evm_sload_sstore_roundtrip() {
     core::assert(result.status == OK)
     core::assert(result.stack_top == 0x2a)
     core::assert(state.storage_load(0xaa, 3) == 0x2a)
+    core::assert(!result.gas_exact)
+    result.release()
 }
 
 #[test]
@@ -59,7 +68,14 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     bytes[8] = 0x01
     bytes[9] = 0x00
     let program = Program::new(bytes, len: 10, status: OK)
-    let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
+    let call = CallEnv {
+        address: 0xaa,
+        caller: 0,
+        origin: 0,
+        callvalue: 0,
+        gasprice: 0,
+        gas_limit: 1_000_000,
+    }
     let mut state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
     core::assert(state.set_balance(0xbb, 23))
@@ -75,6 +91,8 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
 
     core::assert(result.status == OK)
     core::assert(result.stack_top == 128)
+    core::assert(!result.gas_exact)
+    result.release()
 }
 
 #[test]
@@ -90,7 +108,14 @@ fn evm_tload_tstore_roundtrip() {
     bytes[7] = 0x5c
     bytes[8] = 0x00
     let program = Program::new(bytes, len: 9, status: OK)
-    let call = CallEnv { address: 0xaa, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas: 0 }
+    let call = CallEnv {
+        address: 0xaa,
+        caller: 0,
+        origin: 0,
+        callvalue: 0,
+        gasprice: 0,
+        gas_limit: 1_000_000,
+    }
     let mut state = WorldState::empty()
     let result = execute(
         program,
@@ -103,4 +128,6 @@ fn evm_tload_tstore_roundtrip() {
     core::assert(result.status == OK)
     core::assert(result.stack_top == 9)
     core::assert(state.transient_load(0xaa, 4) == 9)
+    core::assert(result.gas_exact && result.gas_remaining == 999791)
+    result.release()
 }
