@@ -605,6 +605,52 @@ impl Vm {
         }
     }
 
+    // Fe currently rejects forwarding state and raw-buffer accesses together.
+    // Keep their dispatch separate until https://github.com/argotorg/fe/issues/1651.
+    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ state: mut WorldState) -> bool {
+        if op == 0x31 {
+            let address = self.pop()
+            if self.ok() {
+                self.push(state.balance(address))
+            }
+            return true
+        }
+
+        if op == 0x40 {
+            let number = self.pop()
+            if self.ok() {
+                self.push(state.block_hash(number))
+            }
+            return true
+        }
+
+        if op == 0x47 {
+            self.push(state.balance(call.address))
+            return true
+        }
+
+        if op == 0x54 {
+            self.sload(call, state)
+            return true
+        }
+
+        if op == 0x55 {
+            self.sstore(call, mut state)
+            return true
+        }
+
+        if op == 0x5c {
+            self.tload(call, state)
+            return true
+        }
+
+        if op == 0x5d {
+            self.tstore(call, mut state)
+            return true
+        }
+        false
+    }
+
     fn step(
         mut self,
         _ op: i32,
@@ -612,7 +658,6 @@ impl Vm {
         _ calldata: InputData,
         _ call: CallEnv,
         _ block: BlockEnv,
-        _ state: mut WorldState,
     ) {
         if op == 0x50 {
             let _ = self.pop()
@@ -635,14 +680,6 @@ impl Vm {
 
         if op == 0x30 {
             self.push(call.address)
-            return
-        }
-
-        if op == 0x31 {
-            let address = self.pop()
-            if self.ok() {
-                self.push(state.balance(address))
-            }
             return
         }
 
@@ -701,14 +738,6 @@ impl Vm {
             return
         }
 
-        if op == 0x40 {
-            let number = self.pop()
-            if self.ok() {
-                self.push(state.block_hash(number))
-            }
-            return
-        }
-
         if op == 0x41 {
             self.push(block.coinbase)
             return
@@ -739,11 +768,6 @@ impl Vm {
             return
         }
 
-        if op == 0x47 {
-            self.push(state.balance(call.address))
-            return
-        }
-
         if op == 0x48 {
             self.push(block.basefee)
             return
@@ -766,16 +790,6 @@ impl Vm {
 
         if op == 0x53 {
             self.mstore(byte_only: true)
-            return
-        }
-
-        if op == 0x54 {
-            self.sload(call, state)
-            return
-        }
-
-        if op == 0x55 {
-            self.sstore(call, mut state)
             return
         }
 
@@ -812,16 +826,6 @@ impl Vm {
         }
 
         if op == 0x5b { return }
-
-        if op == 0x5c {
-            self.tload(call, state)
-            return
-        }
-
-        if op == 0x5d {
-            self.tstore(call, mut state)
-            return
-        }
 
         if op == 0x5e {
             self.mcopy()
@@ -910,8 +914,8 @@ impl Vm {
                 let len: usize = (op - 0x5f).downcast_unchecked()
                 let value = read_push_value(mut self, program, len)
                 self.push(value)
-            } else {
-                self.step(op, program, calldata, call, block, mut state)
+            } else if !self.step_state(op, call, mut state) {
+                self.step(op, program, calldata, call, block)
             }
         }
     }

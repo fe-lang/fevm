@@ -131,3 +131,59 @@ fn evm_tload_tstore_roundtrip() {
     core::assert(result.gas_exact && result.gas_remaining == 999791)
     result.release()
 }
+
+#[test]
+fn evm_interleaves_state_and_owned_memory() {
+    let mut bytes: [u8; 4096] = [0; 4096]
+    let mut len: usize = 0
+    // Memory -> storage -> transient storage -> memory, then return both words.
+    for op in [
+        0x60,
+        0x2a,
+        0x5f,
+        0x52,
+        0x5f,
+        0x51,
+        0x60,
+        0x03,
+        0x55,
+        0x60,
+        0x03,
+        0x54,
+        0x60,
+        0x04,
+        0x5d,
+        0x60,
+        0x04,
+        0x5c,
+        0x60,
+        0x20,
+        0x52,
+        0x60,
+        0x40,
+        0x5f,
+        0xf3,
+    ] {
+        bytes[len] = op
+        len += 1
+    }
+    let program = Program::new(bytes, len, status: OK)
+    let mut state = WorldState::empty()
+    let result = execute(
+        program,
+        empty_bytes(),
+        default_call_env(),
+        default_block_env(),
+        mut state,
+    )
+    core::assert(result.status == OK && result.stack_len == 0)
+    core::assert(
+        !result.gas_exact && result.output_valid && result.output.len() == 64,
+    )
+    core::assert(
+        result.output.byte_at(31) == 0x2a && result.output.byte_at(63) == 0x2a,
+    )
+    core::assert(state.storage_load(0, 3) == 0x2a)
+    core::assert(state.transient_load(0, 4) == 0x2a)
+    result.release()
+}
