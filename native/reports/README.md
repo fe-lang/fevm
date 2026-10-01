@@ -1,8 +1,9 @@
 # Native arithmetic evidence: AArch64 macOS
 
-For the current compiler and complete native acceptance, see the
-[owned-buffer foundation](owned-buffer-foundation.md). The measurements below
-use earlier compiler revisions.
+For the current local compiler and Linux native acceptance, see the
+[owned-memory checkpoint](memory-integration-draft.md). The
+[owned-buffer foundation](owned-buffer-foundation.md) retains the earlier macOS
+acceptance. The measurements below use earlier compiler revisions.
 
 Measured on an Apple M1 Pro with macOS 15.6.1 and Apple Clang 17.0.0.
 These are diagnostic microbenchmarks collected during concurrent compiler and

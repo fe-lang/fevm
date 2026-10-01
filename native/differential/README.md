@@ -3,22 +3,20 @@
 This runner compares FeVM's single-frame execution with `revm-interpreter`
 **31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
 explicitly configured for **Cancun**. Cargo.lock pins the reference and its
-dependencies. The draft corpus includes 1,729 frames: arithmetic batches, all PUSH
+dependencies. The corpus includes 1,729 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
 remaining gas, and returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
-Last accepted checkpoint: **1,602 frames pass at O0/O1/O2 on AArch64 macOS**. Fe's
-escape-decoding fix supplies valid JSON, and the pinned reference correction
-distinguishes DUP/SWAP underflow from genuine overflow. The reference's successful
-instruction paths and gas charging remain unchanged. No cases or halt categories
-were removed. See the [acceptance report](../reports/cancun-frames.md).
-The earlier native baseline passed on Linux; this expanded frame gate still
-needs its own Linux run.
+Current checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
+96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
+reason differences per level match the agreed contract below. See the
+[owned-memory report](../reports/memory-integration-draft.md).
 
-The new contract and all 1,729 reference frames pass their checks, but FeVM memory
-execution is **not accepted yet**: borrow-analysis scaling blocks compilation.
-See the [draft report](../reports/memory-integration-draft.md).
+The previous [AArch64 macOS checkpoint](../reports/cancun-frames.md) covered 1,602
+frames with its own compiler pin. The new compiler/corpus still needs a macOS run.
+The pinned reference correction distinguishes DUP/SWAP underflow from genuine
+overflow without changing successful instruction paths or gas charging.
 
 ## Running
 

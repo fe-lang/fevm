@@ -1,17 +1,38 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/argotorg/fe",
-  "fe_revision": "bde32240b93090d15b7139bab05e8ec660035882",
+  "fe_revision": "f6eed783cad9f437b5b1efb6b1fd59368d17ab55",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "5374ab32a35d41a39ca82c138797ab9b033caf80",
-  "cargo_lock_sha256": "984b4717f54fd06401db3d5d3673b0e22dc80bd3f498d0ab34d52eadc53cf8f4",
+  "sonatina_revision": "f8a9fe5ab832b718dbef57309c88c4290dd66232",
+  "cargo_lock_sha256": "578f5acdd1e7468062812e8cace67c4bf1cf40b4c51118a234c1bc901108a00e",
   "rust_version": "1.98.1",
   "features": [
     "cranelift"
   ],
-  "publication": "published: argotorg/fe fevm-native-memory-integration; sbillig/sonatina fevm-native-enum-integration",
+  "publication": "local Fe branch integrate/fevm-development-20261001; supply --fe-repository with the local checkout or a bundle; Sonatina revision is published",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"
-  ]
+  ],
+  "integration": {
+    "fe_base_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
+    "fe_prs": [
+      1661,
+      1662,
+      1663,
+      1664,
+      1665,
+      1666,
+      1667,
+      1628,
+      1674
+    ],
+    "sonatina_merged_prs": [
+      356,
+      357,
+      358,
+      359,
+      366
+    ]
+  }
 }

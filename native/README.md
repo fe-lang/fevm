@@ -5,19 +5,15 @@ and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The last accepted [owned-buffer foundation](reports/owned-buffer-foundation.md) passes
-all seven stages on AArch64 macOS: workspace, CLI, 1,602 frames at each of
-O0/O1/O2, arithmetic and SwissTable. It also verifies memory-cost calculations
-and a reusable owned-buffer frame on the new compiler. VM memory integration
-remains the next step. The reference retains the precise DUP/SWAP correction
-from the [previous Cancun checkpoint](reports/cancun-frames.md).
-The [memory integration draft](reports/memory-integration-draft.md) adds the VM
-implementation and expanded frame contract; compiler borrow-analysis scaling
-currently prevents its native acceptance.
-The original six-stage baseline has also [passed on x86_64 Linux](reports/linux-baseline-2026-09-22/README.md);
-the expanded frame gate still needs its own Linux run.
-The [earlier accepted integration](reports/native-integration.md) records the
-previous six-stage suite and the aggregate-construction fix in Sonatina PR #321.
+The [owned-memory checkpoint](reports/memory-integration-draft.md) passes all seven
+stages on x86_64 Linux: 19 workspace tests, 13 CLI/allocator checks, and 1,729
+Cancun frames at each of O0/O1/O2, plus arithmetic and SwissTable matrices.
+The VM now uses growable owned memory, charges expansion before allocation,
+resets reusable frames, and reports host allocation failures separately.
+Transaction rollback and complete state-access gas accounting remain the next
+interpreter work. This compiler pin still needs an AArch64 macOS acceptance run.
+The earlier [owned-buffer foundation](reports/owned-buffer-foundation.md) retains
+the last macOS checkpoint and its separate compiler manifest.
 Historical reports retain their own compiler manifests.
 
 ## Hosts and prerequisites
@@ -28,17 +24,22 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The compiler revisions are published on `argotorg/fe:fevm-native-memory-integration`
-and `sbillig/sonatina:fevm-native-enum-integration`. FeVM acceptance sources
-are on the public `fe-lang/fevm:cancun-memory` branch. The bootstrap verifies
-exact commits; it does not substitute a branch tip or patch compiler sources.
-See [Cloud/Linux handoff](cloud-linux.md) for access requirements and exact inputs.
+The current Fe compiler is the local branch `integrate/fevm-development-20261001`,
+based on master with performance PRs #1661–#1667, pointer-analysis PR #1628,
+and LSP PR #1674. Master already includes shared guard graphs from PR #1638.
+The Sonatina pin is public main, including verifier PR #356 and aggregate
+initialization-sharing PR #357. Exact revisions and the Cargo lock hash are in
+`toolchain.json`.
+
+The Fe integration commit is not published. Supply the local Fe repository or
+a Git bundle containing it with `--fe-repository`; on this machine it is `../fe`.
+The bootstrap verifies exact commits and uses their committed sources.
+See [Cloud/Linux handoff](cloud-linux.md) for moving the local integration.
 
 ```sh
 python3 native/bootstrap.py --out native/out/toolchain \
   --toolchain 1.98.1 \
-  --fe-repository https://github.com/argotorg/fe.git \
-  --sonatina-repository https://github.com/sbillig/sonatina.git
+  --fe-repository ../fe
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
@@ -64,11 +65,11 @@ commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
 
-The [Cancun frame suite](differential/README.md) compares 1,602 deterministic
-frames against a pinned revm interpreter. It checks halt status, complete
-successful/reverted stacks and output, covering arithmetic operand roles, PUSH
-padding, jump destinations and stack boundaries. Gas accounting, memory
-accounting, external state and nested calls remain separate milestones.
+The [Cancun frame suite](differential/README.md) compares 1,729 deterministic
+frames against a pinned revm interpreter. It checks outcomes, remaining gas,
+output, and completed stacks and active memory, covering arithmetic operand
+roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
+External state, transaction pricing and nested calls remain separate milestones.
 
 The [SwissTable suite](swisstable/README.md) compares full-key hashing against
 the original table, checks dictionary behavior and native probe counts, and

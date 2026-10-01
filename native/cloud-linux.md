@@ -6,12 +6,13 @@ The [retained evidence](reports/linux-baseline-2026-09-22/README.md) includes
 exact compiler/source pins, complete acceptance records and stage logs. This
 covers the original six-stage baseline below, not the newer Cancun frame corpus.
 
-The next Linux run should use the public `fe-lang/fevm:cancun-memory` branch and
-the exact compiler revisions in its `native/toolchain.json`. The
-[owned-buffer foundation](reports/owned-buffer-foundation.md) records the current
-AArch64 acceptance and compiler identities. Record the selected FeVM commit
-before running; do not substitute the older pins in the historical table below.
-The new gate includes Cancun frame results and memory-cost workspace tests.
+The current [owned-memory checkpoint](reports/memory-integration-draft.md) also
+passes the expanded seven-stage suite on x86_64 Linux, including all 1,729 frames
+at O0/O1/O2. Its Fe integration branch is local and not available from a public
+fetch. Transfer the committed FeVM checkout and a Fe Git bundle containing the
+revision in `native/toolchain.json`, or use `native/handoff.py` after bootstrap.
+Pass that repository or bundle to `--fe-repository`. Sonatina's pin is published
+on `fe-lang/sonatina`. Record the selected FeVM commit before running.
 
 The earlier Linux baseline used these exact revisions:
 
@@ -53,8 +54,7 @@ uname -s -m
 git rev-parse HEAD
 python3 native/bootstrap.py --out native/out/linux-bootstrap \
   --toolchain 1.98.1 \
-  --fe-repository https://github.com/argotorg/fe.git \
-  --sonatina-repository https://github.com/sbillig/sonatina.git
+  --fe-repository /path/to/fe.bundle
 python3 native/accept.py --build native/out/linux-bootstrap/build.json \
   --out native/out/linux-acceptance --check-only
 ```
@@ -62,7 +62,8 @@ python3 native/accept.py --build native/out/linux-bootstrap/build.json \
 Retain `build.json`, `acceptance.json`, CLI/arithmetic/SwissTable result JSON, and
 workspace and failure logs. Record host, revisions, commands, exit codes and
 counts; report failed or unexecuted stages explicitly. The suite covers native
-workspace execution, CLI smoke, arithmetic and SwissTable, not Cancun conformance.
+workspace execution, CLI/allocator checks, bounded Cancun frames, arithmetic and
+SwissTable. Full Cancun conformance remains pending.
 Shared Cloud hardware is suitable for correctness acceptance, not timing claims.
 
 ## Retained local work

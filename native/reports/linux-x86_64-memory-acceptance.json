@@ -1,0 +1,785 @@
+{
+  "schema": 1,
+  "date": "2026-10-01",
+  "scope": "Linux owned-memory and stateless Cancun frame checkpoint; transaction state/rollback and full Cancun conformance pending",
+  "fevm_source_revision": "6cf6f742ff8d66f606518289bb8a44905310e3b0",
+  "toolchain": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "f6eed783cad9f437b5b1efb6b1fd59368d17ab55",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "f8a9fe5ab832b718dbef57309c88c4290dd66232",
+    "cargo_lock_sha256": "578f5acdd1e7468062812e8cace67c4bf1cf40b4c51118a234c1bc901108a00e",
+    "rust_version": "1.98.1",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "local Fe branch integrate/fevm-development-20261001; supply --fe-repository with the local checkout or a bundle; Sonatina revision is published",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ],
+    "integration": {
+      "fe_base_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
+      "fe_prs": [
+        1661,
+        1662,
+        1663,
+        1664,
+        1665,
+        1666,
+        1667,
+        1628,
+        1674
+      ],
+      "sonatina_merged_prs": [
+        356,
+        357,
+        358,
+        359,
+        366
+      ]
+    }
+  },
+  "integration_inputs": {
+    "fe_branch": "integrate/fevm-development-20261001",
+    "fe_base": "2cd823883c401634b32fcc1bea6b72492004ca24",
+    "fe_pr_heads": {
+      "1661": "b1672621ac57625ae2c471016182a85fe999154f",
+      "1662": "65376d07d4e6dd4a0299f0fc7f45e2c4e4b0b3f3",
+      "1663": "b722ea745614610804fe5867b8e6dad3fb28e09c",
+      "1664": "9c62578ac764cbef50995c50a50194883d536eae",
+      "1665": "ca2e8ba13acee91937dba4eaf46914c6ea1a1c5d",
+      "1666": "ba29aae4ac270c478f26efb6076e0491f16e9d35",
+      "1667": "250998e4eecdb7a4e013acbc52de847ee8a2c03d",
+      "1628": "ca33b6c62bfb020ee3f60ae291892274dc45a381",
+      "1674": "25174c908e1c41fbf3f5c53d9ede9a71a16d0164"
+    },
+    "sonatina_revision": "f8a9fe5ab832b718dbef57309c88c4290dd66232",
+    "sonatina_merged_prs": [
+      356,
+      357,
+      358,
+      359,
+      366
+    ],
+    "graph_integration": "PR1666 weak graph caches plus master scoped-condition handles; PR1667 terminal pruning",
+    "reviewed_snapshot_updates": [
+      "crates/fe/tests/differential_deposit/gas_report.snap",
+      "crates/fe/tests/native_reference_runtime_cost.snap"
+    ],
+    "target_directory": "/home/sean/code/fevm/native/out/development-20261001/compiler-target"
+  },
+  "compiler_source_audit": {
+    "tested_source_tree": "f041156e04139cf896f424918cea200ff830c476",
+    "post_build_changes": [
+      "crates/fe/tests/differential_deposit/gas_report.snap",
+      "crates/fe/tests/native_reference_runtime_cost.snap"
+    ],
+    "code_and_lock_unchanged": true,
+    "committed_revision": "f6eed783cad9f437b5b1efb6b1fd59368d17ab55",
+    "committed_tree": "9a203a3279a09a6478fecbe7a8021106b724272c"
+  },
+  "compiler_verification": {
+    "release_all_features_passed": 4415,
+    "skipped": 1,
+    "strict_clippy": true,
+    "nightly_fmt": true,
+    "log_sha256": "d5061eb95ecdf7fb4be1dd99113281b352382d46fdeb80d1d6dc2a4113c562a0"
+  },
+  "reference_verification": {
+    "release_tests_passed": 2,
+    "contract_tests_passed": 4,
+    "strict_clippy": true,
+    "nightly_fmt": true
+  },
+  "acceptance": {
+    "schema": 1,
+    "build": {
+      "manifest": {
+        "schema": 1,
+        "fe_repository": "https://github.com/argotorg/fe",
+        "fe_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
+        "fe_patch_sha256": "6879c952ea31d2c874581cd3e87af9cc86ae3cfaa4ac5d2ca27916d6c3a46fb0",
+        "sonatina_repository": "https://github.com/fe-lang/sonatina",
+        "sonatina_revision": "f8a9fe5ab832b718dbef57309c88c4290dd66232",
+        "cargo_lock_sha256": "578f5acdd1e7468062812e8cace67c4bf1cf40b4c51118a234c1bc901108a00e",
+        "rust_version": "1.98.1",
+        "features": [
+          "cranelift"
+        ],
+        "publication": "local development integration; not published",
+        "hosts": [
+          "aarch64-apple-darwin",
+          "x86_64-unknown-linux-gnu"
+        ],
+        "prs": {
+          "fe": [
+            1661,
+            1662,
+            1663,
+            1664,
+            1665,
+            1666,
+            1667,
+            1628,
+            1674
+          ],
+          "sonatina_merged": [
+            356,
+            357
+          ]
+        }
+      },
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "source_directory": "/home/sean/code/fe-worktrees/fevm-development-20261001",
+      "target_directory": "/home/sean/code/fe-worktrees/fevm-guard-graph-sharing/target",
+      "compiler": "/home/sean/code/fevm/native/out/development-20261001/bin/fe",
+      "compiler_sha256": "f532c5bde1e23da5e6f6b03a02141a621a88ba016d72d4f19b07b3fda145e40a",
+      "compiler_version": "fe 26.4.0 (2cd823883)",
+      "complete": true,
+      "source_status": "uncommitted integration; exact patch retained"
+    },
+    "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+    "complete": true,
+    "scope": "native workspace tests, CLI smoke, Cancun frame results, numeric kernels, and SwissTable; full Cancun conformance remains pending",
+    "checks": [
+      {
+        "name": "workspace-O0",
+        "status": 0,
+        "seconds": 163.87800646398682
+      },
+      {
+        "name": "workspace-O1",
+        "status": 0,
+        "seconds": 171.20830385902082
+      },
+      {
+        "name": "workspace-O2",
+        "status": 0,
+        "seconds": 172.64095969800837
+      },
+      {
+        "name": "cli-smoke",
+        "status": 0,
+        "seconds": 263.36844730898156
+      },
+      {
+        "name": "cancun-frames",
+        "status": 0,
+        "seconds": 410.49007525501656
+      },
+      {
+        "name": "swisstable-differential",
+        "status": 0,
+        "seconds": 37.622003413998755
+      },
+      {
+        "name": "arithmetic",
+        "status": 0,
+        "seconds": 33.8459587880061
+      }
+    ]
+  },
+  "workspace_tests_per_level": 19,
+  "cli": {
+    "schema": 1,
+    "scope": "native FeVM CLI smoke, not Cancun conformance",
+    "compiler_sha256": "f532c5bde1e23da5e6f6b03a02141a621a88ba016d72d4f19b07b3fda145e40a",
+    "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+    "complete": true,
+    "builds": [
+      {
+        "level": "0",
+        "build_seconds": 59.4933743730071,
+        "object_bytes": 6042664,
+        "text_bytes": 5966448,
+        "executable_bytes": 6035576,
+        "relink_seconds": 0.05213700598687865,
+        "executable_sha256": "447a9e108dcbcf957d17c30365de609de588ddfc2897a6a3da0e831a8fa56a55",
+        "checks": [
+          {
+            "name": "usage",
+            "passed": true,
+            "status": 2,
+            "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+            "stderr": ""
+          },
+          {
+            "name": "empty",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "stop",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "add",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+            "stderr": ""
+          },
+          {
+            "name": "calldata-return",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x1234\n",
+            "stderr": ""
+          },
+          {
+            "name": "bad-hex",
+            "passed": true,
+            "status": 3,
+            "stdout": "invalid hex bytecode\n",
+            "stderr": ""
+          },
+          {
+            "name": "odd-hex",
+            "passed": true,
+            "status": 4,
+            "stdout": "hex bytecode has an odd number of digits\n",
+            "stderr": ""
+          },
+          {
+            "name": "stack-underflow",
+            "passed": true,
+            "status": 10,
+            "stdout": "stack underflow\n",
+            "stderr": ""
+          },
+          {
+            "name": "invalid",
+            "passed": true,
+            "status": 17,
+            "stdout": "invalid opcode\n",
+            "stderr": ""
+          },
+          {
+            "name": "revert",
+            "passed": true,
+            "status": 19,
+            "stdout": "revert 0x\n",
+            "stderr": ""
+          },
+          {
+            "name": "owned-output",
+            "passed": true,
+            "status": 0,
+            "stdout_bytes": 131077,
+            "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+            "stderr": ""
+          },
+          {
+            "name": "memory-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          },
+          {
+            "name": "output-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          }
+        ]
+      },
+      {
+        "level": "1",
+        "build_seconds": 100.54676095800824,
+        "object_bytes": 4554496,
+        "text_bytes": 4494696,
+        "executable_bytes": 4557208,
+        "relink_seconds": 0.027125700988108292,
+        "executable_sha256": "817173d01d61aa1aba4088b4fa202bb18b007e1b0f4708f8941962e4c4555941",
+        "checks": [
+          {
+            "name": "usage",
+            "passed": true,
+            "status": 2,
+            "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+            "stderr": ""
+          },
+          {
+            "name": "empty",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "stop",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "add",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+            "stderr": ""
+          },
+          {
+            "name": "calldata-return",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x1234\n",
+            "stderr": ""
+          },
+          {
+            "name": "bad-hex",
+            "passed": true,
+            "status": 3,
+            "stdout": "invalid hex bytecode\n",
+            "stderr": ""
+          },
+          {
+            "name": "odd-hex",
+            "passed": true,
+            "status": 4,
+            "stdout": "hex bytecode has an odd number of digits\n",
+            "stderr": ""
+          },
+          {
+            "name": "stack-underflow",
+            "passed": true,
+            "status": 10,
+            "stdout": "stack underflow\n",
+            "stderr": ""
+          },
+          {
+            "name": "invalid",
+            "passed": true,
+            "status": 17,
+            "stdout": "invalid opcode\n",
+            "stderr": ""
+          },
+          {
+            "name": "revert",
+            "passed": true,
+            "status": 19,
+            "stdout": "revert 0x\n",
+            "stderr": ""
+          },
+          {
+            "name": "owned-output",
+            "passed": true,
+            "status": 0,
+            "stdout_bytes": 131077,
+            "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+            "stderr": ""
+          },
+          {
+            "name": "memory-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          },
+          {
+            "name": "output-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          }
+        ]
+      },
+      {
+        "level": "2",
+        "build_seconds": 98.3898423089995,
+        "object_bytes": 4554496,
+        "text_bytes": 4494696,
+        "executable_bytes": 4557208,
+        "relink_seconds": 0.056634499022038653,
+        "executable_sha256": "817173d01d61aa1aba4088b4fa202bb18b007e1b0f4708f8941962e4c4555941",
+        "checks": [
+          {
+            "name": "usage",
+            "passed": true,
+            "status": 2,
+            "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+            "stderr": ""
+          },
+          {
+            "name": "empty",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "stop",
+            "passed": true,
+            "status": 0,
+            "stdout": "empty\n",
+            "stderr": ""
+          },
+          {
+            "name": "add",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+            "stderr": ""
+          },
+          {
+            "name": "calldata-return",
+            "passed": true,
+            "status": 0,
+            "stdout": "0x1234\n",
+            "stderr": ""
+          },
+          {
+            "name": "bad-hex",
+            "passed": true,
+            "status": 3,
+            "stdout": "invalid hex bytecode\n",
+            "stderr": ""
+          },
+          {
+            "name": "odd-hex",
+            "passed": true,
+            "status": 4,
+            "stdout": "hex bytecode has an odd number of digits\n",
+            "stderr": ""
+          },
+          {
+            "name": "stack-underflow",
+            "passed": true,
+            "status": 10,
+            "stdout": "stack underflow\n",
+            "stderr": ""
+          },
+          {
+            "name": "invalid",
+            "passed": true,
+            "status": 17,
+            "stdout": "invalid opcode\n",
+            "stderr": ""
+          },
+          {
+            "name": "revert",
+            "passed": true,
+            "status": 19,
+            "stdout": "revert 0x\n",
+            "stderr": ""
+          },
+          {
+            "name": "owned-output",
+            "passed": true,
+            "status": 0,
+            "stdout_bytes": 131077,
+            "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+            "stderr": ""
+          },
+          {
+            "name": "memory-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          },
+          {
+            "name": "output-allocation-failure",
+            "passed": true,
+            "status": 21,
+            "stdout_bytes": 23,
+            "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+            "stderr": ""
+          }
+        ]
+      }
+    ]
+  },
+  "frames": {
+    "schema": 2,
+    "fork": "Cancun",
+    "scope": "outcome, remaining gas, output, completed stack/active memory; simultaneous-fault reasons retained separately; external state is not compared",
+    "complete": true,
+    "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+    "source_sha256": {
+      "fe.toml": "4eb6ddb8d74798a6ebc6c215dda5a542756d752ccd5f03eff6545ceb91376ddf",
+      "ingots/evm/fe.toml": "4c158700a6a1ef2ffc196d4bc7148ab024124a351bd8d6bb6d62058b922535e4",
+      "ingots/evm/src/cli.fe": "15278a8be62170b8887a64187c3cb8b54986637482be521f60c8aa5245dad1b3",
+      "ingots/evm/src/constants.fe": "1ae70d7d806c3358374929e5eeeda88470dae74463ed3f95dc6105e4d202ac27",
+      "ingots/evm/src/gas.fe": "c3e54b83e6c9a64cb228124d00dbca91b1d67e055b33371c678c929a140eb72a",
+      "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+      "ingots/evm/src/lib.fe": "9adf07424ba1571bfb623e1c642606e6326b9cd29b45a7142dc324bd90f8a7eb",
+      "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+      "ingots/evm/src/memory_runtime.fe": "4e741def40884ab3b60bd0cff03a3a56b778deae866aa77a26edb376439cf49c",
+      "ingots/evm/src/opcodes.fe": "124a92f167fb13ddb4bf8b1306e349e692849d21f12d755931e3cceb6d66a011",
+      "ingots/evm/src/state.fe": "99890f88dea488068e12333cd8a1a6abc8c3080b588b453361527ea49c43cd3b",
+      "ingots/evm/src/types.fe": "0930dbf50aad9107d58b821d62d51ccd686f4ebf2e34ac0714594db17bece424",
+      "ingots/evm/src/vm.fe": "ac27a30aa88dfd0300a7967001e3666c3971ee27ba967b74bc3f682fcaa3c7f2",
+      "ingots/swisstable/fe.toml": "78ff6caf42ab1e1b2678b2d29f4f0753e08f7670e50e4527e48702852b60418f",
+      "ingots/swisstable/src/lib.fe": "7cfc3472f9d69be3b4e97f6cf4ebe18341ee7b0b78df5101fd62115baa002f18",
+      "native/differential/contract.py": "cc56933161a9d431783cd81a088a33c79d16b419d3f5c42794327e10e506bafe",
+      "native/differential/corpus.py": "3f444f1df6b3c1ef9ad81806190a1c389dd7ab5c4e7ae255a2f5c2552b532c5d",
+      "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+      "native/differential/driver/src/lib.fe": "3ad5065af60b688b07d7e229124c52bcb83fac178b79baa09b43763875e0f05a",
+      "native/differential/reference/Cargo.lock": "373755bc0058d83bde5fca5cb8b72bd578a4654d83424d9e9c971383eb7cddc4",
+      "native/differential/reference/Cargo.toml": "274f3ee35d325ffe62993e5eeba6ac8553cb310a95dac7e69a52bcc6119c030e",
+      "native/differential/reference/src/main.rs": "668cfffcabd523e9a58cb059969c41d53b83bfc2827f0fbfca12572dc15b5715",
+      "native/differential/run.py": "edc5a59c26dd2fb89d265c49ef0454ac73a5c81d2cffc6af5313f57cb1ae62e6",
+      "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203"
+    },
+    "compiler_sha256": "f532c5bde1e23da5e6f6b03a02141a621a88ba016d72d4f19b07b3fda145e40a",
+    "compiler_version": "fe 26.4.0 (2cd823883)",
+    "revision": "97199f8e8e3c0014c588e2d6a84ae05a1b84877c",
+    "dirty": true,
+    "reference": {
+      "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+      "packages": [
+        {
+          "name": "revm-bytecode",
+          "version": "7.1.1",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        },
+        {
+          "name": "revm-context-interface",
+          "version": "13.1.0",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        },
+        {
+          "name": "revm-database-interface",
+          "version": "8.0.5",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        },
+        {
+          "name": "revm-interpreter",
+          "version": "31.1.0",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        },
+        {
+          "name": "revm-primitives",
+          "version": "21.0.2",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        },
+        {
+          "name": "revm-state",
+          "version": "8.1.1",
+          "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+        }
+      ],
+      "executable_sha256": "68ac3dfff6a42d745aa88db247f2e839a727bfec386c03d7eadea2f8d10afb95"
+    },
+    "levels": [
+      {
+        "level": "0",
+        "complete": true,
+        "passed": 1729,
+        "reason_differences": [
+          {
+            "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-1-15",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-0-11",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          }
+        ],
+        "build_seconds": 180.9437011590053,
+        "executable_sha256": "7e13a56753a8b3d9a96a557e7d62f78a6e9d51e97c3032a8e033e5c7ad0ad198"
+      },
+      {
+        "level": "1",
+        "complete": true,
+        "passed": 1729,
+        "reason_differences": [
+          {
+            "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-1-15",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-0-11",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          }
+        ],
+        "build_seconds": 106.21048082300695,
+        "executable_sha256": "5cf92f3ccd024ac4cc078094221f68e0f0d32d1aa5dd4e388ba5feb24e05bb37"
+      },
+      {
+        "level": "2",
+        "complete": true,
+        "passed": 1729,
+        "reason_differences": [
+          {
+            "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-1-15",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          },
+          {
+            "case": "returndata-simultaneous-0-0-11",
+            "reference": "return_data_oob",
+            "fevm": "out_of_gas"
+          }
+        ],
+        "build_seconds": 105.26502573801554,
+        "executable_sha256": "5cf92f3ccd024ac4cc078094221f68e0f0d32d1aa5dd4e388ba5feb24e05bb37"
+      }
+    ],
+    "frames_per_level": 1729,
+    "categories": {
+      "anchors": 9,
+      "arithmetic": 167,
+      "push": 593,
+      "jump": 704,
+      "stack": 121,
+      "frame": 8,
+      "memory": 96,
+      "gas": 31
+    },
+    "corpus_sha256": "ba52336131693c7cf85f4e60e09aa6d8092ff4f6e2d62f66a7e72344e87a7d90"
+  },
+  "swisstable": {
+    "builds": 12,
+    "checked_cases": 2004,
+    "results_sha256": "4b72c910df197d57eb35d1035214e25775ea67c4b77def1178a048a6450c7480"
+  },
+  "arithmetic": {
+    "builds": 48,
+    "checked_cases": 74676,
+    "results_sha256": "0a34f2b8c609837f28bb7899d500d59a80783c3fcb54e6931b11fb532aa9567e"
+  },
+  "raw_results": "/home/sean/code/fevm/native/out/development-20261001",
+  "timings": "Concurrent correctness runs, not performance measurements",
+  "macos_status": "not run on this compiler pin",
+  "committed_compiler_bootstrap": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "f6eed783cad9f437b5b1efb6b1fd59368d17ab55",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "f8a9fe5ab832b718dbef57309c88c4290dd66232",
+      "cargo_lock_sha256": "578f5acdd1e7468062812e8cace67c4bf1cf40b4c51118a234c1bc901108a00e",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local Fe branch integrate/fevm-development-20261001; supply --fe-repository with the local checkout or a bundle; Sonatina revision is published",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "integration": {
+        "fe_base_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
+        "fe_prs": [
+          1661,
+          1662,
+          1663,
+          1664,
+          1665,
+          1666,
+          1667,
+          1628,
+          1674
+        ],
+        "sonatina_merged_prs": [
+          356,
+          357,
+          358,
+          359,
+          366
+        ]
+      }
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "source_directory": "/home/sean/code/fevm/native/out/development-20261001/bootstrap/fe",
+    "sonatina_source_directory": "/home/sean/code/fevm/native/out/development-20261001/bootstrap/sonatina",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/home/sean/code/fevm/native/out/development-20261001/compiler-target",
+    "complete": true,
+    "compiler_build_seconds": 84.33169044801616,
+    "compiler": "/home/sean/code/fevm/native/out/development-20261001/bootstrap/bin/fe",
+    "compiler_sha256": "812ae2f35396a75bc62fbeff276cbe16c117d13cb72a6c99337700958fa4e781",
+    "compiler_version": "fe 26.4.0 (f6eed783c)"
+  },
+  "committed_compiler_fe_vm_build": {
+    "compiler_version": "fe 26.4.0 (f6eed783c)",
+    "compiler_sha256": "812ae2f35396a75bc62fbeff276cbe16c117d13cb72a6c99337700958fa4e781",
+    "checks": [
+      {
+        "name": "usage",
+        "passed": true
+      },
+      {
+        "name": "empty",
+        "passed": true
+      },
+      {
+        "name": "stop",
+        "passed": true
+      },
+      {
+        "name": "add",
+        "passed": true
+      },
+      {
+        "name": "calldata-return",
+        "passed": true
+      },
+      {
+        "name": "bad-hex",
+        "passed": true
+      },
+      {
+        "name": "odd-hex",
+        "passed": true
+      },
+      {
+        "name": "stack-underflow",
+        "passed": true
+      },
+      {
+        "name": "invalid",
+        "passed": true
+      },
+      {
+        "name": "revert",
+        "passed": true
+      }
+    ],
+    "executable_sha256": "817173d01d61aa1aba4088b4fa202bb18b007e1b0f4708f8941962e4c4555941",
+    "accepted_executable_sha256": "817173d01d61aa1aba4088b4fa202bb18b007e1b0f4708f8941962e4c4555941",
+    "byte_identical_to_accepted_O1": true,
+    "build_seconds": 57.42407846997958
+  }
+}
