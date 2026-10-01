@@ -84,6 +84,27 @@ def main():
             if not passed:
                 raise AssertionError(f'O{level} {name}: status={result.returncode}, '
                                      f'output_bytes={len(result.stdout)}, stderr={result.stderr!r}')
+        journal = folder / 'journal'
+        journal.mkdir()
+        journal_archive = journal / 'build.tar.gz'
+        log = command([compiler, 'build', ROOT, '--ingot', 'fevm_journal', '--backend', 'native',
+                       '-O', level, '--emit', 'ir,executable', '--out-dir', journal,
+                       '--report', '--report-out', journal_archive])
+        journal.joinpath('build.log').write_bytes(log)
+        artifacts(journal / 'fevm_journal', journal_archive, journal, object_name='fevm_journal.o')
+        controlled = journal / 'allocation-failure'
+        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1',
+                 ROOT / 'native/fixtures/vm_allocator.c', journal / 'fevm_journal.o',
+                 '-o', controlled])
+        result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
+        passed = result.returncode == 0 and not result.stdout and not result.stderr
+        row['checks'].append({'name': 'journal-allocation-failure', 'passed': passed,
+                              'status': result.returncode,
+                              'stdout': result.stdout.decode(errors='replace'),
+                              'stderr': result.stderr.decode(errors='replace')})
+        report.write_text(json.dumps(record, indent=2) + '\n')
+        if not passed:
+            raise AssertionError(f'O{level} journal allocation failure: {result!r}')
         print(f'CLI O{level}: {len(row["checks"])} passed', flush=True)
     record['complete'] = True
     report.write_text(json.dumps(record, indent=2) + '\n')

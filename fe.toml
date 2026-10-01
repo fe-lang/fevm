@@ -5,4 +5,5 @@ members = [
   { path = "ingots/evm", name = "fevm" },
   { path = "ingots/swisstable", name = "swisstable" },
   { path = "native/differential/driver", name = "fevm_frame" },
+  { path = "native/fixtures/journal", name = "fevm_journal" },
 ]

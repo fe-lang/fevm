@@ -5,16 +5,17 @@ and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The [owned-memory checkpoint](reports/memory-integration-draft.md) passes all seven
-stages on x86_64 Linux: 19 workspace tests, 13 CLI/allocator checks, and 1,729
-Cancun frames at each of O0/O1/O2, plus arithmetic and SwissTable matrices.
-The VM now uses growable owned memory, charges expansion before allocation,
-resets reusable frames, and reports host allocation failures separately.
-Transaction rollback and complete state-access gas accounting remain the next
-interpreter work. This compiler pin still needs an AArch64 macOS acceptance run.
-The earlier [owned-buffer foundation](reports/owned-buffer-foundation.md) retains
-the last macOS checkpoint and its separate compiler manifest.
-Historical reports retain their own compiler manifests.
+The [transaction-journal checkpoint](reports/transaction-journal.md) passes all
+seven stages on x86_64 Linux: 27 workspace tests, 14 CLI/allocator checks and
+1,729 Cancun frames at each of O0/O1/O2, plus arithmetic and SwissTable matrices.
+Frames now commit or revert through a transaction-owned journal; transient
+storage survives successful child frames and clears at transaction completion.
+Cancun state-access gas and refunds are the next interpreter work. This compiler
+pin still needs an AArch64 macOS acceptance run.
+
+The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
+[owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
+compiler manifests and historical platform evidence.
 
 ## Hosts and prerequisites
 
@@ -24,9 +25,11 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current Fe compiler is the local branch `integrate/fevm-development-20261001`,
+The current Fe compiler is the local branch `integrate/fevm-transactions-20261001`,
 based on master with performance PRs #1661–#1667, pointer-analysis PR #1628,
-and LSP PR #1674. Master already includes shared guard graphs from PR #1638.
+and LSP PR #1674. Transaction prerequisites add PRs #1681, #1683, #1685,
+#1686, #1687, #1689, and #1693 for input separation, call effects, and recursive
+buffer summaries. Master already includes shared guard graphs from PR #1638.
 The Sonatina pin is public main, including verifier PR #356 and aggregate
 initialization-sharing PR #357. Exact revisions and the Cargo lock hash are in
 `toolchain.json`.

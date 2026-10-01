@@ -13,7 +13,8 @@ use ingot::constants::{
     ERR_REVERT,
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
-    ERR_STATE_LIMIT,
+    ERR_CALL_DEPTH,
+    ERR_STATIC_WRITE,
     ERR_TODO_OPCODE,
     ERR_UNSUPPORTED_OPCODE,
     I256_MIN,
@@ -21,7 +22,7 @@ use ingot::constants::{
     STACK_LIMIT,
 }
 use ingot::opcodes::is_todo_opcode
-use ingot::state::WorldState
+use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program}
 
 pub struct Vm {
@@ -67,6 +68,7 @@ impl Vm {
                 || status == ERR_INVALID_JUMP
                 || status == ERR_INVALID_OPCODE
                 || status == ERR_RETURN_DATA_OOB
+                || status == ERR_STATIC_WRITE
                 || status == ERR_OUT_OF_GAS {
                 self.gas_remaining = 0
             }
@@ -575,39 +577,47 @@ impl Vm {
         self.pc = dest.downcast_unchecked()
     }
 
-    fn sload(mut self, _ call: CallEnv, _ state: WorldState) {
+    fn sload(mut self, _ call: CallEnv, _ state: Transaction) {
         let slot = self.pop()
         if self.ok() {
-            self.push(state.storage_load(call.address, slot))
+            self.push(state.storage_load(address: call.address, slot))
         }
     }
 
-    fn sstore(mut self, _ call: CallEnv, _ state: mut WorldState) {
+    fn sstore(mut self, _ call: CallEnv, _ state: mut Transaction) {
+        if state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return
+        }
         let slot = self.pop()
         let value = self.pop()
-        if self.ok() && !state.storage_store(call.address, slot, value) {
-            self.fault(ERR_STATE_LIMIT)
+        if self.ok() {
+            self.fault(state.storage_store(address: call.address, slot, value))
         }
     }
 
-    fn tload(mut self, _ call: CallEnv, _ state: WorldState) {
+    fn tload(mut self, _ call: CallEnv, _ state: Transaction) {
         let slot = self.pop()
         if self.ok() {
-            self.push(state.transient_load(call.address, slot))
+            self.push(state.transient_load(address: call.address, slot))
         }
     }
 
-    fn tstore(mut self, _ call: CallEnv, _ state: mut WorldState) {
+    fn tstore(mut self, _ call: CallEnv, _ state: mut Transaction) {
+        if state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return
+        }
         let slot = self.pop()
         let value = self.pop()
-        if self.ok() && !state.transient_store(call.address, slot, value) {
-            self.fault(ERR_STATE_LIMIT)
+        if self.ok() {
+            self.fault(state.transient_store(address: call.address, slot, value))
         }
     }
 
     // Fe currently rejects forwarding state and raw-buffer accesses together.
     // Keep their dispatch separate until https://github.com/argotorg/fe/issues/1651.
-    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ state: mut WorldState) -> bool {
+    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ state: mut Transaction) -> bool {
         if op == 0x31 {
             let address = self.pop()
             if self.ok() {
@@ -883,7 +893,7 @@ impl Vm {
         _ calldata: InputData,
         _ call: CallEnv,
         _ block: BlockEnv,
-        _ state: mut WorldState,
+        _ state: mut Transaction,
     ) {
         self.memory.clear()
         self.output.clear()
@@ -895,6 +905,13 @@ impl Vm {
         self.unsupported_opcode = 0
         self.gas_remaining = call.gas_limit
         self.gas_exact = true
+        let checkpoint = match state.checkpoint(is_static: call.is_static) {
+            Option::Some(checkpoint) => checkpoint,
+            Option::None => {
+                self.fault(ERR_CALL_DEPTH)
+                return
+            },
+        }
         while self.pc < program.len() && self.ok() && !self.halted {
             let op = program.byte_at(self.pc) as i32
             self.pc += 1
@@ -904,7 +921,7 @@ impl Vm {
                 self.gas_exact = false
             }
             if !self.charge(base_cost(op) as u128) {
-                return
+                break
             }
             if op == 0x00 {
                 self.halted = true
@@ -917,6 +934,11 @@ impl Vm {
             } else if !self.step_state(op, call, mut state) {
                 self.step(op, program, calldata, call, block)
             }
+        }
+        if self.status == OK {
+            state.commit(checkpoint)
+        } else {
+            state.revert(checkpoint)
         }
     }
     pub fn release(own self) {
@@ -948,7 +970,7 @@ pub fn execute_vm(
     _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
-    _ state: mut WorldState,
+    _ state: mut Transaction,
 ) -> Vm {
     let mut vm = Vm::new()
     vm.run(program, calldata, call, block, mut state)
@@ -960,7 +982,7 @@ pub fn execute(
     _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
-    _ state: mut WorldState,
+    _ state: mut Transaction,
 ) -> ExecutionResult {
     execute_vm(program, calldata, call, block, mut state).into_result()
 }

@@ -1,3 +1,4 @@
+use ingot::transaction::Transaction
 use ingot::constants::{ERR_OUT_OF_GAS, OK}
 use ingot::state::WorldState
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
@@ -13,7 +14,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         i += 1
     }
     let large = Program::new(bytes, len: i, status: OK)
-    let mut state = WorldState::empty()
+    let mut state = Transaction::new(WorldState::empty())
     let mut vm = Vm::new()
     vm.run(
         large,
@@ -70,6 +71,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         index += 1
     }
     result.release()
+    let _ = state.finish(commit: true)
 }
 
 #[test]
@@ -82,7 +84,7 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     bytes[3] = 0x80
     bytes[35] = 0x53
     let huge = Program::new(bytes, len: 36, status: OK)
-    let mut state = WorldState::empty()
+    let mut state = Transaction::new(WorldState::empty())
     let mut vm = Vm::new()
     vm.run(
         huge,
@@ -102,4 +104,5 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
     vm.release()
+    let _ = state.finish(commit: true)
 }

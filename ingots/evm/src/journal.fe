@@ -1,0 +1,63 @@
+use std::native::ByteBuffer
+
+// Fixed-width records in a growable owner. Undo only reads/truncates initialized
+// bytes and therefore cannot fail to allocate while unwinding a failed frame.
+const RECORD_SIZE: u64 = 97
+
+pub struct Change {
+    pub kind: u8,
+    pub address: u256,
+    pub slot: u256,
+    pub previous: u256,
+}
+
+pub struct Journal { bytes: ByteBuffer }
+
+impl Journal {
+    pub fn new() -> Self { Self { bytes: ByteBuffer::new() } }
+    pub fn len(self) -> u64 { self.bytes.len() }
+
+    fn write_word(mut self, offset: u64, value: u256) {
+        let mut i: u64 = 0
+        while i < 32 {
+            self.bytes.set_byte(index: offset + i, value: (value >> (i * 8) as u256).downcast_truncate())
+            i += 1
+        }
+    }
+
+    fn read_word(self, offset: u64) -> u256 {
+        let mut value: u256 = 0
+        let mut i: u64 = 0
+        while i < 32 {
+            value |= (self.bytes.byte_at(offset + i) as u256) << (i * 8) as u256
+            i += 1
+        }
+        value
+    }
+
+    pub fn append(mut self, _ change: Change) -> bool {
+        let offset = self.len()
+        // ByteBuffer bounds its extent to PTRDIFF_MAX, so this addition fits.
+        if !self.bytes.try_resize(offset + RECORD_SIZE) { return false }
+        self.bytes.set_byte(index: offset, value: change.kind)
+        self.write_word(offset: offset + 1, value: change.address)
+        self.write_word(offset: offset + 33, value: change.slot)
+        self.write_word(offset: offset + 65, value: change.previous)
+        true
+    }
+
+    pub fn pop(mut self) -> Change {
+        core::assert(self.len() >= RECORD_SIZE)
+        let offset = self.len() - RECORD_SIZE
+        let change = Change {
+            kind: self.bytes.byte_at(offset),
+            address: self.read_word(offset: offset + 1),
+            slot: self.read_word(offset: offset + 33),
+            previous: self.read_word(offset: offset + 65),
+        }
+        core::assert(self.bytes.try_resize(offset))
+        change
+    }
+
+    pub fn release(own self) { self.bytes.release() }
+}

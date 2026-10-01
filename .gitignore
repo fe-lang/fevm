@@ -7,3 +7,6 @@
 /native/out/
 /native/differential/reference/target/
 __pycache__/
+
+# Fe native build report staging
+/target/

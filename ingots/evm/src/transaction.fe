@@ -1,0 +1,147 @@
+use core::Option
+use swisstable::SwissTable
+use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
+use ingot::journal::{Change, Journal}
+use ingot::state::{StorageKey, WorldState}
+
+const BALANCE: u8 = 0
+const NONCE: u8 = 1
+const STORAGE: u8 = 2
+const TRANSIENT: u8 = 3
+pub const CALL_DEPTH_LIMIT: usize = 1024
+
+// A checkpoint must be closed once, in reverse opening order. Committing a
+// child retains its undo entries so a later parent revert still undoes it.
+pub struct Checkpoint { position: u64, depth: usize, was_static: bool }
+
+// The persistent database is unavailable to callers until finish consumes the
+// transaction. Every write during execution must therefore pass the journal.
+pub struct Transaction {
+    state: WorldState,
+    transient: SwissTable<StorageKey, u256>,
+    journal: Journal,
+    depth: usize,
+    is_static: bool,
+}
+
+impl Transaction {
+    pub fn new(_ state: own WorldState) -> Self {
+        Self {
+            state,
+            transient: SwissTable<StorageKey, u256>::empty(),
+            journal: Journal::new(),
+            depth: 0,
+            is_static: false,
+        }
+    }
+
+    pub fn is_static(self) -> bool { self.is_static }
+    pub fn depth(self) -> usize { self.depth }
+
+    pub fn checkpoint(mut self, is_static: bool) -> Option<Checkpoint> {
+        if self.depth == CALL_DEPTH_LIMIT { return Option::None }
+        self.depth += 1
+        let checkpoint = Checkpoint {
+            position: self.journal.len(), depth: self.depth, was_static: self.is_static,
+        }
+        self.is_static = self.is_static || is_static
+        Option::Some(checkpoint)
+    }
+
+    pub fn commit(mut self, _ checkpoint: own Checkpoint) {
+        core::assert(self.depth == checkpoint.depth)
+        self.depth -= 1
+        self.is_static = checkpoint.was_static
+    }
+
+    pub fn revert(mut self, _ checkpoint: own Checkpoint) {
+        core::assert(self.depth == checkpoint.depth)
+        self.undo_to(checkpoint.position)
+        self.depth -= 1
+        self.is_static = checkpoint.was_static
+    }
+
+    fn undo_to(mut self, _ position: u64) {
+        while self.journal.len() > position {
+            let change = self.journal.pop()
+            let restored = match change.kind {
+                BALANCE => self.state.set_balance(change.address, change.previous),
+                NONCE => self.state.set_nonce(change.address, change.previous),
+                STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
+                TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
+                _ => core::panic(),
+            }
+            // Reverse replay never increases a table beyond an earlier valid
+            // occupancy, including deletion followed by insertion at capacity.
+            core::assert(restored)
+        }
+    }
+
+    pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
+    pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
+    pub fn storage_load(self, address: u256, slot: u256) -> u256 {
+        self.state.storage_load(address, slot)
+    }
+    pub fn transient_load(self, address: u256, slot: u256) -> u256 {
+        self.transient.get(StorageKey { address, slot }).value
+    }
+    pub fn block_hash(self, _ number: u256) -> u256 { self.state.block_hash(number) }
+
+    fn write_transient(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let key = StorageKey { address, slot }
+        if value == 0 {
+            let _ = self.transient.remove(key)
+            return true
+        }
+        self.transient.insert(key, value)
+    }
+
+    fn write(mut self, kind: u8, address: u256, slot: u256, value: u256) -> i32 {
+        if self.is_static { return ERR_STATIC_WRITE }
+        let previous = match kind {
+            BALANCE => self.balance(address),
+            NONCE => self.nonce(address),
+            STORAGE => self.storage_load(address, slot),
+            TRANSIENT => self.transient_load(address, slot),
+            _ => core::panic(),
+        }
+        if previous == value { return OK }
+        if !self.journal.append(Change { kind, address, slot, previous }) {
+            return ERR_HOST_ALLOCATION
+        }
+        let written = match kind {
+            BALANCE => self.state.set_balance(address, value),
+            NONCE => self.state.set_nonce(address, value),
+            STORAGE => self.state.storage_store(address, slot, value),
+            TRANSIENT => self.write_transient(address, slot, value),
+            _ => core::panic(),
+        }
+        if !written {
+            let _ = self.journal.pop()
+            return ERR_STATE_LIMIT
+        }
+        OK
+    }
+
+    pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
+        self.write(kind: BALANCE, address, slot: 0, value)
+    }
+    pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
+        self.write(kind: NONCE, address, slot: 0, value)
+    }
+    pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
+        self.write(kind: STORAGE, address, slot, value)
+    }
+    pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
+        self.write(kind: TRANSIENT, address, slot, value)
+    }
+
+    // Commit/abort the transaction only after every frame has been closed.
+    // Transient storage is dropped at this boundary, never at a frame boundary.
+    pub fn finish(mut own self, commit: bool) -> WorldState {
+        core::assert(self.depth == 0)
+        if !commit { self.undo_to(0) }
+        self.journal.release()
+        self.state
+    }
+}

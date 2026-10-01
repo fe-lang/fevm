@@ -1,6 +1,7 @@
 pub use constants::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
 pub use state::{StorageKey, WorldState}
+pub use transaction::{Checkpoint, Transaction}
 pub use types::{
     BlockEnv,
     InputData,
@@ -37,8 +38,9 @@ fn evm_sload_sstore_roundtrip() {
         callvalue: 0,
         gasprice: 0,
         gas_limit: 1_000_000,
+        is_static: false,
     }
-    let mut state = WorldState::empty()
+    let mut state = Transaction::new(WorldState::empty())
     let result = execute(
         program,
         empty_bytes(),
@@ -49,9 +51,10 @@ fn evm_sload_sstore_roundtrip() {
 
     core::assert(result.status == OK)
     core::assert(result.stack_top == 0x2a)
-    core::assert(state.storage_load(0xaa, 3) == 0x2a)
+    core::assert(state.storage_load(address: 0xaa, slot: 3) == 0x2a)
     core::assert(!result.gas_exact)
     result.release()
+    let _ = state.finish(commit: true)
 }
 
 #[test]
@@ -75,11 +78,13 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
         callvalue: 0,
         gasprice: 0,
         gas_limit: 1_000_000,
+        is_static: false,
     }
-    let mut state = WorldState::empty()
-    core::assert(state.set_balance(0xaa, 100))
-    core::assert(state.set_balance(0xbb, 23))
-    core::assert(state.set_block_hash(7, 5))
+    let mut world = WorldState::empty()
+    core::assert(world.set_block_hash(7, 5))
+    let mut state = Transaction::new(world)
+    core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
+    core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
 
     let result = execute(
         program,
@@ -93,6 +98,7 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     core::assert(result.stack_top == 128)
     core::assert(!result.gas_exact)
     result.release()
+    let _ = state.finish(commit: true)
 }
 
 #[test]
@@ -115,8 +121,9 @@ fn evm_tload_tstore_roundtrip() {
         callvalue: 0,
         gasprice: 0,
         gas_limit: 1_000_000,
+        is_static: false,
     }
-    let mut state = WorldState::empty()
+    let mut state = Transaction::new(WorldState::empty())
     let result = execute(
         program,
         empty_bytes(),
@@ -127,9 +134,10 @@ fn evm_tload_tstore_roundtrip() {
 
     core::assert(result.status == OK)
     core::assert(result.stack_top == 9)
-    core::assert(state.transient_load(0xaa, 4) == 9)
+    core::assert(state.transient_load(address: 0xaa, slot: 4) == 9)
     core::assert(result.gas_exact && result.gas_remaining == 999791)
     result.release()
+    let _ = state.finish(commit: true)
 }
 
 #[test]
@@ -168,7 +176,7 @@ fn evm_interleaves_state_and_owned_memory() {
         len += 1
     }
     let program = Program::new(bytes, len, status: OK)
-    let mut state = WorldState::empty()
+    let mut state = Transaction::new(WorldState::empty())
     let result = execute(
         program,
         empty_bytes(),
@@ -183,7 +191,8 @@ fn evm_interleaves_state_and_owned_memory() {
     core::assert(
         result.output.byte_at(31) == 0x2a && result.output.byte_at(63) == 0x2a,
     )
-    core::assert(state.storage_load(0, 3) == 0x2a)
-    core::assert(state.transient_load(0, 4) == 0x2a)
+    core::assert(state.storage_load(address: 0, slot: 3) == 0x2a)
+    core::assert(state.transient_load(address: 0, slot: 4) == 0x2a)
     result.release()
+    let _ = state.finish(commit: true)
 }

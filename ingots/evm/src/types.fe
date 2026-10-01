@@ -51,6 +51,7 @@ pub struct CallEnv {
     pub callvalue: u256,
     pub gasprice: u256,
     pub gas_limit: u64,
+    pub is_static: bool,
 }
 
 pub struct BlockEnv {
@@ -80,7 +81,7 @@ pub fn empty_bytes() -> InputData {
 }
 
 pub fn default_call_env() -> CallEnv {
-    CallEnv { address: 0, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas_limit: 1_000_000 }
+    CallEnv { address: 0, caller: 0, origin: 0, callvalue: 0, gasprice: 0, gas_limit: 1_000_000, is_static: false }
 }
 
 pub fn default_block_env() -> BlockEnv {

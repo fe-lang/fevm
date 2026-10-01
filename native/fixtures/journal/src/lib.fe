@@ -1,0 +1,42 @@
+use core::Option
+use fevm::{Checkpoint, Transaction, WorldState, OK}
+use fevm::constants::ERR_HOST_ALLOCATION
+
+fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
+    match transaction.checkpoint(is_static: false) {
+        Option::Some(point) => point,
+        Option::None => core::panic(),
+    }
+}
+
+// Linked with vm_allocator.c and FAIL_AT=1. Growing the journal to 131,072
+// bytes fails once; its earlier undo records and logical extent must survive.
+pub fn main() -> i32 {
+    let mut world = WorldState::empty()
+    core::assert(world.storage_store(7, 3, 9000))
+    let mut transaction = Transaction::new(world)
+    let parent = checkpoint(mut transaction)
+    let mut value: u256 = 1
+    let mut status = OK
+    while value < 2048 && status == OK {
+        status = transaction.storage_store(address: 7, slot: 3, value)
+        if status == OK {
+            core::assert(transaction.storage_load(address: 7, slot: 3) == value)
+            value += 1
+        }
+    }
+    core::assert(status == ERR_HOST_ALLOCATION && value > 1 && value < 2048)
+    core::assert(transaction.storage_load(address: 7, slot: 3) == value - 1)
+    transaction.revert(parent)
+    core::assert(transaction.storage_load(address: 7, slot: 3) == 9000)
+    core::assert(transaction.depth() == 0)
+
+    // Existing capacity remains usable after failure and rollback. Neither
+    // replay nor this smaller write may attempt another large allocation.
+    let child = checkpoint(mut transaction)
+    core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
+    transaction.revert(child)
+    let world = transaction.finish(commit: true)
+    core::assert(world.storage_load(7, 3) == 9000)
+    0
+}
