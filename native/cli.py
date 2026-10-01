@@ -61,7 +61,30 @@ def main():
             report.write_text(json.dumps(record, indent=2) + '\n')
             if not passed:
                 raise AssertionError(f'O{level} {name}: {result!r}')
-        print(f'CLI O{level}: {len(CASES)} passed', flush=True)
+        # Use the same compiled VM object with a controlled host allocator.
+        # Returning 65,537 bytes requires separate 131,072-byte data buffers.
+        # The allocator also poisons fresh storage and checks exact releases.
+        for failure_at, name in [(0, 'owned-output'), (1, 'memory-allocation-failure'),
+                                 (2, 'output-allocation-failure')]:
+            controlled = folder / name
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+                     ROOT / 'native/fixtures/vm_allocator.c', folder / 'fevm.o',
+                     '-o', controlled])
+            result = subprocess.run([str(controlled), '620100015ff3'],
+                                    capture_output=True, timeout=60)
+            expected_status = 21 if failure_at else 0
+            expected_output = b'host allocation failed\n' if failure_at else b'0x' + b'00' * 65537 + b'\n'
+            passed = (result.returncode == expected_status and result.stdout == expected_output
+                      and not result.stderr)
+            row['checks'].append({'name': name, 'passed': passed, 'status': result.returncode,
+                                  'stdout_bytes': len(result.stdout),
+                                  'stdout_sha256': hashlib.sha256(result.stdout).hexdigest(),
+                                  'stderr': result.stderr.decode(errors='replace')})
+            report.write_text(json.dumps(record, indent=2) + '\n')
+            if not passed:
+                raise AssertionError(f'O{level} {name}: status={result.returncode}, '
+                                     f'output_bytes={len(result.stdout)}, stderr={result.stderr!r}')
+        print(f'CLI O{level}: {len(row["checks"])} passed', flush=True)
     record['complete'] = True
     report.write_text(json.dumps(record, indent=2) + '\n')
 
