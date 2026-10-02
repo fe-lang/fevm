@@ -20,8 +20,11 @@ overflow without changing successful instruction paths or gas charging.
 
 ## Running
 
-Use the pinned native compiler and a Rust toolchain capable of building the
-locked reference. Keep outputs outside temporary storage:
+Use the pinned native compiler and install the Rust version in
+`native/toolchain.json` with rustup. Both frame and state runners select that
+version explicitly; `--toolchain` selects another installed toolchain for a
+diagnostic run. `native/accept.py` forwards its bootstrap record's Rust version
+to both runners. Keep outputs outside temporary storage:
 
 ```sh
 python3 native/differential/run.py --fe native/out/toolchain/bin/fe \
@@ -29,11 +32,19 @@ python3 native/differential/run.py --fe native/out/toolchain/bin/fe \
 ```
 
 The default builds and runs O0/O1/O2. `--levels 0` selects a focused run. Each
-output directory must be fresh. The result record includes compiler/reference
-hashes, resolved reference package versions and Git sources, source hashes,
+output directory must be fresh. Both runners build the reference into
+`<out>/reference-target` with an explicit Cargo `--target-dir`, overriding
+`CARGO_TARGET_DIR` and `build.target-dir`. The result record includes
+compiler/reference hashes, selected Rust toolchain, Rust/Cargo versions,
+reference target directory, resolved reference package versions and Git sources, source hashes,
 optimization levels and the first failure; generated
 `cases.jsonl` retains every input and expected frame. Sources must remain unchanged
 throughout a run. Compiler reports, IR, binaries and build logs are retained.
+
+Run the harness regressions with
+`python3 -m unittest discover -s native/differential -p 'test_*.py'`. They build
+a small dependency-free Rust fixture using the pinned toolchain and retain
+their temporary artifacts under `/tmp`.
 
 The Fe driver now requires `<hex-bytecode> <hex-calldata> <u64-gas-limit>` and emits
 one JSON object. This replaces the previous wire format:
