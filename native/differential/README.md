@@ -13,8 +13,8 @@ Current checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 reason differences per level match the agreed contract below. See the
 [state-gas acceptance report](../reports/state-gas.md).
 
-The previous [AArch64 macOS checkpoint](../reports/cancun-frames.md) covered 1,602
-frames with its own compiler pin. The new compiler/corpus still needs a macOS run.
+The historical [macOS and Linux checkpoints](../reports/cancun-frames.md) covered
+1,602 frames at their explicitly recorded revisions with a separate compiler pin. The new compiler/corpus still needs a macOS run.
 The pinned reference correction distinguishes DUP/SWAP underflow from genuine
 overflow without changing successful instruction paths or gas charging.
 
