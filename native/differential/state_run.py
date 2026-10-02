@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from run import HERE, ROOT, command, digest, source_files
+from run import HERE, ROOT, build_reference, command, digest, source_files
 from state_contract import assert_anchors, compare, validate
 from state_corpus import cases, encode, payload
 
@@ -18,6 +18,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fe', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--toolchain', default=json.loads((ROOT / 'native/toolchain.json').read_text())['rust_version'],
+                        help='installed rustup toolchain for the reference (default: pinned Rust version)')
     parser.add_argument('--levels', nargs='+', choices=['0', '1', '2'], default=['0', '1', '2'])
     args = parser.parse_args()
     out = args.out.resolve()
@@ -45,16 +47,8 @@ def main():
     try:
         command([sys.executable, '-m', 'unittest', 'discover', '-s', HERE, '-p', 'test_*.py'],
                 out / 'contract-tests.log')
-        command(['cargo', 'build', '--release', '--locked', '--manifest-path', HERE / 'reference/Cargo.toml'],
-                out / 'reference-build.log')
-        metadata = json.loads(subprocess.check_output(
-            ['cargo', 'metadata', '--locked', '--format-version', '1', '--manifest-path', HERE / 'reference/Cargo.toml'], text=True))
-        (out / 'reference-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
-        report['reference']['packages'] = [
-            {key: package[key] for key in ['name', 'version', 'source']}
-            for package in metadata['packages'] if package['name'].startswith('revm-')]
-        reference = HERE / 'reference/target/release/fevm-reference'
-        report['reference']['executable_sha256'] = digest(reference)
+        reference, reference_record = build_reference(out, args.toolchain)
+        report['reference'] |= reference_record
         corpus = cases()
         data = command([reference, '--state'], out / 'reference.jsonl',
                        input=''.join(json.dumps(payload(row)) + '\n' for row in corpus).encode(), timeout=60)
