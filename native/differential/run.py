@@ -4,6 +4,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -34,9 +35,33 @@ def command(args, log, *, input=None, timeout=1800):
     return log.read_bytes()
 
 
+def build_reference(out, toolchain):
+    target = out / 'reference-target'
+    reference = target / 'release/fevm-reference'
+    rustup = ['rustup', 'run', toolchain]
+    cargo = [*rustup, 'cargo']
+    record = {
+        'toolchain': toolchain, 'target_directory': str(target),
+        'rustc': subprocess.check_output([*rustup, 'rustc', '--version'], text=True).strip(),
+        'cargo': subprocess.check_output([*cargo, '--version'], text=True).strip()}
+    command([*cargo, 'build', '--release', '--locked', '--target-dir', target,
+             '--manifest-path', HERE / 'reference/Cargo.toml'], out / 'reference-build.log')
+    metadata = json.loads(subprocess.check_output(
+        [*cargo, 'metadata', '--locked', '--format-version', '1',
+         '--manifest-path', HERE / 'reference/Cargo.toml'], text=True,
+        env=os.environ | {'CARGO_TARGET_DIR': str(target)}))
+    (out / 'reference-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    record['packages'] = [
+        {key: package[key] for key in ['name', 'version', 'source']}
+        for package in metadata['packages'] if package['name'].startswith('revm-')]
+    record['executable_sha256'] = digest(reference)
+    return reference, record
+
+
 def source_files():
     return sorted([*ROOT.glob('ingots/**/*.fe'), *ROOT.glob('ingots/**/fe.toml'), ROOT / 'fe.toml',
-                   *HERE.glob('*.py'), *HERE.glob('*driver/**/*.fe'), *HERE.glob('*driver/fe.toml'),
+                   ROOT / 'native/toolchain.json', *HERE.glob('*.py'),
+                   *HERE.glob('*driver/**/*.fe'), *HERE.glob('*driver/fe.toml'),
                    HERE / 'reference/Cargo.toml', HERE / 'reference/Cargo.lock',
                    *HERE.glob('reference/src/**/*.rs')])
 
@@ -45,6 +70,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fe', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--toolchain', default=json.loads((ROOT / 'native/toolchain.json').read_text())['rust_version'],
+                        help='installed rustup toolchain for the reference (default: pinned Rust version)')
     parser.add_argument('--levels', nargs='+', choices=['0', '1', '2'], default=['0', '1', '2'])
     args = parser.parse_args()
     out = args.out.resolve()
@@ -52,7 +79,6 @@ def main():
     compiler = args.fe.resolve()
     sources = source_files()
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
-    reference = HERE / 'reference/target/release/fevm-reference'
     report = {'schema': 2, 'fork': 'Cancun', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '
               'simultaneous-fault reasons retained separately; external state is not compared', 'complete': False,
               'host': platform.platform(), 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
@@ -70,16 +96,8 @@ def main():
     try:
         command([sys.executable, '-m', 'unittest', 'discover', '-s', HERE, '-p', 'test_*.py'],
                 out / 'contract-tests.log')
-        command(['cargo', 'build', '--release', '--locked', '--manifest-path', HERE / 'reference/Cargo.toml'],
-                out / 'reference-build.log')
-        metadata = json.loads(subprocess.check_output(
-            ['cargo', 'metadata', '--locked', '--format-version', '1',
-             '--manifest-path', HERE / 'reference/Cargo.toml'], text=True))
-        (out / 'reference-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
-        report['reference']['packages'] = [
-            {'name': package['name'], 'version': package['version'], 'source': package['source']}
-            for package in metadata['packages'] if package['name'].startswith('revm-')]
-        report['reference']['executable_sha256'] = digest(reference)
+        reference, reference_record = build_reference(out, args.toolchain)
+        report['reference'] |= reference_record
         corpus = cases()
         payload = ''.join(json.dumps({key: row[key] for key in ['code', 'calldata', 'gas_limit']}) + '\n' for row in corpus)
         data = command([reference], out / 'reference.jsonl', input=payload.encode(), timeout=60)

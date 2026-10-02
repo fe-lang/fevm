@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "09aed1e8817d0be5a9340dc7d6ad3fd7fec43f50",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "736c2be7fc7ae2258bb781213e2e6eae1903b6c0",
+      "cargo_lock_sha256": "163272f88aec018c3ea116b5269ae052f6f4c7564889995315c5e25413e21413",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local Fe branch integrate/fevm-transactions-20261001; supply --fe-repository with the local checkout or a bundle; Sonatina revision is published",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "integration": {
+        "fe_base_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
+        "fe_prs": [
+          1661,
+          1662,
+          1663,
+          1664,
+          1665,
+          1666,
+          1667,
+          1628,
+          1674,
+          1681,
+          1683,
+          1685,
+          1686,
+          1687,
+          1689,
+          1693,
+          1694
+        ],
+        "sonatina_merged_prs": [
+          356,
+          357,
+          358,
+          359,
+          366
+        ],
+        "sonatina_prs": [
+          368,
+          369,
+          370
+        ],
+        "sonatina_stack": 371
+      }
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "source_directory": "/home/sean/code/fevm/native/out/state-gas-20261001/final-bootstrap/fe",
+    "sonatina_source_directory": "/home/sean/code/fevm/native/out/state-gas-20261001/final-bootstrap/sonatina",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/home/sean/code/fevm/native/out/development-20261001/compiler-target",
+    "complete": true,
+    "compiler_build_seconds": 85.90611210101633,
+    "compiler": "/home/sean/code/fevm/native/out/state-gas-20261001/final-bootstrap/bin/fe",
+    "compiler_sha256": "0ec4f47e973f9a8af5ed452427ba77a0c5f3c44b5d02c50f0cb730b2c50d4b5a",
+    "compiler_version": "fe 26.4.0 (09aed1e88)"
+  },
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "complete": true,
+  "scope": "native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels, and SwissTable; full Cancun conformance remains pending",
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 374.0639065939977
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 394.72841584699927
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 448.4723016659991
+    },
+    {
+      "name": "cli-smoke",
+      "status": 0,
+      "seconds": 848.0398442050027
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 611.0966463929981
+    },
+    {
+      "name": "cancun-state",
+      "status": 0,
+      "seconds": 1128.672696177
+    },
+    {
+      "name": "swisstable-differential",
+      "status": 0,
+      "seconds": 30.285618057001557
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 20.010836686000403
+    }
+  ]
+}
