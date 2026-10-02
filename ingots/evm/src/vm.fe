@@ -2,6 +2,7 @@ use core::Option
 use std::native::ByteBuffer
 use ingot::memory::{MemoryExpansion, memory_expansion, copy_expansion, copy_gas}
 use ingot::gas::base_cost
+use ingot::state::address_word
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{
@@ -29,7 +30,7 @@ pub struct Vm {
     pub memory: ByteBuffer,
     pub output: ByteBuffer,
     pub gas_remaining: u64,
-    pub gas_exact: bool,
+    pub refund_delta: i128,
     pub output_valid: bool,
     pub stack: [u256; STACK_LIMIT],
     pub sp: usize,
@@ -45,7 +46,7 @@ impl Vm {
             memory: ByteBuffer::new(),
             output: ByteBuffer::new(),
             gas_remaining: 0,
-            gas_exact: true,
+            refund_delta: 0,
             output_valid: false,
             stack: [0; STACK_LIMIT],
             sp: 0,
@@ -577,10 +578,14 @@ impl Vm {
         self.pc = dest.downcast_unchecked()
     }
 
-    fn sload(mut self, _ call: CallEnv, _ state: Transaction) {
+    fn sload(mut self, _ call: CallEnv, _ state: mut Transaction) {
         let slot = self.pop()
         if self.ok() {
-            self.push(state.storage_load(address: call.address, slot))
+            let gas: u128 = if state.storage_is_warm(address: call.address, slot) { 100 } else { 2100 }
+            if self.charge(gas) {
+                self.fault(state.warm_slot(address: call.address, slot))
+                if self.ok() { self.push(state.storage_load(address: call.address, slot)) }
+            }
         }
     }
 
@@ -592,7 +597,15 @@ impl Vm {
         let slot = self.pop()
         let value = self.pop()
         if self.ok() {
-            self.fault(state.storage_store(address: call.address, slot, value))
+            if self.gas_remaining <= 2300 {
+                self.fault(ERR_OUT_OF_GAS)
+                return
+            }
+            let charge = state.storage_charge(address: call.address, slot, value)
+            if self.charge(charge.gas as u128) {
+                self.fault(state.warm_slot(address: call.address, slot))
+                if self.ok() { self.fault(state.storage_store(address: call.address, slot, value)) }
+            }
         }
     }
 
@@ -619,9 +632,13 @@ impl Vm {
     // Keep their dispatch separate until https://github.com/argotorg/fe/issues/1651.
     fn step_state(mut self, _ op: i32, _ call: CallEnv, _ state: mut Transaction) -> bool {
         if op == 0x31 {
-            let address = self.pop()
+            let address = address_word(self.pop())
             if self.ok() {
-                self.push(state.balance(address))
+                let gas: u128 = if state.account_is_warm(address) { 100 } else { 2600 }
+                if self.charge(gas) {
+                    self.fault(state.warm_account(address))
+                    if self.ok() { self.push(state.balance(address)) }
+                }
             }
             return true
         }
@@ -640,7 +657,7 @@ impl Vm {
         }
 
         if op == 0x54 {
-            self.sload(call, state)
+            self.sload(call, mut state)
             return true
         }
 
@@ -904,7 +921,8 @@ impl Vm {
         self.halted = false
         self.unsupported_opcode = 0
         self.gas_remaining = call.gas_limit
-        self.gas_exact = true
+        self.refund_delta = 0
+        let refund_before = state.refund()
         let checkpoint = match state.checkpoint(is_static: call.is_static) {
             Option::Some(checkpoint) => checkpoint,
             Option::None => {
@@ -915,11 +933,6 @@ impl Vm {
         while self.pc < program.len() && self.ok() && !self.halted {
             let op = program.byte_at(self.pc) as i32
             self.pc += 1
-            // Dynamic transaction pricing for these prototype state operations
-            // is not implemented. Expose that boundary to callers and the corpus.
-            if op == 0x31 || op == 0x54 || op == 0x55 {
-                self.gas_exact = false
-            }
             if !self.charge(base_cost(op) as u128) {
                 break
             }
@@ -937,6 +950,7 @@ impl Vm {
         }
         if self.status == OK {
             state.commit(checkpoint)
+            self.refund_delta = state.refund() - refund_before
         } else {
             state.revert(checkpoint)
         }
@@ -960,7 +974,7 @@ impl Vm {
             stack_len: self.sp,
             unsupported_opcode: self.unsupported_opcode,
             gas_remaining: self.gas_remaining,
-            gas_exact: self.gas_exact,
+            refund_delta: self.refund_delta,
         }
     }
 }

@@ -5,13 +5,12 @@ and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
-The [transaction-journal checkpoint](reports/transaction-journal.md) passes all
-seven stages on x86_64 Linux: 27 workspace tests, 14 CLI/allocator checks and
-1,729 Cancun frames at each of O0/O1/O2, plus arithmetic and SwissTable matrices.
-Frames now commit or revert through a transaction-owned journal; transient
-storage survives successful child frames and clears at transaction completion.
-Cancun state-access gas and refunds are the next interpreter work. This compiler
-pin still needs an AArch64 macOS acceptance run.
+The [state-gas checkpoint](reports/state-gas.md) passes all eight stages on
+x86_64 Linux: 37 workspace tests, 14 CLI/allocator checks, 1,729 Cancun frames
+and 349 stateful sequences at each of O0/O1/O2, plus arithmetic and SwissTable
+matrices. It adds Cancun warm/cold access, original storage and signed refunds
+to the accepted [transaction journal](reports/transaction-journal.md).
+This compiler pin and state-gas source still need an AArch64 macOS acceptance run.
 
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
@@ -29,10 +28,12 @@ The current Fe compiler is the local branch `integrate/fevm-transactions-2026100
 based on master with performance PRs #1661–#1667, pointer-analysis PR #1628,
 and LSP PR #1674. Transaction prerequisites add PRs #1681, #1683, #1685,
 #1686, #1687, #1689, and #1693 for input separation, call effects, and recursive
-buffer summaries. Master already includes shared guard graphs from PR #1638.
-The Sonatina pin is public main, including verifier PR #356 and aggregate
-initialization-sharing PR #357. Exact revisions and the Cargo lock hash are in
-`toolchain.json`.
+buffer summaries. State-driver builds also include PR #1694 for runtime String
+`AsBytes` conversion. Master already includes shared guard graphs from PR #1638.
+The published Sonatina pin includes merged verifier PR #356 and aggregate
+initialization-sharing PR #357, plus PRs #368–#370 in stack #371 for reference
+retirement and indexed view writes. Exact revisions and the Cargo lock hash are
+in `toolchain.json`.
 
 The Fe integration commit is not published. Supply the local Fe repository or
 a Git bundle containing it with `--fe-repository`; on this machine it is `../fe`.
@@ -60,7 +61,9 @@ Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
 The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the Cancun/SwissTable/arithmetic differential corpora at O0/O1/O2.
+CLI smoke cases, and the Cancun frame/state, SwissTable and arithmetic corpora
+at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
+against revm's real journal.
 It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
 execution, calldata return, and exit status; they retain build/link times and
 artifact sizes. An incomplete or failing suite exits nonzero. Run the same
@@ -72,7 +75,9 @@ The [Cancun frame suite](differential/README.md) compares 1,729 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-External state, transaction pricing and nested calls remain separate milestones.
+The additional 349-case state suite checks current/original/transient storage,
+account/slot warmness, signed refunds and nested checkpoints. Signed transaction
+envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 
 The [SwissTable suite](swisstable/README.md) compares full-key hashing against
 the original table, checks dictionary behavior and native probe counts, and

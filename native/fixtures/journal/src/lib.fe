@@ -14,7 +14,7 @@ fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
 pub fn main() -> i32 {
     let mut world = WorldState::empty()
     core::assert(world.storage_store(7, 3, 9000))
-    let mut transaction = Transaction::new(world)
+    let mut transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut transaction)
     let mut value: u256 = 1
     let mut status = OK
@@ -36,7 +36,7 @@ pub fn main() -> i32 {
     let child = checkpoint(mut transaction)
     core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
     transaction.revert(child)
-    let world = transaction.finish(commit: true)
+    let world = transaction.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 3) == 9000)
     0
 }

@@ -11,7 +11,7 @@ Specification-derived anchors also check the reference independently.
 Current checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
 reason differences per level match the agreed contract below. See the
-[owned-memory report](../reports/memory-integration-draft.md).
+[state-gas acceptance report](../reports/state-gas.md).
 
 The previous [AArch64 macOS checkpoint](../reports/cancun-frames.md) covered 1,602
 frames with its own compiler pin. The new compiler/corpus still needs a macOS run.
@@ -56,8 +56,8 @@ independent DUP/SWAP anchors, remain checked. A bounds-plus-gas RETURNDATACOPY c
 can therefore report bounds in revm and gas exhaustion in FeVM while agreeing on
 the exceptional result and complete gas consumption.
 
-Process errors, malformed JSON, unsupported instructions, inexact transaction-gas
-accounting and host allocation failures fail the harness. They are not normalized
+Process errors, malformed JSON, unsupported instructions and host allocation
+failures fail the harness. They are not normalized
 into EVM halt codes.
 Each FeVM frame runs in its own process; arithmetic operations are batched within
 bounded EVM programs, preserving every arithmetic result on the stack.
@@ -66,11 +66,10 @@ bounded EVM programs, preserving every arithmetic result on the stack.
 
 The expanded slice adds gas and active-memory accounting for implemented stateless
 frame instructions. Each case supplies its gas limit; the usual budget is
-1,000,000. Inputs remain bounded to 4,096 bytes by the parser. Existing state
-operations remain prototype functionality; BALANCE/SLOAD/SSTORE mark gas as
-inexact because warm/cold access and original-storage/refund pricing are absent.
-The corpus excludes external state and nested calls. It does not establish full
-Cancun conformance, rollback, resident allocation reclamation or performance.
+1,000,000. Inputs remain bounded to 4,096 bytes by the parser. The stateless corpus excludes external state and nested calls. The additional
+stateful corpus below covers implemented state access, refunds and checkpoint
+rollback. Neither corpus establishes full Cancun conformance, CALL/CREATE
+execution, resident allocation reclamation or performance.
 
 The specification pin is
 [`c335bc4e9e99f7b91024d9033bdc89ce54394848`](https://github.com/ethereum/execution-specs/tree/c335bc4e9e99f7b91024d9033bdc89ce54394848).
@@ -83,3 +82,42 @@ jump analysis follows
 These are local, specification-derived cases, not the Ethereum execution-spec
 test distribution. The reference crate was released from revm commit
 [`0d424ba11fd59d2a2a13988d61381e5b5cfccd22`](https://github.com/bluealloy/revm/tree/0d424ba11fd59d2a2a13988d61381e5b5cfccd22).
+
+
+## Stateful transaction sequences
+
+```sh
+python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
+  --out native/out/cancun-state
+```
+
+The stateful corpus has 349 deterministic cases. Its reference uses the pinned
+revm Context and real Journal over InMemoryDB. Both engines run the same recursive
+sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
+scope compare balances, persistent/current/original storage, transient storage,
+account/slot warmness, signed refund deltas and cumulative refunds. Transaction
+results also compare committed state, capped refunds and net gas used. Repeated
+transactions share persistent state but start fresh transient/access/refund state.
+The reference observes its journal directly so inspection does not warm a key.
+
+Cases include the EIP-2200 storage sequences adjusted to Cancun, cold/warm gas
+boundaries, upfront sender/destination/coinbase/precompile warming, duplicate
+access lists, high-bit BALANCE aliases, negative frame refund contributions,
+static writes, child commit/revert, parent rollback, and transaction abort/reuse.
+The Python contract checks field shapes and accounting invariants; independent
+anchors check the reference's gas, refund and value results. Operational failures
+fail the comparison. Unlike the stateless simultaneous-fault controls, these
+state cases require exact diagnostic reasons as well as exact results.
+
+The native state driver takes one versioned binary case encoded as hex. Integers
+and lengths use big endian; the encoder lives in `state_corpus.py`. Its current
+4,096-byte input limit is a harness limit. JSON lines remain the reference input
+and retained corpus format. Each case starts a fresh native process, while all
+frames and transactions in that case execute in that process. The scope models
+journal boundaries directly; it does not implement CALL/CREATE, transaction
+signatures, intrinsic gas or access-list intrinsic charges.
+
+All 349 stateful cases pass at O0/O1/O2 on x86_64 Linux with the
+[state-gas compiler pin](../reports/state-gas-toolchain.json). AArch64 macOS
+acceptance remains pending. The full native acceptance command includes this
+corpus as its own stage.

@@ -1,6 +1,9 @@
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 
+// EVM account operands use only their low 160 bits.
+pub fn address_word(_ word: u256) -> u256 { word & 0xffffffffffffffffffffffffffffffffffffffff }
+
 pub struct StorageKey { pub address: u256, pub slot: u256 }
 
 impl Copy for StorageKey {}
@@ -38,9 +41,11 @@ impl WorldState {
         }
     }
     pub fn balance(self, _ address: u256) -> u256 {
+        let address = address_word(address)
         self.balances.get(address).value
     }
     pub fn set_balance(mut self, _ address: u256, _ value: u256) -> bool {
+        let address = address_word(address)
         if value == 0 {
             let _ = self.balances.remove(address)
             return true
@@ -48,9 +53,11 @@ impl WorldState {
         self.balances.insert(address, value)
     }
     pub fn nonce(self, _ address: u256) -> u256 {
+        let address = address_word(address)
         self.nonces.get(address).value
     }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
+        let address = address_word(address)
         if value == 0 {
             let _ = self.nonces.remove(address)
             return true
@@ -58,9 +65,11 @@ impl WorldState {
         self.nonces.insert(address, value)
     }
     pub fn storage_load(self, _ address: u256, _ slot: u256) -> u256 {
+        let address = address_word(address)
         self.storage.get(StorageKey { address: address, slot: slot }).value
     }
     pub fn storage_store(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let address = address_word(address)
         let key = StorageKey { address: address, slot: slot }
         if value == 0 {
             let _ = self.storage.remove(key)

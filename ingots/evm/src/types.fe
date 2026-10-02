@@ -54,6 +54,8 @@ pub struct CallEnv {
     pub is_static: bool,
 }
 
+impl Copy for CallEnv {}
+
 pub struct BlockEnv {
     pub coinbase: u256,
     pub timestamp: u256,
@@ -69,7 +71,7 @@ pub struct ExecutionResult {
     pub status: i32,
     pub output: ByteBuffer,
     pub gas_remaining: u64,
-    pub gas_exact: bool,
+    pub refund_delta: i128,
     pub output_valid: bool,
     pub stack_top: u256,
     pub stack_len: usize,

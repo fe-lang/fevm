@@ -5,7 +5,7 @@ use ingot::transaction::{CALL_DEPTH_LIMIT, Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute}
 
-fn program<const N: usize>(_ ops: [u8; N]) -> Program {
+pub fn program<const N: usize>(_ ops: [u8; N]) -> Program {
     let mut bytes: [u8; 4096] = [0; 4096]
     let mut i: usize = 0
     for op in ops {
@@ -15,7 +15,7 @@ fn program<const N: usize>(_ ops: [u8; N]) -> Program {
     Program::new(bytes, len: N, status: OK)
 }
 
-fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint {
+pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint {
     match transaction.checkpoint(is_static) {
         Option::Some(point) => point,
         Option::None => core::panic(),
@@ -28,7 +28,7 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(world.set_balance(7, 10))
     core::assert(world.set_nonce(7, 2))
     core::assert(world.storage_store(7, 8, 11))
-    let mut tx = Transaction::new(world)
+    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     core::assert(tx.set_balance(address: 7, value: 30) == OK)
     core::assert(tx.set_nonce(address: 7, value: 3) == OK)
@@ -44,13 +44,13 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(tx.balance(7) == 10 && tx.nonce(7) == 2)
     core::assert(tx.storage_load(address: 7, slot: 8) == 11)
     core::assert(tx.transient_load(address: 7, slot: 8) == 0)
-    let world = tx.finish(commit: true)
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 8) == 11)
 }
 
 #[test]
 fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
     core::assert(tx.transient_store(address: 1, slot: 2, value: 4) == OK)
@@ -61,13 +61,13 @@ fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
     core::assert(tx.storage_load(address: 1, slot: 2) == 3)
     core::assert(tx.transient_load(address: 1, slot: 2) == 4)
     tx.commit(parent)
-    let world = tx.finish(commit: false)
+    let world = tx.finish(commit: false, gas_spent: 0).state
     core::assert(world.storage_load(1, 2) == 0)
 }
 
 #[test]
 fn transaction_static_mode_is_inherited_and_restored() {
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: true)
     let child = checkpoint(mut tx, is_static: false)
     core::assert(tx.is_static())
@@ -80,7 +80,7 @@ fn transaction_static_mode_is_inherited_and_restored() {
     tx.revert(parent)
     core::assert(!tx.is_static())
     core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
-    let world = tx.finish(commit: true)
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(1, 2) == 3)
 }
 
@@ -92,7 +92,7 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
         core::assert(world.storage_store(1, slot, slot + 1))
         slot += 1
     }
-    let mut tx = Transaction::new(world)
+    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 1, slot: 0, value: 0) == OK)
     core::assert(tx.storage_store(address: 1, slot: 256, value: 2) == OK)
@@ -105,7 +105,7 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
         value += 1
     }
     tx.revert(point)
-    let world = tx.finish(commit: true)
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(1, 0) == 1)
     core::assert(world.storage_load(1, 255) == 256)
     core::assert(world.storage_load(1, 256) == 0)
@@ -133,10 +133,10 @@ fn nested_depth(_ tx: mut Transaction, remaining: usize) {
 
 #[test]
 fn transaction_enforces_frame_depth_without_closing_parent() {
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     nested_depth(mut tx, remaining: CALL_DEPTH_LIMIT)
     core::assert(tx.depth() == 0)
-    let _ = tx.finish(commit: true)
+    let _ = tx.finish(commit: true, gas_spent: 0).state
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // Both persistent and transient writes precede each exit. TODO remains an
     // operational failure, but it must still roll back the frame's writes.
     for exit in [0xfd, 0xfe, 0x01, 0x20] {
-        let mut tx = Transaction::new(WorldState::empty())
+        let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         let code = program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
         // ADD has two operands here; use a second ADD to trigger underflow.
         let underflow = program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
@@ -160,9 +160,9 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
         core::assert(tx.storage_load(address: 0, slot: 0) == 0)
         core::assert(tx.transient_load(address: 0, slot: 0) == 0)
         result.release()
-        let _ = tx.finish(commit: true)
+        let _ = tx.finish(commit: true, gas_spent: 0).state
     }
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let mut call = default_call_env()
     call.gas_limit = 208
     let result = execute(
@@ -172,12 +172,12 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     core::assert(result.status == ERR_OUT_OF_GAS && result.gas_remaining == 0)
     core::assert(tx.transient_load(address: 0, slot: 0) == 0)
     result.release()
-    let _ = tx.finish(commit: true)
+    let _ = tx.finish(commit: true, gas_spent: 0).state
 }
 
 #[test]
 fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let write = program([0x60, 9, 0x5f, 0x5d, 0x60, 7, 0x5f, 0x55])
     let read = program([0x5f, 0x5c])
     let result = execute(write, empty_bytes(), default_call_env(), default_block_env(), mut tx)
@@ -186,18 +186,18 @@ fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
     let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(result.status == OK && result.stack_top == 9)
     result.release()
-    let world = tx.finish(commit: true)
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(0, 0) == 7)
-    let mut next = Transaction::new(world)
+    let mut next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut next)
     core::assert(result.status == OK && result.stack_top == 0)
     result.release()
-    let _ = next.finish(commit: true)
+    let _ = next.finish(commit: true, gas_spent: 0).state
 }
 
 #[test]
 fn vm_static_storage_writes_fault_but_reads_are_allowed() {
-    let mut tx = Transaction::new(WorldState::empty())
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let mut call = default_call_env()
     call.is_static = true
     for op in [0x55, 0x5d] {
@@ -209,5 +209,5 @@ fn vm_static_storage_writes_fault_but_reads_are_allowed() {
     let result = execute(program([0x5f, 0x54, 0x5f, 0x5c]), empty_bytes(), call, default_block_env(), mut tx)
     core::assert(result.status == OK && result.stack_top == 0)
     result.release()
-    let _ = tx.finish(commit: true)
+    let _ = tx.finish(commit: true, gas_spent: 0).state
 }

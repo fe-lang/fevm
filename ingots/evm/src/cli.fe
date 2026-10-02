@@ -109,7 +109,7 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
             }
         }
 
-        let mut state = Transaction::new(WorldState::empty())
+        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         let vm = execute_vm(
             program,
             calldata,
@@ -117,7 +117,7 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
             default_block_env(),
             mut state,
         )
-        let _ = state.finish(commit: vm.status == OK)
+        let _ = state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining).state
         if vm.status != OK {
             write_vm_error(vm)
             let status = vm.status

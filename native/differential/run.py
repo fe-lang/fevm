@@ -34,6 +34,13 @@ def command(args, log, *, input=None, timeout=1800):
     return log.read_bytes()
 
 
+def source_files():
+    return sorted([*ROOT.glob('ingots/**/*.fe'), *ROOT.glob('ingots/**/fe.toml'), ROOT / 'fe.toml',
+                   *HERE.glob('*.py'), *HERE.glob('*driver/**/*.fe'), *HERE.glob('*driver/fe.toml'),
+                   HERE / 'reference/Cargo.toml', HERE / 'reference/Cargo.lock',
+                   *HERE.glob('reference/src/**/*.rs')])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fe', type=Path, required=True)
@@ -43,10 +50,7 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     compiler = args.fe.resolve()
-    sources = sorted([*ROOT.glob('ingots/**/*.fe'), *ROOT.glob('ingots/**/fe.toml'), ROOT / 'fe.toml',
-                      *HERE.glob('*.py'), *HERE.glob('driver/**/*.fe'), HERE / 'driver/fe.toml',
-                      HERE / 'reference/Cargo.toml', HERE / 'reference/Cargo.lock',
-                      HERE / 'reference/src/main.rs'])
+    sources = source_files()
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
     reference = HERE / 'reference/target/release/fevm-reference'
     report = {'schema': 2, 'fork': 'Cancun', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '

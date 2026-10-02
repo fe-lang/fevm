@@ -2,11 +2,12 @@
 
 `fevm` is a native Fe implementation of the EVM. The project is intended to drive Fe native compilation, standard library, and language development with a real systems program.
 
-The repo is a Fe workspace with four ingots:
+The repo is a Fe workspace with five ingots:
 
 - `ingots/evm`: the interpreter library and CLI executable
 - `ingots/swisstable`: a generic fixed-capacity SwissTable-style hash table
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
+- `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
 - `native/fixtures/journal`: an allocation-failure fixture run by the native harness
 
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
@@ -32,20 +33,21 @@ Sample output:
 Library entry point:
 
 ```fe
-let mut transaction = fevm::Transaction::new(world)
-let result = fevm::execute(
-    program,
-    calldata,
-    fevm::default_call_env(),
-    fevm::default_block_env(),
-    mut transaction,
+let call = fevm::default_call_env()
+let block = fevm::default_block_env()
+let mut transaction = fevm::Transaction::new(
+    world, sender: call.origin, destination: call.address, coinbase: block.coinbase,
 )
+let result = fevm::execute(program, calldata, call, block, mut transaction)
+let commit = result.status == fevm::OK
+let gas_spent = call.gas_limit - result.gas_remaining
 // Consume the result after using it to release its owned output buffer.
 result.release()
-let world = transaction.finish(commit: true)
+let settled = transaction.finish(commit, gas_spent)
+let world = settled.state
 ```
 
-The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
+The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
 
 A `Transaction` owns the world state while execution is active. Each `Vm::run`
 opens a frame checkpoint: success commits it, while REVERT and every exceptional
@@ -54,12 +56,33 @@ support child commit and rollback; a committed child remains reversible by its
 parent. Close checkpoints once in reverse order. Static mode is inherited, and
 opening a frame beyond depth 1,024 fails without closing its parent.
 
-`finish(commit: true)` consumes the transaction and returns its world state;
-`finish(commit: false)` first undoes all transaction writes. Both clear transient
-storage and release the journal. Finish requires every frame to be closed.
-Journal growth is fallible: allocation failure leaves the write unapplied, and
-rollback uses existing storage. Warm/cold state-access pricing and refunds are
-still pending; `gas_exact` remains false for BALANCE, SLOAD, and SSTORE.
+`finish(commit, gas_spent)` consumes the transaction and returns persistent state,
+capped `gas_refunded`, and net `gas_used`. Aborting first undoes all writes and
+returns no refund. Both paths discard transient storage and release the journal;
+every frame must already be closed. Journal growth is fallible: allocation failure
+leaves the write unapplied, and rollback uses existing storage.
+
+The transaction warms its sender, destination, coinbase, and Cancun precompiles
+upfront. Add access-list entries with `access_list_account(address)` and
+`access_list_slot(address, slot)` before opening any checkpoint or changing runtime
+state. These calls return false on host table exhaustion. Runtime warming follows
+checkpoint rollback; original storage values remain fixed for the transaction.
+Account keys use their low 160 bits.
+
+BALANCE, SLOAD and SSTORE use Cancun warm/cold pricing. SSTORE tracks original,
+current and new values, enforces the 2,300-gas sentry, and updates signed refunds.
+TLOAD/TSTORE cost 100 gas and do not use that sentry. `ExecutionResult.refund_delta`
+is the successful frame's signed contribution; unsuccessful frames contribute
+zero. Refunds never refill a frame's executable gas. At transaction completion,
+positive refunds are capped to one fifth of the supplied pre-refund `gas_spent`.
+The caller supplies the transaction's total gas spent; signed-envelope and
+intrinsic-gas processing remain outside this frame API.
+
+The world and transaction caches currently use 256-entry tables. Exhaustion and
+allocation failures are explicit host resource errors, distinct from EVM halts.
+The [state-gas checkpoint](native/reports/state-gas.md) passes full native
+acceptance at O0/O1/O2 on x86_64 Linux. It builds on the separately recorded
+[transaction journal](native/reports/transaction-journal.md).
 
 Implemented opcode slice:
 
@@ -102,7 +125,6 @@ Smoke samples:
 
 Near-term expansion:
 
-- Cancun warm/cold state-access gas, original storage, access lists, and refunds.
 - Keccak support for `SHA3` in native Fe.
 - Account code tables for external code opcodes.
 - Direct runtime-code deployment before exact `CREATE`/`CREATE2` address derivation.

@@ -1,3 +1,5 @@
+mod state;
+
 use std::error::Error;
 use std::io::{self, BufRead, Write};
 
@@ -5,7 +7,8 @@ use revm_bytecode::Bytecode;
 use revm_interpreter::host::DummyHost;
 use revm_interpreter::interpreter::{EthInterpreter, ExtBytecode};
 use revm_interpreter::{
-    CallInput, InputsImpl, InstructionResult, Interpreter, SharedMemory, instruction_table,
+    CallInput, InputsImpl, InstructionResult, Interpreter, InterpreterResult, SharedMemory,
+    instruction_table,
 };
 use revm_primitives::{Bytes, hardfork::SpecId, hex};
 use serde::{Deserialize, Serialize};
@@ -52,6 +55,13 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
         )
         .into_result_return()
         .ok_or("nested frames are outside this corpus")?;
+    frame_from_result(&interpreter, &result)
+}
+
+fn frame_from_result(
+    interpreter: &Interpreter<EthInterpreter>,
+    result: &InterpreterResult,
+) -> Result<Frame, Box<dyn Error>> {
     let (outcome, reason) = match result.result {
         InstructionResult::Stop | InstructionResult::Return => ("success", None),
         InstructionResult::Revert => ("revert", None),
@@ -62,7 +72,9 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
             ("exceptional", Some("invalid_opcode"))
         }
         InstructionResult::OutOfOffset => ("exceptional", Some("return_data_oob")),
+        InstructionResult::StateChangeDuringStaticCall => ("exceptional", Some("static_write")),
         InstructionResult::OutOfGas
+        | InstructionResult::ReentrancySentryOOG
         | InstructionResult::MemoryOOG
         | InstructionResult::InvalidOperandOOG => ("exceptional", Some("out_of_gas")),
         other => return Err(format!("reference result outside this corpus: {other:?}").into()),
@@ -89,15 +101,20 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
                 hex::encode(interpreter.memory.context_memory().as_ref())
             )
         }),
-        output: format!("0x{}", hex::encode(result.output)),
+        output: format!("0x{}", hex::encode(&result.output)),
     })
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let stateful = std::env::args().nth(1).as_deref() == Some("--state");
     let mut output = io::BufWriter::new(io::stdout().lock());
     for line in io::stdin().lock().lines() {
-        let frame = execute(serde_json::from_str(&line?)?)?;
-        serde_json::to_writer(&mut output, &frame)?;
+        let line = line?;
+        if stateful {
+            serde_json::to_writer(&mut output, &state::execute(serde_json::from_str(&line)?)?)?;
+        } else {
+            serde_json::to_writer(&mut output, &execute(serde_json::from_str(&line)?)?)?;
+        }
         writeln!(output)?;
     }
     Ok(())

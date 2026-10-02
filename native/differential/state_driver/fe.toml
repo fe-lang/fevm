@@ -1,0 +1,7 @@
+[ingot]
+name = "fevm_state"
+version = "0.1.0"
+
+[dependencies]
+fevm = true
+fevm_frame = true

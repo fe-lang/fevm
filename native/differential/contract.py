@@ -2,7 +2,7 @@
 import re
 
 REASONS = {'stack_underflow', 'stack_overflow', 'invalid_jump', 'invalid_opcode',
-           'out_of_gas', 'return_data_oob'}
+           'out_of_gas', 'return_data_oob', 'static_write'}
 FIELDS = {'outcome', 'reason', 'gas_remaining', 'stack', 'memory', 'output'}
 
 

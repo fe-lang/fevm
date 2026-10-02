@@ -7,6 +7,8 @@ publish = false
 [dependencies]
 revm-interpreter = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d" }
 revm-bytecode = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d" }
-revm-primitives = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d" }
+revm-primitives = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+revm-context = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d" }
+revm-database = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d" }

@@ -1,0 +1,209 @@
+use ingot::constants::{ERR_OUT_OF_GAS, ERR_REVERT, ERR_STATE_LIMIT, OK}
+use ingot::state::WorldState
+use ingot::transaction::Transaction
+use ingot::transaction_runtime::{checkpoint, program}
+use ingot::types::{default_block_env, default_call_env, empty_bytes}
+use ingot::vm::execute
+
+#[test]
+fn upfront_warming_and_access_lists_survive_revert() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 11, destination: 12, coinbase: 13)
+    for address in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] {
+        core::assert(tx.account_is_warm(address))
+    }
+    core::assert(!tx.account_is_warm(14))
+    core::assert(tx.access_list_account(address: 14))
+    core::assert(tx.access_list_slot(address: 15, slot: 9))
+    let point = checkpoint(mut tx, is_static: false)
+    core::assert(tx.warm_account(address: 16) == OK)
+    core::assert(tx.warm_slot(address: 15, slot: 10) == OK)
+    tx.revert(point)
+    core::assert(tx.account_is_warm(14) && tx.account_is_warm(15))
+    core::assert(tx.storage_is_warm(address: 15, slot: 9))
+    core::assert(!tx.account_is_warm(16) && !tx.storage_is_warm(address: 15, slot: 10))
+    let _ = tx.finish(commit: true, gas_spent: 0)
+}
+
+#[test]
+fn balance_masks_high_address_bits_and_charges_one_cold_access() {
+    let mut world = WorldState::empty()
+    core::assert(world.set_balance(0x44, 99))
+    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    let result = execute(
+        program([0x60, 0x44, 0x31, 0x50, 0x60, 1, 0x60, 160, 0x1b, 0x60, 0x44, 0x17, 0x31]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx,
+    )
+    core::assert(result.status == OK && result.stack_top == 99)
+    core::assert(result.gas_remaining == 997280 && result.refund_delta == 0)
+    result.release()
+    let _ = tx.finish(commit: true, gas_spent: 2720)
+}
+
+#[test]
+fn storage_reads_warm_once_and_reverted_reads_become_cold() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let result = execute(program([0x5f, 0x54, 0x5f, 0x54, 0x5f, 0x5f, 0xfd]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.status == ERR_REVERT && result.gas_remaining == 997792)
+    core::assert(!tx.storage_is_warm(address: 0, slot: 0))
+    result.release()
+    let result = execute(program([0x5f, 0x54, 0x5f, 0x54]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.status == OK && result.gas_remaining == 997796)
+    core::assert(tx.storage_is_warm(address: 0, slot: 0))
+    result.release()
+    let _ = tx.finish(commit: true, gas_spent: 4412)
+}
+
+#[test]
+fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
+    let mut world = WorldState::empty()
+    core::assert(world.storage_store(0, 0, 1))
+    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    let parent = checkpoint(mut tx, is_static: false)
+    let result = execute(program([0x5f, 0x5f, 0x55]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.status == OK && result.gas_remaining == 994996)
+    core::assert(result.refund_delta == 4800 && tx.refund() == 4800)
+    result.release()
+    let child = checkpoint(mut tx, is_static: false)
+    let result = execute(program([0x60, 1, 0x5f, 0x55]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.status == OK && result.gas_remaining == 999895)
+    core::assert(result.refund_delta == -2000 && tx.refund() == 2800)
+    result.release()
+    tx.revert(child)
+    core::assert(tx.storage_load(address: 0, slot: 0) == 0 && tx.refund() == 4800)
+    core::assert(tx.storage_is_warm(address: 0, slot: 0))
+    tx.revert(parent)
+    core::assert(tx.storage_load(address: 0, slot: 0) == 1 && tx.refund() == 0)
+    core::assert(tx.original_storage(address: 0, slot: 0) == 1)
+    core::assert(!tx.storage_is_warm(address: 0, slot: 0))
+    let settled = tx.finish(commit: true, gas_spent: 5109)
+    core::assert(settled.gas_refunded == 0 && settled.gas_used == 5109)
+}
+
+#[test]
+fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let point = checkpoint(mut tx, is_static: false)
+    core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
+    core::assert(tx.original_storage(address: 0, slot: 0) == 0)
+    tx.revert(point)
+    let result = execute(program([0x60, 1, 0x5f, 0x55, 0x5f, 0x5f, 0x55]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.status == OK && result.gas_remaining == 977791)
+    core::assert(result.refund_delta == 19900 && tx.refund() == 19900)
+    result.release()
+    let settled = tx.finish(commit: true, gas_spent: 22209)
+    core::assert(settled.gas_refunded == 4441 && settled.gas_used == 17768)
+    core::assert(settled.state.storage_load(0, 0) == 0)
+}
+
+#[test]
+fn sstore_sentry_and_exact_cold_cost_boundaries() {
+    for warm in [false, true] {
+        for gas in [2304, 2305] {
+            let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+            if warm { core::assert(tx.access_list_slot(address: 0, slot: 0)) }
+            let mut call = default_call_env()
+            call.gas_limit = gas
+            let result = execute(program([0x5f, 0x5f, 0x55]), empty_bytes(), call, default_block_env(), mut tx)
+            if gas == 2304 {
+                core::assert(result.status == ERR_OUT_OF_GAS && result.gas_remaining == 0)
+                core::assert(tx.storage_is_warm(address: 0, slot: 0) == warm)
+            } else {
+                core::assert(result.status == OK)
+                core::assert(result.gas_remaining == if warm { 2201 } else { 101 })
+            }
+            result.release()
+            let _ = tx.finish(commit: true, gas_spent: gas)
+        }
+    }
+    for gas in [22104, 22105] {
+        let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        let mut call = default_call_env()
+        call.gas_limit = gas
+        let result = execute(program([0x60, 1, 0x5f, 0x55]), empty_bytes(), call, default_block_env(), mut tx)
+        core::assert(result.gas_remaining == 0)
+        if gas == 22104 {
+            core::assert(result.status == ERR_OUT_OF_GAS && tx.storage_load(address: 0, slot: 0) == 0)
+            core::assert(!tx.storage_is_warm(address: 0, slot: 0))
+        } else {
+            core::assert(result.status == OK && tx.storage_load(address: 0, slot: 0) == 1)
+        }
+        result.release()
+        let _ = tx.finish(commit: true, gas_spent: gas)
+    }
+}
+
+#[test]
+fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
+    let mut world = WorldState::empty()
+    core::assert(world.storage_store(0, 0, 1))
+    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    let mut call = default_call_env()
+    call.gas_limit = 5005
+    let result = execute(program([0x5f, 0x5f, 0x55, 0x5f]), empty_bytes(), call, default_block_env(), mut tx)
+    core::assert(result.status == ERR_OUT_OF_GAS && result.refund_delta == 0)
+    core::assert(tx.refund() == 0 && tx.storage_load(address: 0, slot: 0) == 1)
+    core::assert(!tx.storage_is_warm(address: 0, slot: 0))
+    result.release()
+    let settled = tx.finish(commit: true, gas_spent: 5005)
+    core::assert(settled.gas_refunded == 0 && settled.gas_used == 5005)
+}
+
+#[test]
+fn transaction_boundaries_reset_original_storage_and_access_state() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
+    core::assert(tx.warm_slot(address: 0, slot: 0) == OK)
+    let settled = tx.finish(commit: true, gas_spent: 22100)
+    let mut tx = Transaction::new(settled.state, sender: 0, destination: 0, coinbase: 0)
+    core::assert(!tx.storage_is_warm(address: 0, slot: 0))
+    core::assert(tx.original_storage(address: 0, slot: 0) == 7)
+    let result = execute(program([0x5f, 0x5f, 0x55]),
+        empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    core::assert(result.refund_delta == 4800 && result.gas_remaining == 994996)
+    result.release()
+    let settled = tx.finish(commit: false, gas_spent: 5004)
+    core::assert(settled.gas_refunded == 0 && settled.gas_used == 5004)
+    core::assert(settled.state.storage_load(0, 0) == 7)
+}
+
+#[test]
+fn access_cache_capacity_failure_preserves_rollback() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let point = checkpoint(mut tx, is_static: false)
+    let mut address: u256 = 11
+    while address < 256 {
+        core::assert(tx.warm_account(address) == OK)
+        address += 1
+    }
+    core::assert(tx.warm_account(address: 256) == ERR_STATE_LIMIT)
+    core::assert(!tx.account_is_warm(256))
+    tx.revert(point)
+    core::assert(tx.account_is_warm(10) && !tx.account_is_warm(11))
+    core::assert(tx.warm_account(address: 256) == OK)
+    let _ = tx.finish(commit: true, gas_spent: 0)
+}
+
+#[test]
+fn original_cache_limit_is_operational_and_does_not_apply_the_failed_write() {
+    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let point = checkpoint(mut tx, is_static: false)
+    let mut slot: u256 = 0
+    while slot < 256 {
+        core::assert(tx.storage_store(address: 0, slot, value: 1) == OK)
+        core::assert(tx.storage_store(address: 0, slot, value: 0) == OK)
+        slot += 1
+    }
+    core::assert(tx.storage_store(address: 0, slot: 256, value: 1) == ERR_STATE_LIMIT)
+    core::assert(tx.storage_load(address: 0, slot: 256) == 0)
+    tx.revert(point)
+    core::assert(tx.refund() == 0 && tx.original_storage(address: 0, slot: 255) == 0)
+    core::assert(tx.storage_store(address: 0, slot: 255, value: 2) == OK)
+    let settled = tx.finish(commit: true, gas_spent: 0)
+    core::assert(settled.state.storage_load(0, 255) == 2)
+    core::assert(settled.state.storage_load(0, 256) == 0)
+}

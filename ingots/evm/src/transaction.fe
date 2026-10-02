@@ -2,17 +2,27 @@ use core::Option
 use swisstable::SwissTable
 use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
-use ingot::state::{StorageKey, WorldState}
+use ingot::state::{StorageKey, WorldState, address_word}
+use ingot::gas::{StorageCharge, storage_charge}
 
 const BALANCE: u8 = 0
 const NONCE: u8 = 1
 const STORAGE: u8 = 2
 const TRANSIENT: u8 = 3
+const WARM_ACCOUNT: u8 = 4
+const WARM_STORAGE: u8 = 5
 pub const CALL_DEPTH_LIMIT: usize = 1024
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
-pub struct Checkpoint { position: u64, depth: usize, was_static: bool }
+pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128 }
+
+pub struct TransactionResult {
+    pub state: WorldState,
+    // Gas charged after the transaction refund cap; refunds never refill a frame.
+    pub gas_used: u64,
+    pub gas_refunded: u64,
+}
 
 // The persistent database is unavailable to callers until finish consumes the
 // transaction. Every write during execution must therefore pass the journal.
@@ -20,19 +30,106 @@ pub struct Transaction {
     state: WorldState,
     transient: SwissTable<StorageKey, u256>,
     journal: Journal,
+    warm_accounts: SwissTable<u256, bool>,
+    warm_storage: SwissTable<StorageKey, bool>,
+    originals: SwissTable<StorageKey, u256>,
+    refund: i128,
+    started: bool,
     depth: usize,
     is_static: bool,
 }
 
 impl Transaction {
-    pub fn new(_ state: own WorldState) -> Self {
+    pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
+        let mut warm_accounts = SwissTable<u256, bool>::empty()
+        for address in [sender, destination, coinbase, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+            core::assert(warm_accounts.insert(address_word(address), true))
+        }
         Self {
             state,
             transient: SwissTable<StorageKey, u256>::empty(),
             journal: Journal::new(),
+            warm_accounts,
+            warm_storage: SwissTable<StorageKey, bool>::empty(),
+            originals: SwissTable<StorageKey, u256>::empty(),
+            refund: 0,
+            started: false,
             depth: 0,
             is_static: false,
         }
+    }
+
+    pub fn refund(self) -> i128 { self.refund }
+
+    // Access-list initialization precedes all frames and is never rolled back.
+    pub fn access_list_account(mut self, address: u256) -> bool {
+        core::assert(!self.started)
+        self.warm_accounts.insert(address_word(address), true)
+    }
+
+    pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
+        core::assert(!self.started)
+        let address = address_word(address)
+        let was_warm = self.account_is_warm(address)
+        if !self.warm_accounts.insert(address, true) { return false }
+        if !self.warm_storage.insert(StorageKey { address, slot }, true) {
+            if !was_warm { let _ = self.warm_accounts.remove(address) }
+            return false
+        }
+        true
+    }
+
+    pub fn account_is_warm(self, _ address: u256) -> bool {
+        self.warm_accounts.contains(address_word(address))
+    }
+
+    pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
+        self.warm_storage.contains(StorageKey { address: address_word(address), slot })
+    }
+
+    fn warm(mut self, kind: u8, address: u256, slot: u256) -> i32 {
+        self.started = true
+        let address = address_word(address)
+        let present = if kind == WARM_ACCOUNT {
+            self.account_is_warm(address)
+        } else {
+            self.storage_is_warm(address, slot)
+        }
+        if present { return OK }
+        if !self.journal.append(Change { kind, address, slot, previous: 0 }) {
+            return ERR_HOST_ALLOCATION
+        }
+        let inserted = if kind == WARM_ACCOUNT {
+            self.warm_accounts.insert(address, true)
+        } else {
+            self.warm_storage.insert(StorageKey { address, slot }, true)
+        }
+        if !inserted {
+            let _ = self.journal.pop()
+            return ERR_STATE_LIMIT
+        }
+        OK
+    }
+
+    pub fn warm_account(mut self, address: u256) -> i32 {
+        self.warm(kind: WARM_ACCOUNT, address, slot: 0)
+    }
+
+    pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
+        self.warm(kind: WARM_STORAGE, address, slot)
+    }
+
+    pub fn original_storage(self, address: u256, slot: u256) -> u256 {
+        let original = self.originals.get(StorageKey { address: address_word(address), slot })
+        if original.found { original.value } else { self.storage_load(address, slot) }
+    }
+
+    pub fn storage_charge(self, address: u256, slot: u256, value: u256) -> StorageCharge {
+        storage_charge(
+            original: self.original_storage(address, slot),
+            current: self.storage_load(address, slot), value,
+            cold: !self.storage_is_warm(address, slot),
+        )
     }
 
     pub fn is_static(self) -> bool { self.is_static }
@@ -40,9 +137,10 @@ impl Transaction {
 
     pub fn checkpoint(mut self, is_static: bool) -> Option<Checkpoint> {
         if self.depth == CALL_DEPTH_LIMIT { return Option::None }
+        self.started = true
         self.depth += 1
         let checkpoint = Checkpoint {
-            position: self.journal.len(), depth: self.depth, was_static: self.is_static,
+            position: self.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
         }
         self.is_static = self.is_static || is_static
         Option::Some(checkpoint)
@@ -57,6 +155,7 @@ impl Transaction {
     pub fn revert(mut self, _ checkpoint: own Checkpoint) {
         core::assert(self.depth == checkpoint.depth)
         self.undo_to(checkpoint.position)
+        self.refund = checkpoint.refund
         self.depth -= 1
         self.is_static = checkpoint.was_static
     }
@@ -69,6 +168,8 @@ impl Transaction {
                 NONCE => self.state.set_nonce(change.address, change.previous),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
+                WARM_ACCOUNT => self.warm_accounts.remove(change.address),
+                WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
                 _ => core::panic(),
             }
             // Reverse replay never increases a table beyond an earlier valid
@@ -83,7 +184,7 @@ impl Transaction {
         self.state.storage_load(address, slot)
     }
     pub fn transient_load(self, address: u256, slot: u256) -> u256 {
-        self.transient.get(StorageKey { address, slot }).value
+        self.transient.get(StorageKey { address: address_word(address), slot }).value
     }
     pub fn block_hash(self, _ number: u256) -> u256 { self.state.block_hash(number) }
 
@@ -97,7 +198,9 @@ impl Transaction {
     }
 
     fn write(mut self, kind: u8, address: u256, slot: u256, value: u256) -> i32 {
+        self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(address)
         let previous = match kind {
             BALANCE => self.balance(address),
             NONCE => self.nonce(address),
@@ -130,7 +233,19 @@ impl Transaction {
         self.write(kind: NONCE, address, slot: 0, value)
     }
     pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
-        self.write(kind: STORAGE, address, slot, value)
+        if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        let key = StorageKey { address, slot }
+        let charge = self.storage_charge(address, slot, value)
+        // Capture even an original zero. This cache survives frame rollback and
+        // precedes every persistent write, including direct host-side writes.
+        if !self.originals.contains(key)
+            && !self.originals.insert(key, self.storage_load(address, slot)) {
+            return ERR_STATE_LIMIT
+        }
+        let status = self.write(kind: STORAGE, address, slot, value)
+        if status == OK { self.refund += charge.refund }
+        status
     }
     pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
         self.write(kind: TRANSIENT, address, slot, value)
@@ -138,10 +253,15 @@ impl Transaction {
 
     // Commit/abort the transaction only after every frame has been closed.
     // Transient storage is dropped at this boundary, never at a frame boundary.
-    pub fn finish(mut own self, commit: bool) -> WorldState {
+    pub fn finish(mut own self, commit: bool, gas_spent: u64) -> TransactionResult {
         core::assert(self.depth == 0)
         if !commit { self.undo_to(0) }
+        let mut gas_refunded: u64 = 0
+        if commit && self.refund > 0 {
+            let cap = (gas_spent / 5) as i128
+            gas_refunded = (if self.refund < cap { self.refund } else { cap }).downcast_unchecked()
+        }
         self.journal.release()
-        self.state
+        TransactionResult { state: self.state, gas_used: gas_spent - gas_refunded, gas_refunded }
     }
 }

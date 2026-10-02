@@ -1,6 +1,6 @@
 // Cancun base charges for the implemented frame instructions. Memory/copy and
 // exponent charges are added by the instruction before allocation/execution.
-// BALANCE/SLOAD/SSTORE retain prototype behavior and mark gas accounting inexact.
+// State-access charges depend on the transaction and are computed separately.
 pub fn base_cost(_ op: i32) -> u64 {
     if op == 0x02 || (op >= 0x04 && op <= 0x07) || op == 0x0b || op == 0x47 {
         return 5
@@ -43,4 +43,34 @@ pub fn base_cost(_ op: i32) -> u64 {
         return 2
     }
     0
+}
+
+
+pub struct StorageCharge { pub gas: u64, pub refund: i128 }
+
+// EIP-2200 net metering with EIP-2929 warm costs and EIP-3529 refunds.
+// The SSTORE stipend sentry is checked by the interpreter before this charge.
+pub fn storage_charge(original: u256, current: u256, value: u256, cold: bool) -> StorageCharge {
+    let mut gas: u64 = if cold { 2100 } else { 0 }
+    let mut refund: i128 = 0
+    if current == value {
+        gas += 100
+    } else if original == current {
+        if original == 0 {
+            gas += 20000
+        } else {
+            gas += 2900
+            if value == 0 { refund = 4800 }
+        }
+    } else {
+        gas += 100
+        if original != 0 {
+            if current == 0 { refund -= 4800 }
+            if value == 0 { refund += 4800 }
+        }
+        if original == value {
+            refund += if original == 0 { 19900 } else { 2800 }
+        }
+    }
+    StorageCharge { gas, refund }
 }
