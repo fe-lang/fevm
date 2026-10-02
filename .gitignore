@@ -6,6 +6,7 @@
 # Native harness build products and Python caches
 /native/out/
 /native/differential/reference/target/
+/native/keccak/reference/target/
 __pycache__/
 
 # Fe native build report staging
