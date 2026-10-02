@@ -2,13 +2,16 @@
 
 `fevm` is a native Fe implementation of the EVM. The project is intended to drive Fe native compilation, standard library, and language development with a real systems program.
 
-The repo is a Fe workspace with five ingots:
+The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and CLI executable
-- `ingots/swisstable`: a generic fixed-capacity SwissTable-style hash table
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
 - `native/fixtures/journal`: an allocation-failure fixture run by the native harness
+
+The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable),
+a generic fixed-capacity hash table, through an immutable git revision in
+`ingots/evm/fe.toml`. Fe fetches that dependency when resolving the workspace.
 
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 

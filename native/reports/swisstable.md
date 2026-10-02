@@ -22,7 +22,7 @@ are outside the CPU clock interval. Each runtime lookup result feeds the next
 query index, and every batch checksum is checked. Probe counts come from separate
 instrumented executables and are checked against a physical model. Table behavior
 is independently checked against a Python dictionary. See the
-[suite documentation](../swisstable/README.md) for the corpus and protocol.
+[suite documentation](https://github.com/fe-lang/swisstable/tree/main/native) for the corpus and protocol.
 
 Concurrent Rust and Lean builds heavily loaded this host (a process sample showed
 two rustc processes consuming roughly seven cores between them). These timings

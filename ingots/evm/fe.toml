@@ -3,4 +3,4 @@ name = "fevm"
 version = "0.1.0"
 
 [dependencies]
-swisstable = true
+swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "3987cfe26cd18f1fe1293377e5fda8f6723b51c2" }

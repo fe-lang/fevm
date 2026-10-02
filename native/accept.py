@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Downstream acceptance for native FeVM, Cancun frames/state, arithmetic, and SwissTable."""
+"""Downstream acceptance for native FeVM, Cancun frames/state, and arithmetic."""
 import argparse
 import hashlib
 import json
@@ -31,7 +31,7 @@ def main():
     if report.exists():
         parser.error('acceptance.json already exists; choose a fresh --out directory')
     record = {'schema': 1, 'build': build, 'host': platform.platform(), 'complete': False,
-              'scope': 'native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels, and SwissTable; full Cancun conformance remains pending',
+              'scope': 'native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending',
               'checks': []}
     report.write_text(json.dumps(record, indent=2) + '\n')
     commands = [([compiler, 'test', '--backend', 'native', '-O', level, ROOT],
@@ -42,8 +42,6 @@ def main():
                       '--out', out / 'cancun-frames'], 'cancun-frames'))
     commands.append(([sys.executable, HERE / 'differential/state_run.py', '--fe', compiler,
                       '--out', out / 'cancun-state'], 'cancun-state'))
-    commands.append(([sys.executable, HERE / 'swisstable/run.py', '--fe', compiler,
-                      '--out', out / 'swisstable', '--check-only'], 'swisstable-differential'))
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
     if args.check_only:
         arithmetic.append('--check-only')

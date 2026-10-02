@@ -1,7 +1,7 @@
 # Native FeVM and arithmetic acceptance tooling
 
 This suite checks the native FeVM workspace and CLI, Cancun frame results,
-and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`.
+and arithmetic differential kernels. It uses the pinned compiler in `toolchain.json`.
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
@@ -61,7 +61,7 @@ Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
 The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the Cancun frame/state, SwissTable and arithmetic corpora
+CLI smoke cases, and the Cancun frame/state and arithmetic corpora
 at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
 against revm's real journal.
 It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
@@ -79,11 +79,10 @@ The additional 349-case state suite checks current/original/transient storage,
 account/slot warmness, signed refunds and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 
-The [SwissTable suite](swisstable/README.md) compares full-key hashing against
-the original table, checks dictionary behavior and native probe counts, and
-measures uninstrumented lookups across key distributions, occupancy, and deletion
-histories. Acceptance runs its correctness matrix; timing is a separate command.
-Its baseline Git revision must be available locally.
+SwissTable unit tests, differential checks, and benchmarks live in the
+[standalone library repository](https://github.com/fe-lang/swisstable/tree/main/native).
+FeVM workspace tests exercise its pinned git dependency through interpreter and
+transaction behavior.
 
 ## Arithmetic correctness and measurement
 

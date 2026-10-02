@@ -58,6 +58,7 @@ Prepared from committed sources. The bundles contain the source histories.
 Linux execution is **not yet verified**. This handoff targets x86_64 Linux.
 Install Git, Python 3.10+, Node/npm, Rust {manifest['rust_version']} via rustup, CMake, a C compiler
 and binutils. Verify the bundle SHA-256 values in `handoff.json` before use.
+FeVM fetches its pinned SwissTable git dependency from GitHub; network access is required.
 
 From this directory:
 
@@ -74,10 +75,10 @@ python3 native/accept.py --build native/out/linux-toolchain/build.json \\
 ```
 
 Return `build.json`, `acceptance.json`, `arithmetic/results.json`, `cli/results.json`,
-`swisstable/results.json`, `cancun-frames/results.json`, and the acceptance logs. For performance measurements, use an idle host and omit
+`cancun-frames/results.json`, and the acceptance logs. For performance measurements, use an idle host and omit
 `--check-only`; retain all samples, emitted IR, objects and disassembly.
 A failing command must remain a failure in the report. This validates the native
-workspace tests, CLI smoke, Cancun frame results, numeric kernels, and SwissTable;
+workspace tests, CLI smoke, Cancun frame results, numeric kernels;
 full Cancun conformance remains pending.
 ''')
     print(out / 'README.md')
