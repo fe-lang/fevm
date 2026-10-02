@@ -39,7 +39,8 @@ def main():
     commands.append(([sys.executable, HERE / 'cli.py', '--fe', compiler,
                       '--out', out / 'cli'], 'cli-smoke'))
     commands.append(([sys.executable, HERE / 'differential/run.py', '--fe', compiler,
-                      '--out', out / 'cancun-frames'], 'cancun-frames'))
+                      '--out', out / 'cancun-frames',
+                      '--toolchain', build['manifest']['rust_version']], 'cancun-frames'))
     commands.append(([sys.executable, HERE / 'swisstable/run.py', '--fe', compiler,
                       '--out', out / 'swisstable', '--check-only'], 'swisstable-differential'))
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
