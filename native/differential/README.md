@@ -8,13 +8,14 @@ all PUSH widths and truncation positions, valid and invalid jumps, stack limits,
 and returned/reverted bytes. Specification-derived anchors, including all stack cases, also check the
 reference independently.
 
-Current status: all **1,602 frames pass at O0/O1/O2 on AArch64 macOS**. Fe's
+Current status: all **1,602 frames pass at O0/O1/O2 on x86_64 Linux at
+FeVM `7f8f550`**; historical **AArch64 macOS acceptance applies to `a078672`**. Fe's
 escape-decoding fix supplies valid JSON, and the pinned reference correction
 distinguishes DUP/SWAP underflow from genuine overflow. The reference's successful
 instruction paths and gas charging remain unchanged. No cases or halt categories
 were removed. See the [acceptance report](../reports/cancun-frames.md).
-The earlier native baseline passed on Linux; this expanded frame gate still
-needs its own Linux run.
+The Linux record includes the explicit Rust-toolchain and target-directory fixes.
+The historical macOS record predates those runner changes.
 
 ## Running
 

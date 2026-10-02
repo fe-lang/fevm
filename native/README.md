@@ -6,10 +6,12 @@ CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
 The current [Cancun acceptance](reports/cancun-frames.md) passes all seven stages
-on AArch64 macOS: workspace, CLI, 1,602 frames at each of O0/O1/O2, arithmetic
-and SwissTable. The reference pins a precise DUP/SWAP halt-classification fix.
+on x86_64 Linux at FeVM `7f8f550`: workspace, CLI, 1,602 frames at each of
+O0/O1/O2, arithmetic and SwissTable. Historical AArch64 macOS records apply to
+`a078672`, before the reference-build reproducibility fixes. The reference pins
+a precise DUP/SWAP halt-classification fix.
 The original six-stage baseline has also [passed on x86_64 Linux](reports/linux-baseline-2026-09-22/README.md);
-the expanded frame gate still needs its own Linux run.
+the expanded seven-stage Linux gate has separate records in the Cancun report.
 The [earlier accepted integration](reports/native-integration.md) records the
 previous six-stage suite and the aggregate-construction fix in Sonatina PR #321.
 Historical reports retain their own compiler manifests.
@@ -23,8 +25,9 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The compiler revisions are published on `argotorg/fe:fevm-native-acceptance-pinned`
-and `sbillig/sonatina:fix-native-aggregate-construction`. FeVM acceptance sources
-are on the public `fe-lang/fevm:native-acceptance` branch. The bootstrap verifies
+and `sbillig/sonatina:fix-native-aggregate-construction`. Current Cancun acceptance sources are on the public
+`fe-lang/fevm:cancun-frame-correctness` branch; the older baseline is on
+`native-acceptance`. The bootstrap verifies
 exact commits; it does not substitute a branch tip or patch compiler sources.
 See [Cloud/Linux handoff](cloud-linux.md) for access requirements and exact inputs.
 

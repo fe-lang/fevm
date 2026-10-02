@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "e51aebfc7027aa37eb81c7fc92046387a01998e2",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "61fa661c23bbeeeab024c4e9936656b7a73bd8f4",
+      "cargo_lock_sha256": "bbb0e2a4e3a98c393c61658a98211c7d43aebd11b8de2a1f90e925809345b498",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "published: argotorg/fe fevm-native-acceptance-pinned; sbillig/sonatina fix-native-aggregate-construction",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "source_directory": "/tmp/fevm-pr1-review-checks/toolchain/fe",
+    "sonatina_source_directory": "/tmp/fevm-pr1-review-checks/toolchain/sonatina",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/tmp/fevm-pr1-review-checks/compiler-target",
+    "complete": true,
+    "compiler_build_seconds": 152.35094317799985,
+    "compiler": "/tmp/fevm-pr1-review-checks/toolchain/bin/fe",
+    "compiler_sha256": "25350af4194360883785971978bc978175c5d8d322fa1e8149af4d1db04066cb",
+    "compiler_version": "fe 26.3.0 (e51aebfc7)"
+  },
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "complete": true,
+  "scope": "native workspace tests, CLI smoke, Cancun frame results, numeric kernels, and SwissTable; full Cancun conformance remains pending",
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 83.96394346700026
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 147.84692022000036
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 128.86950811899987
+    },
+    {
+      "name": "cli-smoke",
+      "status": 0,
+      "seconds": 278.4451368069999
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 407.9637455369998
+    },
+    {
+      "name": "swisstable-differential",
+      "status": 0,
+      "seconds": 71.68384607300004
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 70.48492725100004
+    }
+  ]
+}

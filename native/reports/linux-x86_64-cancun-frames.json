@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "fork": "Cancun",
+  "scope": "halt status, successful/reverted final stack, output; gas, memory accounting and external state are not compared",
+  "complete": true,
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "source_sha256": {
+    "fe.toml": "4eb6ddb8d74798a6ebc6c215dda5a542756d752ccd5f03eff6545ceb91376ddf",
+    "ingots/evm/fe.toml": "4c158700a6a1ef2ffc196d4bc7148ab024124a351bd8d6bb6d62058b922535e4",
+    "ingots/evm/src/cli.fe": "abb910a0923c6f0738d7713b305d3e9ca530fd9afb85ac78a8d1303660f035f3",
+    "ingots/evm/src/constants.fe": "72e0191013216c1ca6451200bb23e44b8e3f08506593ac9f3a8626572710aa2d",
+    "ingots/evm/src/hex.fe": "7ea2b3ae8dceb69c4e12aa3403ed5fcc5f146472140d7cee1f00fb445eaf5a87",
+    "ingots/evm/src/lib.fe": "e6a49a2267b2e2add12e43ed399b01fb79924b104df73425b264755bf8698a19",
+    "ingots/evm/src/opcodes.fe": "124a92f167fb13ddb4bf8b1306e349e692849d21f12d755931e3cceb6d66a011",
+    "ingots/evm/src/state.fe": "99890f88dea488068e12333cd8a1a6abc8c3080b588b453361527ea49c43cd3b",
+    "ingots/evm/src/types.fe": "58dc66bd152fafa9d26334d469229ac6c895d999e6c81597ff828d6dd20e9e86",
+    "ingots/evm/src/vm.fe": "1a6717048c3a86fa2981c6858c3990128fb5dafed64d318432119f9aac9a39e2",
+    "ingots/swisstable/fe.toml": "78ff6caf42ab1e1b2678b2d29f4f0753e08f7670e50e4527e48702852b60418f",
+    "ingots/swisstable/src/lib.fe": "7cfc3472f9d69be3b4e97f6cf4ebe18341ee7b0b78df5101fd62115baa002f18",
+    "native/differential/corpus.py": "bb5b17969fc16ce8f150104888e30567c89cde5b71e9e4ced2a3387c4349553b",
+    "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+    "native/differential/driver/src/lib.fe": "7a151c3a1c7cac56a30ffe947a5f5819cdf6807956cada66a5f25769081f2d9c",
+    "native/differential/reference/Cargo.lock": "373755bc0058d83bde5fca5cb8b72bd578a4654d83424d9e9c971383eb7cddc4",
+    "native/differential/reference/Cargo.toml": "274f3ee35d325ffe62993e5eeba6ac8553cb310a95dac7e69a52bcc6119c030e",
+    "native/differential/reference/src/main.rs": "55356edb5d717d70cdc0b9dfb7f53971f18f1cd3aa56810b467de51a63fd89ba",
+    "native/differential/run.py": "bacd2a3a80c8b91c28cb43163d0203d13df1595a453005d821ae4b44a9b4e07c",
+    "native/differential/test_run.py": "aab734845f0d309dace37dd51f1104a69dd7fe5da9d7e48e982184c734295fd9",
+    "native/toolchain.json": "2bcf9548958b64173d348a458c1b758d5b2525cf3d39c91635340e1c38948373"
+  },
+  "compiler_sha256": "25350af4194360883785971978bc978175c5d8d322fa1e8149af4d1db04066cb",
+  "compiler_version": "fe 26.3.0 (e51aebfc7)",
+  "revision": "7f8f55013d9d5354122bd83aec0a42c3f19d9e08",
+  "dirty": false,
+  "reference": {
+    "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+    "toolchain": "1.98.1",
+    "target_directory": "/tmp/fevm-pr1-review-checks/acceptance/cancun-frames/reference-target",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "packages": [
+      {
+        "name": "revm-bytecode",
+        "version": "7.1.1",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-context-interface",
+        "version": "13.1.0",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-database-interface",
+        "version": "8.0.5",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-interpreter",
+        "version": "31.1.0",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-primitives",
+        "version": "21.0.2",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-state",
+        "version": "8.1.1",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      }
+    ],
+    "executable_sha256": "e107c6adddb64b08285b3eb6bf94e2764d5bb4ba6b4864ca4efb9b951b371ff1"
+  },
+  "levels": [
+    {
+      "level": "0",
+      "complete": true,
+      "passed": 1602,
+      "build_seconds": 75.02484124900002,
+      "executable_sha256": "17f7fee896d14fe7186f11f36d46f66a970d04fd694667251a7f55cc322d8e86"
+    },
+    {
+      "level": "1",
+      "complete": true,
+      "passed": 1602,
+      "build_seconds": 144.74085442499972,
+      "executable_sha256": "8565fc971f25d9d95191375c0491e4bcd17074cb3ed4f5c49382ead727170f5d"
+    },
+    {
+      "level": "2",
+      "complete": true,
+      "passed": 1602,
+      "build_seconds": 157.68119337200005,
+      "executable_sha256": "8565fc971f25d9d95191375c0491e4bcd17074cb3ed4f5c49382ead727170f5d"
+    }
+  ],
+  "frames_per_level": 1602,
+  "categories": {
+    "anchors": 9,
+    "arithmetic": 167,
+    "push": 593,
+    "jump": 704,
+    "stack": 121,
+    "frame": 8
+  },
+  "corpus_sha256": "a4cc6fcac0bc5dff6b227e65db979ef9418fe3318770acb25ca131643468d95b"
+}
