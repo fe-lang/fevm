@@ -28,8 +28,8 @@ OPERATIONS = {
 }
 
 
-def command(args, **kwargs):
-    result = subprocess.run([str(x) for x in args], capture_output=True, timeout=600, **kwargs)
+def command(args, *, timeout=600, **kwargs):
+    result = subprocess.run([str(x) for x in args], capture_output=True, timeout=timeout, **kwargs)
     if result.returncode:
         raise RuntimeError(f'command failed ({result.returncode}): {args}\n'
                            + result.stdout.decode(errors='replace')

@@ -37,11 +37,18 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The account-code checkpoint requires local Fe `4c03313f1` and Sonatina `9c350187`.
-Exact revisions, the Rust version and Cargo lock hash are in
-[`reports/account-code-toolchain.json`](reports/account-code-toolchain.json).
-The Fe commit adds the conditional-clobber separation repair to the #1718
-integration and is available in the local Fe repository. The default
+The current logs/BLOBHASH development pin uses local Fe `c5dd6603d` and Sonatina
+`8d822fc3`. Exact revisions, the Rust version and Cargo lock hash are in
+[`reports/logs-blobhash-toolchain.json`](reports/logs-blobhash-toolchain.json).
+Targeted compiler and reduced O1 native checks pass; full native acceptance is
+deferred while development uses smaller tests. The
+[implementation report](reports/logs-blobhash.md) separates this evidence from
+the earlier partial acceptance run.
+The compiler revisions repair concrete native reference layouts, preserve
+conditional clobbers through ownership checking, and stabilize recursive buffer
+and output-effect summaries on top of the final #1718 integration (`2db9a38fa`).
+They also reuse workspace/root analysis and index available object fields. Both
+commits are available in the local Fe and Sonatina repositories. The default
 `toolchain.json` retains the previous published-master checkpoint at `04d344105`.
 Keccak is a separately tested Git dependency; its native differential and timing
 suite lives in [fe-lang/keccak](https://github.com/fe-lang/keccak). FeVM does not
@@ -56,11 +63,17 @@ acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/account-code-toolchain.json \
-  --fe-repository /home/sean/code/fe --out native/out/toolchain --toolchain 1.98.1
+python3 native/bootstrap.py --manifest native/reports/logs-blobhash-toolchain.json \
+  --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
+  --out native/out/toolchain --toolchain 1.98.1
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
+
+For slower compiler candidates, `--build-timeout SECONDS` overrides each CLI/frame/state
+Fe build deadline, and `--stage-timeout SECONDS` overrides the deadline for a complete
+acceptance stage. Reports record both settings; a timeout still fails acceptance.
+Standalone CLI and differential runners also accept `--build-timeout`.
 
 Choose a fresh output directory for each bootstrap and arithmetic run.
 `--target-dir /path/to/cache` can reuse Cargo artifacts while checking out clean
@@ -88,13 +101,30 @@ commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
 
+## Reduced O1 development check
+
+The checkpoint probe compiles the real transaction, journal, state and log modules
+with a small entry point, then checks nested log commit/rollback and receipt
+ownership. It avoids compiling the full interpreter and differential drivers.
+
+```sh
+python3 native/perf/checkpoints.py --fe /path/to/fe \
+  --out native/out/checkpoints-o1
+```
+
+Each run requires a fresh output directory and records source/compiler hashes,
+one-thread O1 build wall/CPU time, peak RSS and checked execution output. The
+default build deadline is 180 seconds (`--build-timeout` overrides it). Use CPU
+time for shared-host comparisons and compare identical source hashes. This probe
+does not establish full interpreter conformance or an end-to-end speedup.
+
 The [Cancun frame suite](differential/README.md) compares 1,835 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 737-case state suite checks current/original/transient storage,
-account code and hashes, copy semantics, account/slot warmness, signed refunds
-and nested checkpoints. Signed transaction
+The additional 1,142-case state suite checks current/original/transient storage,
+account code and hashes, copy semantics, account/slot warmness, signed refunds,
+logs, blob hashes and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 
 SwissTable unit tests, differential checks, and benchmarks live in the

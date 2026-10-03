@@ -10,6 +10,13 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#ifndef WATCH_SIZE
+#define WATCH_SIZE 131072
+#endif
+#ifndef SUCCESS_ALLOCS
+#define SUCCESS_ALLOCS 2
+#endif
+
 static unsigned attempts;
 static unsigned allocations;
 static unsigned releases;
@@ -21,7 +28,7 @@ typedef union {
 } Header;
 
 void *malloc(size_t size) {
-    int watched = size == 131072;
+    int watched = size == WATCH_SIZE;
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;
@@ -46,8 +53,8 @@ void free(void *pointer) {
 }
 
 __attribute__((destructor)) static void check_releases(void) {
-    unsigned expected = FAIL_AT ? FAIL_AT - 1 : 2;
-    if (attempts != (FAIL_AT ? FAIL_AT : 2) ||
+    unsigned expected = FAIL_AT ? FAIL_AT - 1 : SUCCESS_ALLOCS;
+    if (attempts != (FAIL_AT ? FAIL_AT : SUCCESS_ALLOCS) ||
         failures != (FAIL_AT ? 1 : 0) ||
         allocations != expected || releases != expected) _Exit(101);
 }

@@ -112,12 +112,12 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 737 deterministic cases. Its reference uses the pinned
+The stateful corpus has 1,142 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,
-account/slot warmness, signed refund deltas and cumulative refunds. Transaction
-results also compare committed state, capped refunds and net gas used. Repeated
+account/slot warmness, signed refund deltas, cumulative refunds and ordered logs.
+Transaction results also compare committed state, logs, capped refunds and net gas used. Repeated
 transactions share persistent state but start fresh transient/access/refund state.
 The reference observes its journal directly so inspection does not warm a key.
 
@@ -129,16 +129,22 @@ BLOCKHASH history-window/operand/gas boundaries. External-code cases distinguish
 absent, explicitly empty, storage-only, funded, nonce-bearing and code-bearing
 accounts; check static reads, high address bits, copy padding and full-width
 sources, exact gas, shared warming and rollback across frames and transactions.
-The Python contract checks field shapes and accounting invariants; independent
+Log cases cover all topic counts, data copying and zero padding, exact gas,
+full-width empty offsets, static rejection, frame failure and nested rollback.
+Blob-hash cases cover transaction inputs, full-width bounds, static reads, gas,
+checkpoint persistence and transaction reuse. Reference transactions derive their
+EIP-4844 type when blob hashes are present, so the host BLOBHASH path is exercised.
+The Python contract checks field shapes, log encoding and accounting invariants; independent
 anchors check the reference's gas, refund and value results. Operational failures
 fail the comparison. Unlike the stateless simultaneous-fault controls, these
 state cases require exact diagnostic reasons as well as exact results.
 
 The native state driver takes one versioned binary case encoded as hex. Integers
-and lengths use big endian. Version 3 retains explicit block history and each transaction's block number,
-and replaces balance-only initialization with explicit accounts: address (20 bytes),
-balance (32), nonce (8), code length (2) and code bytes. Earlier wire versions are
-rejected. The encoder lives in `state_corpus.py`. Its current
+and lengths use big endian. Version 4 carries block history and explicit accounts:
+address (20 bytes), balance (32), nonce (8), code length (2) and code bytes. Each
+transaction's block number is followed by a blob-hash count (2 bytes) and that many
+32-byte hashes, before its commit flag and access lists. Earlier wire versions
+are rejected. The encoder lives in `state_corpus.py`. Its current
 4,096-byte input limit is a harness limit. JSON lines remain the reference input
 and retained corpus format. Each case starts a fresh native process, while all
 frames and transactions in that case execute in that process. The scope models

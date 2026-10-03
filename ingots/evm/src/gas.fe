@@ -24,6 +24,7 @@ pub fn base_cost(_ op: i32) -> u64 {
         || op == 0x37
         || op == 0x39
         || op == 0x3e
+        || op == 0x49
         || (op >= 0x51 && op <= 0x53)
         || op == 0x5e
         || (op >= 0x60 && op <= 0x9f) {

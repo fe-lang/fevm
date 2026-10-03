@@ -79,7 +79,7 @@ fn account_creation_undo_distinguishes_empty_existing_and_absent_accounts() {
     core::assert(tx.code_hash(1) == 0 && tx.code_size(4) == 3 && tx.balance(4) == 0)
     core::assert(tx.set_balance(address: 5, value: 0) == OK && !tx.exists(5))
     core::assert(tx.set_balance(address: 5, value: 1) == OK)
-    let world = tx.finish(commit: false, gas_spent: 0).state
+    let world = tx.finish(commit: false, gas_spent: 0).into_state()
     core::assert(world.exists(1) && !world.exists(5) && world.code_size(4) == 3)
     world.release()
 }
@@ -101,7 +101,7 @@ fn account_capacity_failures_are_atomic_and_undo_restores_capacity() {
     tx.revert(point)
     core::assert(!tx.exists(255))
     core::assert(tx.set_nonce(address: 256, value: 1) == OK)
-    let mut world = tx.finish(commit: true, gas_spent: 0).state
+    let mut world = tx.finish(commit: true, gas_spent: 0).into_state()
     core::assert(world.set_code(address: 257, code: [1 as u8]) == ERR_STATE_LIMIT)
     core::assert(!world.exists(257) && world.nonce(256) == 1)
     core::assert(world.set_code(address: 0, code: [1 as u8]) == OK)

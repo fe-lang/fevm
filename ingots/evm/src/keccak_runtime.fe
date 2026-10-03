@@ -29,7 +29,7 @@ fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
             core::assert(vm.stack[0] == 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470)
         }
         vm.release()
-        state.finish(commit: true, gas_spent: gas).state.release()
+        state.finish(commit: true, gas_spent: gas).release()
     }
 }
 
@@ -51,7 +51,7 @@ fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
     core::assert(vm.memory.len() == 32 && vm.memory.byte_at(28) == 0)
     core::assert(vm.memory.byte_at(29) == 97 && vm.memory.byte_at(30) == 98 && vm.memory.byte_at(31) == 99)
     vm.release()
-    state.finish(commit: true, gas_spent: 53).state.release()
+    state.finish(commit: true, gas_spent: 53).release()
 }
 
 #[test]
@@ -96,6 +96,6 @@ fn sha3_checks_stack_and_charges_before_allocation() {
         core::assert(vm.status == status && vm.gas_remaining == 0)
         core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
         vm.release()
-        state.finish(commit: true, gas_spent: gas).state.release()
+        state.finish(commit: true, gas_spent: gas).release()
     }
 }

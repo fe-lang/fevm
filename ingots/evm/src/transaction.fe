@@ -1,4 +1,7 @@
 use core::Option
+use std::native::ByteBuffer
+use ingot::buffer::{read_word, write_word}
+use ingot::logs::LogBuffer
 use swisstable::SwissTable
 use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
@@ -15,13 +18,25 @@ pub const CALL_DEPTH_LIMIT: usize = 1024
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
-pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128 }
+pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128, logs: u64 }
 
 pub struct TransactionResult {
     pub state: WorldState,
+    pub logs: LogBuffer,
     // Gas charged after the transaction refund cap; refunds never refill a frame.
     pub gas_used: u64,
     pub gas_refunded: u64,
+}
+
+impl TransactionResult {
+    pub fn into_state(own self) -> WorldState {
+        self.logs.release()
+        self.state
+    }
+    pub fn release(own self) {
+        self.logs.release()
+        self.state.release()
+    }
 }
 
 // The persistent database is unavailable to callers until finish consumes the
@@ -30,6 +45,8 @@ pub struct Transaction {
     state: WorldState,
     transient: SwissTable<StorageKey, u256>,
     journal: Journal,
+    logs: LogBuffer,
+    blob_hashes: ByteBuffer,
     warm_accounts: SwissTable<u256, bool>,
     warm_storage: SwissTable<StorageKey, bool>,
     originals: SwissTable<StorageKey, u256>,
@@ -49,6 +66,8 @@ impl Transaction {
             state,
             transient: SwissTable<StorageKey, u256>::empty(),
             journal: Journal::new(),
+            logs: LogBuffer::new(),
+            blob_hashes: ByteBuffer::new(),
             warm_accounts,
             warm_storage: SwissTable<StorageKey, bool>::empty(),
             originals: SwissTable<StorageKey, u256>::empty(),
@@ -57,6 +76,29 @@ impl Transaction {
             depth: 0,
             is_static: false,
         }
+    }
+
+    pub fn logs(self) -> ref LogBuffer { ref self.logs }
+
+    pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64,
+                    data: ByteBuffer, offset: u64, len: u64) -> i32 {
+        self.started = true
+        if self.is_static { return ERR_STATIC_WRITE }
+        if self.logs.append(address, topics, topic_count, data, offset, len) { OK }
+        else { ERR_HOST_ALLOCATION }
+    }
+
+    pub fn add_blob_hash(mut self, _ hash: u256) -> bool {
+        core::assert(!self.started)
+        let offset = self.blob_hashes.len()
+        if !self.blob_hashes.try_resize(offset + 32) { return false }
+        write_word(mut self.blob_hashes, offset, value: hash)
+        true
+    }
+    pub fn blob_hash(self, _ index: u256) -> u256 {
+        if index >= (self.blob_hashes.len() / 32) as u256 { return 0 }
+        let index: u64 = index.downcast_unchecked()
+        read_word(self.blob_hashes, offset: index * 32)
     }
 
     pub fn refund(self) -> i128 { self.refund }
@@ -140,7 +182,7 @@ impl Transaction {
         self.started = true
         self.depth += 1
         let checkpoint = Checkpoint {
-            position: self.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
+            position: self.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
         }
         self.is_static = self.is_static || is_static
         Option::Some(checkpoint)
@@ -155,6 +197,7 @@ impl Transaction {
     pub fn revert(mut self, _ checkpoint: own Checkpoint) {
         core::assert(self.depth == checkpoint.depth)
         self.undo_to(checkpoint.position)
+        self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
         self.depth -= 1
         self.is_static = checkpoint.was_static
@@ -263,13 +306,17 @@ impl Transaction {
     // Transient storage is dropped at this boundary, never at a frame boundary.
     pub fn finish(mut own self, commit: bool, gas_spent: u64) -> TransactionResult {
         core::assert(self.depth == 0)
-        if !commit { self.undo_to(0) }
+        if !commit {
+            self.undo_to(0)
+            self.logs.truncate(0)
+        }
         let mut gas_refunded: u64 = 0
         if commit && self.refund > 0 {
             let cap = (gas_spent / 5) as i128
             gas_refunded = (if self.refund < cap { self.refund } else { cap }).downcast_unchecked()
         }
         self.journal.release()
-        TransactionResult { state: self.state, gas_used: gas_spent - gas_refunded, gas_refunded }
+        self.blob_hashes.release()
+        TransactionResult { state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }
     }
 }

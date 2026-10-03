@@ -1,0 +1,92 @@
+use std::native::ByteBuffer
+use ingot::buffer::{read_word, write_word}
+use ingot::state::address_word
+
+// Address, four topics, then packed u64 data offset / length / topic count.
+const RECORD_SIZE: u64 = 192
+
+pub struct LogEntry {
+    pub address: u256,
+    pub topics: [u256; 4],
+    pub topic_count: u64,
+    data: ref ByteBuffer,
+    offset: u64,
+    len: u64,
+}
+
+impl LogEntry {
+    pub fn len(self) -> u64 { self.len }
+    pub fn byte_at(self, _ index: u64) -> u8 {
+        core::assert(index < self.len)
+        self.data.byte_at(self.offset + index)
+    }
+}
+
+// Separate growable headers and bytes give constant-time indexed reads and
+// checkpoint truncation. Views borrow the owner, so mutation cannot stale them.
+pub struct LogBuffer { records: ByteBuffer, data: ByteBuffer }
+
+impl LogBuffer {
+    pub fn new() -> Self {
+        Self { records: ByteBuffer::new(), data: ByteBuffer::new() }
+    }
+    pub fn len(self) -> u64 { self.records.len() / RECORD_SIZE }
+    pub fn entry(self, _ index: u64) -> LogEntry {
+        core::assert(index < self.len())
+        let offset = index * RECORD_SIZE
+        let metadata = read_word(self.records, offset: offset + 160)
+        let mut topics: [u256; 4] = [0; 4]
+        let count: u64 = (metadata >> 128).downcast_unchecked()
+        let mut topic: u64 = 0
+        while topic < count {
+            topics[topic as usize] = read_word(self.records, offset: offset + 32 + topic * 32)
+            topic += 1
+        }
+        LogEntry {
+            address: read_word(self.records, offset), topics, topic_count: count,
+            data: ref self.data, offset: metadata.downcast_truncate(),
+            len: (metadata >> 64).downcast_truncate(),
+        }
+    }
+    pub fn append(mut self, address: u256, topics: [u256; 4], topic_count: u64,
+                  data: ByteBuffer, offset: u64, len: u64) -> bool {
+        core::assert(topic_count <= 4 && offset <= data.len() && len <= data.len() - offset)
+        let record = self.records.len()
+        let start = self.data.len()
+        // Every individual extent fits PTRDIFF_MAX, so these additions fit u64.
+        if !self.records.try_resize(record + RECORD_SIZE) { return false }
+        if !self.data.try_resize(start + len) {
+            core::assert(self.records.try_resize(record))
+            return false
+        }
+        write_word(mut self.records, offset: record, value: address_word(address))
+        let mut topic: u64 = 0
+        while topic < topic_count {
+            write_word(mut self.records, offset: record + 32 + topic * 32, value: topics[topic as usize])
+            topic += 1
+        }
+        let metadata = start as u256 | (len as u256) << 64 | (topic_count as u256) << 128
+        write_word(mut self.records, offset: record + 160, value: metadata)
+        let mut byte: u64 = 0
+        while byte < len {
+            self.data.set_byte(index: start + byte, value: data.byte_at(offset + byte))
+            byte += 1
+        }
+        true
+    }
+    pub fn truncate(mut self, _ count: u64) {
+        core::assert(count <= self.len())
+        let end = if count == 0 { 0 } else {
+            let metadata = read_word(self.records, offset: (count - 1) * RECORD_SIZE + 160)
+            let start: u64 = metadata.downcast_truncate()
+            let len: u64 = (metadata >> 64).downcast_truncate()
+            start + len
+        }
+        core::assert(self.data.try_resize(end))
+        core::assert(self.records.try_resize(count * RECORD_SIZE))
+    }
+    pub fn release(own self) {
+        self.records.release()
+        self.data.release()
+    }
+}

@@ -7,7 +7,7 @@ The repo is a Fe workspace:
 - `ingots/evm`: the interpreter library and CLI executable
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
-- `native/fixtures/journal` and `native/fixtures/accounts`: allocation-failure fixtures run by the native harness
+- `native/fixtures/journal`, `native/fixtures/accounts`, and `native/fixtures/logs`: allocation-failure fixtures run by the native harness
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for fixed-capacity hash tables and [keccak](https://github.com/fe-lang/keccak)
@@ -17,18 +17,24 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/account-code-toolchain.json \
-  --fe-repository /home/sean/code/fe --out native/out/toolchain --toolchain 1.98.1
+python3 native/bootstrap.py --manifest native/reports/logs-blobhash-toolchain.json \
+  --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
+  --out native/out/toolchain --toolchain 1.98.1
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The account-code milestone requires local Fe `4c03313f1`, which integrates
-master, PR #1718 and the conditional-clobber borrow-checking repair. Supply a
+The logs/BLOBHASH development pin is local Fe `c5dd6603d`, which integrates
+the final PR #1718 fixes (`2db9a38fa`), native reference-layout, buffer ownership,
+recursive-summary repairs and analysis-reuse optimizations. It pins Sonatina
+`8d822fc3`, including indexed object-store invalidation. Supply a
 local Fe repository or Git bundle containing that commit. The default
 `native/toolchain.json` retains the previous published-master checkpoint. See
 [native build instructions](native/README.md) for prerequisites and reproducible
 acceptance commands.
+
+The [logs/BLOBHASH implementation report](native/reports/logs-blobhash.md)
+records the completed targeted checks and the deferred full acceptance gate.
 
 Sample output:
 
@@ -50,12 +56,13 @@ let gas_spent = call.gas_limit - result.gas_remaining
 // Consume the result after using it to release its owned output buffer.
 result.release()
 let settled = transaction.finish(commit, gas_spent)
-let world = settled.state
+// Read settled.logs before consuming the receipt.
+let world = settled.into_state()
 // After the final transaction, release the world's owned code arena.
 world.release()
 ```
 
-The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
+The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
 
 A `Transaction` owns the world state while execution is active. Each `Vm::run`
 opens a frame checkpoint: success commits it, while REVERT and every exceptional
@@ -65,10 +72,23 @@ parent. Close checkpoints once in reverse order. Static mode is inherited, and
 opening a frame beyond depth 1,024 fails without closing its parent.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
-capped `gas_refunded`, and net `gas_used`. Aborting first undoes all writes and
-returns no refund. Both paths discard transient storage and release the journal;
-every frame must already be closed. Journal growth is fallible: allocation failure
-leaves the write unapplied, and rollback uses existing storage.
+owned logs, capped `gas_refunded`, and net `gas_used`. Aborting first undoes all
+writes and discards logs and refunds. Both paths discard transient storage and
+blob hashes and release the journal; every frame must already be closed. Call
+`TransactionResult.release()` to release both state and logs, or `into_state()`
+to release logs and reuse the world. The public fields can also be moved out
+separately when the receipt must outlive subsequent transactions. Each owner
+still requires release. Journal and log growth are fallible: allocation failure
+leaves the operation unapplied, and rollback uses existing storage.
+
+LOG0 through LOG4 copy frame memory and ordered topics into transaction-owned
+storage. `transaction.logs()` and `receipt.logs` expose indexed borrowed
+`LogEntry` views with address, topics, topic count, `len()` and `byte_at(index)`.
+Views prevent mutation while borrowed. Nested rollback truncates logs, including
+logs from committed children. Static frames reject log emission. Add versioned
+blob hashes with `add_blob_hash(hash)` before execution; this returns false on
+allocation failure. BLOBHASH costs 3 gas and returns zero for any full-width
+index outside that transaction's list. Blob hashes survive checkpoint rollback.
 
 The transaction warms its sender, destination, coinbase, and Cancun precompiles
 upfront. Add access-list entries with `access_list_account(address)` and
@@ -133,16 +153,15 @@ Implemented opcode slice:
 - `AND`, `OR`, `XOR`, `NOT`, `BYTE`, `SHL`, `SHR`, `SAR`
 - `ADDRESS`, `ORIGIN`, `CALLER`, `CALLVALUE`, `CALLDATALOAD`, `CALLDATASIZE`, `CALLDATACOPY`
 - `CODESIZE`, `CODECOPY`, `EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH`, `GASPRICE`, `RETURNDATASIZE`, `RETURNDATACOPY`
-- `BALANCE`, `BLOCKHASH`, `COINBASE`, `TIMESTAMP`, `NUMBER`, `PREVRANDAO`, `GASLIMIT`, `CHAINID`, `SELFBALANCE`, `BASEFEE`, `BLOBBASEFEE`
+- `BALANCE`, `BLOCKHASH`, `COINBASE`, `TIMESTAMP`, `NUMBER`, `PREVRANDAO`, `GASLIMIT`, `CHAINID`, `SELFBALANCE`, `BASEFEE`, `BLOBBASEFEE`, `BLOBHASH`
 - `MLOAD`, `MSTORE`, `MSTORE8`, `SLOAD`, `SSTORE`, `MSIZE`, `TLOAD`, `TSTORE`, `MCOPY`
 - validated `JUMP`, `JUMPI`, `PC`, `GAS`, `JUMPDEST`
+- `LOG0` through `LOG4`
 - `RETURN`, `REVERT`
 - `INVALID` as an explicit execution fault
 
 Recognized TODO opcodes:
 
-- blob transaction data: `BLOBHASH`
-- logs: `LOG0` through `LOG4`
 - create/call opcodes: `CREATE`, `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE2`, `STATICCALL`, `SELFDESTRUCT`
 
 Undefined byte values still fail as unsupported opcodes.
@@ -163,8 +182,6 @@ Smoke samples:
 
 Near-term expansion:
 
-- Transaction log ownership, rollback and `LOG0` through `LOG4`.
-- `BLOBHASH` transaction inputs.
 - Call frames and exact `CREATE`/`CREATE2` deployment semantics.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. Full Cancun conformance and performance comparisons

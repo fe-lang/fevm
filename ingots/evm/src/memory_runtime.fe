@@ -71,7 +71,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         index += 1
     }
     result.release()
-    state.finish(commit: true, gas_spent: 0).state.release()
+    state.finish(commit: true, gas_spent: 0).release()
 }
 
 #[test]
@@ -104,5 +104,5 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
     vm.release()
-    state.finish(commit: true, gas_spent: 0).state.release()
+    state.finish(commit: true, gas_spent: 0).release()
 }

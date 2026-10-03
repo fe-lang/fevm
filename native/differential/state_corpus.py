@@ -31,7 +31,7 @@ def scope(actions, commit, static=False):
 
 
 def transaction(actions, *, warm=False, commit=True):
-    return dict(sender=address(11), destination=address(12), coinbase=address(13), block_number=word(0),
+    return dict(blob_hashes=[], sender=address(11), destination=address(12), coinbase=address(13), block_number=word(0),
                 access_accounts=[], access_slots=[dict(address=address(12), slot=word(0))] if warm else [],
                 commit=commit, actions=actions)
 
@@ -162,6 +162,7 @@ def cases():
         rows.append(case(f'blockhash-gas-{code}-{gas}', 'block-history-gas',
                          [transaction([frame(code, gas=gas)])]))
     rows.extend(account_code_cases())
+    rows.extend(logs_blob_cases())
     assert len({row['name'] for row in rows}) == len(rows)
     return rows
 
@@ -326,13 +327,114 @@ def account_code_cases():
     return rows
 
 
+def emit(topics, length=0, offset=0):
+    return ''.join(push(topic) for topic in reversed(topics)) + push(length) + push(offset) + f'{0xa0 + len(topics):02x}'
+
+
+def log_record(topics, data=b'', emitter=12):
+    return dict(address=address(emitter), topics=[word(topic) for topic in topics], data='0x' + data.hex())
+
+
+def logs_blob_cases():
+    rows = []
+    values = [1, 0, 1 << 255, (1 << 256) - 1]
+    data = bytes((index * 13 + 7) % 256 for index in range(137))
+    initialize = push(len(data)) + '5f5f37'
+    for count, length, offset in product(range(5), [0, 1, 31, 32, 33, 136, 257], [0, 1, 31, 136]):
+        topics = values[:count]
+        code = initialize + emit(topics, length, offset)
+        copied = data[offset:offset + length].ljust(length, b'\x00')
+        expected = [log_record(topics, copied)]
+        action = frame(code)
+        action['calldata'] = data.hex()
+        rows.append(case(f'log-data-{count}-{length}-{offset}', 'logs-data', [transaction([action])],
+                         anchors={'0.steps.0.logs': expected, '0.logs': expected}))
+    for count, length, offset, adjustment in product(range(5), [0, 1, 32, 33], [0, 31], [-1, 0, 1]):
+        topics = values[:count]
+        words = (offset + length + 31) // 32 if length else 0
+        spent = sum(2 if value == 0 else 3 for value in [*topics, length, offset])
+        spent += 375 * (count + 1) + 8 * length + 3 * words + words * words // 512
+        expected = [] if adjustment < 0 else [log_record(topics, bytes(length))]
+        rows.append(case(f'log-gas-{count}-{length}-{offset}-{adjustment}', 'logs-gas',
+                         [transaction([frame(emit(topics, length, offset), gas=spent + adjustment)])],
+                         anchors={'0.steps.0.frame.outcome': 'exceptional' if adjustment < 0 else 'success',
+                                  '0.steps.0.frame.gas_remaining': max(0, adjustment), '0.logs': expected}))
+    for count in range(5):
+        topics = values[:count]
+        code = emit(topics, offset=(1 << 256) - 1)
+        spent = 375 * (count + 1) + sum(2 if value == 0 else 3 for value in [*topics, 0, (1 << 256) - 1])
+        rows.append(case(f'log-empty-full-offset-{count}', 'logs-ranges', [transaction([frame(code, gas=spent)])],
+                         anchors={'0.steps.0.frame.memory': '0x', '0.steps.0.frame.gas_remaining': 0,
+                                  '0.logs': [log_record(topics)]}))
+        for available in range(count + 2):
+            rows.append(case(f'log-underflow-{count}-{available}', 'logs-stack',
+                             [transaction([frame('5f' * available + f'{0xa0 + count:02x}')])],
+                             anchors={'0.steps.0.frame.reason': 'stack_underflow', '0.logs': []}))
+        for length, offset in [(1, 1 << 64), (1 << 64, 0), (1 << 255, 0), ((1 << 256) - 1, 1)]:
+            rows.append(case(f'log-overflow-{count}-{length}-{offset}', 'logs-ranges',
+                             [transaction([frame(emit(topics, length, offset))])],
+                             anchors={'0.steps.0.frame.reason': 'out_of_gas', '0.logs': []}))
+        for code in [emit(topics, 1), emit(topics, (1 << 256) - 1), f'{0xa0 + count:02x}']:
+            rows.append(case(f'log-static-{count}-{code}', 'logs-static', [transaction([frame(code, static=True)])],
+                             anchors={'0.steps.0.frame.reason': 'static_write', '0.logs': []}))
+    records = [log_record([index]) for index in range(1, 6)]
+    actions = [frame(emit([1])), scope([frame(emit([2])), scope([frame(emit([3]))], True), frame(emit([4]))], False), frame(emit([5]))]
+    rows.append(case('logs-child-commit-parent-revert', 'logs-checkpoints', [transaction(actions)],
+                     anchors={'0.steps.3.logs': records[:3], '0.steps.5.logs': records[:1], '0.logs': [records[0], records[4]]}))
+    rows.append(case('logs-child-revert-parent-commit', 'logs-checkpoints', [transaction([
+        scope([frame(emit([1])), scope([frame(emit([2]))], False), frame(emit([3]))], True)])],
+        anchors={'0.logs': [records[0], records[2]]}))
+    rows.append(case('logs-inherited-static', 'logs-static', [transaction([
+        frame(emit([1])), scope([frame(emit([2]))], True, True)])],
+        anchors={'0.steps.1.frame.reason': 'static_write', '0.logs': records[:1]}))
+    for ending in ['5f5ffd', 'fe', '01']:
+        rows.append(case(f'logs-failed-frame-{ending}', 'logs-checkpoints', [transaction([
+            frame(emit([1])), frame(emit([2]) + store(9) + ending), frame(emit([3]))])],
+            anchors={'0.steps.1.logs': records[:1], '0.storage.0': word(0), '0.logs': [records[0], records[2]]}))
+    rows.append(case('logs-out-of-gas-after-append', 'logs-checkpoints', [transaction([
+        frame(emit([1])), frame(emit([], length=0) + '5f', gas=379)])],
+        anchors={'0.steps.1.frame.reason': 'out_of_gas', '0.logs': records[:1]}))
+    for commit in [False, True]:
+        rows.append(case(f'logs-transaction-{commit}', 'logs-checkpoints', [
+            transaction([frame(emit([1]))], commit=commit), transaction([frame(emit([2]))])],
+            anchors={'0.steps.0.logs': records[:1], '0.logs': records[:1] if commit else [], '1.logs': records[1:2]}))
+    # Event data is a copy, independent of subsequent frame-memory mutation.
+    code = '60aa5f53' + emit([7], length=1) + '60bb5f53' + emit([8], length=1)
+    rows.append(case('logs-copy-memory-before-mutation', 'logs-data', [transaction([frame(code)])],
+                     anchors={'0.logs': [log_record([7], b'\xaa'), log_record([8], b'\xbb')]}))
+    # BLOBHASH reads the transaction's immutable versioned-hash list, with full-width bounds.
+    for count, index, static in product([0, 1, 2, 6], [0, 1, 2, 5, 6, 1 << 64, 1 << 255, (1 << 256) - 1], [False, True]):
+        hashes = [(1 << 248) | (number + 17) for number in range(count)]
+        tx = transaction([frame(push(index) + '49', static=static)])
+        tx['blob_hashes'] = [word(value) for value in hashes]
+        rows.append(case(f'blobhash-{count}-{index}-{static}', 'blob-hashes', [tx],
+                         anchors={'0.steps.0.frame.stack': [word(hashes[index] if index < count else 0)],
+                                  '0.steps.0.frame.gas_remaining': 1_000_000 - (5 if index == 0 else 6)}))
+    for index, adjustment in product([0, 1, 1 << 255], [-1, 0, 1]):
+        spent = (2 if index == 0 else 3) + 3
+        tx = transaction([frame(push(index) + '49', gas=spent + adjustment)])
+        tx['blob_hashes'] = [word((1 << 248) | 99)]
+        rows.append(case(f'blobhash-gas-{index}-{adjustment}', 'blob-hashes', [tx],
+                         anchors={'0.steps.0.frame.outcome': 'exceptional' if adjustment < 0 else 'success',
+                                  '0.steps.0.frame.gas_remaining': max(0, adjustment)}))
+    rows.append(case('blobhash-underflow', 'blob-hashes', [transaction([frame('49')])],
+                     anchors={'0.steps.0.frame.reason': 'stack_underflow'}))
+    first = transaction([scope([frame('5f49')], False), frame('5f49')], commit=False)
+    second = transaction([frame('5f49')])
+    first['blob_hashes'] = [word((1 << 248) | 1)]
+    second['blob_hashes'] = [word((1 << 248) | 2)]
+    rows.append(case('blobhash-scope-and-transaction-lifetime', 'blob-hashes', [first, second],
+                     anchors={'0.steps.2.frame.stack': first['blob_hashes'], '1.steps.0.frame.stack': second['blob_hashes']}))
+    return rows
+
+
 def payload(case):
     return {key: value for key, value in case.items() if key not in ['name', 'category', 'anchors']}
 
 
 def encode(case):
-    """Version 3: explicit accounts with balance, nonce and arbitrary code bytes."""
-    data = bytearray([3])
+    """Version 4: transaction blob hashes; results also include journaled logs."""
+    data = bytearray([4])
 
     def integer(value, size):
         data.extend((int(value, 16) if isinstance(value, str) else value).to_bytes(size, 'big'))
@@ -375,6 +477,7 @@ def encode(case):
         for key in ['sender', 'destination', 'coinbase']:
             integer(transaction[key], 20)
         integer(transaction['block_number'], 32)
+        sequence(transaction['blob_hashes'], [(None, 32)])
         integer(transaction['commit'], 1)
         sequence(transaction['access_accounts'], [(None, 20)])
         sequence(transaction['access_slots'], [('address', 20), ('slot', 32)])

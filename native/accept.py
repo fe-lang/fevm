@@ -19,7 +19,13 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--check-only', action='store_true', help='omit noisy timing measurements (recommended in shared CI)')
     parser.add_argument('--jobs', type=int, default=1, help='concurrent native test suites (default: 1)')
+    parser.add_argument('--stage-timeout', type=int, default=3600,
+                        help='seconds allowed per acceptance stage (default: 3600)')
+    parser.add_argument('--build-timeout', type=int,
+                        help='override the CLI/frame/state runners’ per-build timeout in seconds')
     args = parser.parse_args()
+    if args.stage_timeout < 1 or (args.build_timeout is not None and args.build_timeout < 1):
+        parser.error('timeouts must be positive')
     if args.jobs < 1:
         parser.error('--jobs must be positive')
     build = json.loads(args.build.read_text())
@@ -35,6 +41,7 @@ def main():
         parser.error('acceptance.json already exists; choose a fresh --out directory')
     record = {'schema': 1, 'build': build, 'host': platform.platform(), 'complete': False,
               'scope': 'native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending',
+              'stage_timeout_seconds': args.stage_timeout, 'build_timeout_seconds': args.build_timeout,
               'checks': []}
     report.write_text(json.dumps(record, indent=2) + '\n')
     commands = [([compiler, 'test', '--backend', 'native', '--jobs', args.jobs, '-O', level, ROOT],
@@ -47,6 +54,10 @@ def main():
     commands.append(([sys.executable, HERE / 'differential/state_run.py', '--fe', compiler,
                       '--out', out / 'cancun-state',
                       '--toolchain', build['manifest']['rust_version']], 'cancun-state'))
+    if args.build_timeout is not None:
+        for command, name in commands:
+            if name in ('cli-smoke', 'cancun-frames', 'cancun-state'):
+                command.extend(['--build-timeout', args.build_timeout])
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
     if args.check_only:
         arithmetic.append('--check-only')
@@ -56,9 +67,9 @@ def main():
         with out.joinpath(f'{name}.log').open('wb') as log:
             try:
                 status = subprocess.run([str(x) for x in command], stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=3600).returncode
+                                        timeout=args.stage_timeout).returncode
             except subprocess.TimeoutExpired:
-                log.write(b'\nAcceptance command exceeded the 3600-second timeout.\n')
+                log.write(f'\nAcceptance command exceeded the {args.stage_timeout}-second timeout.\n'.encode())
                 status = 124
         record['checks'].append({'name': name, 'status': status, 'seconds': time.perf_counter() - started})
         report.write_text(json.dumps(record, indent=2) + '\n')

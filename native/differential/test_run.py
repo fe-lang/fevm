@@ -12,12 +12,19 @@ import run
 
 sys.path.insert(0, str(run.ROOT / 'native'))
 import accept
+from arith.run import command as captured_command
 
 RUST_VERSION = json.loads((run.ROOT / 'native/toolchain.json').read_text())['rust_version']
 FRAME = {'status': 'success', 'stack': [], 'output': '0x'}
 
 
 class ReferenceBuildTests(unittest.TestCase):
+    def test_cli_build_timeout_is_accepted_and_enforced(self):
+        output = captured_command([sys.executable, '-c', 'print("ready")'], timeout=5)
+        self.assertEqual(output, b'ready\n')
+        with self.assertRaises(subprocess.TimeoutExpired):
+            captured_command([sys.executable, '-c', 'import time; time.sleep(5)'], timeout=0.05)
+
     def test_fresh_reference_ignores_ambient_target_and_toolchain(self):
         for setting in ['environment', 'config']:
             with self.subTest(setting=setting):
@@ -71,13 +78,21 @@ class ReferenceBuildTests(unittest.TestCase):
         build.write_text(json.dumps({'complete': True, 'compiler': str(compiler),
                                      'compiler_sha256': run.digest(compiler),
                                      'manifest': {'rust_version': 'bootstrap-selected-toolchain'}}))
-        with patch.object(sys, 'argv', ['accept.py', '--build', str(build), '--out', str(root / 'results')]), \
+        with patch.object(sys, 'argv', ['accept.py', '--build', str(build), '--out', str(root / 'results'),
+                                      '--stage-timeout', '7200', '--build-timeout', '2400']), \
                 patch.object(accept.platform, 'platform', return_value='test host'), \
                 patch.object(accept.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as invoke:
             with self.assertRaises(SystemExit) as result:
                 accept.main()
         self.assertEqual(result.exception.code, 0)
         commands = [call.args[0] for call in invoke.call_args_list]
+        self.assertTrue(all(call.kwargs['timeout'] == 7200 for call in invoke.call_args_list))
+        report = json.loads((root / 'results/acceptance.json').read_text())
+        self.assertEqual(report['stage_timeout_seconds'], 7200)
+        self.assertEqual(report['build_timeout_seconds'], 2400)
+        for runner in ['cli.py', 'differential/run.py', 'differential/state_run.py']:
+            command = next(command for command in commands if str(accept.HERE / runner) in command)
+            self.assertEqual(command[command.index('--build-timeout') + 1], '2400')
         for runner in ['run.py', 'state_run.py']:
             command = next(command for command in commands if str(accept.HERE / f'differential/{runner}') in command)
             self.assertEqual(command[command.index('--toolchain') + 1], 'bootstrap-selected-toolchain')

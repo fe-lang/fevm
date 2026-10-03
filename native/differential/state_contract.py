@@ -4,8 +4,8 @@ import re
 from contract import validate as validate_frame
 
 WORD = re.compile(r'0x[0-9a-f]{64}')
-STEP_FIELDS = {'frame', 'refund_delta', 'refund_counter', 'accounts', 'storage'}
-TX_FIELDS = {'steps', 'refund_counter', 'gas_refunded', 'gas_used', 'balances', 'storage'}
+STEP_FIELDS = {'frame', 'refund_delta', 'refund_counter', 'accounts', 'storage', 'logs'}
+TX_FIELDS = {'steps', 'refund_counter', 'gas_refunded', 'gas_used', 'balances', 'storage', 'logs'}
 
 
 def flattened(actions):
@@ -26,6 +26,21 @@ def words(values, count):
         raise AssertionError('invalid state words')
 
 
+def validate_logs(logs):
+    if not isinstance(logs, list):
+        raise AssertionError('invalid log list')
+    for log in logs:
+        if not isinstance(log, dict) or set(log) != {'address', 'topics', 'data'}:
+            raise AssertionError('invalid log fields')
+        if not isinstance(log['address'], str) or not re.fullmatch(r'0x[0-9a-f]{40}', log['address']):
+            raise AssertionError('invalid log address')
+        if not isinstance(log['topics'], list) or len(log['topics']) > 4:
+            raise AssertionError('invalid log topics')
+        words(log['topics'], len(log['topics']))
+        if not isinstance(log['data'], str) or not re.fullmatch(r'0x(?:[0-9a-f]{2})*', log['data']):
+            raise AssertionError('invalid log data')
+
+
 def validate(case, results):
     if not isinstance(results, list) or len(results) != len(case['transactions']):
         raise AssertionError('wrong transaction result count')
@@ -39,6 +54,7 @@ def validate(case, results):
         for action, step in zip(actions, result['steps'], strict=True):
             if not isinstance(step, dict) or set(step) != STEP_FIELDS:
                 raise AssertionError('invalid step fields')
+            validate_logs(step['logs'])
             signed(step['refund_delta'])
             signed(step['refund_counter'])
             if action['kind'] == 'frame':
@@ -60,6 +76,9 @@ def validate(case, results):
                 if not isinstance(slot, dict) or set(slot) != {'value', 'original', 'transient', 'warm'} or type(slot['warm']) is not bool:
                     raise AssertionError('invalid storage observation')
                 words([slot['value'], slot['original'], slot['transient']], 3)
+        validate_logs(result['logs'])
+        if not transaction['commit'] and result['logs']:
+            raise AssertionError('aborted transaction retained logs')
         signed(result['refund_counter'])
         if not transaction['commit'] and result['refund_counter'] != 0:
             raise AssertionError('aborted transaction retained refund counter')
@@ -85,4 +104,4 @@ def compare(case, reference, observed):
     validate(case, reference)
     validate(case, observed)
     if reference != observed:
-        raise AssertionError('state, warming, gas, refunds or frame results differ')
+        raise AssertionError('state, warming, gas, refunds, logs or frame results differ')

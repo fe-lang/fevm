@@ -5,7 +5,9 @@ use revm_context::{BlockEnv, CfgEnv, Context, Host, JournalTr, TxEnv};
 use revm_database::{DatabaseCommit, InMemoryDB};
 use revm_interpreter::interpreter::{EthInterpreter, ExtBytecode};
 use revm_interpreter::{CallInput, InputsImpl, Interpreter, SharedMemory, instruction_table};
-use revm_primitives::{Address, Bytes, HashMap, HashSet, U256, hardfork::SpecId, hex};
+use revm_primitives::{
+    Address, B256, Bytes, HashMap, HashSet, Log, TxKind, U256, hardfork::SpecId, hex,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{Frame, frame_from_result};
@@ -58,6 +60,7 @@ struct Storage {
 #[serde(deny_unknown_fields)]
 struct Transaction {
     block_number: U256,
+    blob_hashes: Vec<B256>,
     sender: Address,
     destination: Address,
     coinbase: Address,
@@ -98,12 +101,35 @@ struct SlotObservation {
 }
 
 #[derive(Serialize)]
+struct LogObservation {
+    address: String,
+    topics: Vec<String>,
+    data: String,
+}
+
+impl From<&Log> for LogObservation {
+    fn from(log: &Log) -> Self {
+        Self {
+            address: format!("{:#x}", log.address),
+            topics: log
+                .data
+                .topics()
+                .iter()
+                .map(|topic| format!("{topic:#x}"))
+                .collect(),
+            data: format!("0x{}", hex::encode(&log.data.data)),
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct Step {
     frame: Option<Frame>,
     refund_delta: i128,
     refund_counter: i128,
     accounts: Vec<AccountObservation>,
     storage: Vec<SlotObservation>,
+    logs: Vec<LogObservation>,
 }
 
 #[derive(Serialize)]
@@ -114,6 +140,7 @@ pub struct TransactionResult {
     gas_used: u64,
     balances: Vec<String>,
     storage: Vec<String>,
+    logs: Vec<LogObservation>,
 }
 
 struct Runner<'a> {
@@ -201,6 +228,7 @@ impl Runner<'_> {
             refund_counter: self.refund,
             accounts,
             storage,
+            logs: journal.logs().iter().map(LogObservation::from).collect(),
         });
     }
 
@@ -306,6 +334,11 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
         host.block.beneficiary = transaction.coinbase;
         host.block.number = transaction.block_number;
         host.tx.caller = transaction.sender;
+        host.tx.blob_hashes = transaction.blob_hashes.clone();
+        host.tx.kind = TxKind::Call(transaction.destination);
+        host.tx
+            .derive_tx_type()
+            .map_err(|error| format!("invalid reference transaction environment: {error:?}"))?;
         let mut access_list: HashMap<Address, HashSet<U256>> = HashMap::default();
         for address in &transaction.access_accounts {
             access_list.entry(*address).or_default();
@@ -349,6 +382,13 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
         }
         let gas_refunded =
             u64::try_from(runner.refund.max(0).min(i128::from(runner.gas_spent / 5)))?;
+        let logs = runner
+            .host
+            .journaled_state
+            .logs()
+            .iter()
+            .map(LogObservation::from)
+            .collect();
         let state = runner.host.journaled_state.finalize();
         database = runner.host.journaled_state.database;
         database.commit(state);
@@ -380,6 +420,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
             gas_used: runner.gas_spent - gas_refunded,
             balances,
             storage,
+            logs,
         });
     }
     Ok(results)
@@ -388,7 +429,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{Case, execute};
-    use revm_primitives::U256;
+    use revm_primitives::{B256, U256};
     use serde_json::{Value, json};
 
     fn case(original: u64, transactions: Value) -> Case {
@@ -404,7 +445,7 @@ mod tests {
 
     fn transaction(actions: Value) -> Value {
         json!({
-            "block_number": "0x0",
+            "block_number": "0x0", "blob_hashes": [],
             "sender": "0x0000000000000000000000000000000000000000",
             "destination": "0x0000000000000000000000000000000000000000",
             "coinbase": "0x0000000000000000000000000000000000000000",
@@ -414,6 +455,43 @@ mod tests {
 
     fn frame(code: &str) -> Value {
         json!({"kind": "frame", "code": code, "calldata": "", "gas_limit": 1_000_000, "is_static": false})
+    }
+
+    #[test]
+    fn blob_hashes_use_the_blob_transaction_host_path() {
+        let mut input = case(0, json!([transaction(json!([frame("5f49600149")]))]));
+        let hash = B256::from([1; 32]);
+        input.transactions[0].blob_hashes = vec![hash];
+        let results = execute(input).unwrap();
+        assert_eq!(
+            results[0].steps[0]
+                .frame
+                .as_ref()
+                .unwrap()
+                .stack
+                .as_ref()
+                .unwrap(),
+            &[format!("{hash:#x}"), format!("0x{:064x}", 0)]
+        );
+    }
+
+    #[test]
+    fn log_observations_follow_real_journal_rollback_and_finalization() {
+        let input = case(
+            0,
+            json!([transaction(json!([
+                frame("60aa5f53600560015fa1"),
+                {"kind": "scope", "is_static": false, "commit": false, "actions": [frame("5f5fa0")]},
+                frame("5f5fa0fe"),
+            ]))]),
+        );
+        let results = execute(input).unwrap();
+        assert_eq!(results[0].steps[1].logs.len(), 2);
+        assert_eq!(results[0].steps[2].logs.len(), 1);
+        assert_eq!(results[0].steps[3].logs.len(), 1);
+        assert_eq!(results[0].logs.len(), 1);
+        assert_eq!(results[0].logs[0].data, "0xaa");
+        assert_eq!(results[0].logs[0].topics, [format!("0x{:064x}", 5)]);
     }
 
     #[test]

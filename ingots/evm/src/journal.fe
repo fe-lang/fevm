@@ -1,4 +1,5 @@
 use std::native::ByteBuffer
+use ingot::buffer::{read_word, write_word}
 
 // Fixed-width records in a growable owner. Undo only reads/truncates initialized
 // bytes and therefore cannot fail to allocate while unwinding a failed frame.
@@ -18,32 +19,14 @@ impl Journal {
     pub fn new() -> Self { Self { bytes: ByteBuffer::new() } }
     pub fn len(self) -> u64 { self.bytes.len() }
 
-    fn write_word(mut self, offset: u64, value: u256) {
-        let mut i: u64 = 0
-        while i < 32 {
-            self.bytes.set_byte(index: offset + i, value: (value >> (i * 8) as u256).downcast_truncate())
-            i += 1
-        }
-    }
-
-    fn read_word(self, offset: u64) -> u256 {
-        let mut value: u256 = 0
-        let mut i: u64 = 0
-        while i < 32 {
-            value |= (self.bytes.byte_at(offset + i) as u256) << (i * 8) as u256
-            i += 1
-        }
-        value
-    }
-
     pub fn append(mut self, _ change: Change) -> bool {
         let offset = self.len()
         // ByteBuffer bounds its extent to PTRDIFF_MAX, so this addition fits.
         if !self.bytes.try_resize(offset + RECORD_SIZE) { return false }
         self.bytes.set_byte(index: offset, value: change.kind)
-        self.write_word(offset: offset + 1, value: change.address)
-        self.write_word(offset: offset + 33, value: change.slot)
-        self.write_word(offset: offset + 65, value: change.previous)
+        write_word(mut self.bytes, offset: offset + 1, value: change.address)
+        write_word(mut self.bytes, offset: offset + 33, value: change.slot)
+        write_word(mut self.bytes, offset: offset + 65, value: change.previous)
         self.bytes.set_byte(index: offset + 97, value: if change.existed { 1 } else { 0 })
         true
     }
@@ -53,9 +36,9 @@ impl Journal {
         let offset = self.len() - RECORD_SIZE
         let change = Change {
             kind: self.bytes.byte_at(offset),
-            address: self.read_word(offset: offset + 1),
-            slot: self.read_word(offset: offset + 33),
-            previous: self.read_word(offset: offset + 65),
+            address: read_word(self.bytes, offset: offset + 1),
+            slot: read_word(self.bytes, offset: offset + 33),
+            previous: read_word(self.bytes, offset: offset + 65),
             existed: self.bytes.byte_at(offset + 97) != 0,
         }
         core::assert(self.bytes.try_resize(offset))

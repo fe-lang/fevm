@@ -686,7 +686,45 @@ impl Vm {
         }
     }
 
+    fn log(mut self, _ topics_count: u64, _ call: CallEnv, _ state: mut Transaction) {
+        if state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return
+        }
+        let offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+        let plan = match memory_expansion(current: self.memory.len(), offset, len) {
+            Option::Some(plan) => plan,
+            Option::None => {
+                self.fault(ERR_OUT_OF_GAS)
+                return
+            },
+        }
+        let length: u64 = len.downcast_unchecked()
+        if !self.charge(375 + topics_count as u128 * 375 + length as u128 * 8 + plan.gas as u128) { return }
+        let mut topics: [u256; 4] = [0; 4]
+        let mut topic: u64 = 0
+        while topic < topics_count {
+            topics[topic as usize] = self.pop()
+            topic += 1
+        }
+        if !self.ok() || !self.expand_memory(plan.size) { return }
+        let start: u64 = if length == 0 { 0 } else { offset.downcast_unchecked() }
+        self.fault(state.emit_log(address: call.address, topics, topic_count: topics_count,
+                                  data: self.memory, offset: start, len: length))
+    }
+
     fn step_state(mut self, _ op: i32, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) -> bool {
+        if op >= 0xa0 && op <= 0xa4 {
+            self.log((op - 0xa0).downcast_unchecked(), call, mut state)
+            return true
+        }
+        if op == 0x49 {
+            let index = self.pop()
+            if self.ok() { self.push(state.blob_hash(index)) }
+            return true
+        }
         if op == 0x3c {
             self.extcodecopy(mut state)
             return true

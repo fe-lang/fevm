@@ -36,7 +36,7 @@ pub fn main() -> i32 {
     let child = checkpoint(mut transaction)
     core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
     transaction.revert(child)
-    let world = transaction.finish(commit: true, gas_spent: 0).state
+    let world = transaction.finish(commit: true, gas_spent: 0).into_state()
     core::assert(world.storage_load(7, 3) == 9000)
     world.release()
     0
