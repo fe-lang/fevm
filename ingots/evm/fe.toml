@@ -4,3 +4,4 @@ version = "0.1.0"
 
 [dependencies]
 swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "3987cfe26cd18f1fe1293377e5fda8f6723b51c2" }
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "7f32a75b9426f68fd3d44c2d09207386c481355d" }

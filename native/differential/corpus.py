@@ -236,5 +236,49 @@ def cases():
     add('gas-u64-max', 'gas', b'\x5a', gas_limit=(1 << 64) - 1,
         expected=success((1 << 64) - 3, gas_remaining=(1 << 64) - 3, memory='0x'))
     add('loop-exhaustion', 'gas', bytes.fromhex('5b5f56'), gas_limit=100, expected=exceptional('out_of_gas'))
+    empty_hash = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+    abc_hash = 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45
+    for offset in [0, 1, 1 << 64, 1 << 255, MASK]:
+        add(f'keccak-empty-{offset:x}', 'keccak', push(0) + push(offset) + b'\x20',
+            expected=success(empty_hash, gas_remaining=999964, memory='0x'))
+    add('keccak-abc', 'keccak', bytes.fromhex('626162635f526003601d20'),
+        expected=success(abc_hash, gas_remaining=999947, memory='0x' + '00' * 29 + '616263'))
+    # Known input is copied into an unaligned subrange. Check the whole active
+    # memory and exact gas independently; revm supplies the digest oracle.
+    for length in [0, 1, 7, 8, 31, 32, 33, 63, 64, 65, 134, 135, 136, 137, 138,
+                   271, 272, 273, 407, 408, 409, 1024, 4096]:
+        data = rng.randbytes(length)
+        for offset in [0, 1, 31]:
+            words = (length + 31) // 32
+            size = (offset + length + 31) // 32 * 32 if length else 0
+            active_words = size // 32
+            memory_cost = 3 * active_words + active_words * active_words // 512
+            memory = (b'\0' * offset + data).ljust(size, b'\0') if length else b''
+            code = push(length) + push(0) + push(offset) + b'\x37' + push(length) + push(offset) + b'\x20'
+            add(f'keccak-range-{offset}-{length}', 'keccak', code, data,
+                expected={'outcome': 'success', 'gas_remaining': 1_000_000 - 48 - 9 * words - memory_cost,
+                          'memory': '0x' + memory.hex()})
+    # Hashing newly expanded memory must read zeroes, including multiple rates.
+    for length in [1, 32, 33, 135, 136, 137, 272, 4096, 9000]:
+        words = (length + 31) // 32
+        cost = 36 + 9 * words + words * words // 512
+        add(f'keccak-zero-extension-{length}', 'keccak', push(length) + push(0) + b'\x20',
+            expected={'outcome': 'success', 'gas_remaining': 1_000_000 - cost,
+                      'memory': '0x' + '00' * (words * 32)})
+    for length, required in [(0, 36), (1, 45), (33, 54), (136, 81)]:
+        for gas in [required - 1, required, required + 1]:
+            expected = (exceptional('out_of_gas') if gas < required else
+                        {'outcome': 'success', 'gas_remaining': gas - required,
+                         'memory': '0x' + '00' * ((length + 31) // 32 * 32)})
+            add(f'keccak-gas-{length}-{gas}', 'keccak', push(length) + push(0) + b'\x20',
+                gas_limit=gas, expected=expected)
+    for offset, length in [(MASK, 1), (1, MASK), (1 << 64, 1), (0, 1 << 64),
+                           (1 << 255, 1), (0, 1 << 255), (1 << 42, 1), ((1 << 42) - 1, 1)]:
+        add(f'keccak-unpayable-{offset:x}-{length:x}', 'keccak', push(length) + push(offset) + b'\x20',
+            expected=exceptional('out_of_gas'))
+    for available in [0, 1]:
+        add(f'keccak-underflow-{available}', 'keccak', b'\x5f' * available + b'\x20',
+            expected=exceptional('stack_underflow'))
+
     assert len({case['name'] for case in result}) == len(result)
     return result

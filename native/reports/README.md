@@ -1,7 +1,8 @@
 # Native arithmetic evidence: AArch64 macOS
 
-For the current local compiler and Linux native acceptance, see the
-[owned-memory checkpoint](memory-integration-draft.md). The
+For the current compiler and native acceptance status, see the
+[Keccak checkpoint](keccak-integration.md). The
+[owned-memory checkpoint](memory-integration-draft.md) and
 [owned-buffer foundation](owned-buffer-foundation.md) retains the earlier macOS
 acceptance. The measurements below use earlier compiler revisions.
 

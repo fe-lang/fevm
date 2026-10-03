@@ -10,7 +10,8 @@ x86_64 Linux: 37 workspace tests, 14 CLI/allocator checks, 1,729 Cancun frames
 and 349 stateful sequences at each of O0/O1/O2, plus arithmetic and SwissTable
 matrices. It adds Cancun warm/cold access, original storage and signed refunds
 to the accepted [transaction journal](reports/transaction-journal.md).
-This compiler pin and state-gas source still need an AArch64 macOS acceptance run.
+That historical checkpoint retains its own compiler pin. The current pin and
+expanded corpus still need an AArch64 macOS acceptance run.
 
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
@@ -24,26 +25,19 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current Fe compiler is the local branch `integrate/fevm-transactions-20261001`,
-based on master with performance PRs #1661–#1667, pointer-analysis PR #1628,
-and LSP PR #1674. Transaction prerequisites add PRs #1681, #1683, #1685,
-#1686, #1687, #1689, and #1693 for input separation, call effects, and recursive
-buffer summaries. State-driver builds also include PR #1694 for runtime String
-`AsBytes` conversion. Master already includes shared guard graphs from PR #1638.
-The published Sonatina pin includes merged verifier PR #356 and aggregate
-initialization-sharing PR #357, plus PRs #368–#370 in stack #371 for reference
-retirement and indexed view writes. Exact revisions and the Cargo lock hash are
-in `toolchain.json`.
+The current pin uses published Fe master `04d344105` and Sonatina `9c350187`.
+Exact revisions, the Rust version and Cargo lock hash are in `toolchain.json`.
+Keccak is a separately tested Git dependency; its native differential and timing
+suite lives in [fe-lang/keccak](https://github.com/fe-lang/keccak). FeVM does not
+need the experimental compiler barrier used by that benchmark.
 
-The Fe integration commit is not published. Supply the local Fe repository or
-a Git bundle containing it with `--fe-repository`; on this machine it is `../fe`.
-The bootstrap verifies exact commits and uses their committed sources.
-See [Cloud/Linux handoff](cloud-linux.md) for moving the local integration.
+Bootstrap verifies exact commits and builds their committed sources. Native
+acceptance defaults to one test suite at a time (`--jobs` overrides it), because
+preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
 python3 native/bootstrap.py --out native/out/toolchain \
-  --toolchain 1.98.1 \
-  --fe-repository ../fe
+  --toolchain 1.98.1
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```

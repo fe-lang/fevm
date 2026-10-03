@@ -3,12 +3,12 @@
 This runner compares FeVM's single-frame execution with `revm-interpreter`
 **31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
 explicitly configured for **Cancun**. Cargo.lock pins the reference and its
-dependencies. The corpus includes 1,729 frames: arithmetic batches, all PUSH
+dependencies. The corpus includes 1,835 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
-remaining gas, and returned/reverted bytes. A looping program checks gas exhaustion.
+remaining gas, Keccak ranges/padding/gas, and returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
-Current checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
+Previous checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
 reason differences per level match the agreed contract below. See the
 [state-gas acceptance report](../reports/state-gas.md).
@@ -102,7 +102,7 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 349 deterministic cases. Its reference uses the pinned
+The stateful corpus has 383 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,
@@ -114,21 +114,23 @@ The reference observes its journal directly so inspection does not warm a key.
 Cases include the EIP-2200 storage sequences adjusted to Cancun, cold/warm gas
 boundaries, upfront sender/destination/coinbase/precompile warming, duplicate
 access lists, high-bit BALANCE aliases, negative frame refund contributions,
-static writes, child commit/revert, parent rollback, and transaction abort/reuse.
+static writes, child commit/revert, parent rollback, transaction abort/reuse, and
+BLOCKHASH history-window/operand/gas boundaries.
 The Python contract checks field shapes and accounting invariants; independent
 anchors check the reference's gas, refund and value results. Operational failures
 fail the comparison. Unlike the stateless simultaneous-fault controls, these
 state cases require exact diagnostic reasons as well as exact results.
 
 The native state driver takes one versioned binary case encoded as hex. Integers
-and lengths use big endian; the encoder lives in `state_corpus.py`. Its current
+and lengths use big endian. Version 2 adds explicit block history and a block
+number per transaction; version 1 is no longer accepted. The encoder lives in `state_corpus.py`. Its current
 4,096-byte input limit is a harness limit. JSON lines remain the reference input
 and retained corpus format. Each case starts a fresh native process, while all
 frames and transactions in that case execute in that process. The scope models
 journal boundaries directly; it does not implement CALL/CREATE, transaction
 signatures, intrinsic gas or access-list intrinsic charges.
 
-All 349 stateful cases pass at O0/O1/O2 on x86_64 Linux with the
+The previous 349 stateful cases pass at O0/O1/O2 on x86_64 Linux with the
 [state-gas compiler pin](../reports/state-gas-toolchain.json). AArch64 macOS
 acceptance remains pending. The full native acceptance command includes this
 corpus as its own stage.

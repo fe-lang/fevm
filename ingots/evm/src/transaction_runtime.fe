@@ -143,7 +143,8 @@ fn transaction_enforces_frame_depth_without_closing_parent() {
 fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // Both persistent and transient writes precede each exit. TODO remains an
     // operational failure, but it must still roll back the frame's writes.
-    for exit in [0xfd, 0xfe, 0x01, 0x20] {
+    // LOG0 supplies that exit now that SHA3 is implemented.
+    for exit in [0xfd, 0xfe, 0x01, 0xa0] {
         let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         let code = program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
         // ADD has two operands here; use a second ADD to trigger underflow.

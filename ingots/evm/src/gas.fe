@@ -11,6 +11,7 @@ pub fn base_cost(_ op: i32) -> u64 {
     if op == 0x0a || op == 0x57 {
         return 10
     }
+    if op == 0x20 { return 30 }
     if op == 0x40 { return 20 }
     if op == 0x5b { return 1 }
     if op == 0x5c || op == 0x5d {

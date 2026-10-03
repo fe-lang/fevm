@@ -9,23 +9,23 @@ The repo is a Fe workspace:
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
 - `native/fixtures/journal`: an allocation-failure fixture run by the native harness
 
-The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable),
-a generic fixed-capacity hash table, through an immutable git revision in
-`ingots/evm/fe.toml`. Fe fetches that dependency when resolving the workspace.
+The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
+for fixed-capacity hash tables and [keccak](https://github.com/fe-lang/keccak)
+for Keccak-256. `ingots/evm/fe.toml` pins both to immutable Git revisions; Fe
+fetches them when resolving the workspace.
 
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
 python3 native/bootstrap.py --out native/out/toolchain \
-  --toolchain 1.98.1 --fe-repository ../fe
+  --toolchain 1.98.1
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The current compiler pin uses the local Fe branch
-`integrate/fevm-transactions-20261001`; `../fe` must contain that branch's commit.
-See [native build instructions](native/README.md) for the integrated PRs and
-rebuilding from another checkout or a Git bundle.
+The compiler pin uses published Fe master and Sonatina revisions. See
+[native build instructions](native/README.md) for prerequisites and reproducible
+acceptance commands.
 
 Sample output:
 
@@ -87,9 +87,16 @@ The [state-gas checkpoint](native/reports/state-gas.md) passes full native
 acceptance at O0/O1/O2 on x86_64 Linux. It builds on the separately recorded
 [transaction journal](native/reports/transaction-journal.md).
 
+SHA3 uses the separately tested [Fe Keccak library](https://github.com/fe-lang/keccak),
+pinned to an immutable Git revision. It charges 30 gas plus six per input word
+and memory expansion before allocating, and borrows the selected memory range.
+Zero-length input ignores the offset. BLOCKHASH exposes only the previous
+256 blocks, including when the host supplies entries outside that window.
+
 Implemented opcode slice:
 
 - `STOP`
+- `SHA3` (Ethereum Keccak-256)
 - `PUSH0`, `PUSH1` through `PUSH32`
 - `POP`, `DUP1` through `DUP16`, `SWAP1` through `SWAP16`
 - `ADD`, `MUL`, `SUB`, `DIV`, `SDIV`, `MOD`, `SMOD`, `ADDMOD`, `MULMOD`, `EXP`
@@ -105,7 +112,6 @@ Implemented opcode slice:
 
 Recognized TODO opcodes:
 
-- `SHA3`
 - account and history opcodes: `EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH`, `BLOBHASH`
 - logs: `LOG0` through `LOG4`
 - create/call opcodes: `CREATE`, `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE2`, `STATICCALL`, `SELFDESTRUCT`
@@ -128,7 +134,6 @@ Smoke samples:
 
 Near-term expansion:
 
-- Keccak support for `SHA3` in native Fe.
 - Account code tables for external code opcodes.
 - Direct runtime-code deployment before exact `CREATE`/`CREATE2` address derivation.
 - Environment fixtures for logs, calls, and nested execution.

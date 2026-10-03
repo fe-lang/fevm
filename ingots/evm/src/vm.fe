@@ -1,5 +1,6 @@
 use core::Option
 use std::native::ByteBuffer
+use keccak::Keccak256
 use ingot::memory::{MemoryExpansion, memory_expansion, copy_expansion, copy_gas}
 use ingot::gas::base_cost
 use ingot::state::address_word
@@ -144,6 +145,33 @@ impl Vm {
             return false
         }
         true
+    }
+
+    fn sha3(mut self) {
+        let offset = self.pop()
+        let len = self.pop()
+        if !self.ok() { return }
+        match memory_expansion(current: self.memory.len(), offset, len) {
+            Option::Some(plan,) => {
+                // A successful plan bounds every nonempty range below 2^42.
+                // Charge the whole operation before allocating or narrowing offsets.
+                let words: u64 = (len / 32 + if len % 32 == 0 { 0 } else { 1 }).downcast_unchecked()
+                let gas = plan.gas as u128 + words as u128 * 6
+                if !self.charge(gas) || !self.expand_memory(plan.size) { return }
+            },
+            Option::None => {
+                self.fault(ERR_OUT_OF_GAS)
+                return
+            },
+        }
+        let mut hash = Keccak256::new()
+        if len != 0 {
+            hash.update(self.memory, offset: offset.downcast_unchecked(), len: len.downcast_unchecked())
+        }
+        let digest = hash.finish()
+        let mut value: u256 = 0
+        for byte in digest { value = (value << 8) | byte as u256 }
+        self.push(value)
     }
 
     fn mload(mut self) {
@@ -704,7 +732,7 @@ impl Vm {
         }
 
         if op == 0x20 {
-            self.todo(op)
+            self.sha3()
             return
         }
 

@@ -18,7 +18,10 @@ def main():
     parser.add_argument('--build', type=Path, required=True, help='bootstrap build.json')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--check-only', action='store_true', help='omit noisy timing measurements (recommended in shared CI)')
+    parser.add_argument('--jobs', type=int, default=1, help='concurrent native test suites (default: 1)')
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error('--jobs must be positive')
     build = json.loads(args.build.read_text())
     if not build.get('complete'):
         parser.error('compiler bootstrap is incomplete')
@@ -34,7 +37,7 @@ def main():
               'scope': 'native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending',
               'checks': []}
     report.write_text(json.dumps(record, indent=2) + '\n')
-    commands = [([compiler, 'test', '--backend', 'native', '-O', level, ROOT],
+    commands = [([compiler, 'test', '--backend', 'native', '--jobs', args.jobs, '-O', level, ROOT],
                  f'workspace-O{level}') for level in ['0', '1', '2']]
     commands.append(([sys.executable, HERE / 'cli.py', '--fe', compiler,
                       '--out', out / 'cli'], 'cli-smoke'))

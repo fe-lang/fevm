@@ -1,0 +1,101 @@
+use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
+use ingot::constants::{ERR_OUT_OF_GAS, ERR_STACK_UNDERFLOW}
+use ingot::vm::Vm
+
+#[test]
+fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
+    for gas in [35 as u64, 36, 37] {
+        let mut bytes: [u8; 4096] = [0; 4096]
+        // PUSH1 0; PUSH32 MAX; SHA3.
+        bytes[0] = 0x60
+        bytes[2] = 0x7f
+        let mut index: usize = 3
+        while index < 35 {
+            bytes[index] = 255
+            index += 1
+        }
+        bytes[35] = 0x20
+        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        let mut vm = Vm::new()
+        let mut call = default_call_env()
+        call.gas_limit = gas
+        call.is_static = true
+        vm.run(Program::new(bytes, len: 36, status: OK), empty_bytes(), call, default_block_env(), mut state)
+        core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
+        if gas < 36 {
+            core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0)
+        } else {
+            core::assert(vm.status == OK && vm.gas_remaining == gas - 36 && vm.sp == 1)
+            core::assert(vm.stack[0] == 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470)
+        }
+        vm.release()
+        let _ = state.finish(commit: true, gas_spent: gas)
+    }
+}
+
+#[test]
+fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
+    let mut bytes: [u8; 4096] = [0; 4096]
+    let mut index: usize = 0
+    for byte in [0x62, 0x61, 0x62, 0x63, 0x5f, 0x52, 0x60, 3, 0x60, 29, 0x20] {
+        bytes[index] = byte
+        index += 1
+    }
+    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let mut vm = Vm::new()
+    let mut call = default_call_env()
+    call.gas_limit = 53
+    vm.run(Program::new(bytes, len: index, status: OK), empty_bytes(), call, default_block_env(), mut state)
+    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 1)
+    core::assert(vm.stack[0] == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45)
+    core::assert(vm.memory.len() == 32 && vm.memory.byte_at(28) == 0)
+    core::assert(vm.memory.byte_at(29) == 97 && vm.memory.byte_at(30) == 98 && vm.memory.byte_at(31) == 99)
+    vm.release()
+    let _ = state.finish(commit: true, gas_spent: 53)
+}
+
+#[test]
+fn sha3_checks_stack_and_charges_before_allocation() {
+    for (available, offset, len, gas, status) in [
+        (0 as u64, 0, 0, 100, ERR_STACK_UNDERFLOW),
+        (1, 0, 0, 100, ERR_STACK_UNDERFLOW),
+        (2, 0, 1, 44, ERR_OUT_OF_GAS),
+        (2, 0, 33, 53, ERR_OUT_OF_GAS),
+        (2, 0, 136, 80, ERR_OUT_OF_GAS),
+        (2, 1 << 255, 1, 1000000, ERR_OUT_OF_GAS),
+        (2, 0, !(0 as u256), 1000000, ERR_OUT_OF_GAS),
+    ] {
+        let mut bytes: [u8; 4096] = [0; 4096]
+        let mut size: usize = 0
+        if available > 0 {
+            bytes[size] = 0x7f
+            size += 1
+            let mut index: usize = 0
+            while index < 32 {
+                bytes[size] = (len >> ((31 - index) * 8) as u256).downcast_truncate()
+                size += 1
+                index += 1
+            }
+        }
+        if available > 1 {
+            bytes[size] = 0x7f
+            size += 1
+            let mut index: usize = 0
+            while index < 32 {
+                bytes[size] = (offset >> ((31 - index) * 8) as u256).downcast_truncate()
+                size += 1
+                index += 1
+            }
+        }
+        bytes[size] = 0x20
+        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        let mut vm = Vm::new()
+        let mut call = default_call_env()
+        call.gas_limit = gas
+        vm.run(Program::new(bytes, len: size + 1, status: OK), empty_bytes(), call, default_block_env(), mut state)
+        core::assert(vm.status == status && vm.gas_remaining == 0)
+        core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
+        vm.release()
+        let _ = state.finish(commit: true, gas_spent: gas)
+    }
+}

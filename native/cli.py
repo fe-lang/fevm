@@ -15,6 +15,8 @@ CASES = [
     ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata]\n'),
     ('empty', [''], 0, 'empty\n'),
     ('stop', ['00'], 0, 'empty\n'),
+    ('keccak-empty', ['5f5f20'], 0, '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n'),
+    ('keccak-abc', ['626162635f526003601d20'], 0, '0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n'),
     ('add', ['6002600301'], 0, f'0x{5:064x}\n'),
     ('calldata-return', ['6002600060003760026000f3', '1234'], 0, '0x1234\n'),
     ('bad-hex', ['zz'], 3, 'invalid hex bytecode\n'),
