@@ -24,6 +24,8 @@ CASES = [
     ('blobhash-empty', ['5f49'], 0, f'0x{0:064x}\n'),
     ('add', ['6002600301'], 0, f'0x{5:064x}\n'),
     ('calldata-return', ['6002600060003760026000f3', '1234'], 0, '0x1234\n'),
+    ('large-code-size', ['3800' + '00' * 8191], 0, f'0x{8193:064x}\n'),
+    ('large-calldata-size', ['36', 'ab' * 9001], 0, f'0x{9001:064x}\n'),
     ('bad-hex', ['zz'], 3, 'invalid hex bytecode\n'),
     ('odd-hex', ['0'], 4, 'hex bytecode has an odd number of digits\n'),
     ('stack-underflow', ['01'], 10, 'stack underflow\n'),

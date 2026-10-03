@@ -482,6 +482,4 @@ def encode(case):
         sequence(transaction['access_accounts'], [(None, 20)])
         sequence(transaction['access_slots'], [('address', 20), ('slot', 32)])
         actions(transaction['actions'])
-    if len(data) > 4096:
-        raise ValueError('state case exceeds the native harness input capacity')
     return '0x' + data.hex()

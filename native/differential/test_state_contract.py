@@ -84,8 +84,10 @@ class StateContractTests(unittest.TestCase):
 
     def test_wire_encoding_bounds(self):
         self.assertTrue(encode(self.case).startswith('0x04'))
-        self.case['transactions'][0]['actions'][0]['code'] = '00' * 4096
-        with self.assertRaises(ValueError):
+        self.case['transactions'][0]['actions'][0]['code'] = '00' * 9000
+        self.assertGreater(len(bytes.fromhex(encode(self.case)[2:])), 9000)
+        self.case['transactions'][0]['actions'][0]['code'] = '00' * 65536
+        with self.assertRaises(OverflowError):
             encode(self.case)
 
 

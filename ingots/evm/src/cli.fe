@@ -3,7 +3,6 @@ use std::io::{Write, host, write, write_char, writeln}
 use std::native::Args
 use ingot::constants::{
     ERR_BAD_HEX,
-    ERR_CODE_TOO_LONG,
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
     ERR_OUT_OF_GAS,
@@ -40,7 +39,7 @@ fn write_parse_error(_ status: i32) uses (w: mut Write) {
     match status {
         ERR_BAD_HEX => writeln("invalid hex bytecode"),
         ERR_ODD_HEX => writeln("hex bytecode has an odd number of digits"),
-        ERR_CODE_TOO_LONG => writeln("bytecode is too large"),
+        ERR_HOST_ALLOCATION => writeln("host allocation failed"),
         _ => writeln("failed to parse bytecode"),
     }
 }
@@ -97,16 +96,18 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
         let program = parse_hex_program(args.get(1))
         if program.status != OK {
             write_parse_error(program.status)
-            return program.status
+            let status = program.status
+            program.release()
+            return status
         }
 
-        let mut calldata = empty_bytes()
-        if args.len() == 3 {
-            calldata = parse_hex_bytes(args.get(2))
-            if calldata.status != OK {
-                write_parse_error(calldata.status)
-                return calldata.status
-            }
+        let calldata = if args.len() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
+        if calldata.status != OK {
+            write_parse_error(calldata.status)
+            let status = calldata.status
+            calldata.release()
+            program.release()
+            return status
         }
 
         let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)

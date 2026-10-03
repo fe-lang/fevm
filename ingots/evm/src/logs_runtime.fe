@@ -88,7 +88,7 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
             let mut vm = Vm::new()
             let mut call = default_call_env()
             call.gas_limit = gas
-            vm.run(Program::new(code, len: size + 1, status: OK), empty_bytes(), call, default_block_env(), mut tx)
+            vm.run_owned(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx)
             core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
             if gas < cost {
                 core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
@@ -107,7 +107,7 @@ fn log_copies_frame_memory_and_preserves_topic_stack_order() {
     let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let mut vm = Vm::new()
     // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
-    vm.run(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
+    vm.run_owned(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
                     0x60, 1, 0x5f, 0xa2, 0x60, 0xcd, 0x5f, 0x53]),
            empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(vm.status == OK && vm.memory.byte_at(0) == 0xcd)
@@ -132,7 +132,7 @@ fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     let mut call = default_call_env()
     call.is_static = true
     call.gas_limit = 5
-    vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx)
+    vm.run_owned(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack[0] == first)
     vm.release()
     let next = Transaction::new(tx.finish(commit: true, gas_spent: 5).into_state(), sender: 0, destination: 0, coinbase: 0)

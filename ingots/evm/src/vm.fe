@@ -286,8 +286,8 @@ impl Vm {
     fn calldataload(mut self, _ calldata: InputData) {
         let offset = self.pop()
         if !self.ok() { return }
-        let available: u256 = if offset < calldata.len as u256 {
-            calldata.len as u256 - offset
+        let available: u256 = if offset < calldata.len() as u256 {
+            calldata.len() as u256 - offset
         } else {
             0
         }
@@ -296,8 +296,8 @@ impl Vm {
         while i < 32 {
             value <<= 8
             if i < available {
-                let index: usize = (offset + i).downcast_unchecked()
-                value |= calldata.bytes[index] as u256
+                let index: u64 = (offset + i).downcast_unchecked()
+                value |= calldata.byte_at(index) as u256
             }
             i += 1
         }
@@ -320,16 +320,16 @@ impl Vm {
         if len == 0 { return }
         let dest: u64 = offset.downcast_unchecked()
         let count: u64 = len.downcast_unchecked()
-        let available: u256 = if source < calldata.len as u256 {
-            calldata.len as u256 - source
+        let available: u256 = if source < calldata.len() as u256 {
+            calldata.len() as u256 - source
         } else {
             0
         }
         let mut i: u64 = 0
         while i < count {
             let value = if (i as u256) < available {
-                let index: usize = (source + i as u256).downcast_unchecked()
-                calldata.bytes[index]
+                let index: u64 = (source + i as u256).downcast_unchecked()
+                calldata.byte_at(index)
             } else {
                 0
             }
@@ -837,7 +837,7 @@ impl Vm {
         }
 
         if op == 0x36 {
-            self.push(calldata.len as u256)
+            self.push(calldata.len() as u256)
             return
         }
 
@@ -1028,6 +1028,10 @@ impl Vm {
         self.unsupported_opcode = 0
         self.gas_remaining = call.gas_limit
         self.refund_delta = 0
+        if program.status != OK || calldata.status != OK {
+            self.fault(if program.status != OK { program.status } else { calldata.status })
+            return
+        }
         let refund_before = state.refund()
         let checkpoint = match state.checkpoint(is_static: call.is_static) {
             Option::Some(checkpoint) => checkpoint,
@@ -1061,6 +1065,16 @@ impl Vm {
             state.revert(checkpoint)
         }
     }
+    // One-shot inputs are consumed here; run() borrows reusable analyzed code
+    // and input buffers when their caller needs to retain them.
+    pub fn run_owned(
+        mut self, _ program: own Program, _ calldata: own InputData,
+        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
+    ) {
+        self.run(program, calldata, call, block, mut state)
+        program.release()
+        calldata.release()
+    }
     pub fn release(own self) {
         self.memory.release()
         self.output.release()
@@ -1086,20 +1100,20 @@ impl Vm {
 }
 
 pub fn execute_vm(
-    _ program: Program,
-    _ calldata: InputData,
+    _ program: own Program,
+    _ calldata: own InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> Vm {
     let mut vm = Vm::new()
-    vm.run(program, calldata, call, block, mut state)
+    vm.run_owned(program, calldata, call, block, mut state)
     vm
 }
 
 pub fn execute(
-    _ program: Program,
-    _ calldata: InputData,
+    _ program: own Program,
+    _ calldata: own InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,

@@ -13,10 +13,10 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         bytes[i] = op
         i += 1
     }
-    let large = Program::new(bytes, len: i, status: OK)
+    let large = Program::copy_from(bytes, len: i)
     let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let mut vm = Vm::new()
-    vm.run(
+    vm.run_owned(
         large,
         empty_bytes(),
         default_call_env(),
@@ -36,10 +36,10 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     bytes[1] = 32
     bytes[2] = 0x5f
     bytes[3] = 0xf3
-    let small = Program::new(bytes, len: 4, status: OK)
+    let small = Program::copy_from(bytes, len: 4)
     let mut call = default_call_env()
     call.gas_limit = 20
-    vm.run(small, empty_bytes(), call, default_block_env(), mut state)
+    vm.run_owned(small, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.sp == 0)
     core::assert(vm.memory.len() == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
@@ -51,8 +51,8 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     bytes[2] = 0x28
     bytes[3] = 0x5f
     bytes[4] = 0xf3
-    let regrow = Program::new(bytes, len: 5, status: OK)
-    vm.run(
+    let regrow = Program::copy_from(bytes, len: 5)
+    vm.run_owned(
         regrow,
         empty_bytes(),
         default_call_env(),
@@ -83,10 +83,10 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     bytes[2] = 0x7f
     bytes[3] = 0x80
     bytes[35] = 0x53
-    let huge = Program::new(bytes, len: 36, status: OK)
+    let huge = Program::copy_from(bytes, len: 36)
     let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let mut vm = Vm::new()
-    vm.run(
+    vm.run_owned(
         huge,
         empty_bytes(),
         default_call_env(),
@@ -97,10 +97,10 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
     core::assert(vm.output.len() == 0 && vm.output.capacity() == 0)
 
-    let stop = Program::new([0; 4096], len: 1, status: OK)
+    let stop = Program::copy_from([0 as u8], len: 1)
     let mut call = default_call_env()
     call.gas_limit = 0
-    vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
+    vm.run_owned(stop, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
     vm.release()

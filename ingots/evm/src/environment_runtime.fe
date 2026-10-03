@@ -27,7 +27,7 @@ fn blockhash_limits_history_without_truncating_the_stack_operand() {
         block.number = current
         let mut call = default_call_env()
         call.gas_limit = 23
-        let result = execute(Program::new(bytes, len: 34, status: OK), empty_bytes(), call, block, mut transaction)
+        let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, block, mut transaction)
         core::assert(result.status == OK && result.gas_remaining == 0)
         core::assert(result.stack_top == if valid { 0x1234 } else { 0 })
         result.release()

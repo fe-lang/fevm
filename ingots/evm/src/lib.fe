@@ -31,7 +31,7 @@ fn evm_sload_sstore_roundtrip() {
     bytes[6] = 0x03
     bytes[7] = 0x54
     bytes[8] = 0x00
-    let program = Program::new(bytes, len: 9, status: OK)
+    let program = Program::copy_from(bytes, len: 9)
     let call = CallEnv {
         address: 0xaa,
         caller: 0,
@@ -70,7 +70,7 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     bytes[7] = 0x40
     bytes[8] = 0x01
     bytes[9] = 0x00
-    let program = Program::new(bytes, len: 10, status: OK)
+    let program = Program::copy_from(bytes, len: 10)
     let call = CallEnv {
         address: 0xaa,
         caller: 0,
@@ -113,7 +113,7 @@ fn evm_tload_tstore_roundtrip() {
     bytes[6] = 0x04
     bytes[7] = 0x5c
     bytes[8] = 0x00
-    let program = Program::new(bytes, len: 9, status: OK)
+    let program = Program::copy_from(bytes, len: 9)
     let call = CallEnv {
         address: 0xaa,
         caller: 0,
@@ -175,7 +175,7 @@ fn evm_interleaves_state_and_owned_memory() {
         bytes[len] = op
         len += 1
     }
-    let program = Program::new(bytes, len, status: OK)
+    let program = Program::copy_from(bytes, len)
     let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let result = execute(
         program,

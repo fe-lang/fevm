@@ -1,12 +1,9 @@
-pub const MAX_CODE: usize = 4096
-pub const INPUT_LIMIT: usize = 4096
 pub const STACK_LIMIT: usize = 1024
 
 pub const OK: i32 = 0
 pub const ERR_USAGE: i32 = 2
 pub const ERR_BAD_HEX: i32 = 3
 pub const ERR_ODD_HEX: i32 = 4
-pub const ERR_CODE_TOO_LONG: i32 = 5
 pub const ERR_STACK_UNDERFLOW: i32 = 10
 pub const ERR_STACK_OVERFLOW: i32 = 11
 pub const ERR_UNSUPPORTED_OPCODE: i32 = 13

@@ -6,13 +6,7 @@ use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute}
 
 pub fn program<const N: usize>(_ ops: [u8; N]) -> Program {
-    let mut bytes: [u8; 4096] = [0; 4096]
-    let mut i: usize = 0
-    for op in ops {
-        bytes[i] = op
-        i += 1
-    }
-    Program::new(bytes, len: N, status: OK)
+    Program::copy_from(ops, len: N)
 }
 
 pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint {
@@ -120,7 +114,7 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
 #[inline(never)]
 fn assert_frame_depth_limit(_ tx: mut Transaction) {
     let mut vm = Vm::new()
-    vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    vm.run_owned(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(vm.status == ERR_CALL_DEPTH && tx.depth() == CALL_DEPTH_LIMIT)
     vm.release()
 }
@@ -150,16 +144,18 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // CALL supplies that exit until nested call execution is implemented.
     for exit in [0xfd, 0xfe, 0x01, 0xf1] {
         let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-        let code = program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
         // ADD has two operands here; use a second ADD to trigger underflow.
-        let underflow = program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
+        let selected = if exit == 0x01 {
+            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
+        } else {
+            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
+        }
         let expected = match exit {
             0xfd => ERR_REVERT,
             0xfe => ERR_INVALID_OPCODE,
             0x01 => ERR_STACK_UNDERFLOW,
             _ => ERR_TODO_OPCODE,
         }
-        let selected = if exit == 0x01 { underflow } else { code }
         let result = execute(selected, empty_bytes(), default_call_env(), default_block_env(), mut tx)
         core::assert(result.status == expected && tx.depth() == 0)
         core::assert(tx.storage_load(address: 0, slot: 0) == 0)
@@ -194,7 +190,7 @@ fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
     let world = tx.finish(commit: true, gas_spent: 0).into_state()
     core::assert(world.storage_load(0, 0) == 7)
     let mut next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
-    let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut next)
+    let result = execute(program([0x5f, 0x5c]), empty_bytes(), default_call_env(), default_block_env(), mut next)
     core::assert(result.status == OK && result.stack_top == 0)
     result.release()
     next.finish(commit: true, gas_spent: 0).release()

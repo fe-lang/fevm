@@ -1,7 +1,7 @@
 use std::native::ByteBuffer
 use std::io::{Write, write, write_char}
 use std::native::Arg
-use ingot::constants::{ERR_BAD_HEX, ERR_CODE_TOO_LONG, ERR_ODD_HEX, MAX_CODE, OK, INPUT_LIMIT}
+use ingot::constants::{ERR_BAD_HEX, ERR_HOST_ALLOCATION, ERR_ODD_HEX, OK}
 use ingot::types::{InputData, Program}
 
 fn hex_digit(_ value: u8) -> i32 {
@@ -63,39 +63,11 @@ fn hex_value(_ byte: u8) -> i32 {
 }
 
 pub fn parse_hex_program(_ arg: Arg) -> Program {
-    let mut bytes: [u8; MAX_CODE] = [0; MAX_CODE]
-    let len = arg.len()
-    let mut i: usize = 0
-    if is_prefixed_hex(arg) {
-        i = 2
-    }
-
-    if (len - i) % 2 != 0 {
-        return Program::new(bytes, len: 0, status: ERR_ODD_HEX)
-    }
-
-    let mut out_len: usize = 0
-    while i < len {
-        if out_len >= MAX_CODE {
-            return Program::new(bytes, len: out_len, status: ERR_CODE_TOO_LONG)
-        }
-
-        let hi = hex_value(arg.byte_at(i))
-        let lo = hex_value(arg.byte_at(i + 1))
-        if hi < 0 || lo < 0 {
-            return Program::new(bytes, len: out_len, status: ERR_BAD_HEX)
-        }
-
-        bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
-        out_len += 1
-        i += 2
-    }
-
-    Program::new(bytes, len: out_len, status: OK)
+    Program::new(parse_hex_bytes(arg))
 }
 
 pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
-    let mut bytes: [u8; INPUT_LIMIT] = [0; INPUT_LIMIT]
+    let mut bytes = ByteBuffer::new()
     let len = arg.len()
     let mut i: usize = 0
     if is_prefixed_hex(arg) {
@@ -103,25 +75,23 @@ pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
     }
 
     if (len - i) % 2 != 0 {
-        return InputData { bytes: bytes, len: 0, status: ERR_ODD_HEX }
+        return InputData::new(bytes, status: ERR_ODD_HEX)
     }
-
-    let mut out_len: usize = 0
+    if !bytes.try_resize(((len - i) / 2).downcast_unchecked()) {
+        return InputData::new(bytes, status: ERR_HOST_ALLOCATION)
+    }
+    let mut out_len: u64 = 0
     while i < len {
-        if out_len >= INPUT_LIMIT {
-            return InputData { bytes: bytes, len: out_len, status: ERR_CODE_TOO_LONG }
-        }
-
         let hi = hex_value(arg.byte_at(i))
         let lo = hex_value(arg.byte_at(i + 1))
         if hi < 0 || lo < 0 {
-            return InputData { bytes: bytes, len: out_len, status: ERR_BAD_HEX }
+            return InputData::new(bytes, status: ERR_BAD_HEX)
         }
 
-        bytes[out_len] = ((hi * 16) + lo).downcast_unchecked()
+        bytes.set_byte(index: out_len, value: ((hi * 16) + lo).downcast_unchecked())
         out_len += 1
         i += 2
     }
 
-    InputData { bytes: bytes, len: out_len, status: OK }
+    InputData::new(bytes, status: OK)
 }

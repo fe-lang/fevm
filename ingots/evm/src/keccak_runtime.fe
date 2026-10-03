@@ -20,7 +20,7 @@ fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
         let mut call = default_call_env()
         call.gas_limit = gas
         call.is_static = true
-        vm.run(Program::new(bytes, len: 36, status: OK), empty_bytes(), call, default_block_env(), mut state)
+        vm.run_owned(Program::copy_from(bytes, len: 36), empty_bytes(), call, default_block_env(), mut state)
         core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
         if gas < 36 {
             core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0)
@@ -45,7 +45,7 @@ fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
     let mut vm = Vm::new()
     let mut call = default_call_env()
     call.gas_limit = 53
-    vm.run(Program::new(bytes, len: index, status: OK), empty_bytes(), call, default_block_env(), mut state)
+    vm.run_owned(Program::copy_from(bytes, len: index), empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 1)
     core::assert(vm.stack[0] == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45)
     core::assert(vm.memory.len() == 32 && vm.memory.byte_at(28) == 0)
@@ -92,7 +92,7 @@ fn sha3_checks_stack_and_charges_before_allocation() {
         let mut vm = Vm::new()
         let mut call = default_call_env()
         call.gas_limit = gas
-        vm.run(Program::new(bytes, len: size + 1, status: OK), empty_bytes(), call, default_block_env(), mut state)
+        vm.run_owned(Program::copy_from(bytes, len: size + 1), empty_bytes(), call, default_block_env(), mut state)
         core::assert(vm.status == status && vm.gas_remaining == 0)
         core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
         vm.release()

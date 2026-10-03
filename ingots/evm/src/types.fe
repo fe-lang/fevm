@@ -1,48 +1,95 @@
 use std::native::ByteBuffer
-use ingot::constants::{MAX_CODE, OK, INPUT_LIMIT}
+use keccak::ByteSource
+use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 
 // Code and its instruction-boundary analysis stay immutable together.
 pub struct Program {
-    bytes: [u8; MAX_CODE],
-    len: usize,
-    jumpdests: [u8; MAX_CODE / 8],
+    bytes: ByteBuffer,
+    jumpdests: ByteBuffer,
     pub status: i32,
 }
 
 impl Program {
-    pub fn new(_ bytes: [u8; MAX_CODE], len: usize, status: i32) -> Self {
-        core::assert(len <= MAX_CODE)
-        let mut jumpdests: [u8; MAX_CODE / 8] = [0; MAX_CODE / 8]
-        let mut pc: usize = 0
-        while pc < len {
-            let op = bytes[pc]
-            if op == 0x5b {
-                let bit: u8 = (pc % 8).downcast_unchecked()
-                jumpdests[pc / 8] |= 1 << bit
-            } else if op >= 0x60 && op <= 0x7f {
-                pc += (op as usize) - 0x5f
+    pub fn new(_ input: own InputData) -> Self {
+        let mut status = input.status
+        let len = input.len()
+        let mut jumpdests = ByteBuffer::new()
+        if status == OK {
+            // ByteBuffer extents fit PTRDIFF_MAX, including room for rounding.
+            if !jumpdests.try_resize((len + 7) / 8) {
+                status = ERR_HOST_ALLOCATION
+            } else {
+                let mut pc: u64 = 0
+                while pc < len {
+                    let op = input.byte_at(pc)
+                    if op == 0x5b {
+                        let bit: u8 = (pc % 8).downcast_unchecked()
+                        let old = jumpdests.byte_at(pc / 8)
+                        jumpdests.set_byte(index: pc / 8, value: old | (1 << bit))
+                    } else if op >= 0x60 && op <= 0x7f {
+                        pc += (op as u64) - 0x5f
+                    }
+                    pc += 1
+                }
             }
-            pc += 1
         }
-        Self { bytes: bytes, len: len, jumpdests: jumpdests, status: status }
+        Self { bytes: input.bytes, jumpdests, status }
+    }
+    pub fn copy_from<T: ByteSource>(_ source: T, len: usize) -> Self {
+        core::assert((len as u256) <= source.len() as u256)
+        Self::new(InputData::copy_from(source, offset: 0, len: len.downcast_unchecked()))
     }
     pub fn len(self) -> usize {
-        self.len
+        self.bytes.len().downcast_unchecked()
     }
     pub fn byte_at(self, _ index: usize) -> u8 {
-        self.bytes[index]
+        core::assert(index < self.len())
+        self.bytes.byte_at(index.downcast_unchecked())
     }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
-        if destination >= self.len as u256 {
+        if self.status != OK || destination >= self.bytes.len() as u256 {
             return false
         }
-        let pc: usize = destination.downcast_unchecked()
+        let pc: u64 = destination.downcast_unchecked()
         let bit: u8 = (pc % 8).downcast_unchecked()
-        self.jumpdests[pc / 8] & (1 << bit) != 0
+        self.jumpdests.byte_at(pc / 8) & (1 << bit) != 0
+    }
+    pub fn release(own self) {
+        self.bytes.release()
+        self.jumpdests.release()
     }
 }
 
-pub struct InputData { pub bytes: [u8; INPUT_LIMIT], pub len: usize, pub status: i32 }
+// Inputs own immutable bytes; constructing a frame never borrows a mutable
+// account-code arena or the caller's expandable memory.
+pub struct InputData { bytes: ByteBuffer, pub status: i32 }
+
+impl InputData {
+    pub fn new(_ bytes: own ByteBuffer, status: i32) -> Self { Self { bytes, status } }
+    pub fn copy_from<T: ByteSource>(_ source: T, offset: u64, len: u64) -> Self {
+        core::assert(offset <= source.len() && len <= source.len() - offset)
+        let mut bytes = ByteBuffer::new()
+        let mut status = OK
+        if !bytes.try_resize(len) {
+            status = ERR_HOST_ALLOCATION
+        } else {
+            let mut index: u64 = 0
+            while index < len {
+                bytes.set_byte(index, value: source.byte_at(offset + index))
+                index += 1
+            }
+        }
+        Self { bytes, status }
+    }
+    pub fn len(self) -> u64 { self.bytes.len() }
+    pub fn byte_at(self, _ index: u64) -> u8 { self.bytes.byte_at(index) }
+    pub fn release(own self) { self.bytes.release() }
+}
+
+impl ByteSource for InputData {
+    fn len(self) -> u64 { self.bytes.len() }
+    fn byte_at(self, _ index: u64) -> u8 { self.bytes.byte_at(index) }
+}
 
 pub struct CallEnv {
     pub address: u256,
@@ -79,7 +126,7 @@ pub struct ExecutionResult {
 }
 
 pub fn empty_bytes() -> InputData {
-    InputData { bytes: [0; INPUT_LIMIT], len: 0, status: OK }
+    InputData::new(ByteBuffer::new(), status: OK)
 }
 
 pub fn default_call_env() -> CallEnv {

@@ -17,24 +17,24 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/logs-blobhash-toolchain.json \
+python3 native/bootstrap.py --manifest native/reports/owned-inputs-toolchain.json \
   --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
   --out native/out/toolchain --toolchain 1.98.1
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The logs/BLOBHASH development pin is local Fe `c5dd6603d`, which integrates
+The owned-input development pin is local Fe `78710ce5e`, which integrates
 the final PR #1718 fixes (`2db9a38fa`), native reference-layout, buffer ownership,
-recursive-summary repairs and analysis-reuse optimizations. It pins Sonatina
+recursive-summary and Boolean-return repairs, and analysis/guard reuse. It pins Sonatina
 `8d822fc3`, including indexed object-store invalidation. Supply a
 local Fe repository or Git bundle containing that commit. The default
 `native/toolchain.json` retains the previous published-master checkpoint. See
 [native build instructions](native/README.md) for prerequisites and reproducible
 acceptance commands.
 
-The [logs/BLOBHASH implementation report](native/reports/logs-blobhash.md)
-records the completed targeted checks and the deferred full acceptance gate.
+The [owned-input implementation report](native/reports/owned-inputs.md)
+records the passing targeted O1 checks and the deferred full acceptance gate.
 
 Sample output:
 
@@ -62,7 +62,17 @@ let world = settled.into_state()
 world.release()
 ```
 
-The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
+The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.
+
+`execute` and `execute_vm` consume and release their code and calldata. `Vm::run`
+borrows reusable inputs, which their caller must eventually `release()`;
+`Vm::run_owned` consumes one-shot inputs. `InputData::copy_from(source, offset, len)`
+copies a byte-source range; `InputData::new(bytes, status)` takes a `ByteBuffer`.
+Inputs expose `len()` and `byte_at(index)`. Failed inputs are rejected before
+opening a transaction checkpoint. `vm::Vm` retains memory capacity across runs;
+each run clears the logical extent and zeroes newly exposed bytes. Release the
+VM after its final run, or consume it with `into_result()` to transfer its output.
+Execution results own their output and require explicit `release()`.
 
 A `Transaction` owns the world state while execution is active. Each `Vm::run`
 opens a frame checkpoint: success commits it, while REVERT and every exceptional

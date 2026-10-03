@@ -34,9 +34,6 @@ struct Frame {
 fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
     let code = hex::decode(case.code)?;
     let calldata = hex::decode(case.calldata)?;
-    if code.len() > 4096 || calldata.len() > 4096 {
-        return Err("case exceeds the current FeVM input capacities".into());
-    }
     let mut interpreter = Interpreter::<EthInterpreter>::new(
         SharedMemory::new(),
         ExtBytecode::new(Bytecode::new_legacy(Bytes::from(code))),
@@ -123,6 +120,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{Case, execute};
+
+    #[test]
+    fn accepts_code_and_calldata_beyond_the_old_frame_bound() {
+        let frame = execute(Case {
+            code: format!("383600{}", "00".repeat(8190)),
+            calldata: "ab".repeat(9001),
+            gas_limit: 1_000_000,
+        })
+        .unwrap();
+        assert_eq!(frame.outcome, "success");
+        assert_eq!(frame.gas_remaining, 999996);
+        assert_eq!(
+            frame.stack.unwrap(),
+            [format!("0x{:064x}", 8193), format!("0x{:064x}", 9001)]
+        );
+    }
 
     #[test]
     fn reports_exact_gas_and_exceptional_frame_consumption() {

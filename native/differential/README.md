@@ -3,9 +3,10 @@
 This runner compares FeVM's single-frame execution with `revm-interpreter`
 **31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
 explicitly configured for **Cancun**. Cargo.lock pins the reference and its
-dependencies. The corpus includes 1,835 frames: arithmetic batches, all PUSH
+dependencies. The corpus includes 1,840 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
-remaining gas, Keccak ranges/padding/gas, and returned/reverted bytes. A looping program checks gas exhaustion.
+remaining gas, Keccak ranges/padding/gas, code/calldata beyond 4 KiB, and
+returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
 Keccak checkpoint: **1,835 frames and 383 state sequences pass at O0/O1/O2
@@ -87,7 +88,9 @@ bounded EVM programs, preserving every arithmetic result on the stack.
 
 The expanded slice adds gas and active-memory accounting for implemented stateless
 frame instructions. Each case supplies its gas limit; the usual budget is
-1,000,000. Inputs remain bounded to 4,096 bytes by the parser. The stateless corpus excludes external state and nested calls. The additional
+1,000,000. Code and calldata use growable owned buffers. The state wire format
+uses two-byte lengths for individual fields; it no longer imposes a 4 KiB total
+packet limit. The stateless corpus excludes external state and nested calls. The additional
 stateful corpus below covers implemented state access, refunds and checkpoint
 rollback. Neither corpus establishes full Cancun conformance, CALL/CREATE
 execution, resident allocation reclamation or performance.

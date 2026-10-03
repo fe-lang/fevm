@@ -37,17 +37,19 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current logs/BLOBHASH development pin uses local Fe `c5dd6603d` and Sonatina
+The current owned-input development pin uses local Fe `78710ce5e` and Sonatina
 `8d822fc3`. Exact revisions, the Rust version and Cargo lock hash are in
-[`reports/logs-blobhash-toolchain.json`](reports/logs-blobhash-toolchain.json).
-Targeted compiler and reduced O1 native checks pass; full native acceptance is
+[`reports/owned-inputs-toolchain.json`](reports/owned-inputs-toolchain.json).
+Targeted compiler, input/parser and VM O1 checks pass; full native acceptance is
 deferred while development uses smaller tests. The
-[implementation report](reports/logs-blobhash.md) separates this evidence from
-the earlier partial acceptance run.
+[implementation report](reports/owned-inputs.md) records the exact scope and
+compiler identity. The earlier [logs/BLOBHASH report](reports/logs-blobhash.md)
+retains its historical compiler pin.
 The compiler revisions repair concrete native reference layouts, preserve
 conditional clobbers through ownership checking, and stabilize recursive buffer
 and output-effect summaries on top of the final #1718 integration (`2db9a38fa`).
-They also reuse workspace/root analysis and index available object fields. Both
+They also reuse workspace/root analysis, cache guard projections, preserve Boolean
+return correlations, and index available object fields. Both
 commits are available in the local Fe and Sonatina repositories. The default
 `toolchain.json` retains the previous published-master checkpoint at `04d344105`.
 Keccak is a separately tested Git dependency; its native differential and timing
@@ -63,7 +65,7 @@ acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/logs-blobhash-toolchain.json \
+python3 native/bootstrap.py --manifest native/reports/owned-inputs-toolchain.json \
   --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
   --out native/out/toolchain --toolchain 1.98.1
 python3 native/accept.py --build native/out/toolchain/build.json \
@@ -108,8 +110,12 @@ with a small entry point, then checks nested log commit/rollback and receipt
 ownership. It avoids compiling the full interpreter and differential drivers.
 
 ```sh
-python3 native/perf/checkpoints.py --fe /path/to/fe \
+python3 native/perf/run.py --probe checkpoints --fe /path/to/fe \
   --out native/out/checkpoints-o1
+python3 native/perf/run.py --probe inputs --fe /path/to/fe \
+  --out native/out/inputs-o1
+python3 native/perf/run.py --probe vm_inputs --fe /path/to/fe \
+  --out native/out/vm-inputs-o1
 ```
 
 Each run requires a fresh output directory and records source/compiler hashes,
@@ -118,7 +124,19 @@ default build deadline is 180 seconds (`--build-timeout` overrides it). Use CPU
 time for shared-host comparisons and compare identical source hashes. This probe
 does not establish full interpreter conformance or an end-to-end speedup.
 
-The [Cancun frame suite](differential/README.md) compares 1,835 deterministic
+The input probe compiles only the real code/input types and hex parser. It checks
+50,000-byte inputs, copy ownership, PUSH/jump boundaries, malformed hex, and
+allocation/release behavior when code or jump-map allocation fails. Its controlled
+allocator is relinked against the same native object, avoiding another Fe build.
+
+`--probe vm_inputs` compiles the VM production modules and calls three owned-input
+integration tests. They pass at O1 with the current development compiler: reusable
+9,001-byte calldata, failed inputs before checkpointing, and large code with valid
+and invalid jump boundaries. The build took 174.09 seconds and peaked at 2.42 GB RSS
+on x86_64 Linux. This focused result does not establish full VM acceptance; the
+whole-ingot suite and CLI/differential matrices remain deferred.
+
+The [Cancun frame suite](differential/README.md) compares 1,840 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.

@@ -13,6 +13,9 @@
 #ifndef WATCH_SIZE
 #define WATCH_SIZE 131072
 #endif
+#ifndef WATCH_SIZE_EXTRA
+#define WATCH_SIZE_EXTRA 0
+#endif
 #ifndef SUCCESS_ALLOCS
 #define SUCCESS_ALLOCS 2
 #endif
@@ -28,7 +31,7 @@ typedef union {
 } Header;
 
 void *malloc(size_t size) {
-    int watched = size == WATCH_SIZE;
+    int watched = size == WATCH_SIZE || (WATCH_SIZE_EXTRA != 0 && size == WATCH_SIZE_EXTRA);
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;

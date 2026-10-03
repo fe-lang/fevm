@@ -110,12 +110,16 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     let program = parse_hex_program(args.get(1))
     let calldata = parse_hex_bytes(args.get(2))
     if program.status != 0 || calldata.status != 0 {
+        program.release()
+        calldata.release()
         return 2
     }
     let mut call = default_call_env()
     match parse_gas(args.get(3)) {
         Option::Some(gas,) => call.gas_limit = gas,
         Option::None => {
+            program.release()
+            calldata.release()
             return 2
         },
     }

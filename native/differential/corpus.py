@@ -27,7 +27,6 @@ def cases():
     result = []
 
     def add(name, category, code, calldata=b'', expected=None, gas_limit=1_000_000, simultaneous_faults=None):
-        assert len(code) <= 4096 and len(calldata) <= 4096
         row = {'name': name, 'category': category, 'code': code.hex(), 'calldata': calldata.hex(), 'gas_limit': gas_limit}
         if simultaneous_faults:
             row['simultaneous_faults'] = simultaneous_faults
@@ -48,6 +47,21 @@ def cases():
         ('jump-into-data', '600456605b00', exceptional('invalid_jump')),
     ]:
         add(name, 'anchors', bytes.fromhex(code), expected=expected)
+
+    # These lengths exceed the retired parser buffers. Keep the programs short
+    # to execute even when the immutable code image or calldata is large.
+    add('large-code-size', 'owned-inputs', b'\x38\x00' + b'\x00' * 8191,
+        expected=success(8193, gas_remaining=999998))
+    add('large-calldata-size', 'owned-inputs', b'\x36', b'\xab' * 9001,
+        expected=success(9001, gas_remaining=999998))
+    add('large-calldata-last-word', 'owned-inputs', push(9000) + b'\x35', b'\x00' * 9000 + b'\xab',
+        expected=success(0xab << 248, gas_remaining=999994))
+    code = bytearray(push(8192) + b'\x56')
+    code.extend(b'\x00' * (8192 - len(code)))
+    code.extend(b'\x5b\x60\x2a')
+    add('large-code-jump-map', 'owned-inputs', bytes(code), expected=success(42, gas_remaining=999985))
+    code[8191] = 0x60  # PUSH1 makes the byte at 8192 immediate data.
+    add('large-code-jump-into-data', 'owned-inputs', bytes(code), expected=exceptional('invalid_jump'))
 
     rng = random.Random(0xFECA)
     edges = [0, 1, 2, 7, 127, 128, 255, 256, 257, MASK, MASK - 1]
