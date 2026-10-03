@@ -1,0 +1,1921 @@
+{
+  "schema": 1,
+  "complete": true,
+  "scope": "Account-code milestone; complete current Linux native acceptance matrix, not full Cancun conformance",
+  "implementation_revision": "b9debd9f9b17a5232e0c1b1b3bd6a0d13bd4c710",
+  "compiler_build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "4c03313f1602dbe0cace235e9a32548cc907d551",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "9c35018759aff07516025684fea0be784b0cf6df",
+      "cargo_lock_sha256": "de5e486e7a5088f662536f06d2a9e9047f09aa4029a15b229146892541856a74",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local compiler integration plus conditional-clobber separation repair; provide --fe-repository /home/sean/code/fe",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "source_directory": "/home/sean/code/fevm/native/out/account-code-20261002/toolchain-r2/fe",
+    "sonatina_source_directory": "/home/sean/code/fevm/native/out/account-code-20261002/toolchain-r2/sonatina",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/home/sean/code/fe/target",
+    "complete": true,
+    "compiler_build_seconds": 78.18495932400401,
+    "compiler": "/home/sean/code/fevm/native/out/account-code-20261002/toolchain-r2/bin/fe",
+    "compiler_sha256": "4d4e724e76b86487f05845f9a6368f68e2590743f6cecd0756b73692afa05a28",
+    "compiler_version": "fe 26.4.0 (4c03313f1)"
+  },
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 1156.6824987349974
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 1133.5603696249964
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 1136.613075715999
+    },
+    {
+      "name": "cli-smoke",
+      "status": 0,
+      "seconds": 1132.3283863469987
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 497.19994719499664
+    },
+    {
+      "name": "cancun-state",
+      "status": 0,
+      "seconds": 1264.2385192150032
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 18.403025275998516
+    }
+  ],
+  "workspace": {
+    "O0": {
+      "passed": 39,
+      "log_sha256": "f69783f79f4201fe8fa9cce5791483ed92dc4639fe1467a216c695afa7ee07f0"
+    },
+    "O1": {
+      "passed": 39,
+      "log_sha256": "5b1db74820014ba699a96bf7b027be62e775b6b80a1698c5e21c181a43ef9b39"
+    },
+    "O2": {
+      "passed": 39,
+      "log_sha256": "d321d1fcaa8b8ec6d505495f7bc0b075ec11f4aed7ecc5547a650eb108a2ff0a"
+    }
+  },
+  "records": {
+    "cli": {
+      "schema": 1,
+      "scope": "native FeVM CLI smoke, not Cancun conformance",
+      "compiler_sha256": "4d4e724e76b86487f05845f9a6368f68e2590743f6cecd0756b73692afa05a28",
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "complete": true,
+      "builds": [
+        {
+          "level": "0",
+          "build_seconds": 120.11923627399665,
+          "object_bytes": 12661568,
+          "text_bytes": 12572824,
+          "executable_bytes": 12646584,
+          "relink_seconds": 0.02678330000344431,
+          "executable_sha256": "6544d48a4146a643ea4b49549a16693c0fa722384df6f7e6841630bb2bfd70b0",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-size",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-hash",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-copy",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x00\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-0",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-1",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-2",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "level": "1",
+          "build_seconds": 126.57622815999639,
+          "object_bytes": 11579496,
+          "text_bytes": 11513784,
+          "executable_bytes": 11579480,
+          "relink_seconds": 0.025335100006486755,
+          "executable_sha256": "2bd2d6976f48f2ca1428f038d421464886bfe47ef88770131b3b12f207dfebff",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-size",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-hash",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-copy",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x00\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-0",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-1",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-2",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "level": "2",
+          "build_seconds": 126.78890126800252,
+          "object_bytes": 11579496,
+          "text_bytes": 11513784,
+          "executable_bytes": 11579480,
+          "relink_seconds": 0.025258699999540113,
+          "executable_sha256": "2bd2d6976f48f2ca1428f038d421464886bfe47ef88770131b3b12f207dfebff",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-size",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-hash",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+              "stderr": ""
+            },
+            {
+              "name": "extcode-absent-copy",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x00\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-0",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-1",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "name": "account-code-allocator-2",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        }
+      ]
+    },
+    "frames": {
+      "schema": 2,
+      "fork": "Cancun",
+      "scope": "outcome, remaining gas, output, completed stack/active memory; simultaneous-fault reasons retained separately; external state is not compared",
+      "complete": true,
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "source_sha256": {
+        "fe.toml": "6727afa35ee0cc7f96ea72760754294823b6006c50c5dbb4fcb9aaaad6934603",
+        "ingots/evm/fe.toml": "328b9ca9e1ce54f3818530e44392f7e587f6c9ec7c23afd11b1276f2aa201f0f",
+        "ingots/evm/src/account_runtime.fe": "4835dd8aaefd18d8e9cd9a07931f5da1ac9ff7acee18596dc9f75b46358b5052",
+        "ingots/evm/src/cli.fe": "b504db7beddc3b0acf0e095a4fc64c42de9e052e5228bb38c4f903774a5d4de1",
+        "ingots/evm/src/constants.fe": "8668898ea1a5e59ab294802e57e446732a0574c4f938924623f4f90533716f37",
+        "ingots/evm/src/environment_runtime.fe": "f2bd0b2f67e661bc0ed0a94df897e54ebe576b4c372071561fe2fd421d2ce0ad",
+        "ingots/evm/src/gas.fe": "6cfa212fec36987537b71a1c992adb4c62199813a3510e552141a3dbbebf6b81",
+        "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+        "ingots/evm/src/journal.fe": "727d6b7d0a33a79ecf155e35d500a4e0996a74e23c8901d35eeb948e409a6123",
+        "ingots/evm/src/keccak_runtime.fe": "2645197931f6ca92bb2cc60c8b6664f02dd2cc5441f4c6947360d0be04bfa6de",
+        "ingots/evm/src/lib.fe": "2be7419252258f4d0e4f9699cb8f6882de208cbdf3a7e2e96cfb547784919d19",
+        "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+        "ingots/evm/src/memory_runtime.fe": "d1d8284629fa4a15a48778673162271c8ceee4ed83ba27edf6153067850e3399",
+        "ingots/evm/src/opcodes.fe": "1eda620deb0975ad91affae3d44e16a1bfdd97aba618b822931a7ec838a054f5",
+        "ingots/evm/src/state.fe": "a8f5521818188874d6e7f86dbbfe5df82819f696e8b73ea6f78212f5b6f019a2",
+        "ingots/evm/src/state_gas_runtime.fe": "d8b6a674544a91aee0cd897a93bdfed8bdb3983c8eb1acc493496cacf718c190",
+        "ingots/evm/src/transaction.fe": "057e575a5343385461e78c72b21242a3ec42b773bf6c8f299042b20dd2bed2ba",
+        "ingots/evm/src/transaction_runtime.fe": "1cb78254bdff49b7e7fb24859d1accee58ae4a3c7b9fcbfd57f71ab40c41e0f9",
+        "ingots/evm/src/types.fe": "17082da7d4c6481f3084c1c71e42d3e0e8e968cb0e8a32c66347adc4e0391eb1",
+        "ingots/evm/src/vm.fe": "cab3ec0ae0f0e1ad443c65a74425e04d205ee4f97e832094b2d0ee3df46f767b",
+        "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+        "native/differential/corpus.py": "cf810a75d51db392ae351c74f705010a29d8ad9dcff301577b8f43a869cdb5a4",
+        "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+        "native/differential/driver/src/lib.fe": "e3d95cd9bd8c384493d6f325cd38a579b6292f5b7585cfbafc427d9ae0e40e91",
+        "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+        "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+        "native/differential/reference/src/main.rs": "b0df5de036fa45840e75f2af9e6e35378face404332c16be460edb1262f62f8e",
+        "native/differential/reference/src/state.rs": "b6de991eccc3d559d779b1086335ccb0ee185b8c10df9237d45f8225a843d550",
+        "native/differential/run.py": "64f99321b64483b0a84e20699855689b8fff3588722513daa5e4e1073d7e6a79",
+        "native/differential/state_contract.py": "2e8643c01252b8ec54bd00b6a590e2e5058dceedad8a289dc9f112a9e7fce208",
+        "native/differential/state_corpus.py": "2018e5c9ca625413c24a77fcbbf627d587ad895a4277da8369c56dda9d968135",
+        "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+        "native/differential/state_driver/src/lib.fe": "6e64ea146ac066c6c8c6c433ca6149740629f3a1c7c40cd63bf0b33246a9a094",
+        "native/differential/state_run.py": "892f5d46ec74e48a3222932e6cb33dff1ba642ecac4ea46a125ce62a1106d46c",
+        "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+        "native/differential/test_run.py": "0fdb1d904b0ab979fe23276e1fe387e1c8ab23e45dcd4fa6331464db592963c9",
+        "native/differential/test_state_contract.py": "51c39b5c5984b6b81589eb95f2de447310a4f319133a54575a70556d90f2854a",
+        "native/toolchain.json": "da80615a3af3b27c0f8819e4b43f3afb17b4a5489e914eb243b1a5987d2ab62d"
+      },
+      "compiler_sha256": "4d4e724e76b86487f05845f9a6368f68e2590743f6cecd0756b73692afa05a28",
+      "compiler_version": "fe 26.4.0 (4c03313f1)",
+      "revision": "15e8f72bf95e17a023628607bd0da2c843a1d0a4",
+      "dirty": true,
+      "reference": {
+        "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+        "toolchain": "1.98.1",
+        "target_directory": "/home/sean/code/fevm/native/out/account-code-acceptance-20261002/cancun-frames/reference-target",
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "packages": [
+          {
+            "name": "revm-bytecode",
+            "version": "7.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context",
+            "version": "12.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context-interface",
+            "version": "13.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database",
+            "version": "9.0.6",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database-interface",
+            "version": "8.0.5",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-interpreter",
+            "version": "31.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-primitives",
+            "version": "21.0.2",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-state",
+            "version": "8.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          }
+        ],
+        "executable_sha256": "50a12671efae1ff8b2a7fea5f7bcca4a827f19df1de5252e59ed12ffac14c779"
+      },
+      "levels": [
+        {
+          "level": "0",
+          "complete": true,
+          "passed": 1835,
+          "reason_differences": [
+            {
+              "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-1-15",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-0-11",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            }
+          ],
+          "build_seconds": 153.073818689998,
+          "executable_sha256": "930033a7751b04d011c27fd6060c9e127e3a6bd77440ec00398535f8872b832b"
+        },
+        {
+          "level": "1",
+          "complete": true,
+          "passed": 1835,
+          "reason_differences": [
+            {
+              "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-1-15",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-0-11",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            }
+          ],
+          "build_seconds": 159.45576369100309,
+          "executable_sha256": "6f7547fd313f730820027c7efd65a2276f85e96e929e58924eed85af44124958"
+        },
+        {
+          "level": "2",
+          "complete": true,
+          "passed": 1835,
+          "reason_differences": [
+            {
+              "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-1-15",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-0-11",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            }
+          ],
+          "build_seconds": 159.45081955500063,
+          "executable_sha256": "6f7547fd313f730820027c7efd65a2276f85e96e929e58924eed85af44124958"
+        }
+      ],
+      "frames_per_level": 1835,
+      "categories": {
+        "anchors": 9,
+        "arithmetic": 167,
+        "push": 593,
+        "jump": 704,
+        "stack": 121,
+        "frame": 8,
+        "memory": 96,
+        "gas": 31,
+        "keccak": 106
+      },
+      "corpus_sha256": "658847cb7f235857babb6130c7f97bbea452a9234481659e7cfda3e269a60134"
+    },
+    "state": {
+      "schema": 1,
+      "fork": "Cancun",
+      "complete": true,
+      "scope": "frame results, watched persistent/transient/original state, warmness, signed refunds, nested checkpoints and transaction settlement; signed envelopes and CALL/CREATE are excluded",
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "source_sha256": {
+        "fe.toml": "6727afa35ee0cc7f96ea72760754294823b6006c50c5dbb4fcb9aaaad6934603",
+        "ingots/evm/fe.toml": "328b9ca9e1ce54f3818530e44392f7e587f6c9ec7c23afd11b1276f2aa201f0f",
+        "ingots/evm/src/account_runtime.fe": "4835dd8aaefd18d8e9cd9a07931f5da1ac9ff7acee18596dc9f75b46358b5052",
+        "ingots/evm/src/cli.fe": "b504db7beddc3b0acf0e095a4fc64c42de9e052e5228bb38c4f903774a5d4de1",
+        "ingots/evm/src/constants.fe": "8668898ea1a5e59ab294802e57e446732a0574c4f938924623f4f90533716f37",
+        "ingots/evm/src/environment_runtime.fe": "f2bd0b2f67e661bc0ed0a94df897e54ebe576b4c372071561fe2fd421d2ce0ad",
+        "ingots/evm/src/gas.fe": "6cfa212fec36987537b71a1c992adb4c62199813a3510e552141a3dbbebf6b81",
+        "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+        "ingots/evm/src/journal.fe": "727d6b7d0a33a79ecf155e35d500a4e0996a74e23c8901d35eeb948e409a6123",
+        "ingots/evm/src/keccak_runtime.fe": "2645197931f6ca92bb2cc60c8b6664f02dd2cc5441f4c6947360d0be04bfa6de",
+        "ingots/evm/src/lib.fe": "2be7419252258f4d0e4f9699cb8f6882de208cbdf3a7e2e96cfb547784919d19",
+        "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+        "ingots/evm/src/memory_runtime.fe": "d1d8284629fa4a15a48778673162271c8ceee4ed83ba27edf6153067850e3399",
+        "ingots/evm/src/opcodes.fe": "1eda620deb0975ad91affae3d44e16a1bfdd97aba618b822931a7ec838a054f5",
+        "ingots/evm/src/state.fe": "a8f5521818188874d6e7f86dbbfe5df82819f696e8b73ea6f78212f5b6f019a2",
+        "ingots/evm/src/state_gas_runtime.fe": "d8b6a674544a91aee0cd897a93bdfed8bdb3983c8eb1acc493496cacf718c190",
+        "ingots/evm/src/transaction.fe": "057e575a5343385461e78c72b21242a3ec42b773bf6c8f299042b20dd2bed2ba",
+        "ingots/evm/src/transaction_runtime.fe": "1cb78254bdff49b7e7fb24859d1accee58ae4a3c7b9fcbfd57f71ab40c41e0f9",
+        "ingots/evm/src/types.fe": "17082da7d4c6481f3084c1c71e42d3e0e8e968cb0e8a32c66347adc4e0391eb1",
+        "ingots/evm/src/vm.fe": "cab3ec0ae0f0e1ad443c65a74425e04d205ee4f97e832094b2d0ee3df46f767b",
+        "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+        "native/differential/corpus.py": "cf810a75d51db392ae351c74f705010a29d8ad9dcff301577b8f43a869cdb5a4",
+        "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+        "native/differential/driver/src/lib.fe": "e3d95cd9bd8c384493d6f325cd38a579b6292f5b7585cfbafc427d9ae0e40e91",
+        "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+        "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+        "native/differential/reference/src/main.rs": "b0df5de036fa45840e75f2af9e6e35378face404332c16be460edb1262f62f8e",
+        "native/differential/reference/src/state.rs": "b6de991eccc3d559d779b1086335ccb0ee185b8c10df9237d45f8225a843d550",
+        "native/differential/run.py": "64f99321b64483b0a84e20699855689b8fff3588722513daa5e4e1073d7e6a79",
+        "native/differential/state_contract.py": "2e8643c01252b8ec54bd00b6a590e2e5058dceedad8a289dc9f112a9e7fce208",
+        "native/differential/state_corpus.py": "2018e5c9ca625413c24a77fcbbf627d587ad895a4277da8369c56dda9d968135",
+        "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+        "native/differential/state_driver/src/lib.fe": "6e64ea146ac066c6c8c6c433ca6149740629f3a1c7c40cd63bf0b33246a9a094",
+        "native/differential/state_run.py": "892f5d46ec74e48a3222932e6cb33dff1ba642ecac4ea46a125ce62a1106d46c",
+        "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+        "native/differential/test_run.py": "0fdb1d904b0ab979fe23276e1fe387e1c8ab23e45dcd4fa6331464db592963c9",
+        "native/differential/test_state_contract.py": "51c39b5c5984b6b81589eb95f2de447310a4f319133a54575a70556d90f2854a",
+        "native/toolchain.json": "da80615a3af3b27c0f8819e4b43f3afb17b4a5489e914eb243b1a5987d2ab62d"
+      },
+      "compiler_sha256": "4d4e724e76b86487f05845f9a6368f68e2590743f6cecd0756b73692afa05a28",
+      "compiler_version": "fe 26.4.0 (4c03313f1)",
+      "revision": "15e8f72bf95e17a023628607bd0da2c843a1d0a4",
+      "dirty": true,
+      "reference": {
+        "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+        "toolchain": "1.98.1",
+        "target_directory": "/home/sean/code/fevm/native/out/account-code-acceptance-20261002/cancun-state/reference-target",
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "packages": [
+          {
+            "name": "revm-bytecode",
+            "version": "7.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context",
+            "version": "12.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context-interface",
+            "version": "13.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database",
+            "version": "9.0.6",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database-interface",
+            "version": "8.0.5",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-interpreter",
+            "version": "31.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-primitives",
+            "version": "21.0.2",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-state",
+            "version": "8.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          }
+        ],
+        "executable_sha256": "50a12671efae1ff8b2a7fea5f7bcca4a827f19df1de5252e59ed12ffac14c779"
+      },
+      "levels": [
+        {
+          "level": "0",
+          "complete": true,
+          "passed": 737,
+          "build_seconds": 406.92529180699785,
+          "executable_sha256": "a511e04bede18165d2cca4f6ae9d426c2eb5d7928172b2519fe9b8fe1fe259df"
+        },
+        {
+          "level": "1",
+          "complete": true,
+          "passed": 737,
+          "build_seconds": 422.02974579700094,
+          "executable_sha256": "d781cb39dcca43fd00a5073088fccb660e99abac52df33ea4ec6a1af24292938"
+        },
+        {
+          "level": "2",
+          "complete": true,
+          "passed": 737,
+          "build_seconds": 421.06073079899943,
+          "executable_sha256": "d781cb39dcca43fd00a5073088fccb660e99abac52df33ea4ec6a1af24292938"
+        }
+      ],
+      "cases_per_level": 737,
+      "categories": {
+        "net-storage-anchors": 34,
+        "storage-frame-sequences": 162,
+        "account-warming": 32,
+        "gas-boundaries": 40,
+        "static": 5,
+        "checkpoints": 3,
+        "frame-revert": 3,
+        "access-lists": 2,
+        "transaction-boundaries": 2,
+        "refund-cap": 1,
+        "word-boundaries": 1,
+        "seeded-state-sequences": 64,
+        "block-history": 30,
+        "block-history-gas": 4,
+        "account-code-identity": 57,
+        "account-code-warmth": 52,
+        "account-code-gas": 12,
+        "account-code-copy": 109,
+        "account-code-copy-gas": 118,
+        "account-code-stack": 6
+      },
+      "corpus_sha256": "8df0391cf78e0f876fe11428aa0586cd9ad6a794965ef20b95f376a8396032c1"
+    },
+    "arithmetic": {
+      "schema": 1,
+      "complete": true,
+      "created_utc": "2026-10-03T08:14:11.642626+00:00",
+      "runner_sha256": "9f9087900d81184b65f64f039af6060db13873abe793934cd1858f77af2b27da",
+      "host": {
+        "system": "Linux",
+        "machine": "x86_64",
+        "platform": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+        "cpu": [
+          "processor\t: 0",
+          "vendor_id\t: AuthenticAMD",
+          "cpu family\t: 26",
+          "model\t\t: 68",
+          "model name\t: AMD Ryzen 5 9600X 6-Core Processor",
+          "stepping\t: 0",
+          "microcode\t: 0xffffffff",
+          "cpu MHz\t\t: 3892.585",
+          "cache size\t: 1024 KB",
+          "physical id\t: 0",
+          "siblings\t: 10",
+          "core id\t\t: 0",
+          "cpu cores\t: 5",
+          "apicid\t\t: 0",
+          "initial apicid\t: 0",
+          "fpu\t\t: yes",
+          "fpu_exception\t: yes",
+          "cpuid level\t: 13",
+          "wp\t\t: yes",
+          "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm rep_good nopl cpuid extd_apicid tsc_known_freq pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves xsaveerptr arat avx512vbmi avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm",
+          "bugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass srso spectre_v2_user",
+          "bogomips\t: 7785.17",
+          "TLB size\t: 192 4K pages",
+          "clflush size\t: 64",
+          "cache_alignment\t: 64"
+        ],
+        "clock_ticks_per_second": 1000000,
+        "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "compiler": {
+        "path": "/home/sean/code/fevm/native/out/account-code-20261002/toolchain-r2/bin/fe",
+        "version": "fe 26.4.0 (4c03313f1)",
+        "sha256": "4d4e724e76b86487f05845f9a6368f68e2590743f6cecd0756b73692afa05a28"
+      },
+      "harness_revision": "15e8f72bf95e17a023628607bd0da2c843a1d0a4",
+      "harness_dirty": true,
+      "timing": "process CPU clock, input/output and startup excluded; dependent op/xor loop; build includes compiler startup, link and report; relink measured separately",
+      "results": [
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.31017919900477864
+          ],
+          "median_build_seconds": 0.31017919900477864,
+          "object_bytes": 13112,
+          "text_bytes": 9385,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010828700003912672,
+          "executable_sha256": "724364d28be1d95a89d79cdeca93c793f60e1c41e556cd7b91789b58cc326194",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.3700211989998934
+          ],
+          "median_build_seconds": 0.3700211989998934,
+          "object_bytes": 8432,
+          "text_bytes": 6888,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010683599997719284,
+          "executable_sha256": "13891b0f1d85f39cdba0925dec17d1160a5c1de44b5a3028802bc7219b902ee0",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.36760709900408983
+          ],
+          "median_build_seconds": 0.36760709900408983,
+          "object_bytes": 8432,
+          "text_bytes": 6888,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010739999997895211,
+          "executable_sha256": "13891b0f1d85f39cdba0925dec17d1160a5c1de44b5a3028802bc7219b902ee0",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.30587579899292905
+          ],
+          "median_build_seconds": 0.30587579899292905,
+          "object_bytes": 8312,
+          "text_bytes": 4612,
+          "executable_bytes": 21400,
+          "relink_seconds": 0.010853099993255455,
+          "executable_sha256": "8e7f1329bdbffeebe005d61cb5b1b2af23678f82ac5f3ad3356797f575463ebc",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.37349649899988435
+          ],
+          "median_build_seconds": 0.37349649899988435,
+          "object_bytes": 4264,
+          "text_bytes": 2720,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010647399998561013,
+          "executable_sha256": "f77bcd2ead30df147cece6513177fa359fc2d1f3f02088f4c15a720e31ade142",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.3686286989977816
+          ],
+          "median_build_seconds": 0.3686286989977816,
+          "object_bytes": 4264,
+          "text_bytes": 2720,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010724500003561843,
+          "executable_sha256": "f77bcd2ead30df147cece6513177fa359fc2d1f3f02088f4c15a720e31ade142",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.3066939989948878
+          ],
+          "median_build_seconds": 0.3066939989948878,
+          "object_bytes": 13496,
+          "text_bytes": 9769,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.01045890000386862,
+          "executable_sha256": "3ff5dcafbea43d29138da0ddc1b397b03118b588570a21ae8dc6117d966e76f0",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.36693889900197973
+          ],
+          "median_build_seconds": 0.36693889900197973,
+          "object_bytes": 8800,
+          "text_bytes": 7256,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010838200003490783,
+          "executable_sha256": "3532ff88f3cdfd388732bf4cc780fea44197014600020c4f9867e4d2d84809d9",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.3725413989959634
+          ],
+          "median_build_seconds": 0.3725413989959634,
+          "object_bytes": 8800,
+          "text_bytes": 7256,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010879699999350123,
+          "executable_sha256": "3532ff88f3cdfd388732bf4cc780fea44197014600020c4f9867e4d2d84809d9",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.31356939900433645
+          ],
+          "median_build_seconds": 0.31356939900433645,
+          "object_bytes": 9000,
+          "text_bytes": 5156,
+          "executable_bytes": 21400,
+          "relink_seconds": 0.010858000001462642,
+          "executable_sha256": "a821ee2053210e9195a4f2ba991100d5d99603992cea0a8e90bf08aadba21ede",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.37904369899479207
+          ],
+          "median_build_seconds": 0.37904369899479207,
+          "object_bytes": 4800,
+          "text_bytes": 3256,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010506799997529015,
+          "executable_sha256": "4e4fd20ad7935ca1f145e1395d6cddeeca011c9c9ac6ac9e2f9885d1baa25f79",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.38112489899504
+          ],
+          "median_build_seconds": 0.38112489899504,
+          "object_bytes": 4800,
+          "text_bytes": 3256,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.0107136000005994,
+          "executable_sha256": "4e4fd20ad7935ca1f145e1395d6cddeeca011c9c9ac6ac9e2f9885d1baa25f79",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.30173849900165806
+          ],
+          "median_build_seconds": 0.30173849900165806,
+          "object_bytes": 14432,
+          "text_bytes": 10705,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.01074250000237953,
+          "executable_sha256": "8c8af9b3f421fcaad2e615f18cf6834ae000e6918bc66f4a4f1ab437c471bcc2",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.3698645990007208
+          ],
+          "median_build_seconds": 0.3698645990007208,
+          "object_bytes": 9872,
+          "text_bytes": 8328,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010499700001673773,
+          "executable_sha256": "92b39b79e08b8187ead2dc4510186e533784a90404bfdfc3c0fd4159541f192d",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.3644397989992285
+          ],
+          "median_build_seconds": 0.3644397989992285,
+          "object_bytes": 9872,
+          "text_bytes": 8328,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010719500001869164,
+          "executable_sha256": "92b39b79e08b8187ead2dc4510186e533784a90404bfdfc3c0fd4159541f192d",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.32042769899999257
+          ],
+          "median_build_seconds": 0.32042769899999257,
+          "object_bytes": 9504,
+          "text_bytes": 5579,
+          "executable_bytes": 21552,
+          "relink_seconds": 0.010603099995933007,
+          "executable_sha256": "e7b37fd38f938b4935b9f7e64b894e6b54f00fe7f1622c2044f9c0a623e23970",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.40044299900182523
+          ],
+          "median_build_seconds": 0.40044299900182523,
+          "object_bytes": 4784,
+          "text_bytes": 3168,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010526500002015382,
+          "executable_sha256": "c4fd221a9df0faae36d29290fced9c63c08b8d7d2fa3c1bc604a1a955e88957b",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.4005488989932928
+          ],
+          "median_build_seconds": 0.4005488989932928,
+          "object_bytes": 4784,
+          "text_bytes": 3168,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010720700003730599,
+          "executable_sha256": "c4fd221a9df0faae36d29290fced9c63c08b8d7d2fa3c1bc604a1a955e88957b",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.30586249900079565
+          ],
+          "median_build_seconds": 0.30586249900079565,
+          "object_bytes": 14440,
+          "text_bytes": 10713,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010769199994683731,
+          "executable_sha256": "b0dee2587b040e45513e1ea5e1a413ed5040659bfda29a317e357dfe6296f670",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.3650699989957502
+          ],
+          "median_build_seconds": 0.3650699989957502,
+          "object_bytes": 9840,
+          "text_bytes": 8296,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010513900000660215,
+          "executable_sha256": "8b83f2c9285033e1e66b59af8319c45bcaddc1b1a68bd249896d75505a3a4bde",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.3636400989998947
+          ],
+          "median_build_seconds": 0.3636400989998947,
+          "object_bytes": 9840,
+          "text_bytes": 8296,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010679099999833852,
+          "executable_sha256": "8b83f2c9285033e1e66b59af8319c45bcaddc1b1a68bd249896d75505a3a4bde",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.319992299999285
+          ],
+          "median_build_seconds": 0.319992299999285,
+          "object_bytes": 9504,
+          "text_bytes": 5579,
+          "executable_bytes": 21552,
+          "relink_seconds": 0.010526500002015382,
+          "executable_sha256": "9b559ab3a578494c020ddcb810425fcb38be79b57062be86b79f40638e5447fc",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.39681109900266165
+          ],
+          "median_build_seconds": 0.39681109900266165,
+          "object_bytes": 4688,
+          "text_bytes": 3072,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010519600000407081,
+          "executable_sha256": "b4a11462ec485f68c8e3c5b6287c6bcc1df317a1eab6cbce153f0e178369b35b",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.40364319999935105
+          ],
+          "median_build_seconds": 0.40364319999935105,
+          "object_bytes": 4688,
+          "text_bytes": 3072,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010591700003715232,
+          "executable_sha256": "b4a11462ec485f68c8e3c5b6287c6bcc1df317a1eab6cbce153f0e178369b35b",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.302947898999264
+          ],
+          "median_build_seconds": 0.302947898999264,
+          "object_bytes": 13416,
+          "text_bytes": 9689,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010482999998203013,
+          "executable_sha256": "914ba9f5b815e46975eaee4dd85bed7986f17848026f3d0ff248776bf47dd803",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.36738500000501517
+          ],
+          "median_build_seconds": 0.36738500000501517,
+          "object_bytes": 8592,
+          "text_bytes": 7048,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010793400004331488,
+          "executable_sha256": "72217359af22cc43b3f8158a4667cc44e94a5df3acbf9206d140102350858aa6",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.36820289900060743
+          ],
+          "median_build_seconds": 0.36820289900060743,
+          "object_bytes": 8592,
+          "text_bytes": 7048,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010828600003151223,
+          "executable_sha256": "72217359af22cc43b3f8158a4667cc44e94a5df3acbf9206d140102350858aa6",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.30645080000249436
+          ],
+          "median_build_seconds": 0.30645080000249436,
+          "object_bytes": 7544,
+          "text_bytes": 4011,
+          "executable_bytes": 21352,
+          "relink_seconds": 0.010757900003227405,
+          "executable_sha256": "3882e4c552c8b53e81cd186ae686bfd4112fbdb6958f0a8ec5dc2bfab7811d61",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.37313750000612345
+          ],
+          "median_build_seconds": 0.37313750000612345,
+          "object_bytes": 4416,
+          "text_bytes": 2800,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010584299998299684,
+          "executable_sha256": "d796d63287fec27fc027a1f2fb8f95054ebf92d28a24919edb8464ce3d134fcc",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.3713135990037699
+          ],
+          "median_build_seconds": 0.3713135990037699,
+          "object_bytes": 4416,
+          "text_bytes": 2800,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010677900005248375,
+          "executable_sha256": "d796d63287fec27fc027a1f2fb8f95054ebf92d28a24919edb8464ce3d134fcc",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.3055173000029754
+          ],
+          "median_build_seconds": 0.3055173000029754,
+          "object_bytes": 13720,
+          "text_bytes": 9993,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010584299998299684,
+          "executable_sha256": "54a41cda7e5537c7e9e8f355fbebc3fe82cc175109753bc909ea855c4af8fbaa",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.3710902989987517
+          ],
+          "median_build_seconds": 0.3710902989987517,
+          "object_bytes": 8664,
+          "text_bytes": 7120,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010728799999924377,
+          "executable_sha256": "7bcffb42d3d64548516dbcd5ac95f48a80999405cce81e2055144c68b1d56573",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.3659325999979046
+          ],
+          "median_build_seconds": 0.3659325999979046,
+          "object_bytes": 8664,
+          "text_bytes": 7120,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010697600002458785,
+          "executable_sha256": "7bcffb42d3d64548516dbcd5ac95f48a80999405cce81e2055144c68b1d56573",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.30777259900060017
+          ],
+          "median_build_seconds": 0.30777259900060017,
+          "object_bytes": 7544,
+          "text_bytes": 4011,
+          "executable_bytes": 21352,
+          "relink_seconds": 0.010982500003592577,
+          "executable_sha256": "4c5bae85ef57e46bcd99017b0f3e04757bcb4e72ac2afd48514839bb460d72fe",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.36941350000415696
+          ],
+          "median_build_seconds": 0.36941350000415696,
+          "object_bytes": 4352,
+          "text_bytes": 2736,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010596300002362113,
+          "executable_sha256": "0b13547aed7e395fc674ebece0f70187ede196cf5e68633de5fb6f4195d07a30",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.3775657990045147
+          ],
+          "median_build_seconds": 0.3775657990045147,
+          "object_bytes": 4352,
+          "text_bytes": 2736,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010585100004391279,
+          "executable_sha256": "0b13547aed7e395fc674ebece0f70187ede196cf5e68633de5fb6f4195d07a30",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.30277310000383295
+          ],
+          "median_build_seconds": 0.30277310000383295,
+          "object_bytes": 13112,
+          "text_bytes": 9385,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010439400000905152,
+          "executable_sha256": "8d9db52c90d0f905e367e49ad0808076410814093cecdfdd10f2d6c25e7b6753",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.3613498990016524
+          ],
+          "median_build_seconds": 0.3613498990016524,
+          "object_bytes": 8400,
+          "text_bytes": 6856,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.01064570000016829,
+          "executable_sha256": "46b3bc2914c099d9ec67e395d51a4cd76204362458df2b91b804ff28052393a5",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.3670187999960035
+          ],
+          "median_build_seconds": 0.3670187999960035,
+          "object_bytes": 8400,
+          "text_bytes": 6856,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010812200001964811,
+          "executable_sha256": "46b3bc2914c099d9ec67e395d51a4cd76204362458df2b91b804ff28052393a5",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.3002825000003213
+          ],
+          "median_build_seconds": 0.3002825000003213,
+          "object_bytes": 6576,
+          "text_bytes": 3196,
+          "executable_bytes": 17176,
+          "relink_seconds": 0.010693699994590133,
+          "executable_sha256": "b52d4ea800fa0db104f17ccaf9ba5f7df0b909a4efe36f6b6a9219bfe28bcdbf",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.3576727990002837
+          ],
+          "median_build_seconds": 0.3576727990002837,
+          "object_bytes": 3808,
+          "text_bytes": 2264,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010988499998347834,
+          "executable_sha256": "6983e6f30327a815a5f66d61f1346ae16eabc8f75f29e66560fa862bd949c1a2",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.3591335000019171
+          ],
+          "median_build_seconds": 0.3591335000019171,
+          "object_bytes": 3808,
+          "text_bytes": 2264,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.011678000002575573,
+          "executable_sha256": "6983e6f30327a815a5f66d61f1346ae16eabc8f75f29e66560fa862bd949c1a2",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.30594100099551724
+          ],
+          "median_build_seconds": 0.30594100099551724,
+          "object_bytes": 16008,
+          "text_bytes": 12281,
+          "executable_bytes": 29592,
+          "relink_seconds": 0.010767799998575356,
+          "executable_sha256": "e64c442f6e6ed8aa53d346b71074d8eadf511a6c8c734bf4f631442c0319834b",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.3775027010051417
+          ],
+          "median_build_seconds": 0.3775027010051417,
+          "object_bytes": 10936,
+          "text_bytes": 9392,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010544899996602908,
+          "executable_sha256": "c8d85ec47676019cf2bcfbedff9540c127068025c7223a6ff79063ce632002e8",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.3682723009987967
+          ],
+          "median_build_seconds": 0.3682723009987967,
+          "object_bytes": 10936,
+          "text_bytes": 9392,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010812100001203362,
+          "executable_sha256": "c8d85ec47676019cf2bcfbedff9540c127068025c7223a6ff79063ce632002e8",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.3283663010006421
+          ],
+          "median_build_seconds": 0.3283663010006421,
+          "object_bytes": 10576,
+          "text_bytes": 6380,
+          "executable_bytes": 21560,
+          "relink_seconds": 0.010935799997241702,
+          "executable_sha256": "6cb38972c4a0663541a240808b8df0277e513c832736297ed6d5a4547904b5c7",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.3898810009995941
+          ],
+          "median_build_seconds": 0.3898810009995941,
+          "object_bytes": 6216,
+          "text_bytes": 4520,
+          "executable_bytes": 20280,
+          "relink_seconds": 0.010496499999135267,
+          "executable_sha256": "a2e7d39e3e6f40b5ad9fe947d271d5a4d4139aeb18fd768b31e8c0295d3ee9c6",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.38638660099968547
+          ],
+          "median_build_seconds": 0.38638660099968547,
+          "object_bytes": 6216,
+          "text_bytes": 4520,
+          "executable_bytes": 20280,
+          "relink_seconds": 0.010600000001431908,
+          "executable_sha256": "a2e7d39e3e6f40b5ad9fe947d271d5a4d4139aeb18fd768b31e8c0295d3ee9c6",
+          "measurements": []
+        }
+      ]
+    }
+  },
+  "source_sha256": {
+    "fe.toml": "6727afa35ee0cc7f96ea72760754294823b6006c50c5dbb4fcb9aaaad6934603",
+    "ingots/evm/fe.toml": "328b9ca9e1ce54f3818530e44392f7e587f6c9ec7c23afd11b1276f2aa201f0f",
+    "ingots/evm/src/account_runtime.fe": "4835dd8aaefd18d8e9cd9a07931f5da1ac9ff7acee18596dc9f75b46358b5052",
+    "ingots/evm/src/cli.fe": "b504db7beddc3b0acf0e095a4fc64c42de9e052e5228bb38c4f903774a5d4de1",
+    "ingots/evm/src/constants.fe": "8668898ea1a5e59ab294802e57e446732a0574c4f938924623f4f90533716f37",
+    "ingots/evm/src/environment_runtime.fe": "f2bd0b2f67e661bc0ed0a94df897e54ebe576b4c372071561fe2fd421d2ce0ad",
+    "ingots/evm/src/gas.fe": "6cfa212fec36987537b71a1c992adb4c62199813a3510e552141a3dbbebf6b81",
+    "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+    "ingots/evm/src/journal.fe": "727d6b7d0a33a79ecf155e35d500a4e0996a74e23c8901d35eeb948e409a6123",
+    "ingots/evm/src/keccak_runtime.fe": "2645197931f6ca92bb2cc60c8b6664f02dd2cc5441f4c6947360d0be04bfa6de",
+    "ingots/evm/src/lib.fe": "2be7419252258f4d0e4f9699cb8f6882de208cbdf3a7e2e96cfb547784919d19",
+    "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+    "ingots/evm/src/memory_runtime.fe": "d1d8284629fa4a15a48778673162271c8ceee4ed83ba27edf6153067850e3399",
+    "ingots/evm/src/opcodes.fe": "1eda620deb0975ad91affae3d44e16a1bfdd97aba618b822931a7ec838a054f5",
+    "ingots/evm/src/state.fe": "a8f5521818188874d6e7f86dbbfe5df82819f696e8b73ea6f78212f5b6f019a2",
+    "ingots/evm/src/state_gas_runtime.fe": "d8b6a674544a91aee0cd897a93bdfed8bdb3983c8eb1acc493496cacf718c190",
+    "ingots/evm/src/transaction.fe": "057e575a5343385461e78c72b21242a3ec42b773bf6c8f299042b20dd2bed2ba",
+    "ingots/evm/src/transaction_runtime.fe": "1cb78254bdff49b7e7fb24859d1accee58ae4a3c7b9fcbfd57f71ab40c41e0f9",
+    "ingots/evm/src/types.fe": "17082da7d4c6481f3084c1c71e42d3e0e8e968cb0e8a32c66347adc4e0391eb1",
+    "ingots/evm/src/vm.fe": "cab3ec0ae0f0e1ad443c65a74425e04d205ee4f97e832094b2d0ee3df46f767b",
+    "native/accept.py": "184ed1f30b85c5035757090e3818a705971ebdbdb6ae4defaefac2077f72491b",
+    "native/arith/run.py": "9f9087900d81184b65f64f039af6060db13873abe793934cd1858f77af2b27da",
+    "native/bootstrap.py": "ec95062b157b3bdc4b7cd52c785a438a577317731961286f49d871b0d3843483",
+    "native/cli.py": "38f6de9c693c889cbd5153024260259af4593789991dbccf419074ebba36f024",
+    "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+    "native/differential/corpus.py": "cf810a75d51db392ae351c74f705010a29d8ad9dcff301577b8f43a869cdb5a4",
+    "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+    "native/differential/driver/src/lib.fe": "e3d95cd9bd8c384493d6f325cd38a579b6292f5b7585cfbafc427d9ae0e40e91",
+    "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+    "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+    "native/differential/reference/src/main.rs": "b0df5de036fa45840e75f2af9e6e35378face404332c16be460edb1262f62f8e",
+    "native/differential/reference/src/state.rs": "b6de991eccc3d559d779b1086335ccb0ee185b8c10df9237d45f8225a843d550",
+    "native/differential/run.py": "64f99321b64483b0a84e20699855689b8fff3588722513daa5e4e1073d7e6a79",
+    "native/differential/state_contract.py": "2e8643c01252b8ec54bd00b6a590e2e5058dceedad8a289dc9f112a9e7fce208",
+    "native/differential/state_corpus.py": "2018e5c9ca625413c24a77fcbbf627d587ad895a4277da8369c56dda9d968135",
+    "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+    "native/differential/state_driver/src/lib.fe": "6e64ea146ac066c6c8c6c433ca6149740629f3a1c7c40cd63bf0b33246a9a094",
+    "native/differential/state_run.py": "892f5d46ec74e48a3222932e6cb33dff1ba642ecac4ea46a125ce62a1106d46c",
+    "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+    "native/differential/test_run.py": "0fdb1d904b0ab979fe23276e1fe387e1c8ab23e45dcd4fa6331464db592963c9",
+    "native/differential/test_state_contract.py": "51c39b5c5984b6b81589eb95f2de447310a4f319133a54575a70556d90f2854a",
+    "native/fixtures/accounts/fe.toml": "cc5bc10d60ea0d8971fcfaeb82bc21e228e514c4823b8772067861bf4b7a2063",
+    "native/fixtures/accounts/src/lib.fe": "78548800cd8cfdf2b5eb2c8e4678981cf7e8b76b090035c2f83d877999c9dd57",
+    "native/fixtures/buffer-borrow-scaling/single_buffer_loop.fe": "419ab64c86efb232f3d245bbb93f097e1a8f3f177357c1eae1484d69b5c097a7",
+    "native/fixtures/buffer-borrow-scaling/single_buffer_store.fe": "0e7a48355c0671715efece74c2bc19fac76a5f5b5d4357cad072318e06bc4c25",
+    "native/fixtures/buffer-borrow-scaling/two_buffers.fe": "58cd3a88a0640b460883ea7d70243c40b7a8e7606525786600428ba51804245d",
+    "native/fixtures/buffer-borrow-scaling/two_buffers_no_loop.fe": "1097104ab6ffb50e2de912a9492d83f14de155e6e4195fabac64e8ece95d19ef",
+    "native/fixtures/buffer-borrow-scaling/two_buffers_one_loop.fe": "132708a8a42406bd22e4bc2ccebbfa92007b312cee7699a9bad4e5d878c1b7f0",
+    "native/fixtures/journal/fe.toml": "2945cb10ca4c4d85f4879948b0f0035300e1a6106a8c71c98a051c950de28cf5",
+    "native/fixtures/journal/src/lib.fe": "0d83789898308461dfae5d226477fce2376c4bf3c335335f95029393eb42cb61",
+    "native/fixtures/owned_buffer_frame.fe": "371da075c153374186aa653e5832c1342146d06b735c555de3934bcf68787e4b",
+    "native/fixtures/vm_allocator.c": "3e5a4e24ce2f0abe4b70ac3ce05e2683ef80ac255402e16a608641b60fccbb64",
+    "native/reports/account-code-toolchain.json": "86906c40b2a15cf3a11eec0c2d591500192dbb920d02d2508ba80e3742d73358",
+    "native/toolchain.json": "da80615a3af3b27c0f8819e4b43f3afb17b4a5489e914eb243b1a5987d2ab62d"
+  },
+  "source_hashes_rechecked": true,
+  "resources": {
+    "exit_status": 0,
+    "seconds": 6339.137253009998,
+    "command": [
+      "/usr/bin/python3",
+      "/home/sean/code/fevm/native/accept.py",
+      "--build",
+      "/home/sean/code/fevm/native/out/account-code-20261002/toolchain-r2/build.json",
+      "--out",
+      "/home/sean/code/fevm/native/out/account-code-acceptance-20261002",
+      "--check-only",
+      "--jobs",
+      "1"
+    ],
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/fevm-account-accept-20261002.scope",
+    "memory_peak_bytes": 12207075328,
+    "memory_max_bytes": 17179869184,
+    "memory_events": {
+      "low": "0",
+      "high": "0",
+      "max": "0",
+      "oom": "0",
+      "oom_kill": "0",
+      "oom_group_kill": "0",
+      "sock_throttled": "0"
+    },
+    "limit_change": {
+      "initial_memory_max_bytes": 12884901888,
+      "final_memory_max_bytes": 17179869184,
+      "observed_peak_before_change_bytes": 12121792512,
+      "reason": "O1 compilation approached the initial ceiling; raise it before O2 while retaining one compiler job and zero swap allowance.",
+      "recorded_at_utc": "2026-10-03T07:08:49.134795+00:00"
+    }
+  },
+  "compiler_tests": {
+    "passed": 4488,
+    "skipped": 1,
+    "command": "cargo nextest r --release --all-features --no-fail-fast",
+    "log": "/home/sean/code/fevm/native/out/account-code-20261002/compiler-full-tests.log",
+    "log_sha256": "a58cb6e5533fe2eadef7a8351cd3e8898ac18e50e488bcfdac5612ff99028edc",
+    "fmt": "passed: cargo +nightly fmt --all --check",
+    "clippy": "passed: cargo clippy --release --workspace --all-targets --all-features -- -D warnings"
+  },
+  "reference_tests": {
+    "passed": 6,
+    "log": "/home/sean/code/fevm/native/out/account-code-20261002/reference-tests-r3.log",
+    "log_sha256": "4bbf44e34a399174696cf69e040ada020c8c292e014930fa88e7795abe421684",
+    "fmt": "passed",
+    "clippy": "passed",
+    "clippy_command": "cargo +1.98.1 clippy --release --all-targets --locked -- -D warnings",
+    "clippy_log_sha256": "a70da5408e7a6da7efe97b23011504833b16a7875bda14543f2504b5b8c7d97a"
+  },
+  "python_tests": {
+    "passed": 10,
+    "log_sha256": "7e0d7430e5522f73a9e0c7b8f898c108c96c3e678e291f8da2dbe253fb7a3961"
+  },
+  "source_hashes_match_implementation": true
+}
