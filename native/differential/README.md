@@ -8,6 +8,10 @@ widths and truncation positions, jumps, stack limits, memory/copy boundaries,
 remaining gas, Keccak ranges/padding/gas, and returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
+Current checkpoint: **1,835 frames and 383 state sequences pass at O0/O1/O2
+on x86_64 Linux**, including 106 Keccak frames and 34 new block-history/gas
+sequences. See the [Keccak integration report](../reports/keccak-integration.md).
+
 Previous checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
 reason differences per level match the agreed contract below. See the

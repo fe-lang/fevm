@@ -38,6 +38,10 @@ Keccak is a separately tested Git dependency; its native differential and timing
 suite lives in [fe-lang/keccak](https://github.com/fe-lang/keccak). FeVM does not
 need the experimental compiler barrier used by that benchmark.
 
+For local development, the [#1718 integration](reports/keccak-pr1718.md) records
+a separate compiler containing the reviewed borrow-checking performance fixes.
+Its manifest requires the local Fe repository containing that merge commit.
+
 Bootstrap verifies exact commits and builds their committed sources. Native
 acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.

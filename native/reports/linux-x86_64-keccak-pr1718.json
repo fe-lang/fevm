@@ -1,0 +1,1715 @@
+{
+  "schema": 1,
+  "complete": true,
+  "scope": "Local PR1718 compiler: all FeVM workspace tests and frame/state corpus at O2; library, CLI and arithmetic at O0/O1/O2. Published master has separate full seven-stage acceptance.",
+  "compiler_build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "0c100f1c8b1afd29f7b106eb9e40df0fc11aa01b",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "9c35018759aff07516025684fea0be784b0cf6df",
+      "cargo_lock_sha256": "de5e486e7a5088f662536f06d2a9e9047f09aa4029a15b229146892541856a74",
+      "rust_version": "1.98.1",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local merge of published Fe master and PR1718; provide --fe-repository /home/sean/code/fe",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "complete": true,
+    "compiler": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/toolchain/bin/fe",
+    "compiler_sha256": "03b4eab8fc8d330f25fd963680a776e1ae05f09984d2f3685f69a632f8d14317",
+    "compiler_version": "fe 26.4.0 (0c100f1c8)",
+    "host": "x86_64-unknown-linux-gnu",
+    "source_directory": "/home/sean/code/fe-worktrees/fevm-pr1718-cfe41-20261002",
+    "source_status": "",
+    "source_status_scope": "tracked files; the build uses an untracked node_modules symlink",
+    "merge_parents": [
+      "04d34410582e4ddac3f516c6ded1a0fdb4a31b3c",
+      "cfe41afdffc88b6de748e69d9596dbcfd195b8fd"
+    ],
+    "pull_request": "https://github.com/argotorg/fe/pull/1718",
+    "target_directory": "/home/sean/code/fe/target",
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "build_command": [
+      "rustup",
+      "run",
+      "1.98.1",
+      "cargo",
+      "build",
+      "--release",
+      "--locked",
+      "-p",
+      "fe",
+      "--features",
+      "cranelift"
+    ],
+    "cargo_build_jobs": 4,
+    "compiler_build_seconds": 123.90032256199993,
+    "build_log": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/toolchain/build.log",
+    "preparation": "Existing locked npm tree-sitter dependencies shared from main checkout; no tracked source edits"
+  },
+  "checks": [
+    {
+      "name": "candidate-check",
+      "status": 0,
+      "seconds": 79.87804611199681
+    },
+    {
+      "name": "unread-many-arm-regression",
+      "status": 0,
+      "seconds": 0.1659806000025128
+    },
+    {
+      "name": "keccak-O0",
+      "status": 0,
+      "seconds": 0.5148799029993825
+    },
+    {
+      "name": "keccak-O1",
+      "status": 0,
+      "seconds": 0.7152310029996443
+    },
+    {
+      "name": "keccak-O2",
+      "status": 0,
+      "seconds": 0.7152723020008125
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 770.1324220259994
+    },
+    {
+      "name": "cancun-frames-O2",
+      "status": 0,
+      "seconds": 133.26393142099914
+    },
+    {
+      "name": "cancun-state-O2",
+      "status": 0,
+      "seconds": 299.3848022810016
+    },
+    {
+      "name": "cli",
+      "status": 0,
+      "seconds": 550.0281621979993
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 18.202147686999524
+    }
+  ],
+  "compiler_tests": {
+    "passed": 4485,
+    "skipped": 1,
+    "command": "cargo +1.98.1 nextest r --release --no-fail-fast --workspace --all-features -j 8",
+    "log": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/compiler-tests.log",
+    "log_sha256": "268f4d3578ae09c811ddea7abed89b071d18e2f0cdd3340e1df314ab59f757f1",
+    "fmt": "passed",
+    "clippy": "passed: --workspace --all-targets --all-features --locked -- -D warnings"
+  },
+  "records": {
+    "frames": {
+      "schema": 2,
+      "fork": "Cancun",
+      "scope": "outcome, remaining gas, output, completed stack/active memory; simultaneous-fault reasons retained separately; external state is not compared",
+      "complete": true,
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "source_sha256": {
+        "fe.toml": "cddef24558bdcd785fb6d49f48e2e9522cf4123432b96e74ef75d0bcd46c30db",
+        "ingots/evm/fe.toml": "328b9ca9e1ce54f3818530e44392f7e587f6c9ec7c23afd11b1276f2aa201f0f",
+        "ingots/evm/src/cli.fe": "a2c5668ff087a227292cd9afed4fd11df496cd8039f06990317ed65e2a46d8e2",
+        "ingots/evm/src/constants.fe": "8668898ea1a5e59ab294802e57e446732a0574c4f938924623f4f90533716f37",
+        "ingots/evm/src/environment_runtime.fe": "4972fa0f9d79d629147d6155e8852c8e3d01b08e6f1c5286dedc0dc133d3ebfc",
+        "ingots/evm/src/gas.fe": "6cfa212fec36987537b71a1c992adb4c62199813a3510e552141a3dbbebf6b81",
+        "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+        "ingots/evm/src/journal.fe": "bea44eb3519d9d28c393574fb2e03d9475fc4e96b6aff5f783cfd5948ad205ca",
+        "ingots/evm/src/keccak_runtime.fe": "a9a525985229778877f459c3306a8224cd5e01992bae053711ee8f44d743e880",
+        "ingots/evm/src/lib.fe": "5bcd3fc377813b32d96f4af12ef90eefc3cf648889f6557048af467b65b9a803",
+        "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+        "ingots/evm/src/memory_runtime.fe": "b00067af9069a9398edb4e0ef75a69df6df4ad054f4336e003840bf941a8dc1f",
+        "ingots/evm/src/opcodes.fe": "ebb42551d542ed77c1539ea1209bdb44b5b9e8829c70ef09c0db23b54b0d023a",
+        "ingots/evm/src/state.fe": "f9a82b9f6a38f4c8b38383daf20e751b860c270df6198430bd7e263850ed4208",
+        "ingots/evm/src/state_gas_runtime.fe": "ecc7dedfacdd99a64be4d774311551d39facc4b357a3723abace0f172274b67e",
+        "ingots/evm/src/transaction.fe": "3bde72263a02181e0e53517d0956407ab08776f0fb4ca650cce591513b56e488",
+        "ingots/evm/src/transaction_runtime.fe": "8b17344348b82c944b412d06c55b457942d7ca26a60688bf2f9bc7a1d1ddaf45",
+        "ingots/evm/src/types.fe": "17082da7d4c6481f3084c1c71e42d3e0e8e968cb0e8a32c66347adc4e0391eb1",
+        "ingots/evm/src/vm.fe": "679a66b885776c07d85b5259187982c519164de48b500ec3f76152385ca14426",
+        "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+        "native/differential/corpus.py": "cf810a75d51db392ae351c74f705010a29d8ad9dcff301577b8f43a869cdb5a4",
+        "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+        "native/differential/driver/src/lib.fe": "3dc2e8ba2cdde5966a1f0c03003be0283cec04161e4dd4324d8c8b3c6f39ec1a",
+        "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+        "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+        "native/differential/reference/src/main.rs": "b0df5de036fa45840e75f2af9e6e35378face404332c16be460edb1262f62f8e",
+        "native/differential/reference/src/state.rs": "374a7d5f300661eea1a077b4fdee72bf0cf1e5200e809ca33b18e42b418278e0",
+        "native/differential/run.py": "64f99321b64483b0a84e20699855689b8fff3588722513daa5e4e1073d7e6a79",
+        "native/differential/state_contract.py": "2e8643c01252b8ec54bd00b6a590e2e5058dceedad8a289dc9f112a9e7fce208",
+        "native/differential/state_corpus.py": "18801d2dc8ff4e82d761b94d70eb75dc441426a0a59ee4f8ee2616ca371329c3",
+        "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+        "native/differential/state_driver/src/lib.fe": "00216301bcf9f46881a4338173da0aa17b705bd658901745b9ff36bc8c1a3134",
+        "native/differential/state_run.py": "892f5d46ec74e48a3222932e6cb33dff1ba642ecac4ea46a125ce62a1106d46c",
+        "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+        "native/differential/test_run.py": "0fdb1d904b0ab979fe23276e1fe387e1c8ab23e45dcd4fa6331464db592963c9",
+        "native/differential/test_state_contract.py": "428862f8c045643ff2c0ad0ddd4516a85d3063f9b28d9d03b038a3130589265d",
+        "native/toolchain.json": "da80615a3af3b27c0f8819e4b43f3afb17b4a5489e914eb243b1a5987d2ab62d"
+      },
+      "compiler_sha256": "03b4eab8fc8d330f25fd963680a776e1ae05f09984d2f3685f69a632f8d14317",
+      "compiler_version": "fe 26.4.0 (0c100f1c8)",
+      "revision": "2805215269d78f2b27240d62b5effdf5c8191861",
+      "dirty": true,
+      "reference": {
+        "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+        "toolchain": "1.98.1",
+        "target_directory": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/frames/reference-target",
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "packages": [
+          {
+            "name": "revm-bytecode",
+            "version": "7.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context",
+            "version": "12.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context-interface",
+            "version": "13.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database",
+            "version": "9.0.6",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database-interface",
+            "version": "8.0.5",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-interpreter",
+            "version": "31.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-primitives",
+            "version": "21.0.2",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-state",
+            "version": "8.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          }
+        ],
+        "executable_sha256": "a61a8f9cfc0b31988022f81d6ad81a6acb9b348a05d2e3e4bc83be544d75ea33"
+      },
+      "levels": [
+        {
+          "level": "2",
+          "complete": true,
+          "passed": 1835,
+          "reason_differences": [
+            {
+              "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-1-15",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            },
+            {
+              "case": "returndata-simultaneous-0-0-11",
+              "reference": "return_data_oob",
+              "fevm": "out_of_gas"
+            }
+          ],
+          "build_seconds": 119.86227470200174,
+          "executable_sha256": "9e784fbe3fc061ecdfd8ef834abb07af3f30a5ce65cc585511e32d23cc268d0c"
+        }
+      ],
+      "frames_per_level": 1835,
+      "categories": {
+        "anchors": 9,
+        "arithmetic": 167,
+        "push": 593,
+        "jump": 704,
+        "stack": 121,
+        "frame": 8,
+        "memory": 96,
+        "gas": 31,
+        "keccak": 106
+      },
+      "corpus_sha256": "658847cb7f235857babb6130c7f97bbea452a9234481659e7cfda3e269a60134"
+    },
+    "state": {
+      "schema": 1,
+      "fork": "Cancun",
+      "complete": true,
+      "scope": "frame results, watched persistent/transient/original state, warmness, signed refunds, nested checkpoints and transaction settlement; signed envelopes and CALL/CREATE are excluded",
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "source_sha256": {
+        "fe.toml": "cddef24558bdcd785fb6d49f48e2e9522cf4123432b96e74ef75d0bcd46c30db",
+        "ingots/evm/fe.toml": "328b9ca9e1ce54f3818530e44392f7e587f6c9ec7c23afd11b1276f2aa201f0f",
+        "ingots/evm/src/cli.fe": "a2c5668ff087a227292cd9afed4fd11df496cd8039f06990317ed65e2a46d8e2",
+        "ingots/evm/src/constants.fe": "8668898ea1a5e59ab294802e57e446732a0574c4f938924623f4f90533716f37",
+        "ingots/evm/src/environment_runtime.fe": "4972fa0f9d79d629147d6155e8852c8e3d01b08e6f1c5286dedc0dc133d3ebfc",
+        "ingots/evm/src/gas.fe": "6cfa212fec36987537b71a1c992adb4c62199813a3510e552141a3dbbebf6b81",
+        "ingots/evm/src/hex.fe": "0a63ce4d2fb680d2dd83849b5c51a496c6eafd9bd357b89c7719785ff8846d54",
+        "ingots/evm/src/journal.fe": "bea44eb3519d9d28c393574fb2e03d9475fc4e96b6aff5f783cfd5948ad205ca",
+        "ingots/evm/src/keccak_runtime.fe": "a9a525985229778877f459c3306a8224cd5e01992bae053711ee8f44d743e880",
+        "ingots/evm/src/lib.fe": "5bcd3fc377813b32d96f4af12ef90eefc3cf648889f6557048af467b65b9a803",
+        "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+        "ingots/evm/src/memory_runtime.fe": "b00067af9069a9398edb4e0ef75a69df6df4ad054f4336e003840bf941a8dc1f",
+        "ingots/evm/src/opcodes.fe": "ebb42551d542ed77c1539ea1209bdb44b5b9e8829c70ef09c0db23b54b0d023a",
+        "ingots/evm/src/state.fe": "f9a82b9f6a38f4c8b38383daf20e751b860c270df6198430bd7e263850ed4208",
+        "ingots/evm/src/state_gas_runtime.fe": "ecc7dedfacdd99a64be4d774311551d39facc4b357a3723abace0f172274b67e",
+        "ingots/evm/src/transaction.fe": "3bde72263a02181e0e53517d0956407ab08776f0fb4ca650cce591513b56e488",
+        "ingots/evm/src/transaction_runtime.fe": "8b17344348b82c944b412d06c55b457942d7ca26a60688bf2f9bc7a1d1ddaf45",
+        "ingots/evm/src/types.fe": "17082da7d4c6481f3084c1c71e42d3e0e8e968cb0e8a32c66347adc4e0391eb1",
+        "ingots/evm/src/vm.fe": "679a66b885776c07d85b5259187982c519164de48b500ec3f76152385ca14426",
+        "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+        "native/differential/corpus.py": "cf810a75d51db392ae351c74f705010a29d8ad9dcff301577b8f43a869cdb5a4",
+        "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+        "native/differential/driver/src/lib.fe": "3dc2e8ba2cdde5966a1f0c03003be0283cec04161e4dd4324d8c8b3c6f39ec1a",
+        "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+        "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+        "native/differential/reference/src/main.rs": "b0df5de036fa45840e75f2af9e6e35378face404332c16be460edb1262f62f8e",
+        "native/differential/reference/src/state.rs": "374a7d5f300661eea1a077b4fdee72bf0cf1e5200e809ca33b18e42b418278e0",
+        "native/differential/run.py": "64f99321b64483b0a84e20699855689b8fff3588722513daa5e4e1073d7e6a79",
+        "native/differential/state_contract.py": "2e8643c01252b8ec54bd00b6a590e2e5058dceedad8a289dc9f112a9e7fce208",
+        "native/differential/state_corpus.py": "18801d2dc8ff4e82d761b94d70eb75dc441426a0a59ee4f8ee2616ca371329c3",
+        "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+        "native/differential/state_driver/src/lib.fe": "00216301bcf9f46881a4338173da0aa17b705bd658901745b9ff36bc8c1a3134",
+        "native/differential/state_run.py": "892f5d46ec74e48a3222932e6cb33dff1ba642ecac4ea46a125ce62a1106d46c",
+        "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+        "native/differential/test_run.py": "0fdb1d904b0ab979fe23276e1fe387e1c8ab23e45dcd4fa6331464db592963c9",
+        "native/differential/test_state_contract.py": "428862f8c045643ff2c0ad0ddd4516a85d3063f9b28d9d03b038a3130589265d",
+        "native/toolchain.json": "da80615a3af3b27c0f8819e4b43f3afb17b4a5489e914eb243b1a5987d2ab62d"
+      },
+      "compiler_sha256": "03b4eab8fc8d330f25fd963680a776e1ae05f09984d2f3685f69a632f8d14317",
+      "compiler_version": "fe 26.4.0 (0c100f1c8)",
+      "revision": "2805215269d78f2b27240d62b5effdf5c8191861",
+      "dirty": true,
+      "reference": {
+        "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+        "toolchain": "1.98.1",
+        "target_directory": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/state/reference-target",
+        "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+        "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+        "packages": [
+          {
+            "name": "revm-bytecode",
+            "version": "7.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context",
+            "version": "12.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-context-interface",
+            "version": "13.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database",
+            "version": "9.0.6",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-database-interface",
+            "version": "8.0.5",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-interpreter",
+            "version": "31.1.0",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-primitives",
+            "version": "21.0.2",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          },
+          {
+            "name": "revm-state",
+            "version": "8.1.1",
+            "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+          }
+        ],
+        "executable_sha256": "a61a8f9cfc0b31988022f81d6ad81a6acb9b348a05d2e3e4bc83be544d75ea33"
+      },
+      "levels": [
+        {
+          "level": "2",
+          "complete": true,
+          "passed": 383,
+          "build_seconds": 290.50487679599973,
+          "executable_sha256": "be1ab8b85487feb09137d816fe1eacdb95b8342eaa4c7fa8af5279a8e01f9b89"
+        }
+      ],
+      "cases_per_level": 383,
+      "categories": {
+        "net-storage-anchors": 34,
+        "storage-frame-sequences": 162,
+        "account-warming": 32,
+        "gas-boundaries": 40,
+        "static": 5,
+        "checkpoints": 3,
+        "frame-revert": 3,
+        "access-lists": 2,
+        "transaction-boundaries": 2,
+        "refund-cap": 1,
+        "word-boundaries": 1,
+        "seeded-state-sequences": 64,
+        "block-history": 30,
+        "block-history-gas": 4
+      },
+      "corpus_sha256": "6c3075bda6dc46922c8b02c82c5fbc41dd78ae5a5a358e9f40592943cd793169"
+    },
+    "cli": {
+      "schema": 1,
+      "scope": "native FeVM CLI smoke, not Cancun conformance",
+      "compiler_sha256": "03b4eab8fc8d330f25fd963680a776e1ae05f09984d2f3685f69a632f8d14317",
+      "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+      "complete": true,
+      "builds": [
+        {
+          "level": "0",
+          "build_seconds": 85.51372928300043,
+          "object_bytes": 9971272,
+          "text_bytes": 9885184,
+          "executable_bytes": 9958744,
+          "relink_seconds": 0.022901699998328695,
+          "executable_sha256": "82b0c0b5444ccd98f63b27e7e35e5efc88a9fe3dabc7fbaffb9e86a36facdf1d",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "level": "1",
+          "build_seconds": 93.31491379299769,
+          "object_bytes": 9211256,
+          "text_bytes": 9146728,
+          "executable_bytes": 9211696,
+          "relink_seconds": 0.022424700000556186,
+          "executable_sha256": "cfbc92bcf7393c420416e7c37f7ff289a109e5e49f2a54d63729aa0b0fd89022",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        },
+        {
+          "level": "2",
+          "build_seconds": 92.76909201400122,
+          "object_bytes": 9211256,
+          "text_bytes": 9146728,
+          "executable_bytes": 9211696,
+          "relink_seconds": 0.022126600000774488,
+          "executable_sha256": "cfbc92bcf7393c420416e7c37f7ff289a109e5e49f2a54d63729aa0b0fd89022",
+          "checks": [
+            {
+              "name": "usage",
+              "passed": true,
+              "status": 2,
+              "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+              "stderr": ""
+            },
+            {
+              "name": "empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "stop",
+              "passed": true,
+              "status": 0,
+              "stdout": "empty\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-empty",
+              "passed": true,
+              "status": 0,
+              "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+              "stderr": ""
+            },
+            {
+              "name": "keccak-abc",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+              "stderr": ""
+            },
+            {
+              "name": "add",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+              "stderr": ""
+            },
+            {
+              "name": "calldata-return",
+              "passed": true,
+              "status": 0,
+              "stdout": "0x1234\n",
+              "stderr": ""
+            },
+            {
+              "name": "bad-hex",
+              "passed": true,
+              "status": 3,
+              "stdout": "invalid hex bytecode\n",
+              "stderr": ""
+            },
+            {
+              "name": "odd-hex",
+              "passed": true,
+              "status": 4,
+              "stdout": "hex bytecode has an odd number of digits\n",
+              "stderr": ""
+            },
+            {
+              "name": "stack-underflow",
+              "passed": true,
+              "status": 10,
+              "stdout": "stack underflow\n",
+              "stderr": ""
+            },
+            {
+              "name": "invalid",
+              "passed": true,
+              "status": 17,
+              "stdout": "invalid opcode\n",
+              "stderr": ""
+            },
+            {
+              "name": "revert",
+              "passed": true,
+              "status": 19,
+              "stdout": "revert 0x\n",
+              "stderr": ""
+            },
+            {
+              "name": "owned-output",
+              "passed": true,
+              "status": 0,
+              "stdout_bytes": 131077,
+              "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+              "stderr": ""
+            },
+            {
+              "name": "memory-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "output-allocation-failure",
+              "passed": true,
+              "status": 21,
+              "stdout_bytes": 23,
+              "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+              "stderr": ""
+            },
+            {
+              "name": "journal-allocation-failure",
+              "passed": true,
+              "status": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        }
+      ]
+    },
+    "arithmetic": {
+      "schema": 1,
+      "complete": true,
+      "created_utc": "2026-10-03T01:48:26.390303+00:00",
+      "runner_sha256": "9f9087900d81184b65f64f039af6060db13873abe793934cd1858f77af2b27da",
+      "host": {
+        "system": "Linux",
+        "machine": "x86_64",
+        "platform": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+        "cpu": [
+          "processor\t: 0",
+          "vendor_id\t: AuthenticAMD",
+          "cpu family\t: 26",
+          "model\t\t: 68",
+          "model name\t: AMD Ryzen 5 9600X 6-Core Processor",
+          "stepping\t: 0",
+          "microcode\t: 0xffffffff",
+          "cpu MHz\t\t: 3892.585",
+          "cache size\t: 1024 KB",
+          "physical id\t: 0",
+          "siblings\t: 10",
+          "core id\t\t: 0",
+          "cpu cores\t: 5",
+          "apicid\t\t: 0",
+          "initial apicid\t: 0",
+          "fpu\t\t: yes",
+          "fpu_exception\t: yes",
+          "cpuid level\t: 13",
+          "wp\t\t: yes",
+          "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm rep_good nopl cpuid extd_apicid tsc_known_freq pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves xsaveerptr arat avx512vbmi avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm",
+          "bugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass srso spectre_v2_user",
+          "bogomips\t: 7785.17",
+          "TLB size\t: 192 4K pages",
+          "clflush size\t: 64",
+          "cache_alignment\t: 64"
+        ],
+        "clock_ticks_per_second": 1000000,
+        "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+      },
+      "compiler": {
+        "path": "/home/sean/code/fevm/native/out/keccak-pr1718-20261002/toolchain/bin/fe",
+        "version": "fe 26.4.0 (0c100f1c8)",
+        "sha256": "03b4eab8fc8d330f25fd963680a776e1ae05f09984d2f3685f69a632f8d14317"
+      },
+      "harness_revision": "2805215269d78f2b27240d62b5effdf5c8191861",
+      "harness_dirty": true,
+      "timing": "process CPU clock, input/output and startup excluded; dependent op/xor loop; build includes compiler startup, link and report; relink measured separately",
+      "results": [
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.3019314020020829
+          ],
+          "median_build_seconds": 0.3019314020020829,
+          "object_bytes": 13112,
+          "text_bytes": 9385,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010745499999757158,
+          "executable_sha256": "724364d28be1d95a89d79cdeca93c793f60e1c41e556cd7b91789b58cc326194",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.3657574020035099
+          ],
+          "median_build_seconds": 0.3657574020035099,
+          "object_bytes": 8432,
+          "text_bytes": 6888,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010915300001215655,
+          "executable_sha256": "13891b0f1d85f39cdba0925dec17d1160a5c1de44b5a3028802bc7219b902ee0",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "ba62eb1b6a2dbde37551d1fdce16c0f5572f581939bb80a860a8a5e46761dd39",
+          "build_seconds": [
+            0.3685405020005419
+          ],
+          "median_build_seconds": 0.3685405020005419,
+          "object_bytes": 8432,
+          "text_bytes": 6888,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010593199996947078,
+          "executable_sha256": "13891b0f1d85f39cdba0925dec17d1160a5c1de44b5a3028802bc7219b902ee0",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.3025873019978462
+          ],
+          "median_build_seconds": 0.3025873019978462,
+          "object_bytes": 8312,
+          "text_bytes": 4612,
+          "executable_bytes": 21400,
+          "relink_seconds": 0.01068930000110413,
+          "executable_sha256": "8e7f1329bdbffeebe005d61cb5b1b2af23678f82ac5f3ad3356797f575463ebc",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.36587460200098576
+          ],
+          "median_build_seconds": 0.36587460200098576,
+          "object_bytes": 4264,
+          "text_bytes": 2720,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010603700000501703,
+          "executable_sha256": "f77bcd2ead30df147cece6513177fa359fc2d1f3f02088f4c15a720e31ade142",
+          "measurements": []
+        },
+        {
+          "operation": "add",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "682f4622c53f1fe3d0cff5a186329d322a985616813a6ce8bc21105b940f0f8c",
+          "build_seconds": [
+            0.3633158029988408
+          ],
+          "median_build_seconds": 0.3633158029988408,
+          "object_bytes": 4264,
+          "text_bytes": 2720,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010749599998234771,
+          "executable_sha256": "f77bcd2ead30df147cece6513177fa359fc2d1f3f02088f4c15a720e31ade142",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.30196850200081826
+          ],
+          "median_build_seconds": 0.30196850200081826,
+          "object_bytes": 13496,
+          "text_bytes": 9769,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010885600000619888,
+          "executable_sha256": "3ff5dcafbea43d29138da0ddc1b397b03118b588570a21ae8dc6117d966e76f0",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.3694503020014963
+          ],
+          "median_build_seconds": 0.3694503020014963,
+          "object_bytes": 8800,
+          "text_bytes": 7256,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010559400001511676,
+          "executable_sha256": "3532ff88f3cdfd388732bf4cc780fea44197014600020c4f9867e4d2d84809d9",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "6edf478da907a35d1f728639006a9fd8103b5c2f0c93a60fc0eb842af3a666ec",
+          "build_seconds": [
+            0.3657985030004056
+          ],
+          "median_build_seconds": 0.3657985030004056,
+          "object_bytes": 8800,
+          "text_bytes": 7256,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.01070629999958328,
+          "executable_sha256": "3532ff88f3cdfd388732bf4cc780fea44197014600020c4f9867e4d2d84809d9",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.308145102000708
+          ],
+          "median_build_seconds": 0.308145102000708,
+          "object_bytes": 9000,
+          "text_bytes": 5156,
+          "executable_bytes": 21400,
+          "relink_seconds": 0.010573799998383038,
+          "executable_sha256": "a821ee2053210e9195a4f2ba991100d5d99603992cea0a8e90bf08aadba21ede",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.38192580200120574
+          ],
+          "median_build_seconds": 0.38192580200120574,
+          "object_bytes": 4800,
+          "text_bytes": 3256,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010696299999835901,
+          "executable_sha256": "4e4fd20ad7935ca1f145e1395d6cddeeca011c9c9ac6ac9e2f9885d1baa25f79",
+          "measurements": []
+        },
+        {
+          "operation": "mul",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "13533d97f3c23d0baf0a95b8ffcad518ae5ea7f7b504de9859876db8ccd7b136",
+          "build_seconds": [
+            0.36966050299815834
+          ],
+          "median_build_seconds": 0.36966050299815834,
+          "object_bytes": 4800,
+          "text_bytes": 3256,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.01064599999881466,
+          "executable_sha256": "4e4fd20ad7935ca1f145e1395d6cddeeca011c9c9ac6ac9e2f9885d1baa25f79",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.3001047010002367
+          ],
+          "median_build_seconds": 0.3001047010002367,
+          "object_bytes": 14432,
+          "text_bytes": 10705,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.01073750000068685,
+          "executable_sha256": "8c8af9b3f421fcaad2e615f18cf6834ae000e6918bc66f4a4f1ab437c471bcc2",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.360551800000394
+          ],
+          "median_build_seconds": 0.360551800000394,
+          "object_bytes": 9872,
+          "text_bytes": 8328,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010748100001364946,
+          "executable_sha256": "92b39b79e08b8187ead2dc4510186e533784a90404bfdfc3c0fd4159541f192d",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "6a72abb9bf5dbd24f2ab988bf65f85291ca9909f00be2363b0361a7e67ff285f",
+          "build_seconds": [
+            0.3607852000022831
+          ],
+          "median_build_seconds": 0.3607852000022831,
+          "object_bytes": 9872,
+          "text_bytes": 8328,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010766499999590451,
+          "executable_sha256": "92b39b79e08b8187ead2dc4510186e533784a90404bfdfc3c0fd4159541f192d",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.31977699900016887
+          ],
+          "median_build_seconds": 0.31977699900016887,
+          "object_bytes": 9504,
+          "text_bytes": 5579,
+          "executable_bytes": 21552,
+          "relink_seconds": 0.010559500002273126,
+          "executable_sha256": "e7b37fd38f938b4935b9f7e64b894e6b54f00fe7f1622c2044f9c0a623e23970",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.39803050000045914
+          ],
+          "median_build_seconds": 0.39803050000045914,
+          "object_bytes": 4784,
+          "text_bytes": 3168,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010768200001621153,
+          "executable_sha256": "c4fd221a9df0faae36d29290fced9c63c08b8d7d2fa3c1bc604a1a955e88957b",
+          "measurements": []
+        },
+        {
+          "operation": "div",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "f30c2b16e4ed539aec573feb5596798646cd129cfca522e668ed37c10bf392d4",
+          "build_seconds": [
+            0.40189720000125817
+          ],
+          "median_build_seconds": 0.40189720000125817,
+          "object_bytes": 4784,
+          "text_bytes": 3168,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010761300000012852,
+          "executable_sha256": "c4fd221a9df0faae36d29290fced9c63c08b8d7d2fa3c1bc604a1a955e88957b",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.30051299900151207
+          ],
+          "median_build_seconds": 0.30051299900151207,
+          "object_bytes": 14440,
+          "text_bytes": 10713,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010758200001873774,
+          "executable_sha256": "b0dee2587b040e45513e1ea5e1a413ed5040659bfda29a317e357dfe6296f670",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.36146630000075675
+          ],
+          "median_build_seconds": 0.36146630000075675,
+          "object_bytes": 9840,
+          "text_bytes": 8296,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010848499998246552,
+          "executable_sha256": "8b83f2c9285033e1e66b59af8319c45bcaddc1b1a68bd249896d75505a3a4bde",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "21e415092c76c66d6df2f4c7e7eb991d7959f1a8d51e4a90fb73f7b6531ecd99",
+          "build_seconds": [
+            0.3661388000000443
+          ],
+          "median_build_seconds": 0.3661388000000443,
+          "object_bytes": 9840,
+          "text_bytes": 8296,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010890800000197487,
+          "executable_sha256": "8b83f2c9285033e1e66b59af8319c45bcaddc1b1a68bd249896d75505a3a4bde",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.32114769899999374
+          ],
+          "median_build_seconds": 0.32114769899999374,
+          "object_bytes": 9504,
+          "text_bytes": 5579,
+          "executable_bytes": 21552,
+          "relink_seconds": 0.01062649999948917,
+          "executable_sha256": "9b559ab3a578494c020ddcb810425fcb38be79b57062be86b79f40638e5447fc",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.4006316000013612
+          ],
+          "median_build_seconds": 0.4006316000013612,
+          "object_bytes": 4688,
+          "text_bytes": 3072,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010763500002212822,
+          "executable_sha256": "b4a11462ec485f68c8e3c5b6287c6bcc1df317a1eab6cbce153f0e178369b35b",
+          "measurements": []
+        },
+        {
+          "operation": "rem",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1421,
+          "source_sha256": "10d5a4f2b227bfc359bb68817e18715a13fa325a3c6a9d16cece47f2410a9ae9",
+          "build_seconds": [
+            0.3998330000031274
+          ],
+          "median_build_seconds": 0.3998330000031274,
+          "object_bytes": 4688,
+          "text_bytes": 3072,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010793700002977857,
+          "executable_sha256": "b4a11462ec485f68c8e3c5b6287c6bcc1df317a1eab6cbce153f0e178369b35b",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.29824249900048017
+          ],
+          "median_build_seconds": 0.29824249900048017,
+          "object_bytes": 13416,
+          "text_bytes": 9689,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010682899999665096,
+          "executable_sha256": "914ba9f5b815e46975eaee4dd85bed7986f17848026f3d0ff248776bf47dd803",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.36730229999739095
+          ],
+          "median_build_seconds": 0.36730229999739095,
+          "object_bytes": 8592,
+          "text_bytes": 7048,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010620199998811586,
+          "executable_sha256": "72217359af22cc43b3f8158a4667cc44e94a5df3acbf9206d140102350858aa6",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "60eb191e7e447f99719f1a906f6ee7ebb4200d6144b9ed5902fcb2ecd6b54303",
+          "build_seconds": [
+            0.36425079999753507
+          ],
+          "median_build_seconds": 0.36425079999753507,
+          "object_bytes": 8592,
+          "text_bytes": 7048,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010816100002557505,
+          "executable_sha256": "72217359af22cc43b3f8158a4667cc44e94a5df3acbf9206d140102350858aa6",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.30472290000034263
+          ],
+          "median_build_seconds": 0.30472290000034263,
+          "object_bytes": 7544,
+          "text_bytes": 4011,
+          "executable_bytes": 21352,
+          "relink_seconds": 0.01057809999838355,
+          "executable_sha256": "3882e4c552c8b53e81cd186ae686bfd4112fbdb6958f0a8ec5dc2bfab7811d61",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.36608549900120124
+          ],
+          "median_build_seconds": 0.36608549900120124,
+          "object_bytes": 4416,
+          "text_bytes": 2800,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010735500000009779,
+          "executable_sha256": "d796d63287fec27fc027a1f2fb8f95054ebf92d28a24919edb8464ce3d134fcc",
+          "measurements": []
+        },
+        {
+          "operation": "shl",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "d8637e0629379861c73d5bf5c85a7c58c25fb373a83e66a5b60027d09c5ab38d",
+          "build_seconds": [
+            0.364683600000717
+          ],
+          "median_build_seconds": 0.364683600000717,
+          "object_bytes": 4416,
+          "text_bytes": 2800,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010814600002049701,
+          "executable_sha256": "d796d63287fec27fc027a1f2fb8f95054ebf92d28a24919edb8464ce3d134fcc",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.3019714000001841
+          ],
+          "median_build_seconds": 0.3019714000001841,
+          "object_bytes": 13720,
+          "text_bytes": 9993,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010844699998415308,
+          "executable_sha256": "54a41cda7e5537c7e9e8f355fbebc3fe82cc175109753bc909ea855c4af8fbaa",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.36745259900271776
+          ],
+          "median_build_seconds": 0.36745259900271776,
+          "object_bytes": 8664,
+          "text_bytes": 7120,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.01060710000092513,
+          "executable_sha256": "7bcffb42d3d64548516dbcd5ac95f48a80999405cce81e2055144c68b1d56573",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "0ed5bfa5e9b4db359d40b1e5b5d8cf94b92975af1af86c38b1a1b48c2355ccc6",
+          "build_seconds": [
+            0.3589027999987593
+          ],
+          "median_build_seconds": 0.3589027999987593,
+          "object_bytes": 8664,
+          "text_bytes": 7120,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010721400001784787,
+          "executable_sha256": "7bcffb42d3d64548516dbcd5ac95f48a80999405cce81e2055144c68b1d56573",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.30031130000134
+          ],
+          "median_build_seconds": 0.30031130000134,
+          "object_bytes": 7544,
+          "text_bytes": 4011,
+          "executable_bytes": 21352,
+          "relink_seconds": 0.010810899999341927,
+          "executable_sha256": "4c5bae85ef57e46bcd99017b0f3e04757bcb4e72ac2afd48514839bb460d72fe",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.3702534039985039
+          ],
+          "median_build_seconds": 0.3702534039985039,
+          "object_bytes": 4352,
+          "text_bytes": 2736,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010668099999747938,
+          "executable_sha256": "0b13547aed7e395fc674ebece0f70187ede196cf5e68633de5fb6f4195d07a30",
+          "measurements": []
+        },
+        {
+          "operation": "shr",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1888,
+          "source_sha256": "7779d3b7915e19adc33dd7d6fbb53935cb9fac078d784addfe3237d676719eef",
+          "build_seconds": [
+            0.3650253050000174
+          ],
+          "median_build_seconds": 0.3650253050000174,
+          "object_bytes": 4352,
+          "text_bytes": 2736,
+          "executable_bytes": 16160,
+          "relink_seconds": 0.010687900001357775,
+          "executable_sha256": "0b13547aed7e395fc674ebece0f70187ede196cf5e68633de5fb6f4195d07a30",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.2965103030001046
+          ],
+          "median_build_seconds": 0.2965103030001046,
+          "object_bytes": 13112,
+          "text_bytes": 9385,
+          "executable_bytes": 25496,
+          "relink_seconds": 0.010504701000172645,
+          "executable_sha256": "8d9db52c90d0f905e367e49ad0808076410814093cecdfdd10f2d6c25e7b6753",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.35815200399883906
+          ],
+          "median_build_seconds": 0.35815200399883906,
+          "object_bytes": 8400,
+          "text_bytes": 6856,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010867199998756405,
+          "executable_sha256": "46b3bc2914c099d9ec67e395d51a4cd76204362458df2b91b804ff28052393a5",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "b37e54d46f30d72eaa8dff849bceb86b7dd23889e769bd6c5316708b5b26f57f",
+          "build_seconds": [
+            0.35931320400050026
+          ],
+          "median_build_seconds": 0.35931320400050026,
+          "object_bytes": 8400,
+          "text_bytes": 6856,
+          "executable_bytes": 20216,
+          "relink_seconds": 0.010793600999022601,
+          "executable_sha256": "46b3bc2914c099d9ec67e395d51a4cd76204362458df2b91b804ff28052393a5",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.29478680299871485
+          ],
+          "median_build_seconds": 0.29478680299871485,
+          "object_bytes": 6576,
+          "text_bytes": 3196,
+          "executable_bytes": 17176,
+          "relink_seconds": 0.01093380000020261,
+          "executable_sha256": "b52d4ea800fa0db104f17ccaf9ba5f7df0b909a4efe36f6b6a9219bfe28bcdbf",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.3571531039997353
+          ],
+          "median_build_seconds": 0.3571531039997353,
+          "object_bytes": 3808,
+          "text_bytes": 2264,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.010730199999670731,
+          "executable_sha256": "6983e6f30327a815a5f66d61f1346ae16eabc8f75f29e66560fa862bd949c1a2",
+          "measurements": []
+        },
+        {
+          "operation": "lt",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "d6c57a10222d6a6bae1d9f5a6607107d43d95cf3daf70bde7100d154dae7479a",
+          "build_seconds": [
+            0.35756020400003763
+          ],
+          "median_build_seconds": 0.35756020400003763,
+          "object_bytes": 3808,
+          "text_bytes": 2264,
+          "executable_bytes": 16120,
+          "relink_seconds": 0.01067989999864949,
+          "executable_sha256": "6983e6f30327a815a5f66d61f1346ae16eabc8f75f29e66560fa862bd949c1a2",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.2987724039994646
+          ],
+          "median_build_seconds": 0.2987724039994646,
+          "object_bytes": 16008,
+          "text_bytes": 12281,
+          "executable_bytes": 29592,
+          "relink_seconds": 0.010762500001874287,
+          "executable_sha256": "e64c442f6e6ed8aa53d346b71074d8eadf511a6c8c734bf4f631442c0319834b",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.36162870400221436
+          ],
+          "median_build_seconds": 0.36162870400221436,
+          "object_bytes": 10936,
+          "text_bytes": 9392,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010737399999925401,
+          "executable_sha256": "c8d85ec47676019cf2bcfbedff9540c127068025c7223a6ff79063ce632002e8",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "builtin",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "9610696998b1057d93f147ce964a1864b64f1455157d122e1e8abe13dc7f8641",
+          "build_seconds": [
+            0.3669515039982798
+          ],
+          "median_build_seconds": 0.3669515039982798,
+          "object_bytes": 10936,
+          "text_bytes": 9392,
+          "executable_bytes": 24312,
+          "relink_seconds": 0.010813799999596085,
+          "executable_sha256": "c8d85ec47676019cf2bcfbedff9540c127068025c7223a6ff79063ce632002e8",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "0",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.31989380400045775
+          ],
+          "median_build_seconds": 0.31989380400045775,
+          "object_bytes": 10576,
+          "text_bytes": 6380,
+          "executable_bytes": 21560,
+          "relink_seconds": 0.010820600000442937,
+          "executable_sha256": "6cb38972c4a0663541a240808b8df0277e513c832736297ed6d5a4547904b5c7",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "1",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.3864629050003714
+          ],
+          "median_build_seconds": 0.3864629050003714,
+          "object_bytes": 6216,
+          "text_bytes": 4520,
+          "executable_bytes": 20280,
+          "relink_seconds": 0.010755600000265986,
+          "executable_sha256": "a2e7d39e3e6f40b5ad9fe947d271d5a4d4139aeb18fd768b31e8c0295d3ee9c6",
+          "measurements": []
+        },
+        {
+          "operation": "pow",
+          "representation": "limbs",
+          "level": "2",
+          "checked_cases": 1457,
+          "source_sha256": "332bf2f613846d4c04149bc9507c52d01ec6cd7e0ce78532af7765531f3c3c56",
+          "build_seconds": [
+            0.3829559049991076
+          ],
+          "median_build_seconds": 0.3829559049991076,
+          "object_bytes": 6216,
+          "text_bytes": 4520,
+          "executable_bytes": 20280,
+          "relink_seconds": 0.01068189999932656,
+          "executable_sha256": "a2e7d39e3e6f40b5ad9fe947d271d5a4d4139aeb18fd768b31e8c0295d3ee9c6",
+          "measurements": []
+        }
+      ]
+    }
+  },
+  "source_hashes_rechecked": true,
+  "resources": {
+    "scope": "run-r52e4cff197ee41ad82565a0a699aba2e.scope",
+    "memory_max_bytes": 12884901888,
+    "complete": true,
+    "peak_bytes": 8863821824,
+    "events": {
+      "low": 0,
+      "high": 0,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0,
+      "oom_group_kill": 0,
+      "sock_throttled": 0
+    }
+  },
+  "workspace": {
+    "O2": {
+      "passed": 35,
+      "log_sha256": "535ce3c1eb58ea265c0b58eb9b812d9ab8fac74d0176d1d712acf7bdb3a6bd14"
+    }
+  },
+  "keccak_revision": "7f32a75b9426f68fd3d44c2d09207386c481355d",
+  "keccak_source_sha256": {
+    "fe.toml": "a10bd5caddc5a62ad7c919a192955eda1f1b13dce361686146c864389526c56b",
+    "src/lib.fe": "d31084c7501365face67ffa787ac62418902443c48142e6523ef8d705b419477",
+    "src/native.fe": "4e49934850b1f0d00921f4232bdd91eb488c42efde1bc1abfd3bb95d6d4bd57c",
+    "src/permutation.fe": "4e6da458e4b59f980b839c7e8f7557e8685ac7055454143e1b4ba30a7ad5734b",
+    "src/tests.fe": "c9740c8b8d12479817a953999287f25bb736b325a0e4e152ac01d376de52aaad"
+  },
+  "keccak_library": {
+    "O0": {
+      "passed": 3,
+      "log_sha256": "3d25b37f0b01da25f9d3af4734217aa9489218016c0f0517fc04c38a9eb709ed"
+    },
+    "O1": {
+      "passed": 3,
+      "log_sha256": "66e5a692b5d6eb5491064472ee068176403989f0ce25512bf90d7e5140cc9476"
+    },
+    "O2": {
+      "passed": 3,
+      "log_sha256": "3d25b37f0b01da25f9d3af4734217aa9489218016c0f0517fc04c38a9eb709ed"
+    }
+  },
+  "master_executable_comparison": {
+    "frames": {
+      "level": "2",
+      "candidate_sha256": "9e784fbe3fc061ecdfd8ef834abb07af3f30a5ce65cc585511e32d23cc268d0c",
+      "master_sha256": "9e784fbe3fc061ecdfd8ef834abb07af3f30a5ce65cc585511e32d23cc268d0c",
+      "identical": true,
+      "candidate_build_seconds": 119.86227470200174,
+      "master_build_seconds": 119.75582982199921
+    },
+    "state": {
+      "level": "2",
+      "candidate_sha256": "be1ab8b85487feb09137d816fe1eacdb95b8342eaa4c7fa8af5279a8e01f9b89",
+      "master_sha256": "be1ab8b85487feb09137d816fe1eacdb95b8342eaa4c7fa8af5279a8e01f9b89",
+      "identical": true,
+      "candidate_build_seconds": 290.50487679599973,
+      "master_build_seconds": 320.1798683169982
+    }
+  },
+  "check_timings": {
+    "scope": "One fe check --ingot fevm per compiler on identical sources; shared host, not a controlled benchmark",
+    "master_compiler_sha256": "0a0254cd83b74eabc85b48706afaa45e397a0e6f5dd1aef2d406351aa596f92e",
+    "master": {
+      "raw": "\tCommand being timed: \"native/out/keccak-resume-20261002/toolchain/bin/fe check . --ingot fevm\"\n\tUser time (seconds): 137.68\n\tSystem time (seconds): 1.53\n\tPercent of CPU this job got: 88%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 2:38.06\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 856176\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 281622\n\tVoluntary context switches: 35996\n\tInvoluntary context switches: 6518\n\tSwaps: 0\n\tFile system inputs: 288704\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "user_seconds": 137.68,
+      "system_seconds": 1.53
+    },
+    "candidate": {
+      "raw": "\tCommand being timed: \"/home/sean/code/fevm/native/out/keccak-pr1718-20261002/toolchain/bin/fe check /home/sean/code/fevm --ingot fevm\"\n\tUser time (seconds): 79.22\n\tSystem time (seconds): 0.59\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 1:19.82\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 855240\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 228352\n\tVoluntary context switches: 2\n\tInvoluntary context switches: 443\n\tSwaps: 0\n\tFile system inputs: 248\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "user_seconds": 79.22,
+      "system_seconds": 0.59
+    }
+  }
+}
