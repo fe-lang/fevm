@@ -2,8 +2,8 @@
 
 The state-access gas milestone is accepted on x86_64 Linux with local Fe
 `09aed1e8817d0be5a9340dc7d6ad3fd7fec43f50` and published Sonatina
-`736c2be7fc7ae2258bb781213e2e6eae1903b6c0`. The exact source hashes, compiler checks
-and eight-stage results are in
+`736c2be7fc7ae2258bb781213e2e6eae1903b6c0`. The original milestone's source hashes,
+compiler checks and eight-stage results are in
 [the acceptance record](linux-x86_64-state-gas-acceptance.json); rebuild with
 [state-gas-toolchain.json](state-gas-toolchain.json).
 
@@ -50,3 +50,26 @@ intrinsic and access-list intrinsic charges, CALL/CREATE execution, the remainin
 opcode families and full Cancun conformance remain separate work. World and
 transaction caches retain their explicit 256-entry host limit. This compiler
 and state-gas source still need an AArch64 macOS acceptance run.
+
+## Reference-build rerun — 2026-10-02
+
+The complete eight-stage native gate also passes after the shared reference-build
+fix at FeVM `e31631968f518d5e82a4ff470f4fdfe34d599e68`. The exact
+[acceptance record](linux-x86_64-reference-build-acceptance.json),
+[frame results](linux-x86_64-reference-build-frames.json) and
+[state results](linux-x86_64-reference-build-state.json) retain that clean tested
+revision and source hashes. Both differential records match its committed sources.
+Later documentation-only evidence commits do not change those tested inputs.
+
+This rerun uses the same compiler pin above, with compiler SHA-256
+`0ec4f47e973f9a8af5ed452427ba77a0c5f3c44b5d02c50f0cb730b2c50d4b5a`.
+Both runners build a fresh reference in their own output directory using
+Rust/Cargo 1.98.1; the records include the selected toolchain, target directory
+and executable hash. Cargo metadata identifies the same target directory.
+The full gate passes all coverage in the table above; the updated regression
+suite passes 10 Python tests and the reference passes 5 Rust tests.
+
+To reproduce, check out the tested revision and follow the native bootstrap and
+acceptance commands with its `native/toolchain.json`. The compiler remains a
+local Fe integration, so supply the recorded local repository or a bundle as
+explained in the [native tooling guide](../README.md).

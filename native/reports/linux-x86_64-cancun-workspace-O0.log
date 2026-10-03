@@ -1,0 +1,23 @@
+running `fe test` for 3 inputs (jobs=8)
+
+COMPILING        evm        /tmp/fevm-pr1-review/ingots/evm
+COMPILING        swisstable /tmp/fevm-pr1-review/ingots/swisstable
+COMPILING        driver     /tmp/fevm-pr1-review/native/differential/driver
+READY [3.6554s]  swisstable running 6 tests
+PASS  [0.0007s]  swisstable swisstable_hash_reference_vectors
+PASS  [0.0007s]  swisstable swisstable_basic_operations
+PASS  [0.0009s]  swisstable swisstable_hash_distributes_each_limb
+PASS  [0.0009s]  swisstable swisstable_tombstones_reuse_full_table_slots
+PASS  [0.0009s]  swisstable swisstable_many_entries_roundtrip
+PASS  [0.0226s]  swisstable swisstable_collisions_updates_and_churn
+READY [74.754s]  driver     running 0 tests
+READY [83.643s]  evm        running 6 tests
+PASS  [0.0030s]  evm        world_state_roundtrips_account_storage
+PASS  [0.0066s]  evm        evm_balance_selfbalance_and_blockhash_use_state
+PASS  [0.0068s]  evm        evm_sload_sstore_roundtrip
+PASS  [0.0061s]  evm        world_state_defaults_to_zero
+PASS  [0.0063s]  evm        world_state_zero_values_clear_entries
+PASS  [0.0095s]  evm        evm_tload_tstore_roundtrip
+Warning: No tests found in /tmp/fevm-pr1-review/native/differential/driver
+
+test result: ok. 12 passed; 0 failed

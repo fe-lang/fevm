@@ -12,6 +12,8 @@ matrices. It adds Cancun warm/cold access, original storage and signed refunds
 to the accepted [transaction journal](reports/transaction-journal.md).
 That historical checkpoint retains its own compiler pin. The current pin and
 expanded corpus still need an AArch64 macOS acceptance run.
+The earlier [1,602-frame evidence](reports/cancun-frames.md) is explicitly scoped
+to its historical FeVM revisions and compiler pin.
 
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
@@ -58,6 +60,9 @@ The acceptance command checks the compiler hash, runs every workspace test,
 CLI smoke cases, and the Cancun frame/state and arithmetic corpora
 at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
 against revm's real journal.
+Both frame and state runners build their reference with the bootstrap record's
+Rust version and an explicit output directory. Their reports record the selected
+toolchain, Rust/Cargo versions and reference target directory.
 It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
 execution, calldata return, and exit status; they retain build/link times and
 artifact sizes. An incomplete or failing suite exits nonzero. Run the same
