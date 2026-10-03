@@ -7,7 +7,7 @@ The repo is a Fe workspace:
 - `ingots/evm`: the interpreter library and CLI executable
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
-- `native/fixtures/journal`: an allocation-failure fixture run by the native harness
+- `native/fixtures/journal` and `native/fixtures/accounts`: allocation-failure fixtures run by the native harness
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for fixed-capacity hash tables and [keccak](https://github.com/fe-lang/keccak)
@@ -17,13 +17,16 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain \
-  --toolchain 1.98.1
+python3 native/bootstrap.py --manifest native/reports/account-code-toolchain.json \
+  --fe-repository /home/sean/code/fe --out native/out/toolchain --toolchain 1.98.1
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The compiler pin uses published Fe master and Sonatina revisions. See
+The account-code milestone requires local Fe `4c03313f1`, which integrates
+master, PR #1718 and the conditional-clobber borrow-checking repair. Supply a
+local Fe repository or Git bundle containing that commit. The default
+`native/toolchain.json` retains the previous published-master checkpoint. See
 [native build instructions](native/README.md) for prerequisites and reproducible
 acceptance commands.
 
@@ -48,6 +51,8 @@ let gas_spent = call.gas_limit - result.gas_remaining
 result.release()
 let settled = transaction.finish(commit, gas_spent)
 let world = settled.state
+// After the final transaction, release the world's owned code arena.
+world.release()
 ```
 
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, and `ExecutionResult`. Results own their output and require explicit `release()`. `vm::Vm` can retain memory capacity across `run` calls; each run clears the logical extent and zeroes newly exposed bytes. Release the VM after its final run, or consume it with `into_result()` to transfer its output. Construct code with `Program::new(bytes, len, status)` or `parse_hex_program`; its immutable bytes share a precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length.
@@ -72,7 +77,7 @@ state. These calls return false on host table exhaustion. Runtime warming follow
 checkpoint rollback; original storage values remain fixed for the transaction.
 Account keys use their low 160 bits.
 
-BALANCE, SLOAD and SSTORE use Cancun warm/cold pricing. SSTORE tracks original,
+BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SLOAD and SSTORE use Cancun warm/cold pricing. SSTORE tracks original,
 current and new values, enforces the 2,300-gas sentry, and updates signed refunds.
 TLOAD/TSTORE cost 100 gas and do not use that sentry. `ExecutionResult.refund_delta`
 is the successful frame's signed contribution; unsuccessful frames contribute
@@ -80,6 +85,28 @@ zero. Refunds never refill a frame's executable gas. At transaction completion,
 positive refunds are capped to one fifth of the supplied pre-refund `gas_spent`.
 The caller supplies the transaction's total gas spent; signed-envelope and
 intrinsic-gas processing remain outside this frame API.
+
+Initialize accounts before opening a transaction with `ensure_account(address)`,
+`set_balance(address, value)`, `set_nonce(address, value)` and
+`set_code(address, code)`. Code accepts the Keccak library's `ByteSource` trait
+(including arrays and native `ByteBuffer`) and is copied into world-owned storage;
+its caller retains ownership of the input. `set_code` returns an operational
+status and preserves the account on allocation or table failure. Replacing or
+clearing code compacts the arena; its capacity tracks the peak live code extent.
+Code storage has no frame-input size limit. Release the world with `release()`
+after its final transaction.
+
+`exists(address)` distinguishes an explicitly present empty account from absence.
+Zero balance/nonce writes preserve an existing account and do not create an absent
+one. Transaction undo restores prior existence as well as values. EXTCODEHASH
+returns zero for absent accounts and EIP-161 empty accounts (zero balance, nonce
+and code), and the empty Keccak digest for nonempty accounts without code.
+EXTCODECOPY zero-fills beyond stored code and charges memory expansion, three gas
+per copied word, and the shared warm/cold account access cost, including access
+cost for an empty copy. Code is immutable during transactions in this slice;
+CREATE, SELFDESTRUCT and their account lifecycle rules remain pending.
+The [account-code checkpoint](native/reports/account-code.md) passes all seven
+native acceptance stages at O0/O1/O2 on x86_64 Linux using local Fe `4c03313f1`.
 
 The world and transaction caches currently use 256-entry tables. Exhaustion and
 allocation failures are explicit host resource errors, distinct from EVM halts.
@@ -105,7 +132,7 @@ Implemented opcode slice:
 - `SIGNEXTEND`, `LT`, `GT`, `SLT`, `SGT`, `EQ`, `ISZERO`
 - `AND`, `OR`, `XOR`, `NOT`, `BYTE`, `SHL`, `SHR`, `SAR`
 - `ADDRESS`, `ORIGIN`, `CALLER`, `CALLVALUE`, `CALLDATALOAD`, `CALLDATASIZE`, `CALLDATACOPY`
-- `CODESIZE`, `CODECOPY`, `GASPRICE`, `RETURNDATASIZE`, `RETURNDATACOPY`
+- `CODESIZE`, `CODECOPY`, `EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH`, `GASPRICE`, `RETURNDATASIZE`, `RETURNDATACOPY`
 - `BALANCE`, `BLOCKHASH`, `COINBASE`, `TIMESTAMP`, `NUMBER`, `PREVRANDAO`, `GASLIMIT`, `CHAINID`, `SELFBALANCE`, `BASEFEE`, `BLOBBASEFEE`
 - `MLOAD`, `MSTORE`, `MSTORE8`, `SLOAD`, `SSTORE`, `MSIZE`, `TLOAD`, `TSTORE`, `MCOPY`
 - validated `JUMP`, `JUMPI`, `PC`, `GAS`, `JUMPDEST`
@@ -114,7 +141,7 @@ Implemented opcode slice:
 
 Recognized TODO opcodes:
 
-- account and history opcodes: `EXTCODESIZE`, `EXTCODECOPY`, `EXTCODEHASH`, `BLOBHASH`
+- blob transaction data: `BLOBHASH`
 - logs: `LOG0` through `LOG4`
 - create/call opcodes: `CREATE`, `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE2`, `STATICCALL`, `SELFDESTRUCT`
 
@@ -136,9 +163,9 @@ Smoke samples:
 
 Near-term expansion:
 
-- Account code tables for external code opcodes.
-- Direct runtime-code deployment before exact `CREATE`/`CREATE2` address derivation.
-- Environment fixtures for logs, calls, and nested execution.
+- Transaction log ownership, rollback and `LOG0` through `LOG4`.
+- `BLOBHASH` transaction inputs.
+- Call frames and exact `CREATE`/`CREATE2` deployment semantics.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. Full Cancun conformance and performance comparisons
 remain future work.

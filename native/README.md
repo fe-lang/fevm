@@ -1,7 +1,8 @@
 # Native FeVM and arithmetic acceptance tooling
 
 This suite checks the native FeVM workspace and CLI, Cancun frame results,
-and arithmetic differential kernels. It uses the pinned compiler in `toolchain.json`.
+and arithmetic differential kernels. Select the compiler manifest for the
+milestone being verified.
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
@@ -15,7 +16,7 @@ expanded corpus still need an AArch64 macOS acceptance run.
 The earlier [1,602-frame evidence](reports/cancun-frames.md) is explicitly scoped
 to its historical FeVM revisions and compiler pin.
 
-The [Keccak integration](reports/keccak-integration.md) passes all seven current
+The preceding [Keccak integration](reports/keccak-integration.md) passes all seven
 stages on published Fe master: 35 workspace tests, 16 CLI checks, 1,835 frames
 and 383 state sequences at O0/O1/O2, plus the arithmetic matrix. Keccak and
 SwissTable now own their standalone test suites in their respective repositories.
@@ -23,6 +24,10 @@ SwissTable now own their standalone test suites in their respective repositories
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
 compiler manifests and historical platform evidence.
+
+The [account-code milestone](reports/account-code.md) passes all seven stages on
+local Fe `4c03313f1`: 39 workspace tests, 22 CLI/allocator checks, 1,835 frames
+and 737 state sequences at O0/O1/O2, plus 74,676 arithmetic checks.
 
 ## Hosts and prerequisites
 
@@ -32,8 +37,12 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current pin uses published Fe master `04d344105` and Sonatina `9c350187`.
-Exact revisions, the Rust version and Cargo lock hash are in `toolchain.json`.
+The account-code checkpoint requires local Fe `4c03313f1` and Sonatina `9c350187`.
+Exact revisions, the Rust version and Cargo lock hash are in
+[`reports/account-code-toolchain.json`](reports/account-code-toolchain.json).
+The Fe commit adds the conditional-clobber separation repair to the #1718
+integration and is available in the local Fe repository. The default
+`toolchain.json` retains the previous published-master checkpoint at `04d344105`.
 Keccak is a separately tested Git dependency; its native differential and timing
 suite lives in [fe-lang/keccak](https://github.com/fe-lang/keccak). FeVM does not
 need the experimental compiler barrier used by that benchmark.
@@ -47,8 +56,8 @@ acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain \
-  --toolchain 1.98.1
+python3 native/bootstrap.py --manifest native/reports/account-code-toolchain.json \
+  --fe-repository /home/sean/code/fe --out native/out/toolchain --toolchain 1.98.1
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
@@ -83,8 +92,9 @@ The [Cancun frame suite](differential/README.md) compares 1,835 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 383-case state suite checks current/original/transient storage,
-account/slot warmness, signed refunds and nested checkpoints. Signed transaction
+The additional 737-case state suite checks current/original/transient storage,
+account code and hashes, copy semantics, account/slot warmness, signed refunds
+and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 
 SwissTable unit tests, differential checks, and benchmarks live in the

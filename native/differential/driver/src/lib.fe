@@ -121,7 +121,7 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     }
     let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
-    let _ = state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining).state
+    state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining).state.release()
     let supported = vm.status == 0
         || (vm.status >= 15 && vm.status <= 19)
         || vm.status == 10

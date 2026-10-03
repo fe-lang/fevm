@@ -36,8 +36,12 @@ def transaction(actions, *, warm=False, commit=True):
                 commit=commit, actions=actions)
 
 
+def account(value, balance=0, nonce=0, code=""):
+    return dict(address=address(value), balance=word(balance), nonce=nonce, code=code)
+
+
 def case(name, category, transactions, original=0, anchors=None):
-    return dict(name=name, category=category, block_hashes=[], balances=[dict(address=address(44), value=word(99))],
+    return dict(name=name, category=category, block_hashes=[], accounts=[account(44, balance=99)],
                 storage=[dict(address=address(12), slot=word(0), value=word(original))],
                 watch_accounts=[address(x) for x in [0, 1, 10, 11, 12, 13, 44, 45]],
                 watch_slots=[dict(address=address(12), slot=word(x)) for x in [0, 1, 2]],
@@ -157,7 +161,168 @@ def cases():
     for code, gas in [('5f40', 21), ('5f40', 22), ('5f40', 23), ('40', 20)]:
         rows.append(case(f'blockhash-gas-{code}-{gas}', 'block-history-gas',
                          [transaction([frame(code, gas=gas)])]))
+    rows.extend(account_code_cases())
     assert len({row['name'] for row in rows}) == len(rows)
+    return rows
+
+
+def account_code_cases():
+    rows = []
+    empty_hash = '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470'
+    abc_hash = '0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45'
+    profiles = [
+        ('absent', None, word(0)), ('empty', account(44), word(0)),
+        ('funded', account(44, balance=1), empty_hash),
+        ('nonce', account(44, nonce=1), empty_hash),
+        ('abc', account(44, code='616263'), abc_hash),
+        ('stop', account(44, code='00'), None),
+        ('push-data', account(44, code='60ff5b00'), None),
+    ]
+    for (name, initial, digest), warm, static, high in product(profiles, [False, True], [False, True], [False, True]):
+        operand = 44 | ((1 << 255) if high else 0)
+        code = push(operand) + '3b' + push(operand) + '3f'
+        tx = transaction([frame(code, static=static)])
+        if warm:
+            tx['access_accounts'] = [address(44)]
+        size = len(bytes.fromhex(initial['code'])) if initial else 0
+        anchors = {'0.steps.0.frame.stack.0': word(size),
+                   '0.steps.0.frame.gas_remaining': 1_000_000 - (100 if warm else 2600) - 100 - 6,
+                   '0.steps.0.accounts.6.warm': True}
+        if digest is not None:
+            anchors['0.steps.0.frame.stack.1'] = digest
+        row = case(f'extcode-{name}-{warm}-{static}-{high}', 'account-code-identity', [tx], anchors=anchors)
+        row['accounts'] = [initial] if initial else []
+        rows.append(row)
+
+    # Storage is deliberately excluded from the EIP-161 empty-account test.
+    row = case('extcode-storage-only', 'account-code-identity', [transaction([frame(push(44) + '3f')])],
+               anchors={'0.steps.0.frame.stack': [word(0)]})
+    row['accounts'] = [account(44)]
+    row['storage'] = [dict(address=address(44), slot=word(0), value=word(9))]
+    rows.append(row)
+
+    # Sender, destination, coinbase and every Cancun precompile start warm.
+    for target in [0, *range(1, 14), 44, 45]:
+        row = case(f'extcode-initial-warm-{target}', 'account-code-warmth',
+                   [transaction([frame(push(target) + '3f')])],
+                   anchors={'0.steps.0.frame.gas_remaining': 1_000_000 - (2 if target == 0 else 3)
+                            - (100 if 1 <= target <= 13 else 2600)})
+        rows.append(row)
+
+    for op, warm, adjustment in product(['3b', '3f'], [False, True], [-1, 0, 1]):
+        spent = 3 + (100 if warm else 2600)
+        tx = transaction([frame(push(44) + op, gas=spent + adjustment)])
+        if warm:
+            tx['access_accounts'] = [address(44)]
+        row = case(f'extcode-gas-{op}-{warm}-{adjustment}', 'account-code-gas', [tx],
+                   anchors={'0.steps.0.frame.outcome': 'exceptional' if adjustment < 0 else 'success',
+                            '0.steps.0.frame.gas_remaining': max(0, adjustment),
+                            '0.steps.0.accounts.6.warm': warm or adjustment >= 0})
+        row['accounts'] = [account(44, code='616263')]
+        rows.append(row)
+
+    external = bytes((i * 17 + 3) % 256 for i in range(137))
+    # Include full-width source words and source ranges past the code end.
+    for length, source, dest in product([0, 1, 31, 32, 33, 136, 137], [0, 1, 136, 137, 138, 1 << 64, (1 << 256) - 1], [0, 31]):
+        code = push(length) + push(source) + push(dest) + push(44) + '3c'
+        extent = ((dest + length + 31) // 32 * 32) if length else 0
+        memory = bytearray(extent)
+        if length:
+            copied = external[source:source + length]
+            memory[dest:dest + len(copied)] = copied
+        row = case(f'extcopy-range-{length}-{source}-{dest}', 'account-code-copy',
+                   [transaction([frame(code, static=True)])],
+                   anchors={'0.steps.0.frame.memory': '0x' + memory.hex(),
+                            '0.steps.0.accounts.6.warm': True})
+        row['accounts'] = [account(44, code=external.hex())]
+        rows.append(row)
+
+    for high in [1 << 160, 1 << 255]:
+        for warm in [False, True]:
+            code = push(3) + push(0) + push(0) + push(high | 44) + '3c' + push(44) + '3b'
+            tx = transaction([frame(code)])
+            if warm:
+                tx['access_accounts'] = [address(44)]
+            row = case(f'extcopy-address-alias-{high}-{warm}', 'account-code-copy', [tx],
+                       anchors={'0.steps.0.frame.memory': '0x616263' + '00' * 29,
+                                '0.steps.0.frame.stack': [word(3)],
+                                '0.steps.0.frame.gas_remaining': 1_000_000 - (100 if warm else 2600) - 119})
+            row['accounts'] = [account(44, code='616263')]
+            rows.append(row)
+
+    for source, dest in product([0, (1 << 256) - 1], [0, (1 << 256) - 1]):
+        for warm, adjustment in product([False, True], [-1, 0, 1]):
+            operands = [0, source, dest, 44]
+            spent = sum(2 if value == 0 else 3 for value in operands) + (100 if warm else 2600)
+            tx = transaction([frame(''.join(map(push, operands)) + '3c', gas=spent + adjustment)])
+            if warm:
+                tx['access_accounts'] = [address(44)]
+            row = case(f'extcopy-empty-{source}-{dest}-{warm}-{adjustment}', 'account-code-copy-gas', [tx],
+                       anchors={'0.steps.0.frame.outcome': 'exceptional' if adjustment < 0 else 'success',
+                                '0.steps.0.frame.gas_remaining': max(0, adjustment),
+                                '0.steps.0.frame.memory': None if adjustment < 0 else '0x',
+                                '0.steps.0.accounts.6.warm': warm or adjustment >= 0})
+            rows.append(row)
+
+    for length, dest, warm, adjustment in product([1, 31, 32, 33, 137], [0, 31, 32], [False, True], [-1, 0, 1]):
+        operands = [length, 1, dest, 44]
+        words = (dest + length + 31) // 32
+        spent = sum(2 if value == 0 else 3 for value in operands) + (100 if warm else 2600)
+        spent += (length + 31) // 32 * 3 + words * 3 + words * words // 512
+        tx = transaction([frame(''.join(map(push, operands)) + '3c', gas=spent + adjustment)])
+        if warm:
+            tx['access_accounts'] = [address(44)]
+        row = case(f'extcopy-gas-{length}-{dest}-{warm}-{adjustment}', 'account-code-copy-gas', [tx],
+                   anchors={'0.steps.0.frame.outcome': 'exceptional' if adjustment < 0 else 'success',
+                            '0.steps.0.frame.gas_remaining': max(0, adjustment),
+                            '0.steps.0.accounts.6.warm': warm or adjustment >= 0})
+        row['accounts'] = [account(44, code=external.hex())]
+        rows.append(row)
+
+    for name, initial, digest in profiles:
+        prefix = push((1 << 256) - 1) + push(0) + '52'
+        code = prefix + push(32) + push(0) + push(1) + push(44) + '3c'
+        initial_code = bytes.fromhex(initial['code']) if initial else b''
+        memory = b'\xff' + initial_code[:32].ljust(32, b'\x00') + bytes(31)
+        row = case(f'extcopy-overwrite-{name}', 'account-code-copy', [transaction([frame(code)])],
+                   anchors={'0.steps.0.frame.memory': '0x' + memory.hex()})
+        row['accounts'] = [initial] if initial else []
+        rows.append(row)
+
+    for length, dest in [(1, 1 << 64), (1, 1 << 255), (1, (1 << 256) - 1), ((1 << 256) - 1, 0)]:
+        row = case(f'extcopy-overflow-{length}-{dest}', 'account-code-copy-gas',
+                   [transaction([frame(push(length) + push(0) + push(dest) + push(44) + '3c')])],
+                   anchors={'0.steps.0.frame.outcome': 'exceptional',
+                            '0.steps.0.frame.memory': None, '0.steps.0.accounts.6.warm': False})
+        rows.append(row)
+
+    for op, operands in [('3b', 1), ('3c', 4), ('3f', 1)]:
+        for available in range(operands):
+            rows.append(case(f'extcode-underflow-{op}-{available}', 'account-code-stack',
+                             [transaction([frame('5f' * available + op)])],
+                             anchors={'0.steps.0.frame.reason': 'stack_underflow'}))
+
+    # All four instructions share the same access set; reverted children and
+    # failed frames restore it, while successful reads never create accounts.
+    reads = [('balance', push(44) + '31'), ('size', push(44) + '3b'),
+             ('hash', push(44) + '3f'), ('copy', '5f5f5f' + push(44) + '3c')]
+    for (first, first_code), (second, second_code), commit in product(reads, reads, [False, True]):
+        tx = transaction([scope([frame(first_code)], commit=commit), frame(second_code)])
+        second_spent = (9 if second == 'copy' else 3) + (100 if commit else 2600)
+        rows.append(case(f'extcode-shared-{first}-{second}-{commit}', 'account-code-warmth', [tx],
+                         anchors={'0.steps.1.accounts.6.warm': commit,
+                                  '0.steps.2.frame.gas_remaining': 1_000_000 - second_spent}))
+    for ending in ['5f5ffd', 'fe']:
+        rows.append(case(f'extcode-failed-{ending}', 'account-code-warmth',
+                         [transaction([frame(push(44) + '3f' + ending), frame(push(44) + '3b')])],
+                         anchors={'0.steps.0.accounts.6.warm': False,
+                                  '0.steps.1.frame.gas_remaining': 997397}))
+    for commit in [False, True]:
+        row = case(f'extcode-transaction-{commit}', 'account-code-warmth',
+                   [transaction([frame(push(44) + '3f')], commit=commit), transaction([frame(push(44) + '3f')])],
+                   anchors={'1.steps.0.frame.gas_remaining': 997397, '1.steps.0.frame.stack': [abc_hash]})
+        row['accounts'] = [account(44, code='616263')]
+        rows.append(row)
     return rows
 
 
@@ -166,8 +331,8 @@ def payload(case):
 
 
 def encode(case):
-    """Version 2: explicit block history and per-transaction block number."""
-    data = bytearray([2])
+    """Version 3: explicit accounts with balance, nonce and arbitrary code bytes."""
+    data = bytearray([3])
 
     def integer(value, size):
         data.extend((int(value, 16) if isinstance(value, str) else value).to_bytes(size, 'big'))
@@ -194,7 +359,14 @@ def encode(case):
                     data.extend(blob)
 
     sequence(case['block_hashes'], [('number', 32), ('hash', 32)])
-    sequence(case['balances'], [('address', 20), ('value', 32)])
+    integer(len(case['accounts']), 2)
+    for account in case['accounts']:
+        integer(account['address'], 20)
+        integer(account['balance'], 32)
+        integer(account['nonce'], 8)
+        code = bytes.fromhex(account['code'].removeprefix('0x'))
+        integer(len(code), 2)
+        data.extend(code)
     sequence(case['storage'], [('address', 20), ('slot', 32), ('value', 32)])
     sequence(case['watch_accounts'], [(None, 20)])
     sequence(case['watch_slots'], [('address', 20), ('slot', 32)])

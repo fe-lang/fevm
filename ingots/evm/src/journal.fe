@@ -2,13 +2,14 @@ use std::native::ByteBuffer
 
 // Fixed-width records in a growable owner. Undo only reads/truncates initialized
 // bytes and therefore cannot fail to allocate while unwinding a failed frame.
-const RECORD_SIZE: u64 = 97
+const RECORD_SIZE: u64 = 98
 
 pub struct Change {
     pub kind: u8,
     pub address: u256,
     pub slot: u256,
     pub previous: u256,
+    pub existed: bool,
 }
 
 pub struct Journal { bytes: ByteBuffer }
@@ -43,6 +44,7 @@ impl Journal {
         self.write_word(offset: offset + 1, value: change.address)
         self.write_word(offset: offset + 33, value: change.slot)
         self.write_word(offset: offset + 65, value: change.previous)
+        self.bytes.set_byte(index: offset + 97, value: if change.existed { 1 } else { 0 })
         true
     }
 
@@ -54,6 +56,7 @@ impl Journal {
             address: self.read_word(offset: offset + 1),
             slot: self.read_word(offset: offset + 33),
             previous: self.read_word(offset: offset + 65),
+            existed: self.bytes.byte_at(offset + 97) != 0,
         }
         core::assert(self.bytes.try_resize(offset))
         change

@@ -8,9 +8,14 @@ widths and truncation positions, jumps, stack limits, memory/copy boundaries,
 remaining gas, Keccak ranges/padding/gas, and returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
-Current checkpoint: **1,835 frames and 383 state sequences pass at O0/O1/O2
+Keccak checkpoint: **1,835 frames and 383 state sequences pass at O0/O1/O2
 on x86_64 Linux**, including 106 Keccak frames and 34 new block-history/gas
 sequences. See the [Keccak integration report](../reports/keccak-integration.md).
+
+Current account-code checkpoint: **1,835 frames and 737 state sequences pass at
+O0/O1/O2 on x86_64 Linux**, including 354 new external-code cases. State results
+match exactly; frames retain the same three declared fault-reason differences.
+See the [account-code report](../reports/account-code.md).
 
 Previous checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
@@ -24,8 +29,9 @@ overflow without changing successful instruction paths or gas charging.
 
 ## Running
 
-Use the pinned native compiler and install the Rust version in
-`native/toolchain.json` with rustup. Both frame and state runners select that
+Use the milestone
+[compiler manifest](../reports/account-code-toolchain.json) and install its Rust
+version with rustup. Both frame and state runners select that
 version explicitly; `--toolchain` selects another installed toolchain for a
 diagnostic run. `native/accept.py` forwards its bootstrap record's Rust version
 to both runners. Keep outputs outside temporary storage:
@@ -106,7 +112,7 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 383 deterministic cases. Its reference uses the pinned
+The stateful corpus has 737 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,
@@ -119,15 +125,20 @@ Cases include the EIP-2200 storage sequences adjusted to Cancun, cold/warm gas
 boundaries, upfront sender/destination/coinbase/precompile warming, duplicate
 access lists, high-bit BALANCE aliases, negative frame refund contributions,
 static writes, child commit/revert, parent rollback, transaction abort/reuse, and
-BLOCKHASH history-window/operand/gas boundaries.
+BLOCKHASH history-window/operand/gas boundaries. External-code cases distinguish
+absent, explicitly empty, storage-only, funded, nonce-bearing and code-bearing
+accounts; check static reads, high address bits, copy padding and full-width
+sources, exact gas, shared warming and rollback across frames and transactions.
 The Python contract checks field shapes and accounting invariants; independent
 anchors check the reference's gas, refund and value results. Operational failures
 fail the comparison. Unlike the stateless simultaneous-fault controls, these
 state cases require exact diagnostic reasons as well as exact results.
 
 The native state driver takes one versioned binary case encoded as hex. Integers
-and lengths use big endian. Version 2 adds explicit block history and a block
-number per transaction; version 1 is no longer accepted. The encoder lives in `state_corpus.py`. Its current
+and lengths use big endian. Version 3 retains explicit block history and each transaction's block number,
+and replaces balance-only initialization with explicit accounts: address (20 bytes),
+balance (32), nonce (8), code length (2) and code bytes. Earlier wire versions are
+rejected. The encoder lives in `state_corpus.py`. Its current
 4,096-byte input limit is a harness limit. JSON lines remain the reference input
 and retained corpus format. Each case starts a fresh native process, while all
 frames and transactions in that case execute in that process. The scope models

@@ -96,7 +96,7 @@ impl Transaction {
             self.storage_is_warm(address, slot)
         }
         if present { return OK }
-        if !self.journal.append(Change { kind, address, slot, previous: 0 }) {
+        if !self.journal.append(Change { kind, address, slot, previous: 0, existed: true }) {
             return ERR_HOST_ALLOCATION
         }
         let inserted = if kind == WARM_ACCOUNT {
@@ -175,9 +175,16 @@ impl Transaction {
             // Reverse replay never increases a table beyond an earlier valid
             // occupancy, including deletion followed by insertion at capacity.
             core::assert(restored)
+            if !change.existed && (change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE) {
+                core::assert(self.state.remove_empty_account(change.address))
+            }
         }
     }
 
+    pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
+    pub fn code_size(self, _ address: u256) -> u64 { self.state.code_size(address) }
+    pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
+    pub fn code_byte(self, address: u256, index: u64) -> u8 { self.state.code_byte(address, index) }
     pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
     pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {
@@ -209,7 +216,8 @@ impl Transaction {
             _ => core::panic(),
         }
         if previous == value { return OK }
-        if !self.journal.append(Change { kind, address, slot, previous }) {
+        let existed = self.state.exists(address)
+        if !self.journal.append(Change { kind, address, slot, previous, existed }) {
             return ERR_HOST_ALLOCATION
         }
         let written = match kind {

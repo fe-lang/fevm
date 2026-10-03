@@ -38,5 +38,6 @@ pub fn main() -> i32 {
     transaction.revert(child)
     let world = transaction.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 3) == 9000)
+    world.release()
     0
 }

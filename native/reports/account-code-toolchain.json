@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "fe_repository": "https://github.com/argotorg/fe",
+  "fe_revision": "4c03313f1602dbe0cace235e9a32548cc907d551",
+  "sonatina_repository": "https://github.com/fe-lang/sonatina",
+  "sonatina_revision": "9c35018759aff07516025684fea0be784b0cf6df",
+  "cargo_lock_sha256": "de5e486e7a5088f662536f06d2a9e9047f09aa4029a15b229146892541856a74",
+  "rust_version": "1.98.1",
+  "features": [
+    "cranelift"
+  ],
+  "publication": "local compiler integration plus conditional-clobber separation repair; provide --fe-repository /home/sean/code/fe",
+  "hosts": [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ]
+}

@@ -53,7 +53,7 @@ fn evm_sload_sstore_roundtrip() {
     core::assert(result.stack_top == 0x2a)
     core::assert(state.storage_load(address: 0xaa, slot: 3) == 0x2a)
     result.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).state.release()
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     core::assert(result.status == OK)
     core::assert(result.stack_top == 128)
     result.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).state.release()
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn evm_tload_tstore_roundtrip() {
     core::assert(state.transient_load(address: 0xaa, slot: 4) == 9)
     core::assert(result.gas_remaining == 999791)
     result.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).state.release()
 }
 
 #[test]
@@ -193,5 +193,5 @@ fn evm_interleaves_state_and_owned_memory() {
     core::assert(state.storage_load(address: 0, slot: 3) == 0x2a)
     core::assert(state.transient_load(address: 0, slot: 4) == 0x2a)
     result.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).state.release()
 }

@@ -1,0 +1,42 @@
+use keccak::ByteSource
+use fevm::{WorldState, OK}
+use fevm::constants::ERR_HOST_ALLOCATION
+
+struct LargeCode {}
+impl ByteSource for LargeCode {
+    fn len(self) -> u64 { 65537 }
+    fn byte_at(self, _ index: u64) -> u8 { (index & 255).downcast_unchecked() }
+}
+
+// Relinked with the controlled allocator: the first or second world's arena
+// growth fails once. Failed replacement preserves code, hash and account data;
+// successful growth and both failure paths must release their owners exactly.
+fn initialize(_ world: mut WorldState) -> i32 {
+    core::assert(world.set_balance(1, 9))
+    core::assert(world.set_code(address: 1, code: [97 as u8, 98, 99]) == OK)
+    let status = world.set_code(address: 1, code: LargeCode {})
+    if status == ERR_HOST_ALLOCATION {
+        core::assert(world.code_size(1) == 3 && world.code_byte(address: 1, index: 2) == 99)
+        core::assert(world.code_hash(1) == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45)
+        core::assert(world.set_code(address: 1, code: [9 as u8]) == OK)
+        core::assert(world.code_size(1) == 1 && world.code_byte(address: 1, index: 0) == 9)
+    } else {
+        core::assert(status == OK && world.code_size(1) == 65537)
+        core::assert(world.code_byte(address: 1, index: 65535) == 255)
+        core::assert(world.code_byte(address: 1, index: 65536) == 0)
+    }
+    core::assert(world.balance(1) == 9)
+    status
+}
+
+pub fn main() -> i32 {
+    let mut first = WorldState::empty()
+    let status = initialize(mut first)
+    if status == OK {
+        let mut second = WorldState::empty()
+        let _ = initialize(mut second)
+        second.release()
+    }
+    first.release()
+    0
+}

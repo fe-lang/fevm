@@ -17,6 +17,9 @@ CASES = [
     ('stop', ['00'], 0, 'empty\n'),
     ('keccak-empty', ['5f5f20'], 0, '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n'),
     ('keccak-abc', ['626162635f526003601d20'], 0, '0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n'),
+    ('extcode-absent-size', ['602c3b'], 0, f'0x{0:064x}\n'),
+    ('extcode-absent-hash', ['602c3f'], 0, f'0x{0:064x}\n'),
+    ('extcode-absent-copy', ['60015f5f602c3c60015ff3'], 0, '0x00\n'),
     ('add', ['6002600301'], 0, f'0x{5:064x}\n'),
     ('calldata-return', ['6002600060003760026000f3', '1234'], 0, '0x1234\n'),
     ('bad-hex', ['zz'], 3, 'invalid hex bytecode\n'),
@@ -107,6 +110,28 @@ def main():
         report.write_text(json.dumps(record, indent=2) + '\n')
         if not passed:
             raise AssertionError(f'O{level} journal allocation failure: {result!r}')
+        accounts = folder / 'accounts'
+        accounts.mkdir()
+        account_archive = accounts / 'build.tar.gz'
+        log = command([compiler, 'build', ROOT, '--ingot', 'fevm_accounts', '--backend', 'native',
+                       '-O', level, '--emit', 'ir,executable', '--out-dir', accounts,
+                       '--report', '--report-out', account_archive])
+        accounts.joinpath('build.log').write_bytes(log)
+        artifacts(accounts / 'fevm_accounts', account_archive, accounts, object_name='fevm_accounts.o')
+        for failure_at in [0, 1, 2]:
+            controlled = accounts / f'allocator-{failure_at}'
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+                     ROOT / 'native/fixtures/vm_allocator.c', accounts / 'fevm_accounts.o',
+                     '-o', controlled])
+            result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
+            passed = result.returncode == 0 and not result.stdout and not result.stderr
+            row['checks'].append({'name': f'account-code-allocator-{failure_at}', 'passed': passed,
+                                  'status': result.returncode,
+                                  'stdout': result.stdout.decode(errors='replace'),
+                                  'stderr': result.stderr.decode(errors='replace')})
+            report.write_text(json.dumps(record, indent=2) + '\n')
+            if not passed:
+                raise AssertionError(f'O{level} account code allocation {failure_at}: {result!r}')
         print(f'CLI O{level}: {len(row["checks"])} passed', flush=True)
     record['complete'] = True
     report.write_text(json.dumps(record, indent=2) + '\n')

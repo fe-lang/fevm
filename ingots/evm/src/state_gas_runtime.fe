@@ -21,7 +21,7 @@ fn upfront_warming_and_access_lists_survive_revert() {
     core::assert(tx.account_is_warm(14) && tx.account_is_warm(15))
     core::assert(tx.storage_is_warm(address: 15, slot: 9))
     core::assert(!tx.account_is_warm(16) && !tx.storage_is_warm(address: 15, slot: 10))
-    let _ = tx.finish(commit: true, gas_spent: 0)
+    tx.finish(commit: true, gas_spent: 0).state.release()
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn balance_masks_high_address_bits_and_charges_one_cold_access() {
     core::assert(result.status == OK && result.stack_top == 99)
     core::assert(result.gas_remaining == 997280 && result.refund_delta == 0)
     result.release()
-    let _ = tx.finish(commit: true, gas_spent: 2720)
+    tx.finish(commit: true, gas_spent: 2720).state.release()
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn storage_reads_warm_once_and_reverted_reads_become_cold() {
     core::assert(result.status == OK && result.gas_remaining == 997796)
     core::assert(tx.storage_is_warm(address: 0, slot: 0))
     result.release()
-    let _ = tx.finish(commit: true, gas_spent: 4412)
+    tx.finish(commit: true, gas_spent: 4412).state.release()
 }
 
 #[test]
@@ -81,6 +81,7 @@ fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
     core::assert(!tx.storage_is_warm(address: 0, slot: 0))
     let settled = tx.finish(commit: true, gas_spent: 5109)
     core::assert(settled.gas_refunded == 0 && settled.gas_used == 5109)
+    settled.state.release()
 }
 
 #[test]
@@ -98,6 +99,7 @@ fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
     let settled = tx.finish(commit: true, gas_spent: 22209)
     core::assert(settled.gas_refunded == 4441 && settled.gas_used == 17768)
     core::assert(settled.state.storage_load(0, 0) == 0)
+    settled.state.release()
 }
 
 #[test]
@@ -117,7 +119,7 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
                 core::assert(result.gas_remaining == if warm { 2201 } else { 101 })
             }
             result.release()
-            let _ = tx.finish(commit: true, gas_spent: gas)
+            tx.finish(commit: true, gas_spent: gas).state.release()
         }
     }
     for gas in [22104, 22105] {
@@ -133,7 +135,7 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
             core::assert(result.status == OK && tx.storage_load(address: 0, slot: 0) == 1)
         }
         result.release()
-        let _ = tx.finish(commit: true, gas_spent: gas)
+        tx.finish(commit: true, gas_spent: gas).state.release()
     }
 }
 
@@ -151,6 +153,7 @@ fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
     result.release()
     let settled = tx.finish(commit: true, gas_spent: 5005)
     core::assert(settled.gas_refunded == 0 && settled.gas_used == 5005)
+    settled.state.release()
 }
 
 #[test]
@@ -169,6 +172,7 @@ fn transaction_boundaries_reset_original_storage_and_access_state() {
     let settled = tx.finish(commit: false, gas_spent: 5004)
     core::assert(settled.gas_refunded == 0 && settled.gas_used == 5004)
     core::assert(settled.state.storage_load(0, 0) == 7)
+    settled.state.release()
 }
 
 #[test]
@@ -185,7 +189,7 @@ fn access_cache_capacity_failure_preserves_rollback() {
     tx.revert(point)
     core::assert(tx.account_is_warm(10) && !tx.account_is_warm(11))
     core::assert(tx.warm_account(address: 256) == OK)
-    let _ = tx.finish(commit: true, gas_spent: 0)
+    tx.finish(commit: true, gas_spent: 0).state.release()
 }
 
 #[test]
@@ -206,4 +210,5 @@ fn original_cache_limit_is_operational_and_does_not_apply_the_failed_write() {
     let settled = tx.finish(commit: true, gas_spent: 0)
     core::assert(settled.state.storage_load(0, 255) == 2)
     core::assert(settled.state.storage_load(0, 256) == 0)
+    settled.state.release()
 }

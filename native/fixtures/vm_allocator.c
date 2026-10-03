@@ -2,6 +2,7 @@
 // buffers each request 131,072 bytes, larger than the frame/state descriptors.
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
 // The journal fixture uses FAIL_AT=1 to check atomic growth failure and undo.
+// The accounts fixture uses all three settings for code replacement and release.
 #define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>

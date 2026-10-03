@@ -1,0 +1,7 @@
+[ingot]
+name = "fevm_accounts"
+version = "0.1.0"
+
+[dependencies]
+fevm = true
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "7f32a75b9426f68fd3d44c2d09207386c481355d" }

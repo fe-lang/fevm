@@ -16,7 +16,7 @@ type StateHost = Context<BlockEnv, TxEnv, CfgEnv, InMemoryDB>;
 #[serde(deny_unknown_fields)]
 pub struct Case {
     block_hashes: Vec<BlockHash>,
-    balances: Vec<Balance>,
+    accounts: Vec<Account>,
     storage: Vec<Storage>,
     watch_accounts: Vec<Address>,
     watch_slots: Vec<Slot>,
@@ -32,9 +32,11 @@ struct BlockHash {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Balance {
+struct Account {
     address: Address,
-    value: U256,
+    balance: U256,
+    nonce: u64,
+    code: String,
 }
 
 #[derive(Deserialize)]
@@ -286,10 +288,14 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
             .block_hashes
             .insert(block.number, block.hash.into());
     }
-    for balance in case.balances {
-        let mut info = database.load_account(balance.address)?.info.clone();
-        info.balance = balance.value;
-        database.insert_account_info(balance.address, info);
+    for account in case.accounts {
+        let code = Bytecode::new_legacy(Bytes::from(hex::decode(&account.code)?));
+        let mut info = database.load_account(account.address)?.info.clone();
+        info.balance = account.balance;
+        info.nonce = account.nonce;
+        info.code_hash = code.hash_slow();
+        info.code = Some(code);
+        database.insert_account_info(account.address, info);
     }
     for storage in case.storage {
         database.insert_account_storage(storage.address, storage.slot, storage.value)?;
@@ -382,12 +388,13 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{Case, execute};
+    use revm_primitives::U256;
     use serde_json::{Value, json};
 
     fn case(original: u64, transactions: Value) -> Case {
         serde_json::from_value(json!({
             "block_hashes": [],
-            "balances": [{"address": "0x0000000000000000000000000000000000000044", "value": "0x63"}],
+            "accounts": [{"address": "0x0000000000000000000000000000000000000044", "balance": "0x63", "nonce": 0, "code": ""}],
             "storage": [{"address": "0x0000000000000000000000000000000000000000", "slot": "0x0", "value": format!("0x{original:x}")}],
             "watch_accounts": ["0x0000000000000000000000000000000000000044"],
             "watch_slots": [{"address": "0x0000000000000000000000000000000000000000", "slot": "0x0"}],
@@ -407,6 +414,30 @@ mod tests {
 
     fn frame(code: &str) -> Value {
         json!({"kind": "frame", "code": code, "calldata": "", "gas_limit": 1_000_000, "is_static": false})
+    }
+
+    #[test]
+    fn account_code_hash_distinguishes_empty_accounts_and_empty_code() {
+        let empty = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
+        let abc = "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45";
+        for (balance, nonce, code, expected) in [
+            (0_u64, 0, "", format!("0x{:064x}", 0)),
+            (1, 0, "", empty.to_string()),
+            (0, 1, "", empty.to_string()),
+            (0, 0, "616263", abc.to_string()),
+        ] {
+            let mut input = case(0, json!([transaction(json!([frame("60443b60443f")]))]));
+            input.accounts[0].balance = U256::from(balance);
+            input.accounts[0].nonce = nonce;
+            input.accounts[0].code = code.to_string();
+            let results = execute(input).unwrap();
+            let frame = results[0].steps[0].frame.as_ref().unwrap();
+            assert_eq!(
+                frame.stack.as_ref().unwrap(),
+                &[format!("0x{:064x}", code.len() / 2), expected,]
+            );
+            assert_eq!(frame.gas_remaining, 997294);
+        }
     }
 
     #[test]
