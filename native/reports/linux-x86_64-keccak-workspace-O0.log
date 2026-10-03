@@ -1,0 +1,50 @@
+running `fe test` for 4 inputs (jobs=1)
+
+COMPILING        evm          /home/sean/code/fevm/ingots/evm
+READY [363.10s]  evm          running 35 tests
+PASS  [0.0496s]  evm          blockhash_limits_history_without_truncating_the_stack_operand
+PASS  [0.0321s]  evm          sha3_empty_ignores_full_width_offset_and_obeys_exact_gas
+PASS  [0.0272s]  evm          sha3_hashes_a_borrowed_memory_subrange_without_changing_it
+PASS  [0.0371s]  evm          sha3_checks_stack_and_charges_before_allocation
+PASS  [0.0292s]  evm          evm_sload_sstore_roundtrip
+PASS  [0.0268s]  evm          evm_balance_selfbalance_and_blockhash_use_state
+PASS  [0.0274s]  evm          evm_tload_tstore_roundtrip
+PASS  [0.0269s]  evm          evm_interleaves_state_and_owned_memory
+PASS  [0.0251s]  evm          memory_rounding_and_quadratic_cost
+PASS  [0.0347s]  evm          memory_empty_and_unpayable_ranges
+PASS  [0.0253s]  evm          memory_copy_combines_extents_and_word_costs
+PASS  [0.0252s]  evm          memory_cost_preserves_the_full_u64_gas_domain
+PASS  [0.0300s]  evm          vm_reuses_zeroed_memory_and_transfers_owned_output
+PASS  [0.0283s]  evm          vm_exhausts_gas_before_allocating_and_can_reset_after_fault
+PASS  [0.0364s]  evm          world_state_defaults_to_zero
+PASS  [0.0273s]  evm          world_state_roundtrips_account_storage
+PASS  [0.0266s]  evm          world_state_zero_values_clear_entries
+PASS  [0.0294s]  evm          upfront_warming_and_access_lists_survive_revert
+PASS  [0.0301s]  evm          balance_masks_high_address_bits_and_charges_one_cold_access
+PASS  [0.0311s]  evm          storage_reads_warm_once_and_reverted_reads_become_cold
+PASS  [0.0283s]  evm          storage_refunds_are_signed_and_follow_nested_checkpoints
+PASS  [0.0270s]  evm          original_zero_survives_revert_and_refunds_are_capped_at_transaction_end
+PASS  [0.0334s]  evm          sstore_sentry_and_exact_cold_cost_boundaries
+PASS  [0.0282s]  evm          refunds_never_pay_for_execution_and_failed_frames_discard_them
+PASS  [0.0282s]  evm          transaction_boundaries_reset_original_storage_and_access_state
+PASS  [0.0298s]  evm          access_cache_capacity_failure_preserves_rollback
+PASS  [0.0484s]  evm          original_cache_limit_is_operational_and_does_not_apply_the_failed_write
+PASS  [0.0322s]  evm          transaction_reverts_committed_children_and_restores_all_state_kinds
+PASS  [0.0286s]  evm          transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it
+PASS  [0.0295s]  evm          transaction_static_mode_is_inherited_and_restored
+PASS  [0.0477s]  evm          transaction_undo_survives_full_tables_and_grows_past_prototype_capacity
+PASS  [0.0288s]  evm          transaction_enforces_frame_depth_without_closing_parent
+PASS  [0.0339s]  evm          vm_rollback_covers_revert_exceptional_and_operational_exits
+PASS  [0.0299s]  evm          vm_transient_state_is_shared_by_frames_and_cleared_between_transactions
+PASS  [0.0302s]  evm          vm_static_storage_writes_fault_but_reads_are_allowed
+COMPILING        driver       /home/sean/code/fevm/native/differential/driver
+READY [115.81s]  driver       running 0 tests
+COMPILING        state_driver /home/sean/code/fevm/native/differential/state_driver
+READY [186.19s]  state_driver running 0 tests
+COMPILING        journal      /home/sean/code/fevm/native/fixtures/journal
+READY [83.736s]  journal      running 0 tests
+Warning: No tests found in /home/sean/code/fevm/native/differential/driver
+Warning: No tests found in /home/sean/code/fevm/native/differential/state_driver
+Warning: No tests found in /home/sean/code/fevm/native/fixtures/journal
+
+test result: ok. 35 passed; 0 failed

@@ -15,6 +15,11 @@ expanded corpus still need an AArch64 macOS acceptance run.
 The earlier [1,602-frame evidence](reports/cancun-frames.md) is explicitly scoped
 to its historical FeVM revisions and compiler pin.
 
+The [Keccak integration](reports/keccak-integration.md) passes all seven current
+stages on published Fe master: 35 workspace tests, 16 CLI checks, 1,835 frames
+and 383 state sequences at O0/O1/O2, plus the arithmetic matrix. Keccak and
+SwissTable now own their standalone test suites in their respective repositories.
+
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
 compiler manifests and historical platform evidence.
@@ -70,11 +75,11 @@ commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
 
-The [Cancun frame suite](differential/README.md) compares 1,729 deterministic
+The [Cancun frame suite](differential/README.md) compares 1,835 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 349-case state suite checks current/original/transient storage,
+The additional 383-case state suite checks current/original/transient storage,
 account/slot warmness, signed refunds and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 

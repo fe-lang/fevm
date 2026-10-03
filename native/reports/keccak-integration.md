@@ -40,16 +40,27 @@ library tests also pass without the benchmark compiler patch.
 
 ## Acceptance
 
-All 35 interpreter tests pass at O0/O1/O2. Final seven-stage native acceptance
-is in progress. Artifacts are retained under
-`native/out/keccak-acceptance-20261002-r2` with the compiler build record under
-`native/out/keccak-resume-20261002/toolchain`. Acceptance runs every workspace
-suite with `--jobs 1`, without reducing optimizer levels or verifier checks.
-The initial run found and corrected the obsolete rollback fixture; it is retained
-separately and is not the final acceptance result. Explicit 3- and 6-GiB scopes
-were too small for compilation. The final run uses a 12-GiB scope; O1 EVM
-preparation reached about 8.7 GiB without memory-limit or OOM events. The cap
-changes scheduling/resources only; verifier checks and test coverage are intact.
+All seven stages pass on x86_64 Linux: 35 workspace tests, 16 CLI checks,
+1,835 frame cases and 383 state sequences at each of O0/O1/O2, plus 74,676
+arithmetic checks across 48 generated builds. The frame corpus retains three
+previously declared RETURNDATACOPY simultaneous-fault reason differences at each
+level; all 106 Keccak cases match. All ten Python harness tests and five Rust
+reference tests pass, as do nightly Rust formatting and strict Clippy.
+
+The [machine-readable record](linux-x86_64-keccak-acceptance.json) includes
+compiler identity, Git dependency pins, source hashes, per-stage results and
+build metadata. Source hashes were rechecked against the final tree. Workspace
+logs and [the compiler manifest](keccak-toolchain.json) are retained alongside it.
+Full local artifacts live under `native/out/keccak-acceptance-20261002-r2`, with
+the immutable compiler under `native/out/keccak-resume-20261002/toolchain`.
+
+Acceptance runs every workspace suite with `--jobs 1`. The initial run found
+and corrected the obsolete rollback fixture; its partial result is retained
+separately. Explicit 3- and 6-GiB scopes were too small for compilation. The
+successful run used a 12-GiB scope and reached about 9.55 GiB, without recorded
+memory-limit or OOM events. These settings retain every optimizer level and
+verifier check. Total acceptance wall time was approximately 70 minutes on
+this shared host.
 
 This checkpoint does not establish complete Cancun conformance or AArch64 macOS
 acceptance. Account-code opcodes, calls/creation, logs and the remaining families

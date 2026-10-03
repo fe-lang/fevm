@@ -92,6 +92,8 @@ pinned to an immutable Git revision. It charges 30 gas plus six per input word
 and memory expansion before allocating, and borrows the selected memory range.
 Zero-length input ignores the offset. BLOCKHASH exposes only the previous
 256 blocks, including when the host supplies entries outside that window.
+The [Keccak integration checkpoint](native/reports/keccak-integration.md) passes
+all seven native acceptance stages at O0/O1/O2 on x86_64 Linux.
 
 Implemented opcode slice:
 
