@@ -15,11 +15,19 @@ type StateHost = Context<BlockEnv, TxEnv, CfgEnv, InMemoryDB>;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Case {
+    block_hashes: Vec<BlockHash>,
     balances: Vec<Balance>,
     storage: Vec<Storage>,
     watch_accounts: Vec<Address>,
     watch_slots: Vec<Slot>,
     transactions: Vec<Transaction>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BlockHash {
+    number: U256,
+    hash: U256,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +55,7 @@ struct Storage {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Transaction {
+    block_number: U256,
     sender: Address,
     destination: Address,
     coinbase: Address,
@@ -271,6 +280,12 @@ impl Runner<'_> {
 
 pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
     let mut database = InMemoryDB::default();
+    for block in case.block_hashes {
+        database
+            .cache
+            .block_hashes
+            .insert(block.number, block.hash.into());
+    }
     for balance in case.balances {
         let mut info = database.load_account(balance.address)?.info.clone();
         info.balance = balance.value;
@@ -283,6 +298,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
     for transaction in &case.transactions {
         let mut host = StateHost::new(database, SpecId::CANCUN);
         host.block.beneficiary = transaction.coinbase;
+        host.block.number = transaction.block_number;
         host.tx.caller = transaction.sender;
         let mut access_list: HashMap<Address, HashSet<U256>> = HashMap::default();
         for address in &transaction.access_accounts {
@@ -370,6 +386,7 @@ mod tests {
 
     fn case(original: u64, transactions: Value) -> Case {
         serde_json::from_value(json!({
+            "block_hashes": [],
             "balances": [{"address": "0x0000000000000000000000000000000000000044", "value": "0x63"}],
             "storage": [{"address": "0x0000000000000000000000000000000000000000", "slot": "0x0", "value": format!("0x{original:x}")}],
             "watch_accounts": ["0x0000000000000000000000000000000000000044"],
@@ -380,6 +397,7 @@ mod tests {
 
     fn transaction(actions: Value) -> Value {
         json!({
+            "block_number": "0x0",
             "sender": "0x0000000000000000000000000000000000000000",
             "destination": "0x0000000000000000000000000000000000000000",
             "coinbase": "0x0000000000000000000000000000000000000000",

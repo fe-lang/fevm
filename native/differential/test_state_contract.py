@@ -51,7 +51,7 @@ class StateContractTests(unittest.TestCase):
             validate(self.case, actual)
 
     def test_wire_encoding_bounds(self):
-        self.assertTrue(encode(self.case).startswith('0x01'))
+        self.assertTrue(encode(self.case).startswith('0x02'))
         self.case['transactions'][0]['actions'][0]['code'] = '00' * 4096
         with self.assertRaises(ValueError):
             encode(self.case)

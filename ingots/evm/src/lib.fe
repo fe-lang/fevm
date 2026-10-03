@@ -84,12 +84,13 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     let mut state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0)
     core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
     core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
-
+    let mut block = default_block_env()
+    block.number = 8
     let result = execute(
         program,
         empty_bytes(),
         call,
-        default_block_env(),
+        block,
         mut state,
     )
 

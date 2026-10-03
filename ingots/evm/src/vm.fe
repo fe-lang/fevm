@@ -630,7 +630,7 @@ impl Vm {
 
     // Fe currently rejects forwarding state and raw-buffer accesses together.
     // Keep their dispatch separate until https://github.com/argotorg/fe/issues/1651.
-    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ state: mut Transaction) -> bool {
+    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) -> bool {
         if op == 0x31 {
             let address = address_word(self.pop())
             if self.ok() {
@@ -646,7 +646,10 @@ impl Vm {
         if op == 0x40 {
             let number = self.pop()
             if self.ok() {
-                self.push(state.block_hash(number))
+                let hash = if number < block.number && block.number - number <= 256 {
+                    state.block_hash(number)
+                } else { 0 }
+                self.push(hash)
             }
             return true
         }
@@ -944,7 +947,7 @@ impl Vm {
                 let len: usize = (op - 0x5f).downcast_unchecked()
                 let value = read_push_value(mut self, program, len)
                 self.push(value)
-            } else if !self.step_state(op, call, mut state) {
+            } else if !self.step_state(op, call, block, mut state) {
                 self.step(op, program, calldata, call, block)
             }
         }

@@ -31,13 +31,13 @@ def scope(actions, commit, static=False):
 
 
 def transaction(actions, *, warm=False, commit=True):
-    return dict(sender=address(11), destination=address(12), coinbase=address(13),
+    return dict(sender=address(11), destination=address(12), coinbase=address(13), block_number=word(0),
                 access_accounts=[], access_slots=[dict(address=address(12), slot=word(0))] if warm else [],
                 commit=commit, actions=actions)
 
 
 def case(name, category, transactions, original=0, anchors=None):
-    return dict(name=name, category=category, balances=[dict(address=address(44), value=word(99))],
+    return dict(name=name, category=category, block_hashes=[], balances=[dict(address=address(44), value=word(99))],
                 storage=[dict(address=address(12), slot=word(0), value=word(original))],
                 watch_accounts=[address(x) for x in [0, 1, 10, 11, 12, 13, 44, 45]],
                 watch_slots=[dict(address=address(12), slot=word(x)) for x in [0, 1, 2]],
@@ -136,6 +136,27 @@ def cases():
             actions = [scope(actions[:2], commit=index % 3 != 0), *actions[2:]]
         rows.append(case(f'mixed-state-{index}', 'seeded-state-sequences',
                          [transaction(actions, warm=index % 3 == 0)], original=index % 3))
+    for current, requested in [
+        (0, 0), (1, 0), (255, 0), (256, 0), (257, 0),
+        (300, 43), (300, 44), (300, 45), (300, 299), (300, 300), (300, 301),
+        (300, (1 << 64) + 44), (300, (1 << 256) - 1),
+        ((1 << 64) - 1, (1 << 64) - 257),
+        ((1 << 64) - 1, (1 << 64) - 258),
+    ]:
+        for stored_hash in [0, 0x1234]:
+            # Always use PUSH32 so all independent gas anchors are identical.
+            code = '7f' + f'{requested:064x}' + '40'
+            tx = transaction([frame(code, gas=23)])
+            tx['block_number'] = word(current)
+            expected = stored_hash if 0 < current - requested <= 256 else 0
+            row = case(f'blockhash-{current}-{requested}-{stored_hash}', 'block-history', [tx],
+                       anchors={'0.steps.0.frame.stack': [word(expected)],
+                                '0.steps.0.frame.gas_remaining': 0})
+            row['block_hashes'] = [dict(number=word(requested), hash=word(stored_hash))]
+            rows.append(row)
+    for code, gas in [('5f40', 21), ('5f40', 22), ('5f40', 23), ('40', 20)]:
+        rows.append(case(f'blockhash-gas-{code}-{gas}', 'block-history-gas',
+                         [transaction([frame(code, gas=gas)])]))
     assert len({row['name'] for row in rows}) == len(rows)
     return rows
 
@@ -145,8 +166,8 @@ def payload(case):
 
 
 def encode(case):
-    """Version 1: big-endian lengths/words; recursive actions match the JSON schema."""
-    data = bytearray([1])
+    """Version 2: explicit block history and per-transaction block number."""
+    data = bytearray([2])
 
     def integer(value, size):
         data.extend((int(value, 16) if isinstance(value, str) else value).to_bytes(size, 'big'))
@@ -172,6 +193,7 @@ def encode(case):
                     integer(len(blob), 2)
                     data.extend(blob)
 
+    sequence(case['block_hashes'], [('number', 32), ('hash', 32)])
     sequence(case['balances'], [('address', 20), ('value', 32)])
     sequence(case['storage'], [('address', 20), ('slot', 32), ('value', 32)])
     sequence(case['watch_accounts'], [(None, 20)])
@@ -180,6 +202,7 @@ def encode(case):
     for transaction in case['transactions']:
         for key in ['sender', 'destination', 'coinbase']:
             integer(transaction[key], 20)
+        integer(transaction['block_number'], 32)
         integer(transaction['commit'], 1)
         sequence(transaction['access_accounts'], [(None, 20)])
         sequence(transaction['access_slots'], [('address', 20), ('slot', 32)])
