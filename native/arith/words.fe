@@ -59,10 +59,10 @@ fn shr1(_ x: Word) -> Word {
 struct QuotRem { quotient: Word, remainder: Word }
 fn divide(numerator: Word, denominator: Word) -> QuotRem {
     core::assert(!is_zero(denominator))
-    let mut n = numerator
-    let mut q = zero()
-    let mut r = zero()
-    let mut i: u64 = 0
+    var n = numerator
+    var q = zero()
+    var r = zero()
+    var i: u64 = 0
     while i < 256 {
         let overflow = (r.d >> 63) != 0
         r = shl1(r)
@@ -79,9 +79,9 @@ fn divide(numerator: Word, denominator: Word) -> QuotRem {
 }
 
 fn power(base: Word, exponent: Word) -> Word {
-    let mut x = base
-    let mut n = exponent
-    let mut result = one()
+    var x = base
+    var n = exponent
+    var result = one()
     while !is_zero(n) {
         if (n.a & 1) != 0 {
             result = mul(result, x)
@@ -98,8 +98,8 @@ fn shift_left(value: Word, shift: Word) -> Word {
     if (shift.b | shift.c | shift.d) != 0 || shift.a >= 256 {
         return zero()
     }
-    let mut x = value
-    let mut n = shift.a
+    var x = value
+    var n = shift.a
     while n >= 64 {
         x = Word { a: 0, b: x.a, c: x.b, d: x.c }
         n -= 64
@@ -116,8 +116,8 @@ fn shift_right(value: Word, shift: Word) -> Word {
     if (shift.b | shift.c | shift.d) != 0 || shift.a >= 256 {
         return zero()
     }
-    let mut x = value
-    let mut n = shift.a
+    var x = value
+    var n = shift.a
     while n >= 64 {
         x = Word { a: x.b, b: x.c, c: x.d, d: 0 }
         n -= 64
@@ -133,11 +133,11 @@ fn shift_right(value: Word, shift: Word) -> Word {
 
 #[arithmetic(unchecked)]
 fn mul(_ x: Word, _ y: Word) -> Word {
-    let mut a: u64 = 0
-    let mut b: u64 = 0
-    let mut c: u64 = 0
-    let mut d: u64 = 0
-    let mut carry: u128 = 0
+    var a: u64 = 0
+    var b: u64 = 0
+    var c: u64 = 0
+    var d: u64 = 0
+    var carry: u128 = 0
     let product = (x.a as u128) * (y.a as u128) + (a as u128) + carry
     a = product.downcast_truncate()
     carry = product >> 64
@@ -149,7 +149,7 @@ fn mul(_ x: Word, _ y: Word) -> Word {
     carry = product >> 64
     let product = (x.a as u128) * (y.d as u128) + (d as u128) + carry
     d = product.downcast_truncate()
-    let mut carry: u128 = 0
+    var carry: u128 = 0
     let product = (x.b as u128) * (y.a as u128) + (b as u128) + carry
     b = product.downcast_truncate()
     carry = product >> 64
@@ -158,13 +158,13 @@ fn mul(_ x: Word, _ y: Word) -> Word {
     carry = product >> 64
     let product = (x.b as u128) * (y.c as u128) + (d as u128) + carry
     d = product.downcast_truncate()
-    let mut carry: u128 = 0
+    var carry: u128 = 0
     let product = (x.c as u128) * (y.a as u128) + (c as u128) + carry
     c = product.downcast_truncate()
     carry = product >> 64
     let product = (x.c as u128) * (y.b as u128) + (d as u128) + carry
     d = product.downcast_truncate()
-    let mut carry: u128 = 0
+    var carry: u128 = 0
     let product = (x.d as u128) * (y.a as u128) + (d as u128) + carry
     d = product.downcast_truncate()
     Word { a, b, c, d }

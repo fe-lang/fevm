@@ -86,9 +86,9 @@ def source(op, representation):
 #[arithmetic(unchecked)]
 fn kernel(lhs: Word, rhs: Word, rounds: u64) -> Word {{
     {setup}
-    let mut a = seed
-    let mut result = seed
-    let mut i: u64 = 0
+    var a = seed
+    var result = seed
+    var i: u64 = 0
     while i < rounds {{
         result = {body}
         a = {next_a}
