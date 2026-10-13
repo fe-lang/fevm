@@ -7,7 +7,7 @@ use ingot::vm::execute
 
 #[test]
 fn upfront_warming_and_access_lists_survive_revert() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 11, destination: 12, coinbase: 13)
+    var tx = Transaction::new(WorldState::empty(), sender: 11, destination: 12, coinbase: 13)
     for address in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] {
         core::assert(tx.account_is_warm(address))
     }
@@ -26,9 +26,9 @@ fn upfront_warming_and_access_lists_survive_revert() {
 
 #[test]
 fn balance_masks_high_address_bits_and_charges_one_cold_access() {
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.set_balance(0x44, 99))
-    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let result = execute(
         program([0x60, 0x44, 0x31, 0x50, 0x60, 1, 0x60, 160, 0x1b, 0x60, 0x44, 0x17, 0x31]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx,
@@ -41,7 +41,7 @@ fn balance_masks_high_address_bits_and_charges_one_cold_access() {
 
 #[test]
 fn storage_reads_warm_once_and_reverted_reads_become_cold() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let result = execute(program([0x5f, 0x54, 0x5f, 0x54, 0x5f, 0x5f, 0xfd]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(result.status == ERR_REVERT && result.gas_remaining == 997792)
@@ -57,9 +57,9 @@ fn storage_reads_warm_once_and_reverted_reads_become_cold() {
 
 #[test]
 fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.storage_store(0, 0, 1))
-    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     let result = execute(program([0x5f, 0x5f, 0x55]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx)
@@ -86,7 +86,7 @@ fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
 
 #[test]
 fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
     core::assert(tx.original_storage(address: 0, slot: 0) == 0)
@@ -106,9 +106,9 @@ fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
 fn sstore_sentry_and_exact_cold_cost_boundaries() {
     for warm in [false, true] {
         for gas in [2304, 2305] {
-            let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
             if warm { core::assert(tx.access_list_slot(address: 0, slot: 0)) }
-            let mut call = default_call_env()
+            var call = default_call_env()
             call.gas_limit = gas
             let result = execute(program([0x5f, 0x5f, 0x55]), empty_bytes(), call, default_block_env(), mut tx)
             if gas == 2304 {
@@ -123,8 +123,8 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
         }
     }
     for gas in [22104, 22105] {
-        let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-        let mut call = default_call_env()
+        var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var call = default_call_env()
         call.gas_limit = gas
         let result = execute(program([0x60, 1, 0x5f, 0x55]), empty_bytes(), call, default_block_env(), mut tx)
         core::assert(result.gas_remaining == 0)
@@ -141,10 +141,10 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
 
 #[test]
 fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.storage_store(0, 0, 1))
-    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
-    let mut call = default_call_env()
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var call = default_call_env()
     call.gas_limit = 5005
     let result = execute(program([0x5f, 0x5f, 0x55, 0x5f]), empty_bytes(), call, default_block_env(), mut tx)
     core::assert(result.status == ERR_OUT_OF_GAS && result.refund_delta == 0)
@@ -158,11 +158,11 @@ fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
 
 #[test]
 fn transaction_boundaries_reset_original_storage_and_access_state() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
     core::assert(tx.warm_slot(address: 0, slot: 0) == OK)
     let settled = tx.finish(commit: true, gas_spent: 22100)
-    let mut tx = Transaction::new(settled.into_state(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(settled.into_state(), sender: 0, destination: 0, coinbase: 0)
     core::assert(!tx.storage_is_warm(address: 0, slot: 0))
     core::assert(tx.original_storage(address: 0, slot: 0) == 7)
     let result = execute(program([0x5f, 0x5f, 0x55]),
@@ -177,9 +177,9 @@ fn transaction_boundaries_reset_original_storage_and_access_state() {
 
 #[test]
 fn access_cache_capacity_failure_preserves_rollback() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
-    let mut address: u256 = 11
+    var address: u256 = 11
     while address < 256 {
         core::assert(tx.warm_account(address) == OK)
         address += 1
@@ -194,9 +194,9 @@ fn access_cache_capacity_failure_preserves_rollback() {
 
 #[test]
 fn original_cache_limit_is_operational_and_does_not_apply_the_failed_write() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
-    let mut slot: u256 = 0
+    var slot: u256 = 0
     while slot < 256 {
         core::assert(tx.storage_store(address: 0, slot, value: 1) == OK)
         core::assert(tx.storage_store(address: 0, slot, value: 0) == OK)

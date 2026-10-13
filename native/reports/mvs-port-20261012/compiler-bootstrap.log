@@ -1,0 +1,69 @@
++ git init /tmp/fevm-mvs-bootstrap-r3/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-bootstrap-r3/fe/.git/
++ git -C /tmp/fevm-mvs-bootstrap-r3/fe fetch /tmp/fevm-mvs-fe5c32c1 1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47
+From /tmp/fevm-mvs-fe5c32c1
+ * branch                1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-bootstrap-r3/fe checkout --detach FETCH_HEAD
+HEAD is now at 1c8e2c20d Pin Sonatina enum extraction speculation fix
++ git init /tmp/fevm-mvs-bootstrap-r3/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-bootstrap-r3/sonatina/.git/
++ git -C /tmp/fevm-mvs-bootstrap-r3/sonatina fetch /run/user/1000/fevm-mvs-sonatina 6f4b0397cfa77165a0ff4fafadc0a003fb72dc59
+From /run/user/1000/fevm-mvs-sonatina
+ * branch              6f4b0397cfa77165a0ff4fafadc0a003fb72dc59 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-bootstrap-r3/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 6f4b0397 Keep enum payload extraction under its variant proof
++ npm ci --ignore-scripts
+
+added 3 packages, and audited 4 packages in 640ms
+
+found 0 vulnerabilities
++ npm rebuild tree-sitter-cli
+rebuilt dependencies successfully
++ npx --no-install tree-sitter generate --abi=14
++ rustup run 1.99.0 cargo build --release --locked -p fe --features cranelift
+   Compiling fe-parser v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/parser)
+   Compiling fe-common v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/common)
+   Compiling fe-trace-facts-macros v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/trace-facts-macros)
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/hir)
+   Compiling fe-dataflow v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/fe-dataflow)
+   Compiling tree-sitter-fe v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/tree-sitter-fe)
+   Compiling sonatina-ir v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397)
+   Compiling fe-trace-facts v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/trace-facts)
+   Compiling fe-test-utils v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/test-utils)
+   Compiling fe-resolver v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/resolver)
+   Compiling sonatina-parser v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397)
+   Compiling sonatina-verifier v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/driver)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/fe-web)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/codegen)
+   Compiling sonatina-codegen v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/mir)
+   Compiling fe-fmt v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/fmt)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/semantic-indexing)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/fe)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/language-server)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/contract-harness)
+   Compiling fe-debug-export v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/debug-export)
+   Compiling fe-solc-runner v26.4.0 (/tmp/fevm-mvs-bootstrap-r3/fe/crates/solc-runner)
+    Finished `release` profile [optimized] target(s) in 3m 18s
+Native compiler: /tmp/fevm-mvs-bootstrap-r3/bin/fe

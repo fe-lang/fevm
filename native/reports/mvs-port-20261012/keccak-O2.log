@@ -1,0 +1,5 @@
+PASS  [0.0013s] keccak_known_answers
+PASS  [0.0017s] keccak_updates_cross_rate_boundaries_and_preserve_the_input
+PASS  [0.0015s] keccak_borrows_native_buffer_ranges
+
+test result: ok. 3 passed; 0 failed

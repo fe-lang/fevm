@@ -1,0 +1,63 @@
+{
+  "schema": 2,
+  "complete": true,
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "opt_level": 1,
+  "scope": "reduced calls build and execution; not full EVM acceptance",
+  "probe": "calls",
+  "runner_sha256": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+  "generated_manifest_sha256": "d0d4a1fc298f557571fa217d960af72d0dc0ad1c7bd959e1c3f790fc0ddf0954",
+  "compiler": "/dev/shm/fevm-mvs-stack-fe",
+  "compiler_sha256": "49a71e4d7db0a66dbdc676d48c2c4c3dc89cb75e7bf57951d56132ae0a476046",
+  "source_sha256": {
+    "ingots/evm/fe.toml": "05074653e95429944d7e7148d05202abc7af9e5284fc47b06f9e1fd9df0a88b9",
+    "native/perf/calls.fe": "799ba6929dfc0a0c1e622ca0124b2c5dc82682614ae62d5778381c8dda725b6a",
+    "ingots/evm/src/buffer.fe": "29561950e701a1338abd1db0ca133f5a7a54f9c058a8e1a6e234b84fcdb9bb4a",
+    "ingots/evm/src/calls_runtime.fe": "bf02217a0b65a9a300c6227c37cfe8686bfab55432696ca36f7730bc45430022",
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/gas.fe": "0f9544b2593f255cbaf1ed3ab0291a3fd06b55d7707ad3651cbb790653589059",
+    "ingots/evm/src/journal.fe": "156dac4720636be5eaac6149b5b18d1ca7eb31333b82400954ea389fbf893b43",
+    "ingots/evm/src/logs.fe": "44da959812c8ec04781f93e9c059cc848e4f6ebf10f2caed6f202029b2562db9",
+    "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+    "ingots/evm/src/opcodes.fe": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41",
+    "ingots/evm/src/state.fe": "a92f0bfec2c4ddb849024cde398826a6881ecce4e06529106b110d13c8275b13",
+    "ingots/evm/src/transaction.fe": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5",
+    "ingots/evm/src/types.fe": "1db979c7ca80d7ef4943008fa43b63d978a7981a33fd0be288754f9f48b6bb2a",
+    "ingots/evm/src/vm.fe": "cbe2ac637deb6d3485e949539f44e2e1f254b909441ca9642691ca2a4a7f16c9"
+  },
+  "rayon_threads": 1,
+  "borrowck_profile": false,
+  "borrowck_subgraphs": false,
+  "build_timeout_seconds": 1800,
+  "timing_scope": "build includes dependency resolution, optimization and linking",
+  "build": {
+    "command": [
+      "/dev/shm/fevm-mvs-stack-fe",
+      "build",
+      "/dev/shm/fevm-mvs-calls-r1/ingot",
+      "--backend",
+      "native",
+      "-O",
+      "1",
+      "--emit",
+      "ir,executable",
+      "--out-dir",
+      "/dev/shm/fevm-mvs-calls-r1/build"
+    ],
+    "status": 0,
+    "wall_seconds": 381.6072432390647,
+    "user_seconds": 373.611719,
+    "system_seconds": 7.541241,
+    "max_rss_bytes": 7325810688
+  },
+  "executable_sha256": "b38501f9992613104bb133ef1293f623301dd1d353e557b94d5e96792cbd21bf",
+  "checks": [
+    {
+      "name": "execution",
+      "status": 0,
+      "executable_sha256": "b38501f9992613104bb133ef1293f623301dd1d353e557b94d5e96792cbd21bf",
+      "stdout": "CALL cases passed\n",
+      "passed": true
+    }
+  ]
+}

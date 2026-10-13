@@ -1,0 +1,58 @@
+{
+  "schema": 2,
+  "complete": true,
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "opt_level": 1,
+  "scope": "reduced checkpoints build and execution; not full EVM acceptance",
+  "probe": "checkpoints",
+  "runner_sha256": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+  "generated_manifest_sha256": "a5333214966fc655408e50f070161489781791fde865f55a4548916cdb178bc4",
+  "compiler": "/tmp/fevm-mvs-fe",
+  "compiler_sha256": "480068cd04eb1d33f3b9f2f89bc1a99b43b0330e98878a589ec12b49c1dccffa",
+  "source_sha256": {
+    "ingots/evm/fe.toml": "7e16594cbee09959c01ded92705e307dd63cd78191ae6c603b0cba218b722ce1",
+    "native/perf/checkpoints.fe": "8f5df035d8c93207bc82af687d8e7475ae066cdfd94a3661fae16f5885979f18",
+    "ingots/evm/src/buffer.fe": "29561950e701a1338abd1db0ca133f5a7a54f9c058a8e1a6e234b84fcdb9bb4a",
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/gas.fe": "0f9544b2593f255cbaf1ed3ab0291a3fd06b55d7707ad3651cbb790653589059",
+    "ingots/evm/src/journal.fe": "156dac4720636be5eaac6149b5b18d1ca7eb31333b82400954ea389fbf893b43",
+    "ingots/evm/src/logs.fe": "44da959812c8ec04781f93e9c059cc848e4f6ebf10f2caed6f202029b2562db9",
+    "ingots/evm/src/state.fe": "a92f0bfec2c4ddb849024cde398826a6881ecce4e06529106b110d13c8275b13",
+    "ingots/evm/src/transaction.fe": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5"
+  },
+  "rayon_threads": 1,
+  "borrowck_profile": false,
+  "borrowck_subgraphs": false,
+  "build_timeout_seconds": 180,
+  "timing_scope": "build includes dependency resolution, optimization and linking",
+  "build": {
+    "command": [
+      "/tmp/fevm-mvs-fe",
+      "build",
+      "/tmp/fevm-mvs-checkpoints-r1/ingot",
+      "--backend",
+      "native",
+      "-O",
+      "1",
+      "--emit",
+      "ir,executable",
+      "--out-dir",
+      "/tmp/fevm-mvs-checkpoints-r1/build"
+    ],
+    "status": 0,
+    "wall_seconds": 20.912831110996194,
+    "user_seconds": 20.225517,
+    "system_seconds": 0.630292,
+    "max_rss_bytes": 1754284032
+  },
+  "executable_sha256": "c15650693b2324decd7ca2ed28b5cdc3465effdf3432dd507897e2171771aba5",
+  "checks": [
+    {
+      "name": "execution",
+      "status": 0,
+      "executable_sha256": "c15650693b2324decd7ca2ed28b5cdc3465effdf3432dd507897e2171771aba5",
+      "stdout": "11111111",
+      "passed": true
+    }
+  ]
+}

@@ -1,0 +1,541 @@
+running `fe test` for 6 inputs (jobs=1)
+
+COMPILING        evm          /home/sean/code/fevm/ingots/evm
+                 evm          error[2-0002]: `FixedStack` is not found
+                 evm            ┌─ src/vm.fe:2:31
+                 evm            │
+                 evm          2 │ use std::native::{ByteBuffer, FixedStack}
+                 evm            │                               ^^^^^^^^^^ `FixedStack` is not found
+                 evm         
+                 evm          error[2-0002]: `FixedStack` is not found
+                 evm               ┌─ src/vm.fe:1234:28
+                 evm               │
+                 evm          1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 evm               │                            ^^^^^^^^^^ `FixedStack` is not found
+                 evm         
+                 evm          error[8-0000]: type mismatch
+                 evm               ┌─ src/vm.fe:1234:13
+                 evm               │
+                 evm          1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 evm               │             ^^^^^^ expected `!`, but `_` is given
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1236:13
+                 evm               │
+                 evm          1236 │             Option::None => {
+                 evm               │             ^^^^^^^^^^^^
+                 evm               │             │
+                 evm               │             type annotation is needed
+                 evm               │             consider giving `: Option<_>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1243:13
+                 evm               │
+                 evm          1243 │             Result::Ok(()) => {},
+                 evm               │             ^^^^^^^^^^^^^^
+                 evm               │             │
+                 evm               │             type annotation is needed
+                 evm               │             consider giving `: Result<_, ()>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1244:13
+                 evm               │
+                 evm          1244 │             Result::Err(_) => core::panic(),
+                 evm               │             ^^^^^^^^^^^^^^
+                 evm               │             │
+                 evm               │             type annotation is needed
+                 evm               │             consider giving `: Result<_, _>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1254:17
+                 evm               │
+                 evm          1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 evm               │                 ^^^^^^^^^^^^^^^^^^^
+                 evm               │                 │
+                 evm               │                 type annotation is needed
+                 evm               │                 consider giving `: Option<_>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1255:21
+                 evm               │
+                 evm          1255 │                     Result::Ok(()) => {},
+                 evm               │                     ^^^^^^^^^^^^^^
+                 evm               │                     │
+                 evm               │                     type annotation is needed
+                 evm               │                     consider giving `: Result<_, ()>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1256:21
+                 evm               │
+                 evm          1256 │                     Result::Err(_) => core::panic(),
+                 evm               │                     ^^^^^^^^^^^^^^
+                 evm               │                     │
+                 evm               │                     type annotation is needed
+                 evm               │                     consider giving `: Result<_, _>` here
+                 evm         
+                 evm          error[8-0031]: type annotation is needed
+                 evm               ┌─ src/vm.fe:1258:17
+                 evm               │
+                 evm          1258 │                 Option::None => {
+                 evm               │                 ^^^^^^^^^^^^
+                 evm               │                 │
+                 evm               │                 type annotation is needed
+                 evm               │                 consider giving `: Option<_>` here
+                 evm         
+                 evm         
+ERROR [1.1447s]  evm          Compilation errors
+COMPILING        driver       /home/sean/code/fevm/native/differential/driver
+                 driver       Error: Errors in dependency
+                 driver      
+                 driver       Dependency: fevm (version: 0.1.0)
+                 driver       URL: file:///home/sean/code/fevm/ingots/evm/
+                 driver      
+                 driver       error[2-0002]: `FixedStack` is not found
+                 driver         ┌─ src/vm.fe:2:31
+                 driver         │
+                 driver       2 │ use std::native::{ByteBuffer, FixedStack}
+                 driver         │                               ^^^^^^^^^^ `FixedStack` is not found
+                 driver      
+                 driver       error[2-0002]: `FixedStack` is not found
+                 driver            ┌─ src/vm.fe:1234:28
+                 driver            │
+                 driver       1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 driver            │                            ^^^^^^^^^^ `FixedStack` is not found
+                 driver      
+                 driver       error[8-0000]: type mismatch
+                 driver            ┌─ src/vm.fe:1234:13
+                 driver            │
+                 driver       1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 driver            │             ^^^^^^ expected `!`, but `_` is given
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1236:13
+                 driver            │
+                 driver       1236 │             Option::None => {
+                 driver            │             ^^^^^^^^^^^^
+                 driver            │             │
+                 driver            │             type annotation is needed
+                 driver            │             consider giving `: Option<_>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1243:13
+                 driver            │
+                 driver       1243 │             Result::Ok(()) => {},
+                 driver            │             ^^^^^^^^^^^^^^
+                 driver            │             │
+                 driver            │             type annotation is needed
+                 driver            │             consider giving `: Result<_, ()>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1244:13
+                 driver            │
+                 driver       1244 │             Result::Err(_) => core::panic(),
+                 driver            │             ^^^^^^^^^^^^^^
+                 driver            │             │
+                 driver            │             type annotation is needed
+                 driver            │             consider giving `: Result<_, _>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1254:17
+                 driver            │
+                 driver       1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 driver            │                 ^^^^^^^^^^^^^^^^^^^
+                 driver            │                 │
+                 driver            │                 type annotation is needed
+                 driver            │                 consider giving `: Option<_>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1255:21
+                 driver            │
+                 driver       1255 │                     Result::Ok(()) => {},
+                 driver            │                     ^^^^^^^^^^^^^^
+                 driver            │                     │
+                 driver            │                     type annotation is needed
+                 driver            │                     consider giving `: Result<_, ()>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1256:21
+                 driver            │
+                 driver       1256 │                     Result::Err(_) => core::panic(),
+                 driver            │                     ^^^^^^^^^^^^^^
+                 driver            │                     │
+                 driver            │                     type annotation is needed
+                 driver            │                     consider giving `: Result<_, _>` here
+                 driver      
+                 driver       error[8-0031]: type annotation is needed
+                 driver            ┌─ src/vm.fe:1258:17
+                 driver            │
+                 driver       1258 │                 Option::None => {
+                 driver            │                 ^^^^^^^^^^^^
+                 driver            │                 │
+                 driver            │                 type annotation is needed
+                 driver            │                 consider giving `: Option<_>` here
+                 driver      
+                 driver      
+ERROR [1.2317s]  driver       Errors in dependency
+COMPILING        state_driver /home/sean/code/fevm/native/differential/state_driver
+                 state_driver Error: Errors in dependency
+                 state_driver
+                 state_driver Dependency: fevm (version: 0.1.0)
+                 state_driver URL: file:///home/sean/code/fevm/ingots/evm/
+                 state_driver
+                 state_driver error[2-0002]: `FixedStack` is not found
+                 state_driver   ┌─ src/vm.fe:2:31
+                 state_driver   │
+                 state_driver 2 │ use std::native::{ByteBuffer, FixedStack}
+                 state_driver   │                               ^^^^^^^^^^ `FixedStack` is not found
+                 state_driver
+                 state_driver error[2-0002]: `FixedStack` is not found
+                 state_driver      ┌─ src/vm.fe:1234:28
+                 state_driver      │
+                 state_driver 1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 state_driver      │                            ^^^^^^^^^^ `FixedStack` is not found
+                 state_driver
+                 state_driver error[8-0000]: type mismatch
+                 state_driver      ┌─ src/vm.fe:1234:13
+                 state_driver      │
+                 state_driver 1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 state_driver      │             ^^^^^^ expected `!`, but `_` is given
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1236:13
+                 state_driver      │
+                 state_driver 1236 │             Option::None => {
+                 state_driver      │             ^^^^^^^^^^^^
+                 state_driver      │             │
+                 state_driver      │             type annotation is needed
+                 state_driver      │             consider giving `: Option<_>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1243:13
+                 state_driver      │
+                 state_driver 1243 │             Result::Ok(()) => {},
+                 state_driver      │             ^^^^^^^^^^^^^^
+                 state_driver      │             │
+                 state_driver      │             type annotation is needed
+                 state_driver      │             consider giving `: Result<_, ()>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1244:13
+                 state_driver      │
+                 state_driver 1244 │             Result::Err(_) => core::panic(),
+                 state_driver      │             ^^^^^^^^^^^^^^
+                 state_driver      │             │
+                 state_driver      │             type annotation is needed
+                 state_driver      │             consider giving `: Result<_, _>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1254:17
+                 state_driver      │
+                 state_driver 1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 state_driver      │                 ^^^^^^^^^^^^^^^^^^^
+                 state_driver      │                 │
+                 state_driver      │                 type annotation is needed
+                 state_driver      │                 consider giving `: Option<_>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1255:21
+                 state_driver      │
+                 state_driver 1255 │                     Result::Ok(()) => {},
+                 state_driver      │                     ^^^^^^^^^^^^^^
+                 state_driver      │                     │
+                 state_driver      │                     type annotation is needed
+                 state_driver      │                     consider giving `: Result<_, ()>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1256:21
+                 state_driver      │
+                 state_driver 1256 │                     Result::Err(_) => core::panic(),
+                 state_driver      │                     ^^^^^^^^^^^^^^
+                 state_driver      │                     │
+                 state_driver      │                     type annotation is needed
+                 state_driver      │                     consider giving `: Result<_, _>` here
+                 state_driver
+                 state_driver error[8-0031]: type annotation is needed
+                 state_driver      ┌─ src/vm.fe:1258:17
+                 state_driver      │
+                 state_driver 1258 │                 Option::None => {
+                 state_driver      │                 ^^^^^^^^^^^^
+                 state_driver      │                 │
+                 state_driver      │                 type annotation is needed
+                 state_driver      │                 consider giving `: Option<_>` here
+                 state_driver
+                 state_driver
+ERROR [1.2551s]  state_driver Errors in dependency
+COMPILING        accounts     /home/sean/code/fevm/native/fixtures/accounts
+                 accounts     Error: Errors in dependency
+                 accounts    
+                 accounts     Dependency: fevm (version: 0.1.0)
+                 accounts     URL: file:///home/sean/code/fevm/ingots/evm/
+                 accounts    
+                 accounts     error[2-0002]: `FixedStack` is not found
+                 accounts       ┌─ src/vm.fe:2:31
+                 accounts       │
+                 accounts     2 │ use std::native::{ByteBuffer, FixedStack}
+                 accounts       │                               ^^^^^^^^^^ `FixedStack` is not found
+                 accounts    
+                 accounts     error[2-0002]: `FixedStack` is not found
+                 accounts          ┌─ src/vm.fe:1234:28
+                 accounts          │
+                 accounts     1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 accounts          │                            ^^^^^^^^^^ `FixedStack` is not found
+                 accounts    
+                 accounts     error[8-0000]: type mismatch
+                 accounts          ┌─ src/vm.fe:1234:13
+                 accounts          │
+                 accounts     1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 accounts          │             ^^^^^^ expected `!`, but `_` is given
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1236:13
+                 accounts          │
+                 accounts     1236 │             Option::None => {
+                 accounts          │             ^^^^^^^^^^^^
+                 accounts          │             │
+                 accounts          │             type annotation is needed
+                 accounts          │             consider giving `: Option<_>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1243:13
+                 accounts          │
+                 accounts     1243 │             Result::Ok(()) => {},
+                 accounts          │             ^^^^^^^^^^^^^^
+                 accounts          │             │
+                 accounts          │             type annotation is needed
+                 accounts          │             consider giving `: Result<_, ()>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1244:13
+                 accounts          │
+                 accounts     1244 │             Result::Err(_) => core::panic(),
+                 accounts          │             ^^^^^^^^^^^^^^
+                 accounts          │             │
+                 accounts          │             type annotation is needed
+                 accounts          │             consider giving `: Result<_, _>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1254:17
+                 accounts          │
+                 accounts     1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 accounts          │                 ^^^^^^^^^^^^^^^^^^^
+                 accounts          │                 │
+                 accounts          │                 type annotation is needed
+                 accounts          │                 consider giving `: Option<_>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1255:21
+                 accounts          │
+                 accounts     1255 │                     Result::Ok(()) => {},
+                 accounts          │                     ^^^^^^^^^^^^^^
+                 accounts          │                     │
+                 accounts          │                     type annotation is needed
+                 accounts          │                     consider giving `: Result<_, ()>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1256:21
+                 accounts          │
+                 accounts     1256 │                     Result::Err(_) => core::panic(),
+                 accounts          │                     ^^^^^^^^^^^^^^
+                 accounts          │                     │
+                 accounts          │                     type annotation is needed
+                 accounts          │                     consider giving `: Result<_, _>` here
+                 accounts    
+                 accounts     error[8-0031]: type annotation is needed
+                 accounts          ┌─ src/vm.fe:1258:17
+                 accounts          │
+                 accounts     1258 │                 Option::None => {
+                 accounts          │                 ^^^^^^^^^^^^
+                 accounts          │                 │
+                 accounts          │                 type annotation is needed
+                 accounts          │                 consider giving `: Option<_>` here
+                 accounts    
+                 accounts    
+ERROR [1.2311s]  accounts     Errors in dependency
+COMPILING        journal      /home/sean/code/fevm/native/fixtures/journal
+                 journal      Error: Errors in dependency
+                 journal     
+                 journal      Dependency: fevm (version: 0.1.0)
+                 journal      URL: file:///home/sean/code/fevm/ingots/evm/
+                 journal     
+                 journal      error[2-0002]: `FixedStack` is not found
+                 journal        ┌─ src/vm.fe:2:31
+                 journal        │
+                 journal      2 │ use std::native::{ByteBuffer, FixedStack}
+                 journal        │                               ^^^^^^^^^^ `FixedStack` is not found
+                 journal     
+                 journal      error[2-0002]: `FixedStack` is not found
+                 journal           ┌─ src/vm.fe:1234:28
+                 journal           │
+                 journal      1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 journal           │                            ^^^^^^^^^^ `FixedStack` is not found
+                 journal     
+                 journal      error[8-0000]: type mismatch
+                 journal           ┌─ src/vm.fe:1234:13
+                 journal           │
+                 journal      1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 journal           │             ^^^^^^ expected `!`, but `_` is given
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1236:13
+                 journal           │
+                 journal      1236 │             Option::None => {
+                 journal           │             ^^^^^^^^^^^^
+                 journal           │             │
+                 journal           │             type annotation is needed
+                 journal           │             consider giving `: Option<_>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1243:13
+                 journal           │
+                 journal      1243 │             Result::Ok(()) => {},
+                 journal           │             ^^^^^^^^^^^^^^
+                 journal           │             │
+                 journal           │             type annotation is needed
+                 journal           │             consider giving `: Result<_, ()>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1244:13
+                 journal           │
+                 journal      1244 │             Result::Err(_) => core::panic(),
+                 journal           │             ^^^^^^^^^^^^^^
+                 journal           │             │
+                 journal           │             type annotation is needed
+                 journal           │             consider giving `: Result<_, _>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1254:17
+                 journal           │
+                 journal      1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 journal           │                 ^^^^^^^^^^^^^^^^^^^
+                 journal           │                 │
+                 journal           │                 type annotation is needed
+                 journal           │                 consider giving `: Option<_>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1255:21
+                 journal           │
+                 journal      1255 │                     Result::Ok(()) => {},
+                 journal           │                     ^^^^^^^^^^^^^^
+                 journal           │                     │
+                 journal           │                     type annotation is needed
+                 journal           │                     consider giving `: Result<_, ()>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1256:21
+                 journal           │
+                 journal      1256 │                     Result::Err(_) => core::panic(),
+                 journal           │                     ^^^^^^^^^^^^^^
+                 journal           │                     │
+                 journal           │                     type annotation is needed
+                 journal           │                     consider giving `: Result<_, _>` here
+                 journal     
+                 journal      error[8-0031]: type annotation is needed
+                 journal           ┌─ src/vm.fe:1258:17
+                 journal           │
+                 journal      1258 │                 Option::None => {
+                 journal           │                 ^^^^^^^^^^^^
+                 journal           │                 │
+                 journal           │                 type annotation is needed
+                 journal           │                 consider giving `: Option<_>` here
+                 journal     
+                 journal     
+ERROR [1.2383s]  journal      Errors in dependency
+COMPILING        logs         /home/sean/code/fevm/native/fixtures/logs
+                 logs         Error: Errors in dependency
+                 logs        
+                 logs         Dependency: fevm (version: 0.1.0)
+                 logs         URL: file:///home/sean/code/fevm/ingots/evm/
+                 logs        
+                 logs         error[2-0002]: `FixedStack` is not found
+                 logs           ┌─ src/vm.fe:2:31
+                 logs           │
+                 logs         2 │ use std::native::{ByteBuffer, FixedStack}
+                 logs           │                               ^^^^^^^^^^ `FixedStack` is not found
+                 logs        
+                 logs         error[2-0002]: `FixedStack` is not found
+                 logs              ┌─ src/vm.fe:1234:28
+                 logs              │
+                 logs         1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 logs              │                            ^^^^^^^^^^ `FixedStack` is not found
+                 logs        
+                 logs         error[8-0000]: type mismatch
+                 logs              ┌─ src/vm.fe:1234:13
+                 logs              │
+                 logs         1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+                 logs              │             ^^^^^^ expected `!`, but `_` is given
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1236:13
+                 logs              │
+                 logs         1236 │             Option::None => {
+                 logs              │             ^^^^^^^^^^^^
+                 logs              │             │
+                 logs              │             type annotation is needed
+                 logs              │             consider giving `: Option<_>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1243:13
+                 logs              │
+                 logs         1243 │             Result::Ok(()) => {},
+                 logs              │             ^^^^^^^^^^^^^^
+                 logs              │             │
+                 logs              │             type annotation is needed
+                 logs              │             consider giving `: Result<_, ()>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1244:13
+                 logs              │
+                 logs         1244 │             Result::Err(_) => core::panic(),
+                 logs              │             ^^^^^^^^^^^^^^
+                 logs              │             │
+                 logs              │             type annotation is needed
+                 logs              │             consider giving `: Result<_, _>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1254:17
+                 logs              │
+                 logs         1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+                 logs              │                 ^^^^^^^^^^^^^^^^^^^
+                 logs              │                 │
+                 logs              │                 type annotation is needed
+                 logs              │                 consider giving `: Option<_>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1255:21
+                 logs              │
+                 logs         1255 │                     Result::Ok(()) => {},
+                 logs              │                     ^^^^^^^^^^^^^^
+                 logs              │                     │
+                 logs              │                     type annotation is needed
+                 logs              │                     consider giving `: Result<_, ()>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1256:21
+                 logs              │
+                 logs         1256 │                     Result::Err(_) => core::panic(),
+                 logs              │                     ^^^^^^^^^^^^^^
+                 logs              │                     │
+                 logs              │                     type annotation is needed
+                 logs              │                     consider giving `: Result<_, _>` here
+                 logs        
+                 logs         error[8-0031]: type annotation is needed
+                 logs              ┌─ src/vm.fe:1258:17
+                 logs              │
+                 logs         1258 │                 Option::None => {
+                 logs              │                 ^^^^^^^^^^^^
+                 logs              │                 │
+                 logs              │                 type annotation is needed
+                 logs              │                 consider giving `: Option<_>` here
+                 logs        
+                 logs        
+ERROR [1.2498s]  logs         Errors in dependency
+
+test result: FAILED. 0 passed; 6 failed
+
+failures:
+    evm::compile
+    driver::compile
+    state_driver::compile
+    accounts::compile
+    journal::compile
+    logs::compile

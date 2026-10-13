@@ -126,7 +126,7 @@ impl Vm {
     }
 
     fn charge_expansion(mut self, _ plan: MemoryExpansion, len: u256, copying: bool) -> bool {
-        let mut gas = plan.gas as u128
+        var gas = plan.gas as u128
         if copying {
             match copy_gas(len) {
                 Option::Some(cost,) => gas += cost as u128,
@@ -164,12 +164,12 @@ impl Vm {
                 return
             },
         }
-        let mut hash = Keccak256::new()
+        var hash = Keccak256::new()
         if len != 0 {
             hash.update(self.memory, offset: offset.downcast_unchecked(), len: len.downcast_unchecked())
         }
         let digest = hash.finish()
-        let mut value: u256 = 0
+        var value: u256 = 0
         for byte in digest { value = (value << 8) | byte as u256 }
         self.push(value)
     }
@@ -186,8 +186,8 @@ impl Vm {
             },
         }
         let start: u64 = offset.downcast_unchecked()
-        let mut value: u256 = 0
-        let mut i: u64 = 0
+        var value: u256 = 0
+        var i: u64 = 0
         while i < 32 {
             value = (value << 8) | (self.memory.byte_at(start + i) as u256)
             i += 1
@@ -209,7 +209,7 @@ impl Vm {
             },
         }
         let start: u64 = offset.downcast_unchecked()
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < len {
             let shift = ((len - 1 - i) as u256) * 8
             self.memory
@@ -243,7 +243,7 @@ impl Vm {
         } else {
             0
         }
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < count {
             let value = if (i as u256) < available {
                 let index: usize = (source + i as u256).downcast_unchecked()
@@ -291,8 +291,8 @@ impl Vm {
         } else {
             0
         }
-        let mut value: u256 = 0
-        let mut i: u256 = 0
+        var value: u256 = 0
+        var i: u256 = 0
         while i < 32 {
             value <<= 8
             if i < available {
@@ -325,7 +325,7 @@ impl Vm {
         } else {
             0
         }
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < count {
             let value = if (i as u256) < available {
                 let index: u64 = (source + i as u256).downcast_unchecked()
@@ -376,7 +376,7 @@ impl Vm {
         }
         if count != 0 {
             let start: u64 = offset.downcast_unchecked()
-            let mut i: u64 = 0
+            var i: u64 = 0
             while i < count {
                 self.output.set_byte(index: i, value: self.memory.byte_at(start + i))
                 i += 1
@@ -388,8 +388,8 @@ impl Vm {
     }
 
     fn exp(mut self, base: u256, exponent: u256) {
-        let mut significant = exponent
-        let mut gas: u128 = 0
+        var significant = exponent
+        var gas: u128 = 0
         while significant != 0 {
             gas += 50
             significant >>= 8
@@ -397,9 +397,9 @@ impl Vm {
         if !self.charge(gas) {
             return
         }
-        let mut result: u256 = 1
-        let mut factor = base
-        let mut power = exponent
+        var result: u256 = 1
+        var factor = base
+        var power = exponent
         while power != 0 {
             if power & 1 == 1 {
                 result = result.wrapping_mul(factor)
@@ -676,7 +676,7 @@ impl Vm {
         let source: u64 = if copied == 0 { 0 } else { source.downcast_unchecked() }
         let dest: u64 = dest.downcast_unchecked()
         let len: u64 = len.downcast_unchecked()
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < len {
             let byte = if i < copied {
                 state.code_byte(address, index: source + i)
@@ -703,8 +703,8 @@ impl Vm {
         }
         let length: u64 = len.downcast_unchecked()
         if !self.charge(375 + topics_count as u128 * 375 + length as u128 * 8 + plan.gas as u128) { return }
-        let mut topics: [u256; 4] = [0; 4]
-        let mut topic: u64 = 0
+        var topics: [u256; 4] = [0; 4]
+        var topic: u64 = 0
         while topic < topics_count {
             topics[topic as usize] = self.pop()
             topic += 1
@@ -996,8 +996,8 @@ impl Vm {
 }
 
 fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
-    let mut value: u256 = 0
-    let mut i: usize = 0
+    var value: u256 = 0
+    var i: usize = 0
     while i < len {
         value = value << 8
         if vm.pc < program.len() {
@@ -1106,7 +1106,7 @@ pub fn execute_vm(
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> Vm {
-    let mut vm = Vm::new()
+    var vm = Vm::new()
     vm.run_owned(program, calldata, call, block, mut state)
     vm
 }

@@ -32,17 +32,17 @@ impl Frame {
 }
 
 fn frame(_ tx: mut Transaction) {
-    let mut frame = Frame { memory: ByteBuffer::new() }
+    var frame = Frame { memory: ByteBuffer::new() }
     frame.run(mut tx)
     frame.release()
 }
 
 fn write_logs(_ logs: LogBuffer) uses (w: mut Write) {
-    let mut index: u64 = 0
+    var index: u64 = 0
     while index < logs.len() {
         let entry = logs.entry(index)
         core::assert(entry.address == 7 && entry.len() == 1)
-        core::assert(entry.byte_at(0) == 42)
+        core::assert(logs.byte_at(entry: index, index: 0) == 42)
         write("1")
         index += 1
     }
@@ -50,7 +50,7 @@ fn write_logs(_ logs: LogBuffer) uses (w: mut Write) {
 
 fn actions(_ tx: mut Transaction, _ reader: mut Reader) uses (w: mut Write) {
     let count = reader.read()
-    let mut index: u8 = 0
+    var index: u8 = 0
     while index < count {
         if reader.read() == 0 {
             frame(mut tx)
@@ -69,12 +69,12 @@ fn actions(_ tx: mut Transaction, _ reader: mut Reader) uses (w: mut Write) {
 }
 
 pub fn main() -> i32 {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut reader = Reader { data: ByteBuffer::new(), position: 0 }
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var reader = Reader { data: ByteBuffer::new(), position: 0 }
     // Emit, emit in a reverted child, then emit in a committed child.
     let input: [u8; 10] = [3, 0, 1, 0, 1, 0, 1, 1, 1, 0]
     core::assert(reader.data.try_resize(10))
-    let mut index: u64 = 0
+    var index: u64 = 0
     while index < 10 {
         reader.data.set_byte(index, value: input[index as usize])
         index += 1
@@ -83,8 +83,8 @@ pub fn main() -> i32 {
     core::assert(reader.position == 10)
     let receipt = tx.finish(commit: true, gas_spent: 0)
     core::assert(receipt.logs.len() == 2)
-    core::assert(receipt.logs.entry(0).byte_at(0) == 42)
-    core::assert(receipt.logs.entry(1).byte_at(0) == 42)
+    core::assert(receipt.logs.byte_at(entry: 0, index: 0) == 42)
+    core::assert(receipt.logs.byte_at(entry: 1, index: 0) == 42)
     receipt.release()
     reader.data.release()
     0

@@ -18,11 +18,11 @@ pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint
 
 #[test]
 fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.set_balance(7, 10))
     core::assert(world.set_nonce(7, 2))
     core::assert(world.storage_store(7, 8, 11))
-    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     core::assert(tx.set_balance(address: 7, value: 30) == OK)
     core::assert(tx.set_nonce(address: 7, value: 3) == OK)
@@ -45,7 +45,7 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
 
 #[test]
 fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
     core::assert(tx.transient_store(address: 1, slot: 2, value: 4) == OK)
@@ -63,7 +63,7 @@ fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
 
 #[test]
 fn transaction_static_mode_is_inherited_and_restored() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: true)
     let child = checkpoint(mut tx, is_static: false)
     core::assert(tx.is_static())
@@ -83,20 +83,20 @@ fn transaction_static_mode_is_inherited_and_restored() {
 
 #[test]
 fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
-    let mut world = WorldState::empty()
-    let mut slot: u256 = 0
+    var world = WorldState::empty()
+    var slot: u256 = 0
     while slot < 256 {
         core::assert(world.storage_store(1, slot, slot + 1))
         slot += 1
     }
-    let mut tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 1, slot: 0, value: 0) == OK)
     core::assert(tx.storage_store(address: 1, slot: 256, value: 2) == OK)
     core::assert(tx.storage_store(address: 1, slot: 257, value: 2) == ERR_STATE_LIMIT)
     // Hundreds of updates to one slot must grow the journal, not impose a new
     // consensus instruction-count limit. Failed insertion must not poison undo.
-    let mut value: u256 = 3
+    var value: u256 = 3
     while value < 600 {
         core::assert(tx.storage_store(address: 1, slot: 256, value) == OK)
         value += 1
@@ -113,7 +113,7 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
 // Keep the one-time VM/code buffers out of every recursive checkpoint frame.
 #[inline(never)]
 fn assert_frame_depth_limit(_ tx: mut Transaction) {
-    let mut vm = Vm::new()
+    var vm = Vm::new()
     vm.run_owned(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(vm.status == ERR_CALL_DEPTH && tx.depth() == CALL_DEPTH_LIMIT)
     vm.release()
@@ -131,7 +131,7 @@ fn nested_depth(_ tx: mut Transaction, remaining: usize) {
 
 #[test]
 fn transaction_enforces_frame_depth_without_closing_parent() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     nested_depth(mut tx, remaining: CALL_DEPTH_LIMIT)
     core::assert(tx.depth() == 0)
     tx.finish(commit: true, gas_spent: 0).release()
@@ -143,7 +143,7 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // operational failure, but it must still roll back the frame's writes.
     // CALL supplies that exit until nested call execution is implemented.
     for exit in [0xfd, 0xfe, 0x01, 0xf1] {
-        let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         // ADD has two operands here; use a second ADD to trigger underflow.
         let selected = if exit == 0x01 {
             program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
@@ -163,8 +163,8 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
         result.release()
         tx.finish(commit: true, gas_spent: 0).release()
     }
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut call = default_call_env()
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var call = default_call_env()
     call.gas_limit = 208
     let result = execute(
         program([0x60, 8, 0x5f, 0x5d, 0x60, 9, 0x5f, 0x5d]),
@@ -178,7 +178,7 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
 
 #[test]
 fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let write = program([0x60, 9, 0x5f, 0x5d, 0x60, 7, 0x5f, 0x55])
     let read = program([0x5f, 0x5c])
     let result = execute(write, empty_bytes(), default_call_env(), default_block_env(), mut tx)
@@ -189,7 +189,7 @@ fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
     result.release()
     let world = tx.finish(commit: true, gas_spent: 0).into_state()
     core::assert(world.storage_load(0, 0) == 7)
-    let mut next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let result = execute(program([0x5f, 0x5c]), empty_bytes(), default_call_env(), default_block_env(), mut next)
     core::assert(result.status == OK && result.stack_top == 0)
     result.release()
@@ -198,8 +198,8 @@ fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
 
 #[test]
 fn vm_static_storage_writes_fault_but_reads_are_allowed() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut call = default_call_env()
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var call = default_call_env()
     call.is_static = true
     for op in [0x55, 0x5d] {
         let result = execute(program([0x60, 9, 0x5f, op]), empty_bytes(), call, default_block_env(), mut tx)

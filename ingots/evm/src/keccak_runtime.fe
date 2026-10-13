@@ -5,19 +5,19 @@ use ingot::vm::Vm
 #[test]
 fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
     for gas in [35 as u64, 36, 37] {
-        let mut bytes: [u8; 4096] = [0; 4096]
+        var bytes: [u8; 4096] = [0; 4096]
         // PUSH1 0; PUSH32 MAX; SHA3.
         bytes[0] = 0x60
         bytes[2] = 0x7f
-        let mut index: usize = 3
+        var index: usize = 3
         while index < 35 {
             bytes[index] = 255
             index += 1
         }
         bytes[35] = 0x20
-        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-        let mut vm = Vm::new()
-        let mut call = default_call_env()
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var vm = Vm::new()
+        var call = default_call_env()
         call.gas_limit = gas
         call.is_static = true
         vm.run_owned(Program::copy_from(bytes, len: 36), empty_bytes(), call, default_block_env(), mut state)
@@ -35,15 +35,15 @@ fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
 
 #[test]
 fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
-    let mut bytes: [u8; 4096] = [0; 4096]
-    let mut index: usize = 0
+    var bytes: [u8; 4096] = [0; 4096]
+    var index: usize = 0
     for byte in [0x62, 0x61, 0x62, 0x63, 0x5f, 0x52, 0x60, 3, 0x60, 29, 0x20] {
         bytes[index] = byte
         index += 1
     }
-    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut vm = Vm::new()
-    let mut call = default_call_env()
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
+    var call = default_call_env()
     call.gas_limit = 53
     vm.run_owned(Program::copy_from(bytes, len: index), empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 1)
@@ -65,12 +65,12 @@ fn sha3_checks_stack_and_charges_before_allocation() {
         (2, 1 << 255, 1, 1000000, ERR_OUT_OF_GAS),
         (2, 0, !(0 as u256), 1000000, ERR_OUT_OF_GAS),
     ] {
-        let mut bytes: [u8; 4096] = [0; 4096]
-        let mut size: usize = 0
+        var bytes: [u8; 4096] = [0; 4096]
+        var size: usize = 0
         if available > 0 {
             bytes[size] = 0x7f
             size += 1
-            let mut index: usize = 0
+            var index: usize = 0
             while index < 32 {
                 bytes[size] = (len >> ((31 - index) * 8) as u256).downcast_truncate()
                 size += 1
@@ -80,7 +80,7 @@ fn sha3_checks_stack_and_charges_before_allocation() {
         if available > 1 {
             bytes[size] = 0x7f
             size += 1
-            let mut index: usize = 0
+            var index: usize = 0
             while index < 32 {
                 bytes[size] = (offset >> ((31 - index) * 8) as u256).downcast_truncate()
                 size += 1
@@ -88,9 +88,9 @@ fn sha3_checks_stack_and_charges_before_allocation() {
             }
         }
         bytes[size] = 0x20
-        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-        let mut vm = Vm::new()
-        let mut call = default_call_env()
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var vm = Vm::new()
+        var call = default_call_env()
         call.gas_limit = gas
         vm.run_owned(Program::copy_from(bytes, len: size + 1), empty_bytes(), call, default_block_env(), mut state)
         core::assert(vm.status == status && vm.gas_remaining == 0)

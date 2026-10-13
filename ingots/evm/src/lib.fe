@@ -1,3 +1,4 @@
+use std::native::Args
 pub use constants::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
 pub use logs::{LogBuffer, LogEntry}
@@ -16,12 +17,14 @@ pub use types::{
 pub use vm::{self, execute}
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
-    cli::run(argc, argv)
+    // Native main supplies live NUL-terminated arguments for this process.
+    let args = unsafe { Args::new(argc, argv) }
+    cli::run(args)
 }
 
 #[test]
 fn evm_sload_sstore_roundtrip() {
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     bytes[0] = 0x60
     bytes[1] = 0x2a
     bytes[2] = 0x60
@@ -41,7 +44,7 @@ fn evm_sload_sstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    let mut state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
     let result = execute(
         program,
         empty_bytes(),
@@ -59,7 +62,7 @@ fn evm_sload_sstore_roundtrip() {
 
 #[test]
 fn evm_balance_selfbalance_and_blockhash_use_state() {
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     bytes[0] = 0x60
     bytes[1] = 0xbb
     bytes[2] = 0x31
@@ -80,12 +83,12 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.set_block_hash(7, 5))
-    let mut state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0)
     core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
     core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
-    let mut block = default_block_env()
+    var block = default_block_env()
     block.number = 8
     let result = execute(
         program,
@@ -103,7 +106,7 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
 
 #[test]
 fn evm_tload_tstore_roundtrip() {
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     bytes[0] = 0x60
     bytes[1] = 0x09
     bytes[2] = 0x60
@@ -123,7 +126,7 @@ fn evm_tload_tstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    let mut state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
     let result = execute(
         program,
         empty_bytes(),
@@ -142,8 +145,8 @@ fn evm_tload_tstore_roundtrip() {
 
 #[test]
 fn evm_interleaves_state_and_owned_memory() {
-    let mut bytes: [u8; 4096] = [0; 4096]
-    let mut len: usize = 0
+    var bytes: [u8; 4096] = [0; 4096]
+    var len: usize = 0
     // Memory -> storage -> transient storage -> memory, then return both words.
     for op in [
         0x60,
@@ -176,7 +179,7 @@ fn evm_interleaves_state_and_owned_memory() {
         len += 1
     }
     let program = Program::copy_from(bytes, len)
-    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let result = execute(
         program,
         empty_bytes(),

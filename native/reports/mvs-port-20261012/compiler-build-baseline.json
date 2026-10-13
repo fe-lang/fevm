@@ -1,0 +1,30 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/sbillig/fe",
+    "fe_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "11722eacb49ce1f565191145d290bd25618c7342",
+    "cargo_lock_sha256": "db87456660c366f6db37f0722602b9cecbf9d00688f6520b55963d8664ed8c21",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "sbillig/fe mvs branch and published Sonatina revision",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "source_directory": "/tmp/fevm-mvs-fe5c32c1",
+  "target_directory": "/dev/shm/fevm-mvs-target",
+  "compiler": "/tmp/fevm-mvs-fe",
+  "compiler_sha256": "480068cd04eb1d33f3b9f2f89bc1a99b43b0330e98878a589ec12b49c1dccffa",
+  "compiler_version": "fe 26.4.0 (fe5c32c)",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "complete": true,
+  "build_command": "CARGO_TARGET_DIR=/dev/shm/fevm-mvs-target CARGO_BUILD_JOBS=2 cargo +1.99.0 build --release --locked -p fe --features cranelift",
+  "provenance": "Clean isolated shallow checkout of the exact manifest revision; Sonatina fetched through locked Cargo dependencies; compiler copied after successful build"
+}

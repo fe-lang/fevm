@@ -30,10 +30,10 @@ fn initialize(_ world: mut WorldState) -> i32 {
 }
 
 pub fn main() -> i32 {
-    let mut first = WorldState::empty()
+    var first = WorldState::empty()
     let status = initialize(mut first)
     if status == OK {
-        let mut second = WorldState::empty()
+        var second = WorldState::empty()
         let _ = initialize(mut second)
         second.release()
     }

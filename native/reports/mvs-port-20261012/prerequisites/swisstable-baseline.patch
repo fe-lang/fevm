@@ -1,0 +1,75 @@
+From 60017e7f2f033e971bdb2a5f5d4af097115f3be8 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Mon, 12 Oct 2026 15:07:39 -0700
+Subject: [PATCH] Port historical SwissTable hash baseline to MVS
+
+---
+ src/lib.fe | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/src/lib.fe b/src/lib.fe
+index d547a09..7589cf2 100644
+--- a/src/lib.fe
++++ b/src/lib.fe
+@@ -28,7 +28,7 @@ pub struct SwissTable<K, V> {
+ impl<K, V> Copy for SwissTable<K, V> where K: Copy, V: Copy {}
+ 
+ pub fn hash_u256(_ key: u256) -> u256 {
+-    let mut x = key ^ 0x9e3779b97f4a7c15
++    var x = key ^ 0x9e3779b97f4a7c15
+     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9)
+     x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb)
+     x ^ (x >> 31)
+@@ -79,13 +79,13 @@ impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Cop
+     }
+ 
+     fn search(self, _ key: K, _ hash: u256, _ fingerprint: u8) -> TableSearch {
+-        let mut first_deleted: usize = 0
+-        let mut saw_deleted = false
+-        let mut group = group_start(hash)
+-        let mut probe: usize = 0
++        var first_deleted: usize = 0
++        var saw_deleted = false
++        var group = group_start(hash)
++        var probe: usize = 0
+ 
+         while probe < TABLE_GROUPS {
+-            let mut i: usize = 0
++            var i: usize = 0
+             while i < TABLE_GROUP_WIDTH {
+                 let slot = group + i
+                 let ctrl = self.ctrl[slot]
+@@ -171,7 +171,7 @@ impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Cop
+ 
+ #[test]
+ fn swisstable_basic_operations() {
+-    let mut table = SwissTable<u256, u256>::empty()
++    var table = SwissTable<u256, u256>::empty()
+     core::assert(table.is_empty())
+     core::assert(table.capacity() == TABLE_CAP)
+     core::assert(table.len() == 0)
+@@ -197,8 +197,8 @@ fn swisstable_basic_operations() {
+ 
+ #[test]
+ fn swisstable_many_entries_roundtrip() {
+-    let mut table = SwissTable<u256, u256>::empty()
+-    let mut i: usize = 0
++    var table = SwissTable<u256, u256>::empty()
++    var i: usize = 0
+     while i < 128 {
+         let key = (i as u256).wrapping_mul(257) + 11
+         core::assert(table.insert(key, key + 1000))
+@@ -218,8 +218,8 @@ fn swisstable_many_entries_roundtrip() {
+ 
+ #[test]
+ fn swisstable_tombstones_reuse_full_table_slots() {
+-    let mut table = SwissTable<u256, u256>::empty()
+-    let mut i: usize = 0
++    var table = SwissTable<u256, u256>::empty()
++    var i: usize = 0
+     while i < TABLE_CAP {
+         core::assert(table.insert(i as u256, (i as u256) + 1))
+         i += 1
+-- 
+2.43.0
+

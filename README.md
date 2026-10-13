@@ -17,24 +17,21 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/owned-inputs-toolchain.json \
-  --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
-  --out native/out/toolchain --toolchain 1.98.1
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The owned-input development pin is local Fe `78710ce5e`, which integrates
-the final PR #1718 fixes (`2db9a38fa`), native reference-layout, buffer ownership,
-recursive-summary and Boolean-return repairs, and analysis/guard reuse. It pins Sonatina
-`8d822fc3`, including indexed object-store invalidation. Supply a
-local Fe repository or Git bundle containing that commit. The default
-`native/toolchain.json` retains the previous published-master checkpoint. See
-[native build instructions](native/README.md) for prerequisites and reproducible
-acceptance commands.
-
-The [owned-input implementation report](native/reports/owned-inputs.md)
-records the passing targeted O1 checks and the deferred full acceptance gate.
+The compiler target is [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs),
+pinned with its Sonatina revision, Rust version and Cargo lock hash in
+[`native/toolchain.json`](native/toolchain.json). Sources use MVS mutable value
+bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
+for reproducible compiler builds and the acceptance matrix. All seven native
+acceptance stages pass at O0/O1/O2 on x86_64 Linux
+([evidence](native/reports/mvs-port-20261012/README.md)). The pinned prerequisite
+commits await publication. Earlier
+[owned-input results](native/reports/owned-inputs.md) describe
+their historical compiler and do not establish MVS acceptance.
 
 Sample output:
 
@@ -47,7 +44,7 @@ Library entry point:
 ```fe
 let call = fevm::default_call_env()
 let block = fevm::default_block_env()
-let mut transaction = fevm::Transaction::new(
+var transaction = fevm::Transaction::new(
     world, sender: call.origin, destination: call.address, coinbase: block.coinbase,
 )
 let result = fevm::execute(program, calldata, call, block, mut transaction)
@@ -92,9 +89,11 @@ still requires release. Journal and log growth are fallible: allocation failure
 leaves the operation unapplied, and rollback uses existing storage.
 
 LOG0 through LOG4 copy frame memory and ordered topics into transaction-owned
-storage. `transaction.logs()` and `receipt.logs` expose indexed borrowed
-`LogEntry` views with address, topics, topic count, `len()` and `byte_at(index)`.
-Views prevent mutation while borrowed. Nested rollback truncates logs, including
+storage. `transaction.logs()` and `receipt.logs` expose `entry(index)`, which
+copies `LogEntry` header metadata: address, topics, topic count and `len()`.
+Read payload bytes through `logs.byte_at(entry: index, index: byte)`, which
+checks both indices against the current log buffer. Headers store no references.
+Nested rollback truncates logs, including
 logs from committed children. Static frames reject log emission. Add versioned
 blob hashes with `add_blob_hash(hash)` before execution; this returns false on
 allocation failure. BLOBHASH costs 3 gas and returns zero for any full-width

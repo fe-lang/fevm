@@ -1,0 +1,81 @@
+error[2-0002]: `FixedStack` is not found
+  ┌─ src/vm.fe:2:31
+  │
+2 │ use std::native::{ByteBuffer, FixedStack}
+  │                               ^^^^^^^^^^ `FixedStack` is not found
+
+error[2-0002]: `FixedStack` is not found
+     ┌─ src/vm.fe:1234:28
+     │
+1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+     │                            ^^^^^^^^^^ `FixedStack` is not found
+
+error[8-0000]: type mismatch
+     ┌─ src/vm.fe:1234:13
+     │
+1234 │         var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+     │             ^^^^^^ expected `!`, but `_` is given
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1236:13
+     │
+1236 │             Option::None => {
+     │             ^^^^^^^^^^^^
+     │             │
+     │             type annotation is needed
+     │             consider giving `: Option<_>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1243:13
+     │
+1243 │             Result::Ok(()) => {},
+     │             ^^^^^^^^^^^^^^
+     │             │
+     │             type annotation is needed
+     │             consider giving `: Result<_, ()>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1244:13
+     │
+1244 │             Result::Err(_) => core::panic(),
+     │             ^^^^^^^^^^^^^^
+     │             │
+     │             type annotation is needed
+     │             consider giving `: Result<_, _>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1254:17
+     │
+1254 │                 Option::Some(frame) => match frames.try_push(frame) {
+     │                 ^^^^^^^^^^^^^^^^^^^
+     │                 │
+     │                 type annotation is needed
+     │                 consider giving `: Option<_>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1255:21
+     │
+1255 │                     Result::Ok(()) => {},
+     │                     ^^^^^^^^^^^^^^
+     │                     │
+     │                     type annotation is needed
+     │                     consider giving `: Result<_, ()>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1256:21
+     │
+1256 │                     Result::Err(_) => core::panic(),
+     │                     ^^^^^^^^^^^^^^
+     │                     │
+     │                     type annotation is needed
+     │                     consider giving `: Result<_, _>` here
+
+error[8-0031]: type annotation is needed
+     ┌─ src/vm.fe:1258:17
+     │
+1258 │                 Option::None => {
+     │                 ^^^^^^^^^^^^
+     │                 │
+     │                 type annotation is needed
+     │                 consider giving `: Option<_>` here
+

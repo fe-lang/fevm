@@ -1,0 +1,168 @@
+CLI O0: 35 passed
+Traceback (most recent call last):
+  File "/home/sean/code/fevm/native/cli.py", line 188, in <module>
+    main()
+  File "/home/sean/code/fevm/native/cli.py", line 162, in main
+    log = command([compiler, 'build', ROOT, '--ingot', 'fevm_logs', '--backend', 'native',
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sean/code/fevm/native/arith/run.py", line 34, in command
+    raise RuntimeError(f'command failed ({result.returncode}): {args}\n'
+RuntimeError: command failed (1): [PosixPath('/dev/shm/fevm-mvs-bootstrap-r2/bin/fe'), 'build', PosixPath('/home/sean/code/fevm'), '--ingot', 'fevm_logs', '--backend', 'native', '-O', '1', '--emit', 'ir,executable', '--out-dir', PosixPath('/dev/shm/fevm-mvs-acceptance-r1/cli/O1/logs'), '--report', '--report-out', PosixPath('/dev/shm/fevm-mvs-acceptance-r1/cli/O1/logs/build.tar.gz')]
+wrote report: /dev/shm/fevm-mvs-acceptance-r1/cli/O1/logs/build.tar.gz
+Error: Failed to compile native output: internal error: error [IR0600] enum.extract requires a proven active variant at the use site @ func26:block53:inst147 (%emit_log, enum.extract)
+
+
+Verifier function IR context:
+
+---- func26 (%emit_log) ----
+func private %emit_log(v0.objref<@layout_12>, v1.i256, v2.constref<[i256; 4]>, v3.i64, v4.@layout_3, v5.i64, v6.i64) -> i32 {
+    block0:
+        v10.objref<i1> = obj.proj v0 9.i256;
+        obj.store v10 1.i1;
+        v12.objref<i1> = obj.proj v0 11.i256;
+        v13.i1 = obj.load v12;
+        br v13 block2 block4;
+
+    block2:
+        return 23.i32;
+
+    block4:
+        v31.i1 = gt v3 4.i64;
+        br v31 block75 block26;
+
+    block75:
+        unreachable;
+
+    block73:
+        v17.objref<@layout_9> = obj.proj v0 3.i256;
+        v45.objref<@layout_3> = obj.proj v17 0.i256;
+        v46.objref<i64> = obj.proj v45 1.i256;
+        v47.i64 = obj.load v46;
+        v48.objref<@layout_3> = obj.proj v17 1.i256;
+        v49.objref<i64> = obj.proj v48 1.i256;
+        v50.i64 = obj.load v49;
+        (v52.i64, v53.i1) = uaddo v47 192.i64;
+        br v53 block43 block44;
+
+    block22:
+        (v38.i64, v39.i1) = usubo v34 v5;
+        br v39 block43 block45;
+
+    block26:
+        v34.i64 = extract_value v4 1.i256;
+        v35.i1 = gt v5 v34;
+        br v35 block75 block22;
+
+    block30:
+        (v57.i64, v58.i1) = uaddo v50 v6;
+        br v58 block43 block46;
+
+    block31:
+        v63.i1 = call %try_resize v45 v47;
+        br v63 block7 block79;
+
+    block79:
+        unreachable;
+
+    block33:
+        v66.i256 = and v1 1461501637330902918203684832716283019655932542975.i256;
+        call %write_word v45 v47 v66;
+        (v72.i64, v73.i1) = uaddo v47 32.i64;
+        jump block37;
+
+    block37:
+        v130.i64 = phi (0.i64 block33) (v140 block49);
+        v69.i1 = lt v130 v3;
+        br v69 block38 block39;
+
+    block38:
+        br v73 block43 block47;
+
+    block39:
+        v90.i256 = zext v50 i256;
+        v91.i256 = zext v6 i256;
+        v93.i256 = shl 64.i256 v91;
+        v94.i256 = or v90 v93;
+        v95.i256 = zext v3 i256;
+        v97.i256 = shl 128.i256 v95;
+        v98.i256 = or v94 v97;
+        (v101.i64, v102.i1) = uaddo v47 160.i64;
+        br v102 block43 block53;
+
+    block40:
+        v134.i64 = phi (0.i64 block53) (v142 block61);
+        v104.i1 = lt v134 v6;
+        br v104 block41 block7;
+
+    block41:
+        (v106.i64, v107.i1) = uaddo v50 v134;
+        br v107 block43 block54;
+
+    block43:
+        unreachable;
+
+    block44:
+        v55.i1 = call %try_resize v45 v52;
+        br v55 block30 block7;
+
+    block45:
+        v40.i1 = gt v6 v38;
+        br v40 block75 block73;
+
+    block46:
+        v60.i1 = call %try_resize v48 v57;
+        br v60 block33 block31;
+
+    block47:
+        v143.i64 = shl 5.i64 v130;
+        (v77.i64, v78.i1) = uaddo v72 v143;
+        br v78 block43 block49;
+
+    block49:
+        v80.i256 = zext v130 i256;
+        v84.constref<i256> = const.index v2 v80;
+        v85.i256 = const.load v84;
+        call %write_word v45 v77 v85;
+        v140.i64 = add v130 1.i64;
+        jump block37;
+
+    block53:
+        call %write_word v45 v101 v98;
+        v113.@layout_2 = extract_value v4 0.i256;
+        v114.enumtag(@layout_2) = enum.tag v113;
+        v117.i256 = enum.extract v113 #variant_0 0.i256;
+        jump block40;
+
+    block54:
+        (v109.i64, v110.i1) = uaddo v5 v134;
+        br v110 block43 block57;
+
+    block57:
+        v112.i1 = lt v109 v34;
+        br v112 block81 block83;
+
+    block83:
+        unreachable;
+
+    block81:
+        br_table v114 (0.enumtag(@layout_2) block61) (1.enumtag(@layout_2) block62);
+
+    block61:
+        enum.assert_variant v113 #variant_0;
+        v118.i256 = zext v109 i256;
+        v121.i256 = add v117 v118;
+        v122.i8 = mload v121 i8;
+        call %set_byte v48 v106 v122;
+        v142.i64 = add v134 1.i64;
+        jump block40;
+
+    block62:
+        unreachable;
+
+    block7:
+        v27.i32 = phi (0.i32 block40) (21.i32 block31) (21.i32 block44);
+        return v27;
+}
+
+
+

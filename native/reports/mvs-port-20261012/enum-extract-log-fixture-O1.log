@@ -1,0 +1,5 @@
+Wrote /run/fevm-mvs/logs-enum-fix-O1-r2/fevm_logs.native.sona
+Wrote /run/fevm-mvs/logs-enum-fix-O1-r2/fevm_logs
+wrote report: /run/fevm-mvs/logs-enum-fix-O1-r2/build.tar.gz
+
+Original O1 log fixture compiled; all six controlled allocator checks passed.

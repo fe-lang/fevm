@@ -10,22 +10,22 @@ fn blockhash_limits_history_without_truncating_the_stack_operand() {
         (300, (1 << 64) + 44, false), (300, max, false),
         (max, max - 256, true), (max, max - 257, false), (max, max, false),
     ] {
-        let mut world = WorldState::empty()
+        var world = WorldState::empty()
         // Invalid history entries must remain invisible even when supplied by
         // the host. The VM checks the window before consulting the database.
         core::assert(world.set_block_hash(requested, 0x1234))
-        let mut transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
-        let mut bytes: [u8; 4096] = [0; 4096]
+        var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+        var bytes: [u8; 4096] = [0; 4096]
         bytes[0] = 0x7f
-        let mut index: usize = 0
+        var index: usize = 0
         while index < 32 {
             bytes[index + 1] = (requested >> ((31 - index) * 8) as u256).downcast_truncate()
             index += 1
         }
         bytes[33] = 0x40
-        let mut block = default_block_env()
+        var block = default_block_env()
         block.number = current
-        let mut call = default_call_env()
+        var call = default_call_env()
         call.gas_limit = 23
         let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, block, mut transaction)
         core::assert(result.status == OK && result.gas_remaining == 0)

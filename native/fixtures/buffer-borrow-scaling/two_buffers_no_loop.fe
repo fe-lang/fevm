@@ -19,7 +19,7 @@ impl Frame {
 }
 
 pub fn main() -> i32 {
-    let mut frame = Frame::new()
+    var frame = Frame::new()
     frame.run(len: 32)
     frame.release()
     0

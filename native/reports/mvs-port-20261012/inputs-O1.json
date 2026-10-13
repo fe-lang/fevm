@@ -1,0 +1,156 @@
+{
+  "schema": 2,
+  "complete": true,
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "opt_level": 1,
+  "scope": "reduced inputs build and execution; not full EVM acceptance",
+  "probe": "inputs",
+  "runner_sha256": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+  "generated_manifest_sha256": "8e14a01f9493522560061b2b7acb73fe21191b92b207a05106479b8188c7997e",
+  "compiler": "/tmp/fevm-mvs-fe",
+  "compiler_sha256": "480068cd04eb1d33f3b9f2f89bc1a99b43b0330e98878a589ec12b49c1dccffa",
+  "source_sha256": {
+    "ingots/evm/fe.toml": "7e16594cbee09959c01ded92705e307dd63cd78191ae6c603b0cba218b722ce1",
+    "native/perf/inputs.fe": "5aee7172a643cd0b76b666bf48a7c05ce2c2d48a994ac53c6954324c716e50fc",
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/hex.fe": "2a267036684ffa6d731420feb6f6a2a10c2013cbfbe061c50333dcf509a206f8",
+    "ingots/evm/src/types.fe": "1db979c7ca80d7ef4943008fa43b63d978a7981a33fd0be288754f9f48b6bb2a",
+    "native/fixtures/vm_allocator.c": "152b552540984574fb8f1ef3773b3ee62e0d607d85916c15a9746042bc99c4d2"
+  },
+  "rayon_threads": 1,
+  "borrowck_profile": false,
+  "borrowck_subgraphs": false,
+  "build_timeout_seconds": 180,
+  "timing_scope": "build includes dependency resolution, optimization and linking",
+  "build": {
+    "command": [
+      "/tmp/fevm-mvs-fe",
+      "build",
+      "/dev/shm/fevm-mvs-inputs-r1/ingot",
+      "--backend",
+      "native",
+      "-O",
+      "1",
+      "--emit",
+      "ir,executable",
+      "--out-dir",
+      "/dev/shm/fevm-mvs-inputs-r1/build",
+      "--report",
+      "--report-out",
+      "/dev/shm/fevm-mvs-inputs-r1/build.tar.gz"
+    ],
+    "status": 0,
+    "wall_seconds": 0.6659275940619409,
+    "user_seconds": 0.605649,
+    "system_seconds": 0.039486999999999994,
+    "max_rss_bytes": 205819904
+  },
+  "artifacts": {
+    "object_bytes": 33192,
+    "text_bytes": 29864,
+    "executable_bytes": 45144,
+    "relink_seconds": 0.011144899995997548,
+    "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e"
+  },
+  "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+  "checks": [
+    {
+      "name": "execution",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "p-empty",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "p-prefix",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "p-large",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "p-odd",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "p-invalid",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "i-empty",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "i-prefix",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "i-large",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "i-odd",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "i-invalid",
+      "status": 0,
+      "executable_sha256": "c3e226a1bdbdbaf3f135e84b8c57a65b5c4b02baf3f6076cc45d310361b0320e",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "allocator-0",
+      "status": 0,
+      "executable_sha256": "30d05a801651a1d078fdbf10050f2da0e8e95a593cbb82b09c9e70dc4c091e0d",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "allocator-1",
+      "status": 0,
+      "executable_sha256": "c1a3fa7d2ea19d2f3effaa3a80de78a94c5a4f99f15b0bea7c27422e1af26c01",
+      "stdout": "inputs passed\n",
+      "passed": true
+    },
+    {
+      "name": "allocator-2",
+      "status": 0,
+      "executable_sha256": "630450048c8a117ee93ed45d3850f3deb6bc2d01756608e8c048775c3b04dc6a",
+      "stdout": "inputs passed\n",
+      "passed": true
+    }
+  ]
+}

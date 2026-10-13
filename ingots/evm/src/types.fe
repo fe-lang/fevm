@@ -11,15 +11,15 @@ pub struct Program {
 
 impl Program {
     pub fn new(_ input: own InputData) -> Self {
-        let mut status = input.status
+        var status = input.status
         let len = input.len()
-        let mut jumpdests = ByteBuffer::new()
+        var jumpdests = ByteBuffer::new()
         if status == OK {
             // ByteBuffer extents fit PTRDIFF_MAX, including room for rounding.
             if !jumpdests.try_resize((len + 7) / 8) {
                 status = ERR_HOST_ALLOCATION
             } else {
-                let mut pc: u64 = 0
+                var pc: u64 = 0
                 while pc < len {
                     let op = input.byte_at(pc)
                     if op == 0x5b {
@@ -68,12 +68,12 @@ impl InputData {
     pub fn new(_ bytes: own ByteBuffer, status: i32) -> Self { Self { bytes, status } }
     pub fn copy_from<T: ByteSource>(_ source: T, offset: u64, len: u64) -> Self {
         core::assert(offset <= source.len() && len <= source.len() - offset)
-        let mut bytes = ByteBuffer::new()
-        let mut status = OK
+        var bytes = ByteBuffer::new()
+        var status = OK
         if !bytes.try_resize(len) {
             status = ERR_HOST_ALLOCATION
         } else {
-            let mut index: u64 = 0
+            var index: u64 = 0
             while index < len {
                 bytes.set_byte(index, value: source.byte_at(offset + index))
                 index += 1

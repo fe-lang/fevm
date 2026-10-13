@@ -19,7 +19,7 @@ pub fn write_hex_u256(_ value: u256) uses (w: mut Write) {
 
 pub fn write_hex_word(_ value: u256) uses (w: mut Write) {
     write("0x")
-    let mut i: usize = 0
+    var i: usize = 0
     while i < 64 {
         let shift = ((63 - i) as u256) * 4
         let nibble: u8 = ((value >> shift) & 15).downcast_unchecked()
@@ -37,7 +37,7 @@ pub fn write_hex_byte(_ value: i32) uses (w: mut Write) {
 
 pub fn write_hex_bytes(_ bytes: ByteBuffer) uses (w: mut Write) {
     write("0x")
-    let mut i: u64 = 0
+    var i: u64 = 0
     while i < bytes.len() {
         write_hex_byte(bytes.byte_at(i) as i32)
         i += 1
@@ -67,9 +67,9 @@ pub fn parse_hex_program(_ arg: Arg) -> Program {
 }
 
 pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
-    let mut bytes = ByteBuffer::new()
+    var bytes = ByteBuffer::new()
     let len = arg.len()
-    let mut i: usize = 0
+    var i: usize = 0
     if is_prefixed_hex(arg) {
         i = 2
     }
@@ -80,7 +80,7 @@ pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
     if !bytes.try_resize(((len - i) / 2).downcast_unchecked()) {
         return InputData::new(bytes, status: ERR_HOST_ALLOCATION)
     }
-    let mut out_len: u64 = 0
+    var out_len: u64 = 0
     while i < len {
         let hi = hex_value(arg.byte_at(i))
         let lo = hex_value(arg.byte_at(i + 1))

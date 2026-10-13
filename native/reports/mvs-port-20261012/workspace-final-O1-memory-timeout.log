@@ -1,0 +1,5 @@
+running `fe test` for 6 inputs (jobs=1)
+
+COMPILING        evm          /home/sean/code/fevm/ingots/evm
+
+Acceptance command exceeded the 7200-second timeout.

@@ -6,11 +6,11 @@ use ingot::vm::Vm
 
 #[test]
 fn logs_copy_data_grow_and_reuse_truncated_storage() {
-    let mut source = ByteBuffer::new()
+    var source = ByteBuffer::new()
     core::assert(source.try_resize(9))
     for i in 0..9 { source.set_byte(index: i.downcast_unchecked(), value: (i + 1).downcast_unchecked()) }
-    let mut logs = LogBuffer::new()
-    let mut i: u64 = 0
+    var logs = LogBuffer::new()
+    var i: u64 = 0
     while i < 350 {
         core::assert(logs.append(address: (1 << 255) | i as u256, topics: [i as u256, 2, 3, 4],
                                 topic_count: i % 5, data: source, offset: 2, len: 7))
@@ -21,13 +21,13 @@ fn logs_copy_data_grow_and_reuse_truncated_storage() {
     for index in [0 as u64, 1, 4, 255, 349] {
         let entry = logs.entry(index)
         core::assert(entry.address == index as u256 && entry.topic_count == index % 5)
-        core::assert(entry.len() == 7 && entry.byte_at(0) == 3 && entry.byte_at(6) == 9)
+        core::assert(entry.len() == 7 && logs.byte_at(entry: index, index: 0) == 3 && logs.byte_at(entry: index, index: 6) == 9)
         if entry.topic_count > 0 { core::assert(entry.topics[0] == index as u256) }
     }
     logs.truncate(1)
     core::assert(logs.append(address: 44, topics: [8; 4], topic_count: 4, data: source, offset: 2, len: 1))
     core::assert(logs.len() == 2 && logs.entry(0).len() == 7)
-    core::assert(logs.entry(1).byte_at(0) == 99 && logs.entry(1).topics[3] == 8)
+    core::assert(logs.byte_at(entry: 1, index: 0) == 99 && logs.entry(1).topics[3] == 8)
     logs.truncate(0)
     core::assert(logs.append(address: 5, topics: [9; 4], topic_count: 0, data: source, offset: 9, len: 0))
     core::assert(logs.entry(0).len() == 0 && logs.entry(0).topics[0] == 0)
@@ -37,10 +37,10 @@ fn logs_copy_data_grow_and_reuse_truncated_storage() {
 
 #[test]
 fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
-    let mut source = ByteBuffer::new()
+    var source = ByteBuffer::new()
     core::assert(source.try_resize(1))
     source.set_byte(index: 0, value: 17)
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     core::assert(tx.emit_log(address: 1, topics: [1; 4], topic_count: 1, data: source, offset: 0, len: 1) == OK)
     let parent = checkpoint(mut tx, is_static: false)
     let child = checkpoint(mut tx, is_static: false)
@@ -54,12 +54,12 @@ fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
     tx.commit(child)
     tx.revert(parent)
     let receipt = tx.finish(commit: true, gas_spent: 0)
-    let mut next = Transaction::new(receipt.state, sender: 0, destination: 0, coinbase: 0)
+    var next = Transaction::new(receipt.state, sender: 0, destination: 0, coinbase: 0)
     source.set_byte(index: 0, value: 34)
     core::assert(next.emit_log(address: 4, topics: [0; 4], topic_count: 0, data: source, offset: 0, len: 1) == OK)
     let aborted = next.finish(commit: false, gas_spent: 0)
     core::assert(aborted.logs.len() == 0 && receipt.logs.len() == 1)
-    core::assert(receipt.logs.entry(0).byte_at(0) == 17)
+    core::assert(receipt.logs.byte_at(entry: 0, index: 0) == 17)
     aborted.release()
     receipt.logs.release()
     source.release()
@@ -71,8 +71,8 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
         // N PUSH0 topics, PUSH0 length, PUSH32 MAX offset, LOGN.
         let cost: u64 = 375 + 375 * count + 2 * count + 5
         for gas in [cost - 1, cost, cost + 1] {
-            let mut code: [u8; 4096] = [0; 4096]
-            let mut size: usize = 0
+            var code: [u8; 4096] = [0; 4096]
+            var size: usize = 0
             while size < (count + 1) as usize {
                 code[size] = 0x5f
                 size += 1
@@ -84,9 +84,9 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
                 size += 1
             }
             code[size] = (0xa0 + count).downcast_unchecked()
-            let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-            let mut vm = Vm::new()
-            let mut call = default_call_env()
+            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+            var vm = Vm::new()
+            var call = default_call_env()
             call.gas_limit = gas
             vm.run_owned(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx)
             core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
@@ -104,14 +104,14 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
 
 #[test]
 fn log_copies_frame_memory_and_preserves_topic_stack_order() {
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut vm = Vm::new()
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
     // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
     vm.run_owned(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
                     0x60, 1, 0x5f, 0xa2, 0x60, 0xcd, 0x5f, 0x53]),
            empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(vm.status == OK && vm.memory.byte_at(0) == 0xcd)
-    core::assert(tx.logs().entry(0).byte_at(0) == 0xab)
+    core::assert(tx.logs().byte_at(entry: 0, index: 0) == 0xab)
     core::assert(tx.logs().entry(0).topics[0] == 0x22 && tx.logs().entry(0).topics[1] == 0x11)
     vm.release()
     tx.finish(commit: true, gas_spent: 0).release()
@@ -121,15 +121,15 @@ fn log_copies_frame_memory_and_preserves_topic_stack_order() {
 fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     let first = (1 << 248) | 0x1234
     let second = (1 << 248) | 0x5678
-    let mut tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     core::assert(tx.add_blob_hash(first) && tx.add_blob_hash(second))
     let point = checkpoint(mut tx, is_static: true)
     core::assert(tx.blob_hash(0) == first && tx.blob_hash(1) == second)
     for index in [2 as u256, 1 << 64, !(0 as u256)] { core::assert(tx.blob_hash(index) == 0) }
     tx.revert(point)
     core::assert(tx.blob_hash(1) == second)
-    let mut vm = Vm::new()
-    let mut call = default_call_env()
+    var vm = Vm::new()
+    var call = default_call_env()
     call.is_static = true
     call.gas_limit = 5
     vm.run_owned(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx)

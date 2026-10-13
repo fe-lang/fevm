@@ -82,7 +82,7 @@ impl WorldState {
         let address = address_word(address)
         let previous = self.accounts.get(address)
         if !previous.found && value == 0 { return true }
-        let mut account = previous.value
+        var account = previous.value
         account.balance = value
         self.accounts.insert(address, account)
     }
@@ -93,7 +93,7 @@ impl WorldState {
         let address = address_word(address)
         let previous = self.accounts.get(address)
         if !previous.found && value == 0 { return true }
-        let mut account = previous.value
+        var account = previous.value
         account.nonce = value
         self.accounts.insert(address, account)
     }
@@ -114,8 +114,8 @@ impl WorldState {
         self.code.byte_at(account.code_offset + 64 + index)
     }
     fn code_word(self, offset: u64) -> u256 {
-        let mut value: u256 = 0
-        let mut i: u64 = 0
+        var value: u256 = 0
+        var i: u64 = 0
         while i < 32 {
             value = (value << 8) | self.code.byte_at(offset + i) as u256
             i += 1
@@ -123,7 +123,7 @@ impl WorldState {
         value
     }
     fn write_code_word(mut self, offset: u64, value: u256) {
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < 32 {
             self.code.set_byte(index: offset + i, value: (value >> ((31 - i) * 8) as u256).downcast_truncate())
             i += 1
@@ -137,7 +137,7 @@ impl WorldState {
         let len = code.len()
         if !previous.found && len == 0 { return OK }
         if !previous.found && self.accounts.len() == self.accounts.capacity() { return ERR_STATE_LIMIT }
-        let mut account = previous.value
+        var account = previous.value
         let old_size = self.code.len()
         let removed = if account.code_len == 0 { 0 } else { 64 + account.code_len }
         let retained = old_size - removed
@@ -151,11 +151,11 @@ impl WorldState {
             let start = account.code_offset
             let end = start + removed
             self.code.copy_within(dest: start, source: end, len: old_size - end)
-            let mut cursor = start
+            var cursor = start
             while cursor < retained {
                 let key = self.code_word(offset: cursor)
                 let size: u64 = self.code_word(offset: cursor + 32).downcast_unchecked()
-                let mut moved = self.accounts.get(key).value
+                var moved = self.accounts.get(key).value
                 moved.code_offset = cursor
                 core::assert(self.accounts.insert(key, moved))
                 cursor += 64 + size
@@ -167,7 +167,7 @@ impl WorldState {
         if len != 0 {
             self.write_code_word(offset: retained, value: address)
             self.write_code_word(offset: retained + 32, value: len as u256)
-            let mut i: u64 = 0
+            var i: u64 = 0
             while i < len {
                 self.code.set_byte(index: retained + 64 + i, value: code.byte_at(i))
                 i += 1
@@ -230,7 +230,7 @@ fn world_state_defaults_to_zero() {
 
 #[test]
 fn world_state_roundtrips_account_storage() {
-    let mut state = WorldState::empty()
+    var state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
     core::assert(state.set_nonce(0xaa, 7))
     core::assert(state.storage_store(0xaa, 3, 44))
@@ -245,7 +245,7 @@ fn world_state_roundtrips_account_storage() {
 
 #[test]
 fn world_state_zero_balance_preserves_account() {
-    let mut state = WorldState::empty()
+    var state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
     core::assert(state.storage_store(0xaa, 3, 44))
     core::assert(state.set_balance(0xaa, 0))

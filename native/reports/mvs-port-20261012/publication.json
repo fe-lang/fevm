@@ -1,0 +1,69 @@
+{
+  "published": false,
+  "requires_explicit_push_authorization": true,
+  "branches": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "branch": "fevm-mvs-fixed-stack",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "base_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
+      "source_directory": "/tmp/fevm-mvs-fe5c32c1",
+      "patch": "prerequisites/fe.patch",
+      "patch_sha256": "46bfcef115a2a022f1256eda24030e408e99255a0e5fc9444ff5a8fa017b1523",
+      "commits": [
+        "c4b5c2a902ee6fb039c595dc710b309ccb904578 Migrate native effect-provider regression to MVS ownership",
+        "2c114c8ae9d931aacef495b3e18042a8bc266944 Add owned native FixedStack for MVS",
+        "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47 Pin Sonatina enum extraction speculation fix"
+      ]
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "branch": "fix/enum-extract-speculation",
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "base_revision": "11722eacb49ce1f565191145d290bd25618c7342",
+      "source_directory": "/run/user/1000/fevm-mvs-sonatina",
+      "patch": "prerequisites/sonatina.patch",
+      "patch_sha256": "07e2fb381dbf4253592848715e4c1f357324ed51f987cfaac24926051cf272f1",
+      "commits": [
+        "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59 Keep enum payload extraction under its variant proof"
+      ]
+    },
+    {
+      "repository": "https://github.com/fe-lang/keccak.git",
+      "branch": "mvs",
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae",
+      "base_revision": "7f32a75b9426f68fd3d44c2d09207386c481355d",
+      "source_directory": "/tmp/fevm-keccak-mvs",
+      "patch": "prerequisites/keccak.patch",
+      "patch_sha256": "30f41bed5eb6381b6accf930f35500eecc8c169c00244f64a0c33054975825e9",
+      "commits": [
+        "0702d006a37efc85390726b933b2a275b215c2ae Port Keccak sources to Fe mutable value semantics"
+      ]
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs",
+      "revision": "770372e54571d0905167bc0d79b9b9b303e6d379",
+      "base_revision": "3987cfe26cd18f1fe1293377e5fda8f6723b51c2",
+      "source_directory": "/tmp/fevm-swisstable-mvs",
+      "patch": "prerequisites/swisstable.patch",
+      "patch_sha256": "b69421e47ec959c96a3406890299c0cb8abfdb487951278b95bae5db957095a7",
+      "commits": [
+        "7e275c449c26d892a6d66243f2ddec0fc6cf660c Port SwissTable sources to Fe mutable value semantics",
+        "770372e54571d0905167bc0d79b9b9b303e6d379 Pin the MVS historical benchmark baseline"
+      ]
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs-hash-baseline",
+      "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8",
+      "base_revision": "ab4cf7dfd7242870364ababff04e2e4524bd2cf8",
+      "source_directory": "/tmp/fevm-swisstable-mvs-baseline",
+      "patch": "prerequisites/swisstable-baseline.patch",
+      "patch_sha256": "815ed8a09ed2613b4ea0eba1a0a1eff2723e16625e1c0d668e6634fbf58ab8d4",
+      "commits": [
+        "60017e7f2f033e971bdb2a5f5d4af097115f3be8 Port historical SwissTable hash baseline to MVS"
+      ]
+    }
+  ]
+}

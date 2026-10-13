@@ -86,8 +86,7 @@ fn write_result(_ vm: Vm) uses (w: mut Write) {
     }
 }
 
-pub fn run(argc: i32, argv: **u8) -> i32 {
-    let args = Args::new(argc, argv)
+pub fn run(_ args: Args) -> i32 {
     with (Write = host()) {
         if args.len() != 2 && args.len() != 3 {
             return usage()
@@ -110,7 +109,7 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
             return status
         }
 
-        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         let vm = execute_vm(
             program,
             calldata,

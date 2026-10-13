@@ -37,37 +37,35 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current owned-input development pin uses local Fe `78710ce5e` and Sonatina
-`8d822fc3`. Exact revisions, the Rust version and Cargo lock hash are in
-[`reports/owned-inputs-toolchain.json`](reports/owned-inputs-toolchain.json).
-Targeted compiler, input/parser and VM O1 checks pass; full native acceptance is
-deferred while development uses smaller tests. The
-[implementation report](reports/owned-inputs.md) records the exact scope and
-compiler identity. The earlier [logs/BLOBHASH report](reports/logs-blobhash.md)
-retains its historical compiler pin.
-The compiler revisions repair concrete native reference layouts, preserve
-conditional clobbers through ownership checking, and stabilize recursive buffer
-and output-effect summaries on top of the final #1718 integration (`2db9a38fa`).
-They also reuse workspace/root analysis, cache guard projections, preserve Boolean
-return correlations, and index available object fields. Both
-commits are available in the local Fe and Sonatina repositories. The default
-`toolchain.json` retains the previous published-master checkpoint at `04d344105`.
-Keccak is a separately tested Git dependency; its native differential and timing
-suite lives in [fe-lang/keccak](https://github.com/fe-lang/keccak). FeVM does not
-need the experimental compiler barrier used by that benchmark.
+The current compiler derives from [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs)
+at `fe5c32c1`, with the owned effect-provider regression migration and native
+`FixedStack` prerequisite and enum speculation fix integrated at
+`1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47`.
+It uses Sonatina `6f4b0397cfa77165a0ff4fafadc0a003fb72dc59` and Rust 1.99.0.
+The default [`toolchain.json`](toolchain.json) records these immutable revisions
+and the Cargo lock hash. All seven native acceptance stages pass on x86_64
+Linux: 52 workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons
+and 1,142 state comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks.
+The compiler passes its full release test suite, including the repaired enum
+speculation regression.
+Fe, Sonatina, Keccak and SwissTable prerequisite commits remain local until publication
+is authorized.
+See the [MVS port evidence](reports/mvs-port-20261012/README.md) for current scope.
 
-For local development, the [#1718 integration](reports/keccak-pr1718.md) records
-a separate compiler containing the reviewed borrow-checking performance fixes.
-Its manifest requires the local Fe repository containing that merge commit.
+Earlier [owned-input results](reports/owned-inputs.md), the
+[logs/BLOBHASH report](reports/logs-blobhash.md), and the
+[#1718 integration](reports/keccak-pr1718.md) retain their own historical compiler
+manifests and verification scope. They do not establish MVS acceptance. Keccak's
+standalone differential and timing suite lives in
+[fe-lang/keccak](https://github.com/fe-lang/keccak); FeVM does not use the
+experimental compiler barrier required by that benchmark.
 
 Bootstrap verifies exact commits and builds their committed sources. Native
 acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --manifest native/reports/owned-inputs-toolchain.json \
-  --fe-repository /home/sean/code/fe --sonatina-repository /home/sean/code/sonatina \
-  --out native/out/toolchain --toolchain 1.98.1
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```

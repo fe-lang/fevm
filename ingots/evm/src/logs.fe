@@ -5,25 +5,22 @@ use ingot::state::address_word
 // Address, four topics, then packed u64 data offset / length / topic count.
 const RECORD_SIZE: u64 = 192
 
+// Copied header metadata. Payload bytes are read through their current owner.
 pub struct LogEntry {
     pub address: u256,
     pub topics: [u256; 4],
     pub topic_count: u64,
-    data: ref ByteBuffer,
-    offset: u64,
     len: u64,
 }
 
+impl Copy for LogEntry {}
+
 impl LogEntry {
     pub fn len(self) -> u64 { self.len }
-    pub fn byte_at(self, _ index: u64) -> u8 {
-        core::assert(index < self.len)
-        self.data.byte_at(self.offset + index)
-    }
 }
 
 // Separate growable headers and bytes give constant-time indexed reads and
-// checkpoint truncation. Views borrow the owner, so mutation cannot stale them.
+// checkpoint truncation. Payload access always checks the current owner.
 pub struct LogBuffer { records: ByteBuffer, data: ByteBuffer }
 
 impl LogBuffer {
@@ -31,20 +28,29 @@ impl LogBuffer {
         Self { records: ByteBuffer::new(), data: ByteBuffer::new() }
     }
     pub fn len(self) -> u64 { self.records.len() / RECORD_SIZE }
+    fn metadata(self, _ entry: u64) -> u256 {
+        core::assert(entry < self.len())
+        read_word(self.records, offset: entry * RECORD_SIZE + 160)
+    }
+    pub fn byte_at(self, entry: u64, index: u64) -> u8 {
+        let metadata = self.metadata(entry)
+        let len: u64 = (metadata >> 64).downcast_truncate()
+        core::assert(index < len)
+        let offset: u64 = metadata.downcast_truncate()
+        self.data.byte_at(offset + index)
+    }
     pub fn entry(self, _ index: u64) -> LogEntry {
-        core::assert(index < self.len())
+        let metadata = self.metadata(index)
         let offset = index * RECORD_SIZE
-        let metadata = read_word(self.records, offset: offset + 160)
-        let mut topics: [u256; 4] = [0; 4]
+        var topics: [u256; 4] = [0; 4]
         let count: u64 = (metadata >> 128).downcast_unchecked()
-        let mut topic: u64 = 0
+        var topic: u64 = 0
         while topic < count {
             topics[topic as usize] = read_word(self.records, offset: offset + 32 + topic * 32)
             topic += 1
         }
         LogEntry {
             address: read_word(self.records, offset), topics, topic_count: count,
-            data: ref self.data, offset: metadata.downcast_truncate(),
             len: (metadata >> 64).downcast_truncate(),
         }
     }
@@ -60,14 +66,14 @@ impl LogBuffer {
             return false
         }
         write_word(mut self.records, offset: record, value: address_word(address))
-        let mut topic: u64 = 0
+        var topic: u64 = 0
         while topic < topic_count {
             write_word(mut self.records, offset: record + 32 + topic * 32, value: topics[topic as usize])
             topic += 1
         }
         let metadata = start as u256 | (len as u256) << 64 | (topic_count as u256) << 128
         write_word(mut self.records, offset: record + 160, value: metadata)
-        let mut byte: u64 = 0
+        var byte: u64 = 0
         while byte < len {
             self.data.set_byte(index: start + byte, value: data.byte_at(offset + byte))
             byte += 1
