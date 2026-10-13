@@ -1,0 +1,40 @@
+{
+  "authorized": true,
+  "authorized_scope": "user yes to five reviewed prerequisite branches; FeVM excluded",
+  "transport": "SSH using existing authenticated sbillig account",
+  "started_at_utc": "2026-10-13T21:34:04.332461+00:00",
+  "branches": [
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "branch": "fix/enum-extract-speculation",
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "verified_remote_ref": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+    },
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "branch": "fevm-mvs-fixed-stack",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "verified_remote_ref": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs-hash-baseline",
+      "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8",
+      "verified_remote_ref": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
+    },
+    {
+      "repository": "https://github.com/fe-lang/keccak.git",
+      "branch": "mvs",
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae",
+      "verified_remote_ref": "0702d006a37efc85390726b933b2a275b215c2ae"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs",
+      "revision": "770372e54571d0905167bc0d79b9b9b303e6d379",
+      "verified_remote_ref": "770372e54571d0905167bc0d79b9b9b303e6d379"
+    }
+  ],
+  "complete": true,
+  "finished_at_utc": "2026-10-13T21:36:10.641423+00:00"
+}

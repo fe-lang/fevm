@@ -1,6 +1,6 @@
 {
-  "complete": false,
-  "status": "All local migration and acceptance verification complete; five prerequisite branch tips await explicit publication authorization",
+  "complete": true,
+  "status": "MVS port committed, all acceptance stages passed, all five prerequisite branches published and cold remote source resolution verified",
   "compiler": {
     "manifest": {
       "schema": 1,
@@ -38,7 +38,7 @@
     "keccak": {
       "source_directory": "/tmp/fevm-keccak-mvs",
       "revision": "0702d006a37efc85390726b933b2a275b215c2ae",
-      "published": false,
+      "published": true,
       "native_library_tests_per_level": 3,
       "levels": [
         0,
@@ -50,7 +50,7 @@
     "swisstable": {
       "source_directory": "/tmp/fevm-swisstable-mvs",
       "revision": "7e275c449c26d892a6d66243f2ddec0fc6cf660c",
-      "published": false,
+      "published": true,
       "native_library_tests_per_level": 6,
       "levels": [
         0,
@@ -404,12 +404,16 @@
       "source_or_compiler_changes": false,
       "resource_summary": "acceptance-resource-summary.json",
       "resources": "acceptance-resources.jsonl.gz"
+    },
+    "cold_published_sources": {
+      "complete": true,
+      "local_git_url_overrides": false,
+      "fresh_ingot_cache": true,
+      "results": "published-verification.json",
+      "log": "published-workspace-check.log"
     }
   },
-  "pending": [
-    "explicit authorization to publish five prerequisite branches",
-    "cold portable dependency resolution after prerequisite publication"
-  ],
+  "pending": [],
   "arithmetic_commit": "cf1db10ed017c7ad6ca8e9ff47611cec560410d3",
   "compiler_candidate": {
     "branch": "fevm-mvs-fixed-stack",
@@ -426,7 +430,7 @@
     ],
     "scope": "final committed prerequisite rebuilt from clean pinned sources"
   },
-  "goal_status": "active",
+  "goal_status": "complete",
   "verification_overrides": {
     "keccak": "file:///tmp/fevm-keccak-mvs",
     "swisstable": "file:///tmp/fevm-swisstable-mvs",
@@ -490,34 +494,7 @@
       "arithmetic"
     ]
   },
-  "pending_publication": [
-    {
-      "repository": "https://github.com/sbillig/fe.git",
-      "branch": "fevm-mvs-fixed-stack",
-      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
-    },
-    {
-      "repository": "https://github.com/fe-lang/keccak.git",
-      "branch": "mvs",
-      "revision": "0702d006a37efc85390726b933b2a275b215c2ae"
-    },
-    {
-      "repository": "https://github.com/fe-lang/swisstable.git",
-      "branch": "mvs",
-      "revision": "770372e54571d0905167bc0d79b9b9b303e6d379"
-    },
-    {
-      "repository": "https://github.com/fe-lang/swisstable.git",
-      "branch": "mvs-hash-baseline",
-      "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
-    },
-    {
-      "repository": "https://github.com/fe-lang/sonatina.git",
-      "branch": "fix/enum-extract-speculation",
-      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
-    }
-  ],
-  "publication_review": "/tmp/fevm-mvs-publication-review-20261012-r2/publication.json",
+  "publication_review": "native/reports/mvs-port-20261012/publication.json",
   "new_compiler_failure": {
     "compiler_revision": "2c114c8ae9d931aacef495b3e18042a8bc266944",
     "compiler_sha256": "6f83308ab8b9ed73c3aa22b06a7d28de945789678668a0b9721e3c19843ccded",
@@ -596,5 +573,40 @@
   },
   "local_verification_complete": true,
   "migration_commit": "e4fe238fa99614c467a237f64c4819660152f9ee",
-  "migration_committed": true
+  "migration_committed": true,
+  "published_prerequisites": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "branch": "fevm-mvs-fixed-stack",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
+    },
+    {
+      "repository": "https://github.com/fe-lang/keccak.git",
+      "branch": "mvs",
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs",
+      "revision": "770372e54571d0905167bc0d79b9b9b303e6d379"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs-hash-baseline",
+      "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "branch": "fix/enum-extract-speculation",
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+    }
+  ],
+  "post_publication": {
+    "complete": true,
+    "verification": "published-verification.json",
+    "push_audit": "publication-push.json",
+    "manifest_publication_text_only": true,
+    "current_manifest_sha256": "10b878bb48ffaf129f73f55fd3722eea0aa34a3741f0f1c4462d2bf9ed2e355e",
+    "runtime_source_hashes_match_accepted_snapshot": true
+  }
 }

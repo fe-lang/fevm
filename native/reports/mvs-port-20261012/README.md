@@ -2,8 +2,9 @@
 
 All seven native acceptance stages pass on x86_64 Linux with the clean pinned
 compiler Fe `1c8e2c20d` and Sonatina `6f4b0397`. The existing uncommitted CALL
-work is preserved. Prerequisite commits remain local; remote reproducibility
-requires their publication and a cold dependency-resolution check.
+work is preserved. All five prerequisite branches are published. Cold compiler
+source preparation and workspace dependency resolution pass with no local URL
+overrides; the fetched sources match the accepted sources exactly.
 
 | Acceptance | Result |
 | --- | --- |
@@ -24,7 +25,8 @@ The fresh detached bootstrap verifies exact source revisions, Rust 1.99.0 and
 Cargo.lock SHA256 before compiling. [compiler-build.json](compiler-build.json)
 records the frozen binary SHA256
 `e45b3315ebd67d6b01fdc103cc17bcf2839dd00fc193ef795488cfebaf62b896`.
-All consumer source hashes still match the snapshot exercised by acceptance.
+Runtime source hashes and compiler/library pins match the accepted snapshot.
+The manifest publication description is the only subsequent source-metadata change.
 
 Fe derives from `sbillig/fe:mvs` at `fe5c32c1`. Commit `c4b5c2a` migrates the
 obsolete effect-provider regression to owned native storage. Commit `2c114c8a`
@@ -64,11 +66,19 @@ Keccak's separate benchmark requires its documented experimental compiler
 barrier and is outside this runtime acceptance. The Python harness tests and
 Rust reference tests pass; reference Clippy and nightly formatting are clean.
 
-The exact five prerequisite branch tips and patches are reviewable in
-[publication.json](publication.json). Manifests use portable Git URLs and
-immutable revisions. Local verification uses process-scoped Git transport
-overrides, recorded in [progress.json](progress.json); global Git configuration
-was not changed. No prerequisite or FeVM branch has been pushed.
+The exact five published prerequisite branch tips and patches are recorded in
+[publication.json](publication.json). All remote refs match their reviewed
+revisions; [publication-push.json](publication-push.json) records the authorized
+SSH pushes. Manifests use portable Git URLs and immutable revisions. Initial
+runtime verification used process-scoped local transport overrides, recorded in
+[progress.json](progress.json). The final cold check uses the published URLs
+and an empty ingot cache, with no local repository or Git URL overrides.
+[published-verification.json](published-verification.json) verifies all 4,457 Fe,
+1,224 Sonatina, 29 Keccak and eight production SwissTable tracked files against
+the accepted sources; both benchmark revisions are fetched and their trees
+match as well. Compiler preparation rechecks the Rust version and lock hash;
+compilation was not repeated because the source bytes and pins are identical.
+Global Git configuration was not changed. The FeVM branch remains local.
 
 Historical failures are retained: the missing stack, obsolete effect-provider
 fixture and pre-fix O1 enum extraction failure each have logs and reproductions.

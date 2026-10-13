@@ -1,0 +1,96 @@
+{
+  "complete": true,
+  "compiler_sources": {
+    "fe": {
+      "repository": "https://github.com/sbillig/fe",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "tree": "c074a15f7e04e207c699b6c3a9972ded45b7591f",
+      "tracked_files": 4457,
+      "content_sha256": "477b7fa568e45516fd4c793e3a02771ade95a5bf94edf258f2baac2264b5ab4c",
+      "matches_accepted_source": true
+    },
+    "sonatina": {
+      "repository": "https://github.com/fe-lang/sonatina",
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "tree": "34aa13c6e5bc4f785dd32bc9d1790d6caaee5168",
+      "tracked_files": 1224,
+      "content_sha256": "a91a9227216e2ccb295e02ab24a0b16417508a6dce360781fdc24ea70973c576",
+      "matches_accepted_source": true
+    }
+  },
+  "libraries": {
+    "keccak": {
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae",
+      "source": "https://github.com/fe-lang/keccak",
+      "checkout": "/tmp/fevm-mvs-published-20261013-r1/ingot-cache/644787e2c420e7e58951d59e24fd4527c984e3cebffedb5e6183423956475932",
+      "tracked_files": 29,
+      "tree": "29c86e22be3227c755cf9de2e0d70e84ed660d13",
+      "content_sha256": "ae68ea8073255a42f5f70ee58ce90c4b1fd28d64066e3eb1631c40c08dabb497",
+      "matches_accepted_source": true
+    },
+    "swisstable": {
+      "revision": "7e275c449c26d892a6d66243f2ddec0fc6cf660c",
+      "source": "https://github.com/fe-lang/swisstable",
+      "checkout": "/tmp/fevm-mvs-published-20261013-r1/ingot-cache/e6f370933c54ec857cb7349bd5c10ab9081f4c9c3d17f296ee2699760133dfb0",
+      "tracked_files": 8,
+      "tree": "ef4e23706bc24db08e5d386b7512bed8c5180aef",
+      "content_sha256": "7d1a6bd072e8a79cad38bce848059bb94ab03b0a59a9da0993ac0e892679f835",
+      "matches_accepted_source": true,
+      "benchmark_commits": {
+        "benchmark_revision": {
+          "revision": "770372e54571d0905167bc0d79b9b9b303e6d379",
+          "tree": "2cfde7479bbe26474789eaff8ca6a85c00bedf16",
+          "fetched_from_remote": true
+        },
+        "benchmark_baseline_revision": {
+          "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8",
+          "tree": "2c2625b6b64c231ff01a5a6af41a63f10b9ccd37",
+          "fetched_from_remote": true
+        }
+      }
+    }
+  },
+  "workspace_semantic_check": true,
+  "fresh_ingot_cache": true,
+  "local_repository_overrides": false,
+  "local_git_url_overrides": false,
+  "compiler_rebuilt": false,
+  "reason_no_runtime_rerun": "All published source bytes and immutable compiler/library pins match the fully accepted snapshot; only manifest publication text changed.",
+  "manifest_update": {
+    "before": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local Fe and Sonatina prerequisite commits; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "after": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "published Fe MVS prerequisites and Sonatina revision",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "only_changed_field": "publication"
+  }
+}

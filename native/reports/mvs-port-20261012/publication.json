@@ -1,5 +1,5 @@
 {
-  "published": false,
+  "published": true,
   "requires_explicit_push_authorization": true,
   "branches": [
     {
@@ -15,7 +15,7 @@
         "2c114c8ae9d931aacef495b3e18042a8bc266944 Add owned native FixedStack for MVS",
         "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47 Pin Sonatina enum extraction speculation fix"
       ],
-      "observed_remote_ref": null
+      "observed_remote_ref": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
     },
     {
       "repository": "https://github.com/fe-lang/sonatina.git",
@@ -28,7 +28,7 @@
       "commits": [
         "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59 Keep enum payload extraction under its variant proof"
       ],
-      "observed_remote_ref": null
+      "observed_remote_ref": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
     },
     {
       "repository": "https://github.com/fe-lang/keccak.git",
@@ -41,7 +41,7 @@
       "commits": [
         "0702d006a37efc85390726b933b2a275b215c2ae Port Keccak sources to Fe mutable value semantics"
       ],
-      "observed_remote_ref": null
+      "observed_remote_ref": "0702d006a37efc85390726b933b2a275b215c2ae"
     },
     {
       "repository": "https://github.com/fe-lang/swisstable.git",
@@ -55,7 +55,7 @@
         "7e275c449c26d892a6d66243f2ddec0fc6cf660c Port SwissTable sources to Fe mutable value semantics",
         "770372e54571d0905167bc0d79b9b9b303e6d379 Pin the MVS historical benchmark baseline"
       ],
-      "observed_remote_ref": null
+      "observed_remote_ref": "770372e54571d0905167bc0d79b9b9b303e6d379"
     },
     {
       "repository": "https://github.com/fe-lang/swisstable.git",
@@ -68,10 +68,15 @@
       "commits": [
         "60017e7f2f033e971bdb2a5f5d4af097115f3be8 Port historical SwissTable hash baseline to MVS"
       ],
-      "observed_remote_ref": null
+      "observed_remote_ref": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
     }
   ],
   "remote_refs_checked_at_utc": "2026-10-13T21:25:37.372420+00:00",
   "consumer_migration_commit": "e4fe238fa99614c467a237f64c4819660152f9ee",
-  "publication_scope": "create the five listed prerequisite branches without force; FeVM branch excluded"
+  "publication_scope": "create the five listed prerequisite branches without force; FeVM branch excluded",
+  "push_authorized": true,
+  "published_at_utc": "2026-10-13T21:36:10.641423+00:00",
+  "cold_remote_resolution": true,
+  "verification": "published-verification.json",
+  "push_audit": "publication-push.json"
 }

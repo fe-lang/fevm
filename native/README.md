@@ -48,8 +48,9 @@ Linux: 52 workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons
 and 1,142 state comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks.
 The compiler passes its full release test suite, including the repaired enum
 speculation regression.
-Fe, Sonatina, Keccak and SwissTable prerequisite commits remain local until publication
-is authorized.
+Fe, Sonatina, Keccak and SwissTable prerequisite commits are published.
+Compiler source preparation and workspace semantic checking also pass with fresh
+remote checkouts and no local Git URL overrides.
 See the [MVS port evidence](reports/mvs-port-20261012/README.md) for current scope.
 
 Earlier [owned-input results](reports/owned-inputs.md), the

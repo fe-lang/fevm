@@ -9,7 +9,7 @@
   "features": [
     "cranelift"
   ],
-  "publication": "local Fe and Sonatina prerequisite commits; publication pending",
+  "publication": "published Fe MVS prerequisites and Sonatina revision",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

@@ -29,7 +29,7 @@ bindings and explicit unsafe boundaries. See [native build instructions](native/
 for reproducible compiler builds and the acceptance matrix. All seven native
 acceptance stages pass at O0/O1/O2 on x86_64 Linux
 ([evidence](native/reports/mvs-port-20261012/README.md)). The pinned prerequisite
-commits await publication. Earlier
+commits are published. Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 
