@@ -416,14 +416,15 @@
     "source_directory": "/tmp/fevm-mvs-fe5c32c1",
     "base_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
     "committed": true,
-    "compiler": "/dev/shm/fevm-mvs-stack-fe",
-    "compiler_sha256": "49a71e4d7db0a66dbdc676d48c2c4c3dc89cb75e7bf57951d56132ae0a476046",
+    "compiler": "/tmp/fevm-mvs-bootstrap-r3/bin/fe",
+    "compiler_sha256": "e45b3315ebd67d6b01fdc103cc17bcf2839dd00fc193ef795488cfebaf62b896",
     "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
     "commits": [
       "c4b5c2a902ee6fb039c595dc710b309ccb904578",
       "2c114c8ae9d931aacef495b3e18042a8bc266944",
       "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
-    ]
+    ],
+    "scope": "final committed prerequisite rebuilt from clean pinned sources"
   },
   "goal_status": "active",
   "verification_overrides": {
@@ -593,5 +594,7 @@
       "workspace-O0"
     ]
   },
-  "local_verification_complete": true
+  "local_verification_complete": true,
+  "migration_commit": "e4fe238fa99614c467a237f64c4819660152f9ee",
+  "migration_committed": true
 }
