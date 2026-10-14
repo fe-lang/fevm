@@ -1,0 +1,21 @@
+{
+  "native_stack": {
+    "commit": "2c114c8ae9d931aacef495b3e18042a8bc266944",
+    "clean_apply": false,
+    "diagnostics": "error: patch failed: crates/fe/tests/native_runtime.rs:1336\nerror: crates/fe/tests/native_runtime.rs: patch does not apply\n",
+    "production_and_fixtures": {
+      "clean_apply": true,
+      "diagnostics": ""
+    },
+    "three_way": {
+      "clean_apply": false,
+      "diagnostics": "Falling back to direct application...\nFalling back to direct application...\nApplied patch to 'crates/fe/tests/native_runtime.rs' with conflicts.\nApplied patch to 'ingots/std/src/native.fe' cleanly.\nApplied patch to 'ingots/std/src/native/bytes.fe' cleanly.\nFalling back to direct application...\nFalling back to direct application...\n",
+      "check_exit_status": 0
+    }
+  },
+  "sonatina_pin": {
+    "commit": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+    "clean_apply": true,
+    "diagnostics": ""
+  }
+}

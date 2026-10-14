@@ -1,0 +1,58 @@
+{
+  "window_seconds": 30,
+  "sampling_frequency_hz": 99,
+  "samples": 2969,
+  "total_lost_samples": 0,
+  "enum_proof_named_symbols_percent": 77.93,
+  "cranelift_named_symbols_percent": 0,
+  "top_symbols": [
+    {
+      "percent": 16.27,
+      "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+    },
+    {
+      "percent": 11.86,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured"
+    },
+    {
+      "percent": 8.22,
+      "symbol": "[.] <&mut <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update_children<<sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update<sonatina_verifier::verify::function::enum_proofs::transfer::instruction::{closure#2}>::{closure#0}>::{closure#0} as core::ops::function::FnMut<((&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState),)>>::call_mut"
+    },
+    {
+      "percent": 8.08,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join"
+    },
+    {
+      "percent": 3.37,
+      "symbol": "[.] mi_free"
+    },
+    {
+      "percent": 3.03,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+    },
+    {
+      "percent": 2.69,
+      "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+    },
+    {
+      "percent": 2.59,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::child"
+    },
+    {
+      "percent": 2.56,
+      "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Anchor, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+    },
+    {
+      "percent": 2.22,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST> as core::ops::drop::Drop>::drop"
+    },
+    {
+      "percent": 1.89,
+      "symbol": "[.] _mi_page_malloc_zero"
+    },
+    {
+      "percent": 1.65,
+      "symbol": "[.] <core::iter::adapters::map::Map<core::iter::adapters::map::Map<rpds::map::red_black_tree_map::IterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>, fn(&archery::shared_pointer::SharedPointer<rpds::map::entry::Entry<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>, archery::shared_pointer::kind::arct::ArcTK>) -> (&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)>, for<'a> fn((&sonatina_verifier::verify::function::enum_proofs::views::Step, &'a sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)) -> &sonatina_verifier::verify::function::enum_proofs::views::Step> as core::iter::traits::iterator::Iterator>::fold::<usize, core::iter::adapters::map::map_fold<&sonatina_verifier::verify::function::enum_proofs::views::Step, usize, usize, <core::iter::adapters::filter::Filter<_, _> as core::iter::traits::iterator::Iterator>::count::to_usize<&sonatina_verifier::verify::function::enum_proofs::views::Step, <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured::{closure#0}>::{closure#0}, <usize as core::iter::traits::accum::Sum>::sum<core::iter::adapters::map::Map<core::iter::adapters::map::Map<core::iter::adapters::map::Map<rpds::map::red_black_tree_map::IterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>, fn(&archery::shared_pointer::SharedPointer<rpds::map::entry::Entry<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>, archery::shared_pointer::kind::arct::ArcTK>) -> (&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)>, for<'a> fn((&sonatina_verifier::verify::function::enum_proofs::views::Step, &'a sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)) -> &sonatina_verifier::verify::function::enum_proofs::views::Step>, <core::iter::adapters::filter::Filter<_, _> as core::iter::traits::iterator::Iterator>::count::to_usize<&sonatina_verifier::verify::function::enum_proofs::views::Step, <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured::{closure#0}>::{closure#0}>>::{closure#0}>::{closure#0}>"
+    }
+  ]
+}

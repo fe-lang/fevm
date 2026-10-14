@@ -28,8 +28,11 @@ pinned with its Sonatina revision, Rust version and Cargo lock hash in
 bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
 for reproducible compiler builds and the acceptance matrix. All seven native
 acceptance stages pass at O0/O1/O2 on x86_64 Linux
-([evidence](native/reports/mvs-port-20261012/README.md)). The pinned prerequisite
-commits are published. Earlier
+([evidence](native/reports/mvs-compile-perf-20261014/README.md)). The latest MVS
+refresh retains the owned native frame stack and enum speculation repair;
+verifier improvements roughly halve workspace preparation time at each
+optimization level. The new compiler prerequisites are local pending
+publication; native build instructions include local repository overrides. Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 

@@ -37,21 +37,37 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current compiler derives from [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs)
-at `fe5c32c1`, with the owned effect-provider regression migration and native
-`FixedStack` prerequisite and enum speculation fix integrated at
-`1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47`.
-It uses Sonatina `6f4b0397cfa77165a0ff4fafadc0a003fb72dc59` and Rust 1.99.0.
+The current compiler derives from
+[`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs) at
+`1b4e287c65a0981b385a18c9d49195c92f8f2197`, with native `FixedStack`, enum
+speculation repair and faster enum-proof verification integrated at
+`ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08`.
+It uses Sonatina `159c00d6576757adc48c816d501a14386b12a902` and Rust 1.99.0.
 The default [`toolchain.json`](toolchain.json) records these immutable revisions
-and the Cargo lock hash. All seven native acceptance stages pass on x86_64
-Linux: 52 workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons
-and 1,142 state comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks.
-The compiler passes its full release test suite, including the repaired enum
-speculation regression.
-Fe, Sonatina, Keccak and SwissTable prerequisite commits are published.
-Compiler source preparation and workspace semantic checking also pass with fresh
-remote checkouts and no local Git URL overrides.
-See the [MVS port evidence](reports/mvs-port-20261012/README.md) for current scope.
+and the Cargo lock hash. No further runtime-source migration is required.
+
+All seven native acceptance stages pass on x86_64 Linux: 52 workspace tests,
+35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at
+each of O0/O1/O2, plus 74,676 arithmetic checks. Workspace preparation is roughly
+twice as fast; the complete matrix falls from 78 to 44 minutes. All nine
+CLI/frame/state executables remain byte-for-byte identical.
+The compiler passes all 3,789 release workspace/all-feature tests; Sonatina
+passes 1,954 tests and 353 filechecks. Strict Clippy and nightly formatting pass.
+See [performance and acceptance evidence](reports/mvs-compile-perf-20261014/README.md).
+
+The native stack implementation and fixtures apply unchanged to the latest MVS
+base; the Rust test harness needs a small merge because upstream replaced an
+obsolete effect-provider test. The existing Sonatina enum-extraction pin update
+applies cleanly. The [refresh baseline](reports/mvs-refresh-20261014/README.md)
+records that applicability and the unchanged-source baseline measurements.
+
+Keccak and SwissTable pins remain published. The new Fe and Sonatina performance
+branches are local pending explicit publication approval. Until then, add
+`--fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina`
+to bootstrap, using repositories that contain the pinned commits. Existing CALL
+edits remain unchanged and uncommitted. The earlier
+[MVS port evidence](reports/mvs-port-20261012/README.md) retains its historical
+compiler and published-source verification.
 
 Earlier [owned-input results](reports/owned-inputs.md), the
 [logs/BLOBHASH report](reports/logs-blobhash.md), and the

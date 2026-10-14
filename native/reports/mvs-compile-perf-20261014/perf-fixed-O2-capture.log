@@ -1,0 +1,2 @@
+[ perf record: Woken up 23 times to write data ]
+[ perf record: Captured and wrote 1.339 MB /tmp/fevm-mvs-compile-perf-20261014-r1/perf-fixed-O2.data (32527 samples) ]

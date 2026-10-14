@@ -1,0 +1,81 @@
+{
+  "complete": true,
+  "checks": [
+    {
+      "name": "nextest",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "nextest",
+        "r",
+        "--release",
+        "--no-fail-fast",
+        "--locked",
+        "--workspace",
+        "--all-features"
+      ],
+      "status": 0,
+      "seconds": 195.15053057507612
+    },
+    {
+      "name": "doctests",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--doc"
+      ],
+      "status": 0,
+      "seconds": 1.6876953630708158
+    },
+    {
+      "name": "filecheck",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "run",
+        "--release",
+        "--locked",
+        "-p",
+        "sonatina-filecheck"
+      ],
+      "status": 0,
+      "seconds": 1.592456964077428
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "clippy",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "status": 0,
+      "seconds": 22.42663546698168
+    },
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "status": 0,
+      "seconds": 1.145323688047938
+    }
+  ]
+}

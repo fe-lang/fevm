@@ -1,0 +1,91 @@
+{
+  "scope": "30-second fixed-compiler O0 diagnostic window; not a whole-run phase percentage and not directly comparable to O1/O2 window coverage.",
+  "profile_header": [
+    "# Total Lost Samples: 0",
+    "# Samples: 2K of event 'task-clock:u'",
+    "# Event count (approx.): 29060605770"
+  ],
+  "enum_proof_named_symbols_percent": 53.05,
+  "top_symbols": [
+    {
+      "percent": 4.07,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::Place as core::cmp::Ord>::cmp"
+    },
+    {
+      "percent": 3.58,
+      "symbol": "[.] mi_free"
+    },
+    {
+      "percent": 3.55,
+      "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+    },
+    {
+      "percent": 3.41,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::types::Type>::is_obj_ref::{closure#0}, bool>"
+    },
+    {
+      "percent": 3.09,
+      "symbol": "[.] <cranelift_codegen::ir::dfg::DataFlowGraph>::value_def"
+    },
+    {
+      "percent": 2.64,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+    },
+    {
+      "percent": 2.54,
+      "symbol": "[.] <rpds::map::red_black_tree_map::RedBlackTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>>::get::<sonatina_verifier::verify::function::enum_proofs::views::Step>"
+    },
+    {
+      "percent": 2.43,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 2.33,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::view_index::Paths> as core::ops::drop::Drop>::drop"
+    },
+    {
+      "percent": 2.09,
+      "symbol": "[.] 0x00000000001a1653"
+    },
+    {
+      "percent": 2.02,
+      "symbol": "[.] <cranelift_codegen::verifier::Verifier>::run"
+    },
+    {
+      "percent": 1.98,
+      "symbol": "[.] _mi_page_malloc_zero"
+    },
+    {
+      "percent": 1.88,
+      "symbol": "[.] <rpds::map::red_black_tree_map::iter_utils::IterStack<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>>::new::<sonatina_verifier::verify::function::enum_proofs::views::Step>"
+    },
+    {
+      "percent": 1.43,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_verifier::verify::function::enum_proofs::views::Anchor, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.29,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_ir::value::ValueId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.25,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::child"
+    },
+    {
+      "percent": 1.22,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::has_stored_references"
+    },
+    {
+      "percent": 1.22,
+      "symbol": "[.] mi_theap_malloc_aligned"
+    },
+    {
+      "percent": 1.18,
+      "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::view_index::Paths>>::dying_next"
+    },
+    {
+      "percent": 1.18,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::imports::ImportSources>::new::<core::iter::adapters::map::Map<core::iter::adapters::flatten::FlatMap<core::option::IntoIter<&sonatina_ir::inst::control_flow::Call>, &smallvec::SmallVec<[sonatina_ir::value::ValueId; 8]>, sonatina_verifier::verify::function::enum_proofs::transfer::instruction::{closure#9}::{closure#0}>, sonatina_verifier::verify::function::enum_proofs::transfer::instruction::{closure#9}::{closure#1}>>"
+    }
+  ]
+}

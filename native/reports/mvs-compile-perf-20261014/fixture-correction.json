@@ -1,0 +1,6 @@
+{
+  "reason": "Array indexing uses obj.index; original generated obj.proj is correctly rejected by the unchanged verifier. Failed attempt is excluded from timing comparisons.",
+  "failed_source_sha256": "e380e5efc7ba3f4fddc46819c13c34a39399c185b7d03afa2b726a2e7bee35ec",
+  "failed_log": "/tmp/fevm-mvs-compile-perf-20261014-r1/comparison/references-1024-0-0-baseline.log",
+  "benchmark_runner_fix": "Read the final GNU time line so nonzero statuses still produce a recorded sample and diagnostic."
+}

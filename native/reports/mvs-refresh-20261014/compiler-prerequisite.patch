@@ -1,0 +1,532 @@
+From 6f496843b0d4192670e1f2a19bf4ae75c51a6499 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Wed, 14 Oct 2026 10:13:24 -0700
+Subject: [PATCH] Carry FeVM native prerequisites onto latest MVS
+
+Preserve owned native frame storage and its allocator/access regressions on sbillig/fe:mvs 1b4e287c. Pin the published Sonatina enum extraction speculation fix.
+---
+ Cargo.lock                                    |  12 +-
+ Cargo.toml                                    |   8 +-
+ .../fe/tests/fixtures/native/fixed_stack.fe   |  66 ++++++++
+ .../tests/fixtures/native/stack_allocator.c   |  58 +++++++
+ crates/fe/tests/native_runtime.rs             | 142 ++++++++++++++----
+ ingots/std/src/native.fe                      |   1 +
+ ingots/std/src/native/bytes.fe                |  10 +-
+ ingots/std/src/native/stack.fe                |  74 +++++++++
+ .../+enum-extract-speculation.bugfix.md       |   1 +
+ newsfragments/+native-fixed-stack.feature.md  |   1 +
+ 10 files changed, 329 insertions(+), 44 deletions(-)
+ create mode 100644 crates/fe/tests/fixtures/native/fixed_stack.fe
+ create mode 100644 crates/fe/tests/fixtures/native/stack_allocator.c
+ create mode 100644 ingots/std/src/native/stack.fe
+ create mode 100644 newsfragments/+enum-extract-speculation.bugfix.md
+ create mode 100644 newsfragments/+native-fixed-stack.feature.md
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 23f5dc8fd..4fe91da7a 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -6774,7 +6774,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-codegen"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "bit-set",
+  "cranelift-codegen",
+@@ -6800,7 +6800,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-ir"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "bit-set",
+  "bitflags 2.11.0",
+@@ -6825,7 +6825,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-macros"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -6835,7 +6835,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-parser"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "annotate-snippets",
+  "bimap",
+@@ -6856,7 +6856,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-triple"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "thiserror 2.0.18",
+ ]
+@@ -6864,7 +6864,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-verifier"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=11722eacb49ce1f565191145d290bd25618c7342#11722eacb49ce1f565191145d290bd25618c7342"
++source = "git+https://github.com/fe-lang/sonatina?rev=6f4b0397cfa77165a0ff4fafadc0a003fb72dc59#6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+ dependencies = [
+  "cranelift-entity 0.136.1",
+  "rayon",
+diff --git a/Cargo.toml b/Cargo.toml
+index 67cb6a631..54d4e343d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -56,10 +56,10 @@ tracing-tree = "0.4.0"
+ wasm-bindgen-test = "0.3"
+ semver = "1.0.26"
+ petgraph = "0.8"
+-sonatina-ir = { git = "https://github.com/fe-lang/sonatina", rev = "11722eacb49ce1f565191145d290bd25618c7342" }
+-sonatina-triple = { git = "https://github.com/fe-lang/sonatina", rev = "11722eacb49ce1f565191145d290bd25618c7342" }
+-sonatina-codegen = { git = "https://github.com/fe-lang/sonatina", rev = "11722eacb49ce1f565191145d290bd25618c7342" }
+-sonatina-verifier = { git = "https://github.com/fe-lang/sonatina", rev = "11722eacb49ce1f565191145d290bd25618c7342" }
++sonatina-ir = { git = "https://github.com/fe-lang/sonatina", rev = "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59" }
++sonatina-triple = { git = "https://github.com/fe-lang/sonatina", rev = "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59" }
++sonatina-codegen = { git = "https://github.com/fe-lang/sonatina", rev = "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59" }
++sonatina-verifier = { git = "https://github.com/fe-lang/sonatina", rev = "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59" }
+ 
+ [profile.dev]
+ # Set to 0 to make the build faster and debugging more difficult.
+diff --git a/crates/fe/tests/fixtures/native/fixed_stack.fe b/crates/fe/tests/fixtures/native/fixed_stack.fe
+new file mode 100644
+index 000000000..946b0b5b4
+--- /dev/null
++++ b/crates/fe/tests/fixtures/native/fixed_stack.fe
+@@ -0,0 +1,66 @@
++use core::{Option, Result}
++use std::native::{Args, FixedStack, ByteBuffer}
++struct Frame { value: u64, words: [u256; 4], memory: ByteBuffer }
++
++pub fn main(argc: i32, argv: **u8) -> i32 {
++    core::assert(core::size_of<[Option<Frame>; 3]>() == 558)
++    let args = unsafe { Args::new(argc, argv) }
++    let mode = if args.len() == 1 { 0 } else { args.get(1).byte_at(0) - 48 }
++    var stack: FixedStack<Frame, 3> = match FixedStack::try_new() {
++        Option::Some(stack) => stack,
++        Option::None => {
++            core::assert(mode == 1)
++            return 0
++        },
++    }
++    core::assert(mode != 1)
++    var count: u64 = 0
++    var failed = false
++    while count < 4 {
++        var memory = ByteBuffer::new()
++        if !memory.try_resize(8192) {
++            memory.release()
++            failed = true
++            break
++        }
++        memory.set_byte(index: 8191, value: (count + 41).downcast_unchecked())
++        let frame = Frame { value: count, words: [count as u256; 4], memory }
++        match stack.try_push(frame) {
++            Result::Ok(()) => {
++                core::assert(count < 3)
++                count += 1
++            },
++            Result::Err(frame) => {
++                core::assert(count == 3 && stack.len() == 3)
++                core::assert(frame.value == 3 && frame.words[3] == 3)
++                core::assert(frame.memory.byte_at(8191) == 44)
++                frame.memory.release()
++                break
++            },
++        }
++    }
++    while stack.len() > 0 {
++        count -= 1
++        let frame = stack.top_mut()
++        core::assert(frame.value == count)
++        core::assert(frame.words[3] == count as u256)
++        core::assert(frame.memory.byte_at(8191) == (count + 41).downcast_unchecked())
++        frame.memory.set_byte(index: 0, value: 97)
++        let frame = stack.pop()
++        core::assert(frame.value == count && frame.memory.byte_at(0) == 97)
++        frame.memory.release()
++    }
++    core::assert(count == 0 && failed == (mode == 2))
++    stack.release()
++    var empty: FixedStack<ByteBuffer, 0> = match FixedStack::try_new() {
++        Option::Some(stack) => stack,
++        Option::None => core::panic(),
++    }
++    core::assert(empty.len() == 0)
++    match empty.try_push(ByteBuffer::new()) {
++        Result::Err(buffer) => buffer.release(),
++        Result::Ok(()) => core::panic(),
++    }
++    empty.release()
++    0
++}
+diff --git a/crates/fe/tests/fixtures/native/stack_allocator.c b/crates/fe/tests/fixtures/native/stack_allocator.c
+new file mode 100644
+index 000000000..f0d1d3827
+--- /dev/null
++++ b/crates/fe/tests/fixtures/native/stack_allocator.c
+@@ -0,0 +1,58 @@
++// Track explicit stack slots and owned buffer allocations, including failures.
++#define _DEFAULT_SOURCE
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/mman.h>
++#ifndef FAIL_STACK
++#define FAIL_STACK 0
++#endif
++#ifndef FAIL_BUFFER
++#define FAIL_BUFFER 0
++#endif
++static unsigned stacks, stack_frees, buffers, buffer_frees, units, unit_frees;
++static unsigned stack_attempts, buffer_attempts, failures;
++typedef union {
++    max_align_t alignment;
++    struct { size_t extent, size; } info;
++} Header;
++void *malloc(size_t size) {
++    if (size == 558 && ++stack_attempts == FAIL_STACK) { failures++; return NULL; }
++    if (size == 8192 && ++buffer_attempts == FAIL_BUFFER) { failures++; return NULL; }
++    if (size > SIZE_MAX - sizeof(Header)) return NULL;
++    size_t extent = sizeof(Header) + size;
++    Header *header = mmap(NULL, extent, PROT_READ | PROT_WRITE,
++                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    if (header == MAP_FAILED) return NULL;
++    header->info.extent = extent;
++    header->info.size = size;
++    stacks += size == 558;
++    buffers += size == 8192;
++    units += size == 1;
++    memset(header + 1, 0xa5, size);
++    return header + 1;
++}
++void free(void *pointer) {
++    if (!pointer) return;
++    Header *header = (Header *)pointer - 1;
++    stack_frees += header->info.size == 558;
++    buffer_frees += header->info.size == 8192;
++    unit_frees += header->info.size == 1;
++    munmap(header, header->info.extent);
++}
++__attribute__((destructor)) static void check_releases(void) {
++    unsigned expected_stack = FAIL_STACK ? 0 : 1;
++    unsigned expected_buffers = FAIL_STACK ? 0 : (FAIL_BUFFER ? FAIL_BUFFER - 1 : 4);
++    unsigned expected_attempts = FAIL_STACK ? 0 : (FAIL_BUFFER ? FAIL_BUFFER : 4);
++    unsigned expected_failures = FAIL_STACK || FAIL_BUFFER ? 1 : 0;
++    fprintf(stderr, "stacks=%u/%u buffers=%u/%u units=%u/%u attempts=%u/%u failures=%u\n",
++            stacks, stack_frees, buffers, buffer_frees, units, unit_frees,
++            stack_attempts, buffer_attempts, failures);
++    if (stacks != expected_stack || stack_frees != expected_stack ||
++        buffers != expected_buffers || buffer_frees != expected_buffers ||
++        units != expected_stack || unit_frees != expected_stack ||
++        stack_attempts != 1 || buffer_attempts != expected_attempts ||
++        failures != expected_failures) _Exit(101);
++}
+diff --git a/crates/fe/tests/native_runtime.rs b/crates/fe/tests/native_runtime.rs
+index c08c7fc80..19047b3f2 100644
+--- a/crates/fe/tests/native_runtime.rs
++++ b/crates/fe/tests/native_runtime.rs
+@@ -15,7 +15,7 @@ use std::{
+         ffi::OsStringExt,
+         process::{CommandExt, ExitStatusExt},
+     },
+-    path::Path,
++    path::{Path, PathBuf},
+     process::{Command, Output, Stdio},
+     thread,
+     time::{Duration, Instant},
+@@ -1053,34 +1053,7 @@ pub fn main() -> i32 {
+         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native/byte_buffer_allocator.c");
+     for level in ["0", "1", "2"] {
+         let out = temp.path().join(format!("out-{level}"));
+-        let report = temp.path().join(format!("report-{level}.tar.gz"));
+-        build(
+-            &source,
+-            &out,
+-            level,
+-            &["--report", "--report-out", report.to_str().unwrap()],
+-        );
+-        let listing = Command::new("tar")
+-            .arg("-tzf")
+-            .arg(&report)
+-            .output()
+-            .unwrap();
+-        assert!(listing.status.success(), "{listing:?}");
+-        let listing = String::from_utf8(listing.stdout).unwrap();
+-        let objects: Vec<_> = listing
+-            .lines()
+-            .filter(|name| name.ends_with("/allocation_failure.o"))
+-            .collect();
+-        assert_eq!(objects.len(), 1, "{listing}");
+-        let extracted = Command::new("tar")
+-            .arg("-xOf")
+-            .arg(&report)
+-            .arg(objects[0])
+-            .output()
+-            .unwrap();
+-        assert!(extracted.status.success(), "{extracted:?}");
+-        let object = out.join("allocation_failure.o");
+-        fs::write(&object, extracted.stdout).unwrap();
++        let object = build_native_object(&source, &out, level);
+         let executable = out.join("controlled_allocator");
+         let linked = Command::new("cc")
+             .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-fno-builtin"])
+@@ -1335,3 +1308,114 @@ fn native_returned_reference_projections_mutate_the_original_at_o1() {
+         .unwrap();
+     assert!(result.status.success(), "{result:?}");
+ }
++
++fn build_native_object(source: &Path, out: &Path, level: &str) -> PathBuf {
++    let stem = source.file_stem().unwrap().to_str().unwrap();
++    let object_name = format!("{stem}.o");
++    let report = out.with_extension("tar.gz");
++    build(
++        source,
++        out,
++        level,
++        &["--report", "--report-out", report.to_str().unwrap()],
++    );
++    let listing = Command::new("tar")
++        .arg("-tzf")
++        .arg(&report)
++        .output()
++        .unwrap();
++    assert!(listing.status.success(), "{listing:?}");
++    let listing = String::from_utf8(listing.stdout).unwrap();
++    let objects: Vec<_> = listing
++        .lines()
++        .filter(|name| name.rsplit('/').next() == Some(object_name.as_str()))
++        .collect();
++    assert_eq!(objects.len(), 1, "{listing}");
++    let extracted = Command::new("tar")
++        .arg("-xOf")
++        .arg(&report)
++        .arg(objects[0])
++        .output()
++        .unwrap();
++    assert!(extracted.status.success(), "{extracted:?}");
++    let object = out.join(object_name);
++    fs::write(&object, extracted.stdout).unwrap();
++    object
++}
++
++#[test]
++fn native_fixed_stack_owns_slots_and_reclaims_allocations() {
++    let temp = tempdir().unwrap();
++    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native");
++    for level in ["0", "1", "2"] {
++        let out = temp.path().join(format!("out-{level}"));
++        let object = build_native_object(&fixtures.join("fixed_stack.fe"), &out, level);
++        for (stack_failure, buffer_failure, mode) in [
++            (0, 0, "0"),
++            (1, 0, "1"),
++            (0, 1, "2"),
++            (0, 2, "2"),
++            (0, 3, "2"),
++            (0, 4, "2"),
++        ] {
++            let executable = out.join(format!("stack-{stack_failure}-{buffer_failure}"));
++            let linked = Command::new("cc")
++                .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-fno-builtin"])
++                .arg(format!("-DFAIL_STACK={stack_failure}"))
++                .arg(format!("-DFAIL_BUFFER={buffer_failure}"))
++                .arg(&object)
++                .arg(fixtures.join("stack_allocator.c"))
++                .arg("-o")
++                .arg(&executable)
++                .output()
++                .unwrap();
++            assert!(linked.status.success(), "{linked:?}");
++            let result = Command::new(&executable).arg(mode).output().unwrap();
++            assert!(
++                result.status.success(),
++                "O{level} {stack_failure}/{buffer_failure}: {result:?}"
++            );
++        }
++    }
++}
++
++#[test]
++fn native_fixed_stack_reserves_its_owner_while_top_is_used() {
++    let temp = tempdir().unwrap();
++    let source = temp.path().join("stack_access.fe");
++    for operation in [
++        "let value = stack.pop()\ncore::assert(top == value)",
++        "stack.release()\ncore::assert(top == 1)",
++    ] {
++        fs::write(
++            &source,
++            format!(
++                r#"
++use core::Option
++use std::native::FixedStack
++pub fn main() -> i32 {{
++    var stack: FixedStack<u256, 1> = match FixedStack::try_new() {{
++        Option::Some(stack) => stack,
++        Option::None => core::panic(),
++    }}
++    stack.try_push(1).unwrap()
++    let top = stack.top_mut()
++    {operation}
++    0
++}}
++"#
++            ),
++        )
++        .unwrap();
++        let result = Command::new(env!("CARGO_BIN_EXE_fe"))
++            .arg("check")
++            .arg(&source)
++            .output()
++            .unwrap();
++        assert!(!result.status.success(), "{operation}: {result:?}");
++        assert!(
++            String::from_utf8_lossy(&result.stderr).contains("access conflict"),
++            "{operation}: {result:?}"
++        );
++    }
++}
+diff --git a/ingots/std/src/native.fe b/ingots/std/src/native.fe
+index 73464b8dc..c4f378919 100644
+--- a/ingots/std/src/native.fe
++++ b/ingots/std/src/native.fe
+@@ -1,6 +1,7 @@
+ /// Interfaces to the native host runtime.
+ use core::ptr
+ pub use bytes::ByteBuffer
++pub use stack::FixedStack
+ 
+ extern {
+     // Trusted by the compiler: reads process accounting without accessing Fe memory.
+diff --git a/ingots/std/src/native/bytes.fe b/ingots/std/src/native/bytes.fe
+index 5ccc45f21..7c61adbb1 100644
+--- a/ingots/std/src/native/bytes.fe
++++ b/ingots/std/src/native/bytes.fe
+@@ -1,12 +1,12 @@
+ use core::Option
+ use core::ptr
+ 
+-// These private declarations have compiler-owned memory contracts. Raw addresses
+-// never leave this module: ByteBuffer is the allocation owner.
++// Native owners share these declarations so allocation and release use the
++// same host ABI. Raw addresses never leave their owning implementation.
+ extern {
+-    fn malloc(size: u64) -> *u8
+-    unsafe fn free(_ address: *u8)
+-    fn is_null(_ address: *u8) -> bool
++    pub(ingot) fn malloc(size: u64) -> *u8
++    pub(ingot) unsafe fn free(_ address: *u8)
++    pub(ingot) fn is_null(_ address: *u8) -> bool
+ }
+ 
+ // Supported native hosts have 64-bit pointers. Keep each object within PTRDIFF_MAX.
+diff --git a/ingots/std/src/native/stack.fe b/ingots/std/src/native/stack.fe
+new file mode 100644
+index 000000000..37c6874ff
+--- /dev/null
++++ b/ingots/std/src/native/stack.fe
+@@ -0,0 +1,74 @@
++use core::{Option, Result, size_of}
++use core::ptr
++use ingot::native::bytes::{malloc, free, is_null}
++
++/// Fixed-capacity native storage with explicit ownership and release.
++/// Drain owned elements before releasing the empty stack.
++pub struct FixedStack<T, const CAPACITY: usize> {
++    unsafe slots: *[Option<T>; CAPACITY],
++    unsafe len: usize,
++}
++
++impl<T, const CAPACITY: usize> FixedStack<T, CAPACITY> {
++    /// Allocate once and initialize slots in place; allocation failure returns None.
++    pub fn try_new() -> Option<Self> {
++        let size = size_of<[Option<T>; CAPACITY]>()
++        if size > 0x7fffffffffffffff { return Option::None }
++        let address = malloc(size: if size == 0 { 1 } else { size.downcast_unchecked() })
++        if is_null(address) { return Option::None }
++        let slots = ptr::cast<u8, [Option<T>; CAPACITY]>(address)
++        var index: usize = 0
++        // The allocation fits every slot; None initializes each variant tag.
++        unsafe {
++            while index < CAPACITY {
++                (*slots)[index] = Option::None
++                index += 1
++            }
++            Option::Some(Self { slots, len: 0 })
++        }
++    }
++
++    pub fn len(self) -> usize { self.len }
++
++    /// Preserve the supplied value if the stack is full; pushing does not allocate.
++    pub fn try_push(mut self, _ value: own T) -> Result<T, ()> {
++        if self.len == CAPACITY { return Result::Err(value) }
++        // The next slot is initialized to None and lies within the allocation.
++        unsafe {
++            (*self.slots)[self.len] = Option::Some(value)
++            self.len += 1
++        }
++        Result::Ok(())
++    }
++
++    /// The mutable projection reserves the stack until its caller's last use.
++    pub fn top_mut(mut self) -> mut T {
++        core::assert(self.len > 0)
++        // Every occupied slot contains Some; the stack owns its allocation.
++        unsafe {
++            match (*self.slots)[self.len - 1] {
++                Option::Some(mut value) => mut value,
++                Option::None => core::panic(),
++            }
++        }
++    }
++
++    pub fn pop(mut self) -> T {
++        core::assert(self.len > 0)
++        let index = self.len - 1
++        // Move the initialized owner out and refill its slot before it is reused.
++        let value = unsafe {
++            let value = (*self.slots)[index]
++            (*self.slots)[index] = Option::None
++            self.len = index
++            value
++        }
++        match value { Option::Some(value) => value, Option::None => core::panic() }
++    }
++
++    /// Release empty storage. Owned elements must first be popped and consumed.
++    pub fn release(own self) {
++        core::assert(self.len == 0)
++        unsafe { free(ptr::cast<[Option<T>; CAPACITY], u8>(self.slots)) }
++    }
++}
+diff --git a/newsfragments/+enum-extract-speculation.bugfix.md b/newsfragments/+enum-extract-speculation.bugfix.md
+new file mode 100644
+index 000000000..1221b3155
+--- /dev/null
++++ b/newsfragments/+enum-extract-speculation.bugfix.md
+@@ -0,0 +1 @@
++Keep enum payload extraction under its active-variant proof during loop optimization by updating Sonatina.
+diff --git a/newsfragments/+native-fixed-stack.feature.md b/newsfragments/+native-fixed-stack.feature.md
+new file mode 100644
+index 000000000..a0f414d76
+--- /dev/null
++++ b/newsfragments/+native-fixed-stack.feature.md
+@@ -0,0 +1 @@
++Add native FixedStack storage with fallible allocation, explicit ownership, mutable top projections, and destructive pop under mutable value semantics.
+-- 
+2.43.0
+

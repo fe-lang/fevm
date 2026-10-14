@@ -1,0 +1,8 @@
+{
+  "source_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+  "compiler": "/tmp/fevm-mvs-compile-perf-20261014-r1/sonatina-baseline",
+  "sha256": "f19c36dc16954c482303255cd8868100ef2a72f55b7316b30c513fb8d58d182e",
+  "rust": "1.99.0",
+  "features": "default",
+  "build_command": "cargo +1.99.0 build --release --locked -p sonatina-cli --target-dir /tmp/fevm-mvs-target-preserved-on-disk"
+}

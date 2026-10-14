@@ -1,0 +1,82 @@
+{
+  "revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+  "parent": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+  "branch": "fevm-mvs-compile-perf-20261014",
+  "source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/fe",
+  "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
+  "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
+  "published": false,
+  "checks": {
+    "complete": true,
+    "checks": [
+      {
+        "name": "format",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all"
+        ],
+        "status": 0,
+        "seconds": 1.5995460940757766
+      },
+      {
+        "name": "nextest",
+        "command": [
+          "cargo",
+          "+1.99.0",
+          "nextest",
+          "r",
+          "--release",
+          "--no-fail-fast",
+          "--locked",
+          "--workspace",
+          "--all-features"
+        ],
+        "status": 0,
+        "seconds": 489.21594420203473
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "+1.99.0",
+          "clippy",
+          "--release",
+          "--locked",
+          "--workspace",
+          "--all-features",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": 0,
+        "seconds": 26.18309908604715
+      },
+      {
+        "name": "notes",
+        "command": [
+          "make",
+          "check-notes",
+          "EISENBOTE=/tmp/fevm-mvs-refresh-20261014-r1/eisenbote"
+        ],
+        "status": 0,
+        "seconds": 0.15420400095172226
+      },
+      {
+        "name": "format-check",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "status": 0,
+        "seconds": 1.584060670924373
+      }
+    ]
+  }
+}

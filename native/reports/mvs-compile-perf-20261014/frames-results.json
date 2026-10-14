@@ -1,0 +1,195 @@
+{
+  "schema": 2,
+  "fork": "Cancun",
+  "scope": "outcome, remaining gas, output, completed stack/active memory; simultaneous-fault reasons retained separately; external state is not compared",
+  "complete": true,
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "build_timeout_seconds": 1800,
+  "source_sha256": {
+    "fe.toml": "fd80d8e32370069b1f37bc1ebde6b68edbc24d9ac474265419d6c217969fea45",
+    "ingots/evm/fe.toml": "05074653e95429944d7e7148d05202abc7af9e5284fc47b06f9e1fd9df0a88b9",
+    "ingots/evm/src/account_runtime.fe": "5b0ec7baac7b85122186f5cc346bcc4e14a392cb05143ce1b1d60928aeb34ba9",
+    "ingots/evm/src/buffer.fe": "29561950e701a1338abd1db0ca133f5a7a54f9c058a8e1a6e234b84fcdb9bb4a",
+    "ingots/evm/src/calls_runtime.fe": "bf02217a0b65a9a300c6227c37cfe8686bfab55432696ca36f7730bc45430022",
+    "ingots/evm/src/cli.fe": "e806043e5785b4a335c72ba958c81499be4c4291c8d04774731206c4de19145c",
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/environment_runtime.fe": "d291fc464dfb44062fab88c2b7d4dce307ef241e7b7d2fe745b9ccb104642178",
+    "ingots/evm/src/gas.fe": "0f9544b2593f255cbaf1ed3ab0291a3fd06b55d7707ad3651cbb790653589059",
+    "ingots/evm/src/hex.fe": "2a267036684ffa6d731420feb6f6a2a10c2013cbfbe061c50333dcf509a206f8",
+    "ingots/evm/src/inputs_runtime.fe": "e011d0394383f5b23a807264e6f21e689144418684d3fb383ff4ac6204a8bf3c",
+    "ingots/evm/src/journal.fe": "156dac4720636be5eaac6149b5b18d1ca7eb31333b82400954ea389fbf893b43",
+    "ingots/evm/src/keccak_runtime.fe": "9f13006c07c3a9f74bb294cbc89d0f41f90f2cf77df450f818d01db215d600ed",
+    "ingots/evm/src/lib.fe": "153b138c6b9c8117c75827dc1c3c19e010a0064656326832ba4f636e98748518",
+    "ingots/evm/src/logs.fe": "44da959812c8ec04781f93e9c059cc848e4f6ebf10f2caed6f202029b2562db9",
+    "ingots/evm/src/logs_runtime.fe": "a57f396a07b7b9546c09f0d735e1dbe5f569896d4c008793dafc5512fbadb9b0",
+    "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+    "ingots/evm/src/memory_runtime.fe": "9f4eaaae5ed120dc83b387d5856a4459fde2dcf3e57c6c0a22b7a3c378bcc492",
+    "ingots/evm/src/opcodes.fe": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41",
+    "ingots/evm/src/state.fe": "a92f0bfec2c4ddb849024cde398826a6881ecce4e06529106b110d13c8275b13",
+    "ingots/evm/src/state_gas_runtime.fe": "17ac9b3122f2ae7713681b4cba560be528d1c402df587cbc8972dee84c6b8f21",
+    "ingots/evm/src/transaction.fe": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5",
+    "ingots/evm/src/transaction_runtime.fe": "bc47c302043226e1ce6573ab419ef01f918cc2dacbdb54cde9ac11ea0d1fcef3",
+    "ingots/evm/src/types.fe": "1db979c7ca80d7ef4943008fa43b63d978a7981a33fd0be288754f9f48b6bb2a",
+    "ingots/evm/src/vm.fe": "cbe2ac637deb6d3485e949539f44e2e1f254b909441ca9642691ca2a4a7f16c9",
+    "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+    "native/differential/corpus.py": "c4043f3e20d0163ba4ab9b01ef44267ba376650d4a3861da3d64735d606998e0",
+    "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+    "native/differential/driver/src/lib.fe": "7921f1ba37050cfc5356976cb375d12d037649cefb03462fbb12ebbca3cfaf5e",
+    "native/differential/reference/Cargo.lock": "aa06b4fc78960ee354273732754789a315cc60890b17289e86175468e2e5bc72",
+    "native/differential/reference/Cargo.toml": "42b81900f3ccb4594e9e7a0627453070edc4268c6a0587b68ec54e08d048e218",
+    "native/differential/reference/src/main.rs": "5d856de0c8b8c9d43193114edd5ee613337d7da211e19de349cdf662b0ebc40d",
+    "native/differential/reference/src/state.rs": "3219136df847922b36ac11b6d9786959506453a2fea9ced774cf3e0a49cd0518",
+    "native/differential/run.py": "23b131bdff0e3388f5bb73f9e4f07105dadf2788f877d3c605086256b6decd6d",
+    "native/differential/state_contract.py": "86aecacb46c848dd7ce80bd7d9daf2556a750e76b2347326808a0c98defaa477",
+    "native/differential/state_corpus.py": "5c2837aa644924642c9a61ab0d217b62369e9b1fdfadf5be449821226966ac96",
+    "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+    "native/differential/state_driver/src/lib.fe": "108422f6457e78d8ec0402528cec07515b89ce64fa907fc55731d01059e1ef71",
+    "native/differential/state_run.py": "6a9ff0d6b4080f177eeb11d8559247f99efd7f121cd156eb41fc316e0c5edc6e",
+    "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+    "native/differential/test_run.py": "e70056ecb7e2d165e1f9a7ce029634954fa5a0ead0a36882d5e1461105d1d425",
+    "native/differential/test_state_contract.py": "605541069ada3099ac9b5fefab2a109e31a5ee242122f42af5500234a44e1378",
+    "native/toolchain.json": "8386d2bd055690c42bf7d8b95ccf787cfa96dd0f88cac5c4077f81ebdeb69dc0"
+  },
+  "compiler_sha256": "9b1efb263b1f2bf7bb85be49a23979ecaff7ecbb5d1fed128169be3daafd8814",
+  "compiler_version": "fe 26.4.0 (ed4ec1d4c)",
+  "revision": "5a7ae95962c4eb2c59fb19cbcc534caa3a368aec",
+  "dirty": true,
+  "reference": {
+    "specification_revision": "c335bc4e9e99f7b91024d9033bdc89ce54394848",
+    "toolchain": "1.99.0",
+    "target_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/acceptance/cancun-frames/reference-target",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "packages": [
+      {
+        "name": "revm-bytecode",
+        "version": "7.1.1",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-context",
+        "version": "12.1.0",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-context-interface",
+        "version": "13.1.0",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-database",
+        "version": "9.0.6",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-database-interface",
+        "version": "8.0.5",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-interpreter",
+        "version": "31.1.0",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-primitives",
+        "version": "21.0.2",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      },
+      {
+        "name": "revm-state",
+        "version": "8.1.1",
+        "source": "git+https://github.com/sbillig/revm?rev=d613ef5735b9beb17acd53a5a1802ebc2198a18d#d613ef5735b9beb17acd53a5a1802ebc2198a18d"
+      }
+    ],
+    "executable_sha256": "8a2e40f84616c2fb954f1feb8b611c65ba066faf0e6af68f46b6a4b581190b8f"
+  },
+  "levels": [
+    {
+      "level": "0",
+      "complete": true,
+      "passed": 1840,
+      "reason_differences": [
+        {
+          "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-1-15",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-0-11",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        }
+      ],
+      "build_seconds": 10.88833034702111,
+      "executable_sha256": "3d4992ca07d1146969a4ce59a407db63df7b7ac545a684a9de15fd16267dd73d"
+    },
+    {
+      "level": "1",
+      "complete": true,
+      "passed": 1840,
+      "reason_differences": [
+        {
+          "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-1-15",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-0-11",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        }
+      ],
+      "build_seconds": 23.46318163909018,
+      "executable_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3"
+    },
+    {
+      "level": "2",
+      "complete": true,
+      "passed": 1840,
+      "reason_differences": [
+        {
+          "case": "returndata-simultaneous-8000000000000000000000000000000000000000000000000000000000000000-1-1000000",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-1-15",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        },
+        {
+          "case": "returndata-simultaneous-0-0-11",
+          "reference": "return_data_oob",
+          "fevm": "out_of_gas"
+        }
+      ],
+      "build_seconds": 23.414652321022004,
+      "executable_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3"
+    }
+  ],
+  "frames_per_level": 1840,
+  "categories": {
+    "anchors": 9,
+    "owned-inputs": 5,
+    "arithmetic": 167,
+    "push": 593,
+    "jump": 704,
+    "stack": 121,
+    "frame": 8,
+    "memory": 96,
+    "gas": 31,
+    "keccak": 106
+  },
+  "corpus_sha256": "7a6dbbfb33796d12b51b200b86d63afd6dbda9ed3efe9eb45b4564d69d8ea7b3"
+}

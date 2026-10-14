@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/sbillig/fe",
-  "fe_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+  "fe_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
-  "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+  "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
+  "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
   "rust_version": "1.99.0",
   "features": [
     "cranelift"
   ],
-  "publication": "published Fe MVS prerequisites and Sonatina revision",
+  "publication": "local MVS compiler with enum-proof traversal fix; publication pending",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

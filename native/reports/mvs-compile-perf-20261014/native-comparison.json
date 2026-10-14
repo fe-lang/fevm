@@ -1,0 +1,168 @@
+{
+  "complete": true,
+  "baseline_compiler": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local prerequisites based on sbillig/fe:mvs 1b4e287c; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe",
+    "sonatina_source_directory": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/tmp/fevm-mvs-target-preserved-on-disk",
+    "complete": true,
+    "compiler_build_seconds": 151.85668657603674,
+    "compiler": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/bin/fe",
+    "compiler_sha256": "82d1c2112d94ea87098c99d5b7eaa344d5552cc76640cd2df1575218481aa75a",
+    "compiler_version": "fe 26.4.0 (6f496843b)"
+  },
+  "fixed_compiler": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
+      "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local MVS compiler with enum-proof traversal fix; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/fe",
+    "sonatina_source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/tmp/fevm-mvs-target-preserved-on-disk",
+    "complete": true,
+    "compiler_build_seconds": 195.04606483096723,
+    "compiler": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/bin/fe",
+    "compiler_sha256": "9b1efb263b1f2bf7bb85be49a23979ecaff7ecbb5d1fed128169be3daafd8814",
+    "compiler_version": "fe 26.4.0 (ed4ec1d4c)"
+  },
+  "stages": [
+    {
+      "stage": "workspace-O0",
+      "baseline_seconds": 1217.176093365997,
+      "fixed_seconds": 614.1082046470838,
+      "speedup": 1.9820221976442813,
+      "wall_reduction_percent": 49.54647827917654
+    },
+    {
+      "stage": "workspace-O1",
+      "baseline_seconds": 1282.1374715110287,
+      "fixed_seconds": 689.194457017933,
+      "speedup": 1.860342111656982,
+      "wall_reduction_percent": 46.24644608462294
+    },
+    {
+      "stage": "workspace-O2",
+      "baseline_seconds": 1277.5140738600167,
+      "fixed_seconds": 686.0350360519951,
+      "speedup": 1.8621703072366014,
+      "wall_reduction_percent": 46.29921892139035
+    },
+    {
+      "stage": "cli-smoke",
+      "baseline_seconds": 272.0153118739836,
+      "fixed_seconds": 212.41961745603476,
+      "speedup": 1.2805564529852502,
+      "wall_reduction_percent": 21.908948436534224
+    },
+    {
+      "stage": "cancun-frames",
+      "baseline_seconds": 90.90395086805802,
+      "fixed_seconds": 83.48984676098917,
+      "speedup": 1.0888024639486236,
+      "wall_reduction_percent": 8.15597566032087
+    },
+    {
+      "stage": "cancun-state",
+      "baseline_seconds": 554.2790110789938,
+      "fixed_seconds": 326.4508358379826,
+      "speedup": 1.697894292891571,
+      "wall_reduction_percent": 41.10351838824039
+    },
+    {
+      "stage": "arithmetic",
+      "baseline_seconds": 12.540534812025726,
+      "fixed_seconds": 11.789079671027139,
+      "speedup": 1.063741628860594,
+      "wall_reduction_percent": 5.9922096805471226
+    }
+  ],
+  "emitted_executable_identity": {
+    "cli": [
+      {
+        "level": "0",
+        "identical": true
+      },
+      {
+        "level": "1",
+        "identical": true
+      },
+      {
+        "level": "2",
+        "identical": true
+      }
+    ],
+    "frames": [
+      {
+        "level": "0",
+        "identical": true
+      },
+      {
+        "level": "1",
+        "identical": true
+      },
+      {
+        "level": "2",
+        "identical": true
+      }
+    ],
+    "state": [
+      {
+        "level": "0",
+        "identical": true
+      },
+      {
+        "level": "1",
+        "identical": true
+      },
+      {
+        "level": "2",
+        "identical": true
+      }
+    ]
+  },
+  "scope": "One complete native matrix per compiler on unchanged runtime/test sources, identical toolchain/features and one compiler worker. Single-run integration observations; not statistical estimates. Baseline O1 includes two short profiles and O2 an extended profile; fixed O0 includes one short profile and O2 an extended profile.",
+  "total_baseline_seconds": 4706.566447370104,
+  "total_fixed_seconds": 2623.4870774430456,
+  "total_wall_reduction_percent": 44.25900267680325
+}

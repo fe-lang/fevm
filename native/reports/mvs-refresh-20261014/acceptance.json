@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local prerequisites based on sbillig/fe:mvs 1b4e287c; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe",
+    "sonatina_source_directory": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/tmp/fevm-mvs-target-preserved-on-disk",
+    "complete": true,
+    "compiler_build_seconds": 151.85668657603674,
+    "compiler": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/bin/fe",
+    "compiler_sha256": "82d1c2112d94ea87098c99d5b7eaa344d5552cc76640cd2df1575218481aa75a",
+    "compiler_version": "fe 26.4.0 (6f496843b)"
+  },
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "complete": true,
+  "scope": "native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending",
+  "stage_timeout_seconds": 7200,
+  "build_timeout_seconds": 1800,
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 1217.176093365997
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 1282.1374715110287
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 1277.5140738600167
+    },
+    {
+      "name": "cli-smoke",
+      "status": 0,
+      "seconds": 272.0153118739836
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 90.90395086805802
+    },
+    {
+      "name": "cancun-state",
+      "status": 0,
+      "seconds": 554.2790110789938
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 12.540534812025726
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "published": false,
+  "requires_explicit_push_authorization": true,
+  "instruction_source": "User-provided AGENTS.md: Push only when user asks.",
+  "reviewed_at_utc": "2026-10-14T20:23:24.649506+00:00",
+  "scope": "two new compiler prerequisite refs only; existing refs and the FeVM branch are outside this publication request",
+  "refs": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "ssh_repository": "git@github.com:sbillig/fe.git",
+      "branch": "fevm-mvs-compile-perf-20261014",
+      "ref": "refs/heads/fevm-mvs-compile-perf-20261014",
+      "revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+      "parent_revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+      "source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/fe",
+      "source_clean": true,
+      "patch": "fe-prerequisite.patch",
+      "patch_sha256": "d44010104a8c48b2bc5e3f1b0108a87ef12eb26257a40204691d8a6af4d4d068",
+      "remote_ref_absent_verified": true
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "ssh_repository": "git@github.com:fe-lang/sonatina.git",
+      "branch": "perf/fevm-enum-proof-traversal-20261014",
+      "ref": "refs/heads/perf/fevm-enum-proof-traversal-20261014",
+      "revision": "159c00d6576757adc48c816d501a14386b12a902",
+      "parent_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/sonatina",
+      "source_clean": true,
+      "patch": "sonatina-performance.patch",
+      "patch_sha256": "fa4cd9dcab5b05869df2b918568bd08323dab890f1d543464312c6afd935b270",
+      "remote_ref_absent_verified": true
+    }
+  ]
+}

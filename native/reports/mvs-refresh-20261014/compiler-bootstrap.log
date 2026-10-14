@@ -1,0 +1,65 @@
++ git init /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/.git/
++ git -C /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe fetch /tmp/fevm-mvs-refresh-20261014-r1/apply-probe 6f496843b0d4192670e1f2a19bf4ae75c51a6499
+From /tmp/fevm-mvs-refresh-20261014-r1/apply-probe
+ * branch                6f496843b0d4192670e1f2a19bf4ae75c51a6499 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe checkout --detach FETCH_HEAD
+HEAD is now at 6f496843b Carry FeVM native prerequisites onto latest MVS
++ git init /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina/.git/
++ git -C /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina fetch https://github.com/fe-lang/sonatina 6f4b0397cfa77165a0ff4fafadc0a003fb72dc59
+From https://github.com/fe-lang/sonatina
+ * branch              6f4b0397cfa77165a0ff4fafadc0a003fb72dc59 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 6f4b0397 Keep enum payload extraction under its variant proof
++ npm ci --ignore-scripts
+
+added 3 packages, and audited 4 packages in 417ms
+
+found 0 vulnerabilities
++ npm rebuild tree-sitter-cli
+rebuilt dependencies successfully
++ npx --no-install tree-sitter generate --abi=14
++ rustup run 1.99.0 cargo build --release --locked -p fe --features cranelift
+   Compiling fe-parser v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/parser)
+   Compiling fe-common v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/common)
+   Compiling fe-trace-facts-macros v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/trace-facts-macros)
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/hir)
+   Compiling fe-dataflow v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/fe-dataflow)
+   Compiling tree-sitter-fe v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/tree-sitter-fe)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/fe-web)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/codegen)
+   Compiling fe-fmt v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/fmt)
+   Compiling fe-trace-facts v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/trace-facts)
+   Compiling fe-test-utils v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/test-utils)
+   Compiling fe-resolver v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/resolver)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/fe)
+   Compiling fe-debug-export v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/debug-export)
+   Compiling fe-solc-runner v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/solc-runner)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/driver)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/mir)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/semantic-indexing)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/language-server)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/fe/crates/contract-harness)
+    Finished `release` profile [optimized] target(s) in 2m 31s
+Native compiler: /tmp/fevm-mvs-refresh-20261014-r1/bootstrap/bin/fe
