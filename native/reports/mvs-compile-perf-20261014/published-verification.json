@@ -1,0 +1,34 @@
+{
+  "complete": true,
+  "verified_at_utc": "2026-10-14T20:56:49.167307+00:00",
+  "method": "Fresh default-URL native/bootstrap.py --prepare-only; no repository overrides; compare every tracked file inventory and byte contents to accepted clean bootstrap sources",
+  "repositories": [
+    {
+      "project": "fe",
+      "revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+      "accepted_source": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/fe",
+      "published_source": "/tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe",
+      "tracked_files": 4462,
+      "all_tracked_bytes_identical": true,
+      "tracked_content_inventory_sha256": "090444fdaf471d643e370ab5ec8bd65d81e8101bcd79f599d9b816b8a79085d7",
+      "published_tree_clean": true
+    },
+    {
+      "project": "sonatina",
+      "revision": "159c00d6576757adc48c816d501a14386b12a902",
+      "accepted_source": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/sonatina",
+      "published_source": "/tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina",
+      "tracked_files": 1224,
+      "all_tracked_bytes_identical": true,
+      "tracked_content_inventory_sha256": "2bea7d5e9d3da9a73e08b1c8e4299c53cbf1e65dee86dbfc52013c3d3bb2b585",
+      "published_tree_clean": true
+    }
+  ],
+  "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
+  "accepted_compiler_sha256": "9b1efb263b1f2bf7bb85be49a23979ecaff7ecbb5d1fed128169be3daafd8814",
+  "compiler_rebuilt": false,
+  "reason_no_rebuild": "All tracked source bytes and locked dependencies match the compiler used for full acceptance. Prepare-only build.json.complete is false by design.",
+  "source_preparation": "published-source-preparation.json",
+  "source_preparation_log": "published-source-preparation.log",
+  "remote_ref_verification": "publication-push.json"
+}

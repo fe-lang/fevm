@@ -1,0 +1,29 @@
+{
+  "complete": true,
+  "authorization": "User: yes, publish. then summarize all of the work that should be merged into fe and sonatina",
+  "verified_at_utc": "2026-10-14T20:56:04.165185+00:00",
+  "push_order": [
+    "sonatina",
+    "fe"
+  ],
+  "refs": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "ref": "refs/heads/fevm-mvs-compile-perf-20261014",
+      "expected_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+      "remote_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+      "local_source_clean": true,
+      "push_result": "created new branch without force",
+      "push_repository": "git@github.com:sbillig/fe.git"
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "ref": "refs/heads/perf/fevm-enum-proof-traversal-20261014",
+      "expected_revision": "159c00d6576757adc48c816d501a14386b12a902",
+      "remote_revision": "159c00d6576757adc48c816d501a14386b12a902",
+      "local_source_clean": true,
+      "push_result": "created new branch without force",
+      "push_repository": "git@github.com:fe-lang/sonatina.git"
+    }
+  ]
+}

@@ -31,8 +31,8 @@ acceptance stages pass at O0/O1/O2 on x86_64 Linux
 ([evidence](native/reports/mvs-compile-perf-20261014/README.md)). The latest MVS
 refresh retains the owned native frame stack and enum speculation repair;
 verifier improvements roughly halve workspace preparation time at each
-optimization level. The new compiler prerequisites are local pending
-publication; native build instructions include local repository overrides. Earlier
+optimization level. Both compiler prerequisite branches are published, and fresh
+GitHub checkouts match the accepted compiler sources byte-for-byte. Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 

@@ -76,7 +76,7 @@ Fe's integration retains every other dependency input exactly. The Cargo lockfil
 diff changes only the six Sonatina package revisions; locked metadata validates
 the graph. [fe-pin-update.json](fe-pin-update.json) records the lock hash and the
 unrelated resolver changes that were prevented. Existing FeVM CALL edits and all
-runtime sources remain unchanged. Neither prerequisite branch has been pushed.
+runtime sources remain unchanged. Both prerequisite branches are published.
 
 
 Acceptance retains all 52 workspace tests, 35 CLI/allocator checks, 1,840 frame
@@ -107,8 +107,24 @@ The earlier enum-extraction speculation repair remains in the backend's history.
 [fe-prerequisite.patch](fe-prerequisite.patch) and
 [sonatina-performance.patch](sonatina-performance.patch) contain the exact changes.
 
-Both prerequisite branches are local pending explicit publication approval.
-[publication.json](publication.json) records the two proposed refs and their
-immutable tips. Until published, bootstrap requires local Fe and Sonatina Git
-repositories containing those commits. Existing published library pins remain
-unchanged.
+The [merge inventory](merge-summary.md) describes all four Fe/Sonatina commits,
+their dependency order and the upstream changes that supersede older patches.
+
+Both prerequisite branches are published after explicit user authorization:
+
+- [Fe `fevm-mvs-compile-perf-20261014`](https://github.com/sbillig/fe/tree/fevm-mvs-compile-perf-20261014) at `ed4ec1d4c`.
+- [Sonatina `perf/fevm-enum-proof-traversal-20261014`](https://github.com/fe-lang/sonatina/tree/perf/fevm-enum-proof-traversal-20261014) at `159c00d6`.
+
+[publication.json](publication.json) and [publication-push.json](publication-push.json)
+record the exact remote tips. Fresh default-URL bootstrap source preparation
+uses no repository overrides. All 4,462 tracked Fe files and 1,224 Sonatina files
+match the accepted clean bootstrap sources byte-for-byte, and the Cargo lock
+hash matches. [published-verification.json](published-verification.json) records
+that comparison. Prepare-only does not rebuild the compiler; its `build.json`
+retains `complete: false` by design. The complete compiler and native acceptance
+results above apply to these identical sources.
+
+Only the toolchain manifest's publication description changed after acceptance;
+[progress.json](progress.json) preserves the accepted input hashes and separately
+records this metadata change. Existing published library pins remain unchanged.
+The FeVM branch was not pushed.

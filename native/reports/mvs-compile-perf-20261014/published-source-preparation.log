@@ -1,0 +1,35 @@
++ git init /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe/.git/
++ git -C /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe fetch https://github.com/sbillig/fe ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08
+From https://github.com/sbillig/fe
+ * branch                ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe checkout --detach FETCH_HEAD
+HEAD is now at ed4ec1d4c Use faster enum-proof verification for native compilation
++ git init /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina/.git/
++ git -C /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina fetch https://github.com/fe-lang/sonatina 159c00d6576757adc48c816d501a14386b12a902
+From https://github.com/fe-lang/sonatina
+ * branch              159c00d6576757adc48c816d501a14386b12a902 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 159c00d6 Avoid repeated enum-proof array and capture scans
+Pinned clean sources prepared in /tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check; compiler build not performed.

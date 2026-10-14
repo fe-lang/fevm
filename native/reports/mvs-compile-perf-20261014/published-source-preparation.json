@@ -1,0 +1,29 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/sbillig/fe",
+    "fe_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
+    "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "local MVS compiler with enum-proof traversal fix; publication pending",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/fe",
+  "sonatina_source_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v20.20.2",
+  "npm": "10.8.2",
+  "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "target_directory": "/tmp/fevm-mvs-compile-perf-20261014-r1/published-source-check/target",
+  "complete": false
+}

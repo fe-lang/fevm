@@ -61,11 +61,12 @@ obsolete effect-provider test. The existing Sonatina enum-extraction pin update
 applies cleanly. The [refresh baseline](reports/mvs-refresh-20261014/README.md)
 records that applicability and the unchanged-source baseline measurements.
 
-Keccak and SwissTable pins remain published. The new Fe and Sonatina performance
-branches are local pending explicit publication approval. Until then, add
-`--fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina`
-to bootstrap, using repositories that contain the pinned commits. Existing CALL
-edits remain unchanged and uncommitted. The earlier
+Keccak and SwissTable pins remain published. The compiler prerequisites are now
+published at [Fe `fevm-mvs-compile-perf-20261014`](https://github.com/sbillig/fe/tree/fevm-mvs-compile-perf-20261014)
+and [Sonatina `perf/fevm-enum-proof-traversal-20261014`](https://github.com/fe-lang/sonatina/tree/perf/fevm-enum-proof-traversal-20261014).
+Fresh default-URL source preparation verifies that every tracked file and the
+lockfile match the accepted compiler sources byte-for-byte. Bootstrap uses the
+published URLs directly. Existing CALL edits remain unchanged and uncommitted. The earlier
 [MVS port evidence](reports/mvs-port-20261012/README.md) retains its historical
 compiler and published-source verification.
 

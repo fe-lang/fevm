@@ -1,6 +1,6 @@
 {
-  "complete": false,
-  "status": "Local implementation, source pins and all verification complete; publication approval pending",
+  "complete": true,
+  "status": "Implementation, acceptance, publication and cold remote source verification complete",
   "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
   "sonatina_branch": "perf/fevm-enum-proof-traversal-20261014",
   "sonatina_tests": 1954,
@@ -14,11 +14,8 @@
   "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
   "original_work_manifest": "../mvs-refresh-20261014/preserved-work.json",
   "production_runtime_changes": false,
-  "published": false,
-  "pending": [
-    "explicit authorization to publish the two prerequisite refs",
-    "cold published-source verification"
-  ],
+  "published": true,
+  "pending": [],
   "compiler_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08",
   "compiler_tests": 3789,
   "compiler_skips": 1,
@@ -177,5 +174,16 @@
   "reference_clippy": true,
   "reference_formatting": true,
   "all_nine_emitted_executables_identical": true,
-  "local_implementation_complete": true
+  "local_implementation_complete": true,
+  "published_source_verification": "published-verification.json",
+  "post_acceptance_metadata": {
+    "path": "native/toolchain.json",
+    "accepted_sha256": "8386d2bd055690c42bf7d8b95ccf787cfa96dd0f88cac5c4077f81ebdeb69dc0",
+    "current_sha256": "401ba63c80edca624d964bcefe51e38ffad010ee49802f19fabc2b7ab5008d02",
+    "changed_fields": [
+      "publication"
+    ],
+    "compiler_inputs_unchanged": true,
+    "explanation": "Only the publication description changed after acceptance; the historical accepted source_sha256 and manifest remain unchanged."
+  }
 }

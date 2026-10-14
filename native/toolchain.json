@@ -9,7 +9,7 @@
   "features": [
     "cranelift"
   ],
-  "publication": "local MVS compiler with enum-proof traversal fix; publication pending",
+  "publication": "published MVS compiler prerequisites with enum speculation and enum-proof traversal fixes",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

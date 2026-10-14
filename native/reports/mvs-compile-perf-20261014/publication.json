@@ -1,5 +1,5 @@
 {
-  "published": false,
+  "published": true,
   "requires_explicit_push_authorization": true,
   "instruction_source": "User-provided AGENTS.md: Push only when user asks.",
   "reviewed_at_utc": "2026-10-14T20:23:24.649506+00:00",
@@ -16,7 +16,9 @@
       "source_clean": true,
       "patch": "fe-prerequisite.patch",
       "patch_sha256": "d44010104a8c48b2bc5e3f1b0108a87ef12eb26257a40204691d8a6af4d4d068",
-      "remote_ref_absent_verified": true
+      "remote_ref_absent_verified": true,
+      "published": true,
+      "remote_revision": "ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08"
     },
     {
       "repository": "https://github.com/fe-lang/sonatina.git",
@@ -29,7 +31,14 @@
       "source_clean": true,
       "patch": "sonatina-performance.patch",
       "patch_sha256": "fa4cd9dcab5b05869df2b918568bd08323dab890f1d543464312c6afd935b270",
-      "remote_ref_absent_verified": true
+      "remote_ref_absent_verified": true,
+      "published": true,
+      "remote_revision": "159c00d6576757adc48c816d501a14386b12a902"
     }
-  ]
+  ],
+  "authorization_granted": true,
+  "authorization": "User: yes, publish. then summarize all of the work that should be merged into fe and sonatina",
+  "verified_at_utc": "2026-10-14T20:56:04.165185+00:00",
+  "remote_verification": "publication-push.json",
+  "published_source_verification": "published-verification.json"
 }
