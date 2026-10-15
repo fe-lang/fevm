@@ -1,0 +1,163 @@
+{
+  "scope": "Whole O1 workspace user CPU self samples; incomplete DWARF caller chains are not used for inclusive attribution",
+  "samples_header": [
+    "# Total Lost Samples: 0",
+    "# Samples: 32K of event 'task-clock:u'"
+  ],
+  "initialization_symbols_percent": 7.79,
+  "enum_proof_symbols_percent": 34.25,
+  "cranelift_symbols_percent": 6.4799999999999995,
+  "shape_symbols_percent": 6.5200000000000005,
+  "top_symbols": [
+    {
+      "percent": 2.96,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] _mi_page_malloc_zero"
+    },
+    {
+      "percent": 2.36,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] mi_free"
+    },
+    {
+      "percent": 1.84,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::types::Type>::is_obj_ref::{closure#0}, bool>"
+    },
+    {
+      "percent": 1.83,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::view_index::Paths> as core::ops::drop::Drop>::drop"
+    },
+    {
+      "percent": 1.73,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <rpds::map::red_black_tree_map::RedBlackTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>>::get::<sonatina_verifier::verify::function::enum_proofs::views::Step>"
+    },
+    {
+      "percent": 1.72,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+    },
+    {
+      "percent": 1.63,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_codegen::transform::aggregate::object_initialization::InitializedValue>::join"
+    },
+    {
+      "percent": 1.57,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_ir::value::ValueId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.57,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::join"
+    },
+    {
+      "percent": 1.56,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.53,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+    },
+    {
+      "percent": 1.44,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <cranelift_codegen::ir::dfg::DataFlowGraph>::value_def"
+    },
+    {
+      "percent": 1.36,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<sonatina_codegen::transform::aggregate::shape::with_uncached_layout<core::option::Option<sonatina_ir::types::Type>, sonatina_codegen::transform::aggregate::shape::aggregate_child_ty::{closure#0}>::{closure#0}, core::option::Option<sonatina_ir::types::Type>>"
+    },
+    {
+      "percent": 1.27,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <rpds::map::red_black_tree_map::Node<_, _, _>>::insert::ins::<u32, sonatina_codegen::transform::aggregate::object_initialization::InitializedValue, archery::shared_pointer::kind::arct::ArcTK>"
+    },
+    {
+      "percent": 1.21,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<sonatina_codegen::transform::aggregate::shape::with_uncached_layout<core::option::Option<usize>, sonatina_codegen::transform::aggregate::shape::aggregate_child_count::{closure#0}>::{closure#0}, core::option::Option<usize>>"
+    },
+    {
+      "percent": 1.18,
+      "command": "fe",
+      "object": "libc.so.6",
+      "symbol": "[.] 0x00000000001a1653"
+    },
+    {
+      "percent": 1.12,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <hashbrown::map::HashMap<regalloc2::ion::data_structures::LiveBundleIndex, (), core::hash::BuildHasherDefault<rustc_hash::FxHasher>>>::insert"
+    },
+    {
+      "percent": 1.11,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::objects::State>::join"
+    },
+    {
+      "percent": 1.09,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::view_index::Paths>>::dying_next"
+    },
+    {
+      "percent": 1.08,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <archery::shared_pointer::kind::arct::ArcTK as archery::shared_pointer::kind::SharedPointerKind>::make_mut::<rpds::map::red_black_tree_map::Node<u32, sonatina_codegen::transform::aggregate::object_initialization::InitializedValue, archery::shared_pointer::kind::arct::ArcTK>>::{closure#0}"
+    },
+    {
+      "percent": 1.05,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] mi_theap_malloc_aligned"
+    },
+    {
+      "percent": 1.04,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::Place as core::cmp::Ord>::cmp"
+    },
+    {
+      "percent": 1.02,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <triomphe::arc::Arc<rpds::map::red_black_tree_map::Node<u32, sonatina_codegen::transform::aggregate::object_initialization::InitializedValue, archery::shared_pointer::kind::arct::ArcTK>>>::drop_slow"
+    },
+    {
+      "percent": 1.0,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_codegen::transform::aggregate::provenance::ProvenanceSnapshot>::new"
+    },
+    {
+      "percent": 0.97,
+      "command": "fe",
+      "object": "fe",
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::view_index::ViewIndex>::update"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "complete": true,
+  "command": [
+    "cargo",
+    "+1.99.0",
+    "test",
+    "--release",
+    "--locked",
+    "--offline",
+    "--workspace",
+    "--all-features",
+    "--doc"
+  ],
+  "tests_passed": 0,
+  "tests_ignored": 2,
+  "source_commit": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "source_unchanged_after_implementation_commit": true
+}

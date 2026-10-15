@@ -17,7 +17,8 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0 \
+  --fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
@@ -28,11 +29,11 @@ pinned with its Sonatina revision, Rust version and Cargo lock hash in
 bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
 for reproducible compiler builds and the acceptance matrix. All seven native
 acceptance stages pass at O0/O1/O2 on x86_64 Linux
-([evidence](native/reports/mvs-compile-perf-20261014/README.md)). The latest MVS
-refresh retains the owned native frame stack and enum speculation repair;
-verifier improvements roughly halve workspace preparation time at each
-optimization level. Both compiler prerequisite branches are published, and fresh
-GitHub checkouts match the accepted compiler sources byte-for-byte. Earlier
+([evidence](native/reports/mvs-compile-perf-20261015/README.md)). The compiler is
+based on fork MVS `8de35117e`, with a repair for repeated initialization-state
+joins. O1 workspace preparation improves from 11m30s to 10m21s on unchanged
+inputs in the measured pair. The new compiler commits are local; bootstrap needs
+the repository overrides above until publication. Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 

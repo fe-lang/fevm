@@ -1,0 +1,866 @@
+{
+  "schema": 1,
+  "complete": true,
+  "created_utc": "2026-10-15T20:10:58.275374+00:00",
+  "runner_sha256": "27ca58b865a2af069f9363c8c33f4e609c2ecb32df425bee98e9efa9bc3d2ec7",
+  "host": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "platform": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+    "cpu": [
+      "processor\t: 0",
+      "vendor_id\t: AuthenticAMD",
+      "cpu family\t: 26",
+      "model\t\t: 68",
+      "model name\t: AMD Ryzen 5 9600X 6-Core Processor",
+      "stepping\t: 0",
+      "microcode\t: 0xffffffff",
+      "cpu MHz\t\t: 3892.585",
+      "cache size\t: 1024 KB",
+      "physical id\t: 0",
+      "siblings\t: 10",
+      "core id\t\t: 0",
+      "cpu cores\t: 5",
+      "apicid\t\t: 0",
+      "initial apicid\t: 0",
+      "fpu\t\t: yes",
+      "fpu_exception\t: yes",
+      "cpuid level\t: 13",
+      "wp\t\t: yes",
+      "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm rep_good nopl cpuid extd_apicid tsc_known_freq pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves xsaveerptr arat avx512vbmi avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm",
+      "bugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass srso spectre_v2_user",
+      "bogomips\t: 7785.17",
+      "TLB size\t: 192 4K pages",
+      "clflush size\t: 64",
+      "cache_alignment\t: 64"
+    ],
+    "clock_ticks_per_second": 1000000,
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+  },
+  "compiler": {
+    "path": "/tmp/fevm-mvs-compile-perf-20261015-r1/candidate-bootstrap/bin/fe",
+    "version": "fe 26.4.0 (d7fdfbb73)",
+    "sha256": "c9ffe9ef6d74f3acd62ba76dc19db17769f66c58eadb26d124a21aa1fb1435ff"
+  },
+  "harness_revision": "28f50fb5670cf7411172f7f44751d1aa2b8e3e56",
+  "harness_dirty": true,
+  "timing": "process CPU clock, input/output and startup excluded; dependent op/xor loop; build includes compiler startup, link and report; relink measured separately",
+  "results": [
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.19823860004544258
+      ],
+      "median_build_seconds": 0.19823860004544258,
+      "object_bytes": 13112,
+      "text_bytes": 9385,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010641899891197681,
+      "executable_sha256": "4ccaf0e805337f5c8323575d54cf427c0ed8e278286c242a791a753d02090388",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.21911519998684525
+      ],
+      "median_build_seconds": 0.21911519998684525,
+      "object_bytes": 8408,
+      "text_bytes": 6864,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010683600092306733,
+      "executable_sha256": "0218f2cee73b40b3f8221831912b68ff7d1955cabb7d9e2c4cf0a1a95b6605cf",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.21784459915943444
+      ],
+      "median_build_seconds": 0.21784459915943444,
+      "object_bytes": 8408,
+      "text_bytes": 6864,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010330000193789601,
+      "executable_sha256": "0218f2cee73b40b3f8221831912b68ff7d1955cabb7d9e2c4cf0a1a95b6605cf",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.19814890017732978
+      ],
+      "median_build_seconds": 0.19814890017732978,
+      "object_bytes": 8312,
+      "text_bytes": 4612,
+      "executable_bytes": 21400,
+      "relink_seconds": 0.010633999947458506,
+      "executable_sha256": "7d959f142a892c9160c03321970dc37f098c31d07daab155fb0ca82ba5a220ae",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.2186020000372082
+      ],
+      "median_build_seconds": 0.2186020000372082,
+      "object_bytes": 4240,
+      "text_bytes": 2696,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010781500022858381,
+      "executable_sha256": "2aa674a5c7572f8c13455168c73e961866b7274826dcecba1d008e28cc01f9ef",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.21870479988865554
+      ],
+      "median_build_seconds": 0.21870479988865554,
+      "object_bytes": 4240,
+      "text_bytes": 2696,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010502399876713753,
+      "executable_sha256": "2aa674a5c7572f8c13455168c73e961866b7274826dcecba1d008e28cc01f9ef",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.19739169999957085
+      ],
+      "median_build_seconds": 0.19739169999957085,
+      "object_bytes": 13496,
+      "text_bytes": 9769,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010915799997746944,
+      "executable_sha256": "0418d05efbac89d31168962446091be049bf664d7f7f3ce9e00171eabf9af3c0",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.22084409999661148
+      ],
+      "median_build_seconds": 0.22084409999661148,
+      "object_bytes": 8776,
+      "text_bytes": 7232,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010465600062161684,
+      "executable_sha256": "4a6aa8757311818c5a47df6c9e84ee7b29f9d4e2cc93ef8808c7a08e121683a7",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.21958560007624328
+      ],
+      "median_build_seconds": 0.21958560007624328,
+      "object_bytes": 8776,
+      "text_bytes": 7232,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010583499912172556,
+      "executable_sha256": "4a6aa8757311818c5a47df6c9e84ee7b29f9d4e2cc93ef8808c7a08e121683a7",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.20020340103656054
+      ],
+      "median_build_seconds": 0.20020340103656054,
+      "object_bytes": 9000,
+      "text_bytes": 5156,
+      "executable_bytes": 21400,
+      "relink_seconds": 0.010515899863094091,
+      "executable_sha256": "7c3993c0909d02aef2b7056750da1f32dc4ac6d602b4069d741b5915c0923dae",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.21999170002527535
+      ],
+      "median_build_seconds": 0.21999170002527535,
+      "object_bytes": 4776,
+      "text_bytes": 3232,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010441800113767385,
+      "executable_sha256": "0ef73d6129372e16cf04c8f525447a95a02dcc2112163a75a13f89ca818dfb76",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.22218240005895495
+      ],
+      "median_build_seconds": 0.22218240005895495,
+      "object_bytes": 4776,
+      "text_bytes": 3232,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010589800076559186,
+      "executable_sha256": "0ef73d6129372e16cf04c8f525447a95a02dcc2112163a75a13f89ca818dfb76",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.1977286001201719
+      ],
+      "median_build_seconds": 0.1977286001201719,
+      "object_bytes": 14432,
+      "text_bytes": 10705,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010591499973088503,
+      "executable_sha256": "67e3d4757432140729b32b542ff4fba91d73c21215eedb451bb09b06f7d8270b",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.22053489997051656
+      ],
+      "median_build_seconds": 0.22053489997051656,
+      "object_bytes": 9848,
+      "text_bytes": 8304,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.010549800004810095,
+      "executable_sha256": "2582291bf5eae390b226786c30e6a9e632dea9579cecd858a650d1956b80e34c",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.22189019992947578
+      ],
+      "median_build_seconds": 0.22189019992947578,
+      "object_bytes": 9848,
+      "text_bytes": 8304,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.010632300050929189,
+      "executable_sha256": "2582291bf5eae390b226786c30e6a9e632dea9579cecd858a650d1956b80e34c",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.19937779987230897
+      ],
+      "median_build_seconds": 0.19937779987230897,
+      "object_bytes": 9288,
+      "text_bytes": 5451,
+      "executable_bytes": 21456,
+      "relink_seconds": 0.010516499867662787,
+      "executable_sha256": "b8631016d7ca73c190474d4e1677e4e502fccbcf06249fdcfc33c142bf5f6497",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.2259782999753952
+      ],
+      "median_build_seconds": 0.2259782999753952,
+      "object_bytes": 5400,
+      "text_bytes": 3680,
+      "executable_bytes": 16184,
+      "relink_seconds": 0.010569300036877394,
+      "executable_sha256": "c3df9aa2990e0b3a4bfdfd207ecf6f02446bd88c479dda1f02f087dedb1281da",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.2279841999989003
+      ],
+      "median_build_seconds": 0.2279841999989003,
+      "object_bytes": 5400,
+      "text_bytes": 3680,
+      "executable_bytes": 16184,
+      "relink_seconds": 0.010618699947372079,
+      "executable_sha256": "c3df9aa2990e0b3a4bfdfd207ecf6f02446bd88c479dda1f02f087dedb1281da",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.1987645998597145
+      ],
+      "median_build_seconds": 0.1987645998597145,
+      "object_bytes": 14440,
+      "text_bytes": 10713,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010705600026994944,
+      "executable_sha256": "ff6466cea0b8a327b13ac2c36db38e12f1abefe17c2ed5c3a82d0d8267479059",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.2179974999744445
+      ],
+      "median_build_seconds": 0.2179974999744445,
+      "object_bytes": 9816,
+      "text_bytes": 8272,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.010632999939844012,
+      "executable_sha256": "e1b36a73f76c76cdf4b5172e3348b7ff39bbdb10d70c26c90b9e2672d732d70d",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.21977360104210675
+      ],
+      "median_build_seconds": 0.21977360104210675,
+      "object_bytes": 9816,
+      "text_bytes": 8272,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.010456599993631244,
+      "executable_sha256": "e1b36a73f76c76cdf4b5172e3348b7ff39bbdb10d70c26c90b9e2672d732d70d",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.19768660003319383
+      ],
+      "median_build_seconds": 0.19768660003319383,
+      "object_bytes": 9288,
+      "text_bytes": 5451,
+      "executable_bytes": 21456,
+      "relink_seconds": 0.010203000158071518,
+      "executable_sha256": "708bec7fa8e260e0b20841dd7d68dd23a368812ea117d6cfc2e7b7c9d9b5b5cc",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.22877139993943274
+      ],
+      "median_build_seconds": 0.22877139993943274,
+      "object_bytes": 4640,
+      "text_bytes": 3024,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010575199965387583,
+      "executable_sha256": "9053d975bf498408dcacc3731436687b1e3e8d0824bdd3cdffcf13e72b6350e9",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.2280858000740409
+      ],
+      "median_build_seconds": 0.2280858000740409,
+      "object_bytes": 4640,
+      "text_bytes": 3024,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010431600036099553,
+      "executable_sha256": "9053d975bf498408dcacc3731436687b1e3e8d0824bdd3cdffcf13e72b6350e9",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.19757550000213087
+      ],
+      "median_build_seconds": 0.19757550000213087,
+      "object_bytes": 13416,
+      "text_bytes": 9689,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010691399918869138,
+      "executable_sha256": "1aa238464dca6ebf80b1c5f3d76d06e649a9c94b4c4293aaf61a352802f604a1",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.22008279990404844
+      ],
+      "median_build_seconds": 0.22008279990404844,
+      "object_bytes": 8568,
+      "text_bytes": 7024,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010420299833640456,
+      "executable_sha256": "1db6fa4de2de4daeb417943a1571e0e88f2619bc9a1988d024720f47166ba9e4",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.21841900004073977
+      ],
+      "median_build_seconds": 0.21841900004073977,
+      "object_bytes": 8568,
+      "text_bytes": 7024,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010589899960905313,
+      "executable_sha256": "1db6fa4de2de4daeb417943a1571e0e88f2619bc9a1988d024720f47166ba9e4",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.19770260015502572
+      ],
+      "median_build_seconds": 0.19770260015502572,
+      "object_bytes": 7544,
+      "text_bytes": 4011,
+      "executable_bytes": 21352,
+      "relink_seconds": 0.010279000038281083,
+      "executable_sha256": "a51fa9be4de8d5b46e0d8ac5d8f79bba118e7e84ece0025942354d509b065de6",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.22134679998271167
+      ],
+      "median_build_seconds": 0.22134679998271167,
+      "object_bytes": 4392,
+      "text_bytes": 2776,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010538900038227439,
+      "executable_sha256": "74e05af95fd16e057e4790469a44ea7c8c9800bc6dafba05ffde76a76ddcba3e",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.21947510004974902
+      ],
+      "median_build_seconds": 0.21947510004974902,
+      "object_bytes": 4392,
+      "text_bytes": 2776,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010297800181433558,
+      "executable_sha256": "74e05af95fd16e057e4790469a44ea7c8c9800bc6dafba05ffde76a76ddcba3e",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.1976585010997951
+      ],
+      "median_build_seconds": 0.1976585010997951,
+      "object_bytes": 13720,
+      "text_bytes": 9993,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010414200136438012,
+      "executable_sha256": "fc663dfd48d32d3fb16cb10ffa26adbe0726c88640f467d77af1e7920ca2c2ea",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.2198637998662889
+      ],
+      "median_build_seconds": 0.2198637998662889,
+      "object_bytes": 8640,
+      "text_bytes": 7096,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.01073420001193881,
+      "executable_sha256": "290bd45c5b2d8c2158fa528bd37fe748cc5e7d6ef8185686544e5a0e0c550a30",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.21949469996616244
+      ],
+      "median_build_seconds": 0.21949469996616244,
+      "object_bytes": 8640,
+      "text_bytes": 7096,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.0105575998313725,
+      "executable_sha256": "290bd45c5b2d8c2158fa528bd37fe748cc5e7d6ef8185686544e5a0e0c550a30",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.19821970001794398
+      ],
+      "median_build_seconds": 0.19821970001794398,
+      "object_bytes": 7544,
+      "text_bytes": 4011,
+      "executable_bytes": 21352,
+      "relink_seconds": 0.010711600072681904,
+      "executable_sha256": "efbe3b358da9bc59603359fe599670bfa343f5e6df0f184cd24483f34749b81a",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.22043019998818636
+      ],
+      "median_build_seconds": 0.22043019998818636,
+      "object_bytes": 4328,
+      "text_bytes": 2712,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010652800090610981,
+      "executable_sha256": "117cd6b0f40c3258642420523647c0723edca842c00396a9e0a449a5499a7b3b",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.2216708001215011
+      ],
+      "median_build_seconds": 0.2216708001215011,
+      "object_bytes": 4328,
+      "text_bytes": 2712,
+      "executable_bytes": 16160,
+      "relink_seconds": 0.010737300151959062,
+      "executable_sha256": "117cd6b0f40c3258642420523647c0723edca842c00396a9e0a449a5499a7b3b",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.19968930003233254
+      ],
+      "median_build_seconds": 0.19968930003233254,
+      "object_bytes": 13112,
+      "text_bytes": 9385,
+      "executable_bytes": 25496,
+      "relink_seconds": 0.010816900059580803,
+      "executable_sha256": "9c52ee212d69e99707e790abbd80660165bf2ee1e73b50b498c99fe8899cba7b",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.22070159995928407
+      ],
+      "median_build_seconds": 0.22070159995928407,
+      "object_bytes": 8376,
+      "text_bytes": 6832,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010616199811920524,
+      "executable_sha256": "ad70d19ec8445764a21dfce1cf6473dbec8b1d2e781517cf846b342f37a63bed",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.22005300293676555
+      ],
+      "median_build_seconds": 0.22005300293676555,
+      "object_bytes": 8376,
+      "text_bytes": 6832,
+      "executable_bytes": 20216,
+      "relink_seconds": 0.010608700104057789,
+      "executable_sha256": "ad70d19ec8445764a21dfce1cf6473dbec8b1d2e781517cf846b342f37a63bed",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.19816740206442773
+      ],
+      "median_build_seconds": 0.19816740206442773,
+      "object_bytes": 6576,
+      "text_bytes": 3196,
+      "executable_bytes": 17176,
+      "relink_seconds": 0.010744899976998568,
+      "executable_sha256": "32f3ffd857efba49ec3bdac90bde0e41e47bb4bdde35460256b820c6bcec561a",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.22198100201785564
+      ],
+      "median_build_seconds": 0.22198100201785564,
+      "object_bytes": 3784,
+      "text_bytes": 2240,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010398201178759336,
+      "executable_sha256": "4c780b9bb20b066d16119d3f0d10651d3ee98321b86c5e5b4714c5e1cb02f996",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.21876880177296698
+      ],
+      "median_build_seconds": 0.21876880177296698,
+      "object_bytes": 3784,
+      "text_bytes": 2240,
+      "executable_bytes": 16120,
+      "relink_seconds": 0.010513199958950281,
+      "executable_sha256": "4c780b9bb20b066d16119d3f0d10651d3ee98321b86c5e5b4714c5e1cb02f996",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.20213100197724998
+      ],
+      "median_build_seconds": 0.20213100197724998,
+      "object_bytes": 16008,
+      "text_bytes": 12281,
+      "executable_bytes": 29592,
+      "relink_seconds": 0.010461400030180812,
+      "executable_sha256": "dea3c28f5254539b1c01d96708f708c78af36ef518a2f4938350eaa2a5434028",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.223618702031672
+      ],
+      "median_build_seconds": 0.223618702031672,
+      "object_bytes": 10912,
+      "text_bytes": 9368,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.010743401013314724,
+      "executable_sha256": "288dacbbd314ff3f552db2488f017d1ae9e681d5d2933928b02a0d3b9ba79983",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.2247264019679278
+      ],
+      "median_build_seconds": 0.2247264019679278,
+      "object_bytes": 10912,
+      "text_bytes": 9368,
+      "executable_bytes": 24312,
+      "relink_seconds": 0.01069020014256239,
+      "executable_sha256": "288dacbbd314ff3f552db2488f017d1ae9e681d5d2933928b02a0d3b9ba79983",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.20179610303603113
+      ],
+      "median_build_seconds": 0.20179610303603113,
+      "object_bytes": 10576,
+      "text_bytes": 6380,
+      "executable_bytes": 21560,
+      "relink_seconds": 0.010368800023570657,
+      "executable_sha256": "62e3eed37466fded458bf081002c0457352deb83dad4012c5ff6f3770e4f8fe7",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.22520560189150274
+      ],
+      "median_build_seconds": 0.22520560189150274,
+      "object_bytes": 6192,
+      "text_bytes": 4496,
+      "executable_bytes": 20280,
+      "relink_seconds": 0.010524299927055836,
+      "executable_sha256": "bacc3d5cf57eddf6f84bc264792555b509eed29d009f2e50ca09c6f5deaf8b1c",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.22571740206331015
+      ],
+      "median_build_seconds": 0.22571740206331015,
+      "object_bytes": 6192,
+      "text_bytes": 4496,
+      "executable_bytes": 20280,
+      "relink_seconds": 0.010595199884846807,
+      "executable_sha256": "bacc3d5cf57eddf6f84bc264792555b509eed29d009f2e50ca09c6f5deaf8b1c",
+      "measurements": []
+    }
+  ]
+}

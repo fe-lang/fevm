@@ -39,36 +39,41 @@ version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler derives from
 [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs) at
-`1b4e287c65a0981b385a18c9d49195c92f8f2197`, with native `FixedStack`, enum
-speculation repair and faster enum-proof verification integrated at
-`ed4ec1d4c3eb5fe4090caedf1235f6c6df375d08`.
-It uses Sonatina `159c00d6576757adc48c816d501a14386b12a902` and Rust 1.99.0.
-The default [`toolchain.json`](toolchain.json) records these immutable revisions
-and the Cargo lock hash. No further runtime-source migration is required.
+`8de35117e3de35c2f92967ec260e124db87c85bb`. This base already contains native
+`FixedStack` and the merged enum-proof fixes. Fe integration
+`d7fdfbb73956b2f3d41e7f4b8101a5a49de46509` pins Sonatina
+`498ce58134505992ccd1146dcbdb94a11483fcf0`, which avoids repeated initialization
+joins and retains shared unchanged facts. It uses Rust 1.99.0. The default
+[`toolchain.json`](toolchain.json) records these exact revisions and lock hash.
+No additional FeVM runtime migration is needed.
 
 All seven native acceptance stages pass on x86_64 Linux: 52 workspace tests,
 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at
-each of O0/O1/O2, plus 74,676 arithmetic checks. Workspace preparation is roughly
-twice as fast; the complete matrix falls from 78 to 44 minutes. All nine
-CLI/frame/state executables remain byte-for-byte identical.
-The compiler passes all 3,789 release workspace/all-feature tests; Sonatina
-passes 1,954 tests and 353 filechecks. Strict Clippy and nightly formatting pass.
-See [performance and acceptance evidence](reports/mvs-compile-perf-20261014/README.md).
+each of O0/O1/O2, plus 74,676 arithmetic checks. O1 workspace preparation improves
+**690.43 → 620.67 seconds (10.10% less wall time)** in one matched-input run per
+compiler, with one suite/Rayon worker. All three main CLI executables are
+byte-for-byte identical to the latest-MVS baseline. The complete candidate matrix
+takes 40.97 minutes; no full-matrix baseline comparison is claimed for this revision.
 
-The native stack implementation and fixtures apply unchanged to the latest MVS
-base; the Rust test harness needs a small merge because upstream replaced an
-obsolete effect-provider test. The existing Sonatina enum-extraction pin update
-applies cleanly. The [refresh baseline](reports/mvs-refresh-20261014/README.md)
-records that applicability and the unchanged-source baseline measurements.
+Fe passes 3,826 release workspace/all-feature tests; Sonatina passes 1,958 tests
+and 355 filechecks. Docs/doctests, strict Clippy, nightly formatting and release
+notes pass. The Python harness's 13 tests and Rust reference's nine tests pass.
+See [performance and acceptance evidence](reports/mvs-compile-perf-20261015/README.md).
 
-Keccak and SwissTable pins remain published. The compiler prerequisites are now
-published at [Fe `fevm-mvs-compile-perf-20261014`](https://github.com/sbillig/fe/tree/fevm-mvs-compile-perf-20261014)
-and [Sonatina `perf/fevm-enum-proof-traversal-20261014`](https://github.com/fe-lang/sonatina/tree/perf/fevm-enum-proof-traversal-20261014).
-Fresh default-URL source preparation verifies that every tracked file and the
-lockfile match the accepted compiler sources byte-for-byte. Bootstrap uses the
-published URLs directly. Existing CALL edits remain unchanged and uncommitted. The earlier
-[MVS port evidence](reports/mvs-port-20261012/README.md) retains its historical
-compiler and published-source verification.
+The new compiler commits remain local on `perf/fevm-native-compile-20261015`
+(Fe) and `perf/fevm-verifier-20261015` (Sonatina). Bootstrap therefore requires
+`--fe-repository` and `--sonatina-repository` paths containing those exact commits.
+On the investigation machine these are
+`/tmp/fevm-mvs-compile-perf-20261015-r1/fe` and
+`/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina`. The implementation and complete
+verification are finished; publication has not been requested. Keccak and
+SwissTable pins remain published and unchanged. Existing CALL edits remain
+unchanged and uncommitted.
+
+The earlier [enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
+[MVS refresh](reports/mvs-refresh-20261014/README.md) and
+[MVS port](reports/mvs-port-20261012/README.md) retain their historical compilers,
+measurements and publication evidence.
 
 Earlier [owned-input results](reports/owned-inputs.md), the
 [logs/BLOBHASH report](reports/logs-blobhash.md), and the
@@ -83,7 +88,8 @@ acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0 \
+  --fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```

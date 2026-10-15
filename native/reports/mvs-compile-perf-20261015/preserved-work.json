@@ -1,0 +1,38 @@
+{
+  "base_revision": "28f50fb5670cf7411172f7f44751d1aa2b8e3e56",
+  "tracked": [
+    "ingots/evm/src/constants.fe",
+    "ingots/evm/src/opcodes.fe",
+    "ingots/evm/src/transaction.fe",
+    "ingots/evm/src/transaction_runtime.fe",
+    "ingots/evm/src/vm.fe",
+    "native/differential/state_driver/src/lib.fe",
+    "native/fixtures/journal/src/lib.fe",
+    "native/fixtures/logs/src/lib.fe",
+    "native/perf/checkpoints.fe",
+    "native/perf/run.py"
+  ],
+  "untracked": [
+    "ingots/evm/src/calls_runtime.fe",
+    "native/perf/calls.fe",
+    "p1b.log",
+    "p1b.time"
+  ],
+  "sha256": {
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/opcodes.fe": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41",
+    "ingots/evm/src/transaction.fe": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5",
+    "ingots/evm/src/transaction_runtime.fe": "bc47c302043226e1ce6573ab419ef01f918cc2dacbdb54cde9ac11ea0d1fcef3",
+    "ingots/evm/src/vm.fe": "cbe2ac637deb6d3485e949539f44e2e1f254b909441ca9642691ca2a4a7f16c9",
+    "native/differential/state_driver/src/lib.fe": "108422f6457e78d8ec0402528cec07515b89ce64fa907fc55731d01059e1ef71",
+    "native/fixtures/journal/src/lib.fe": "95e06230ce00a8c18d465f0050a498034429eca932bfcc2c944f04e4a5764fa0",
+    "native/fixtures/logs/src/lib.fe": "071195704f5edcde7c1cd86a9191fd6f1c219ba06f487709c81d35214581efef",
+    "native/perf/checkpoints.fe": "8f5df035d8c93207bc82af687d8e7475ae066cdfd94a3661fae16f5885979f18",
+    "native/perf/run.py": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+    "ingots/evm/src/calls_runtime.fe": "bf02217a0b65a9a300c6227c37cfe8686bfab55432696ca36f7730bc45430022",
+    "native/perf/calls.fe": "799ba6929dfc0a0c1e622ca0124b2c5dc82682614ae62d5778381c8dda725b6a",
+    "p1b.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "p1b.time": "1b0afd1200fd68c958c447a6558aa507d7f109a9a0495bea329e80125f8b1dff"
+  },
+  "recorded_at_utc": "2026-10-15T18:45:50.489558+00:00"
+}

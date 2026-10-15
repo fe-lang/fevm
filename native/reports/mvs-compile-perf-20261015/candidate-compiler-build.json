@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/sbillig/fe",
+    "fe_revision": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+    "cargo_lock_sha256": "5300766d6da2ae18663923f7c1ba769d793ca611604b070fac5a32cfa151b0db",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "local latest-MVS compiler with aggregate initialization join repair; publication pending",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/tmp/fevm-mvs-compile-perf-20261015-r1/candidate-bootstrap/fe",
+  "sonatina_source_directory": "/tmp/fevm-mvs-compile-perf-20261015-r1/candidate-bootstrap/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v20.20.2",
+  "npm": "10.8.2",
+  "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "target_directory": "/tmp/fevm-mvs-target-preserved-on-disk",
+  "complete": true,
+  "compiler_build_seconds": 215.0782454838045,
+  "compiler": "/tmp/fevm-mvs-compile-perf-20261015-r1/candidate-bootstrap/bin/fe",
+  "compiler_sha256": "c9ffe9ef6d74f3acd62ba76dc19db17769f66c58eadb26d124a21aa1fb1435ff",
+  "compiler_version": "fe 26.4.0 (d7fdfbb73)"
+}

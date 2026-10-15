@@ -1,0 +1,17 @@
+{
+  "complete": true,
+  "scope": "One unchanged-input one-worker O1 workspace preparation/test run per compiler on x86_64 Linux; integration observation, not a statistical speedup estimate",
+  "baseline_wall_seconds": 690.43,
+  "candidate_wall_seconds": 620.6659409478307,
+  "saved_seconds": 69.76405905216927,
+  "wall_time_reduction_percent": 10.104436228461868,
+  "speedup": 1.1124019451520593,
+  "workspace_tests_per_compiler": 52,
+  "original_work_files_unchanged": 14,
+  "frozen_inputs_unchanged": 68,
+  "baseline_profile_scope": "Full run plus two diagnostic 30s captures; wrapper polling interval excluded from time",
+  "candidate_profile_scope": "49Hz user-CPU profile attached after 5.95 compiler CPU seconds; profile startup excluded; stage timer covers full run",
+  "no_concurrent_task_builds_or_tests": true,
+  "baseline_initialization_named_percent": 7.79,
+  "candidate_initialization_named_percent": 2.37
+}

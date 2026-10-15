@@ -1,0 +1,87 @@
+{
+  "revision": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "parent": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "branch": "perf/fevm-native-compile-20261015",
+  "source_clean": true,
+  "published": false,
+  "sonatina_revision": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+  "cargo_lock_sha256": "5300766d6da2ae18663923f7c1ba769d793ca611604b070fac5a32cfa151b0db",
+  "checks": {
+    "complete": true,
+    "checks": [
+      {
+        "name": "format",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all"
+        ],
+        "status": 0,
+        "seconds": 1.7318568550981581
+      },
+      {
+        "name": "nextest",
+        "command": [
+          "cargo",
+          "+1.99.0",
+          "nextest",
+          "r",
+          "--release",
+          "--no-fail-fast",
+          "--locked",
+          "--workspace",
+          "--all-features"
+        ],
+        "status": 0,
+        "seconds": 491.58681838191114
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "+1.99.0",
+          "clippy",
+          "--release",
+          "--locked",
+          "--workspace",
+          "--all-features",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": 0,
+        "seconds": 26.571894725086167
+      },
+      {
+        "name": "notes",
+        "command": [
+          "make",
+          "check-notes",
+          "EISENBOTE=/tmp/fevm-mvs-refresh-20261014-r1/eisenbote"
+        ],
+        "status": 0,
+        "seconds": 0.17562219919636846
+      },
+      {
+        "name": "format-check",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "status": 0,
+        "seconds": 1.610915289958939
+      }
+    ]
+  },
+  "tests_passed": 3826,
+  "tests_skipped": 1,
+  "additional_post_commit_checks": {
+    "doctests": "fe-doctests.json"
+  }
+}

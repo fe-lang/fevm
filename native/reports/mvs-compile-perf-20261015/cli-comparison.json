@@ -1,0 +1,30 @@
+{
+  "complete": true,
+  "scope": "Main FeVM CLI executable at each O0/O1/O2; all 35 CLI/allocator checks per level pass for each compiler",
+  "comparisons": [
+    {
+      "level": "0",
+      "baseline_sha256": "107955e26e19fce65e212e0bfb944eb94fa1283d4075360668b69904f45de916",
+      "candidate_sha256": "107955e26e19fce65e212e0bfb944eb94fa1283d4075360668b69904f45de916",
+      "byte_identical": true,
+      "checks_per_compiler": 35
+    },
+    {
+      "level": "1",
+      "baseline_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "candidate_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "byte_identical": true,
+      "checks_per_compiler": 35
+    },
+    {
+      "level": "2",
+      "baseline_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "candidate_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "byte_identical": true,
+      "checks_per_compiler": 35
+    }
+  ],
+  "all_three_cli_executables_identical": true,
+  "baseline_cli_timings_used": false,
+  "baseline_cli_timing_exclusion": "Baseline CLI ran concurrently with candidate Rust bootstrap, solely for correctness and executable hashes."
+}

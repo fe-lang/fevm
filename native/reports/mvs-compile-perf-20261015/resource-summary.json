@@ -1,0 +1,13 @@
+{
+  "sample_interval_seconds": 10,
+  "peak_sampled_rss_bytes_by_kind": {
+    "workspace-0": 4772974592,
+    "workspace-1": 7364276224,
+    "workspace-2": 7382683648,
+    "build-0": 5470838784,
+    "build-1": 6794874880,
+    "build-2": 6818451456
+  },
+  "all_stage_wall_seconds": 2458.122701830929,
+  "complete": true
+}

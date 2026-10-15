@@ -1,0 +1,8 @@
+{
+  "scope": "Baseline CLI correctness and executable-byte reference only; native timings excluded from performance comparisons",
+  "baseline_cli_session": 89727,
+  "candidate_bootstrap_session": 55633,
+  "overlap_intentional": true,
+  "baseline_workspace_and_direct_join_timings_complete_before_overlap": true,
+  "candidate_native_measurements_wait_for_both_processes_to_finish": true
+}

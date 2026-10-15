@@ -1,0 +1,941 @@
+{
+  "complete": true,
+  "scope": "Private InitializedValue::join on valid nested single-child aggregate states, 256 repeated joins per case; parsing/construction excluded from timers; Rust 1.99.0 release default-feature codegen test binaries",
+  "samples_per_case": 5,
+  "warmup_pairs": 1,
+  "alternating_order": true,
+  "no_concurrent_task_builds_or_tests": true,
+  "results": [
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "baseline_seconds": 0.0002219,
+      "candidate_seconds": 3.4e-06,
+      "speedup": 65.26470588235294
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "baseline_seconds": 0.0002209,
+      "candidate_seconds": 5.41e-05,
+      "speedup": 4.0831792975970425
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "baseline_seconds": 0.0013003,
+      "candidate_seconds": 3.4e-06,
+      "speedup": 382.4411764705882
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "baseline_seconds": 0.0013075,
+      "candidate_seconds": 0.0001342,
+      "speedup": 9.742921013412817
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "baseline_seconds": 0.0235719,
+      "candidate_seconds": 3.4e-06,
+      "speedup": 6932.911764705882
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "baseline_seconds": 0.023572001,
+      "candidate_seconds": 0.0003775,
+      "speedup": 62.44238675496688
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "baseline_seconds": 0.388649002,
+      "candidate_seconds": 3.4e-06,
+      "speedup": 114308.53
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "baseline_seconds": 0.391835301,
+      "candidate_seconds": 0.0007204,
+      "speedup": 543.9135216546364
+    }
+  ],
+  "samples": [
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.000247,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002297,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0013456,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0013952,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0245077,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0246143,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.390686301,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.392174101,
+      "compiler": "baseline-r2",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 8.59e-05,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0001335,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0003585,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0007465,
+      "compiler": "candidate",
+      "sample": 0,
+      "warmup": true
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 5.41e-05,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0001342,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0003775,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0007034,
+      "compiler": "candidate",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0002184,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002209,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0014026,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0013019,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0236115,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.023572001,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.390275901,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.392147501,
+      "compiler": "baseline-r2",
+      "sample": 1,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0002309,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002198,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0013003,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0013212,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0234668,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0235551,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.388589801,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.391650602,
+      "compiler": "baseline-r2",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 6.31e-05,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.000133,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.000359,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0007204,
+      "compiler": "candidate",
+      "sample": 2,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 5.41e-05,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0001328,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0003917,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.000706,
+      "compiler": "candidate",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0002185,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002752,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0013118,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0013574,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0236197,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0235444,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.388804201,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.392051701,
+      "compiler": "baseline-r2",
+      "sample": 3,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0002219,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002462,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0012906,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0013075,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.023468,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0235774,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.388649002,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.391835301,
+      "compiler": "baseline-r2",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.6e-06,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 6.23e-05,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0001417,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0003592,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0007233,
+      "compiler": "candidate",
+      "sample": 4,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 5.39e-05,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.5e-06,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0001367,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0004024,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 3.4e-06,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0007253,
+      "compiler": "candidate",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0002261,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 2,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0002202,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0012895,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 4,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0012936,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.0235719,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 8,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.0236688,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "identical",
+      "iterations": 256,
+      "seconds": 0.388608401,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    },
+    {
+      "depth": 12,
+      "case": "changed",
+      "iterations": 256,
+      "seconds": 0.391713701,
+      "compiler": "baseline-r2",
+      "sample": 5,
+      "warmup": false
+    }
+  ],
+  "failed_initial_fixture_excluded": "probe-correction.json"
+}

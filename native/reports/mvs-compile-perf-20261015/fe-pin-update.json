@@ -1,0 +1,8 @@
+{
+  "upstream_mvs": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "old_sonatina_revision": "1544e570257cbb1e453283b8a81b25b828ec3ca0",
+  "sonatina_revision": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+  "cargo_lock_sha256": "5300766d6da2ae18663923f7c1ba769d793ca611604b070fac5a32cfa151b0db",
+  "only_sonatina_source_revisions_changed": true,
+  "other_dependency_inputs_unchanged": true
+}

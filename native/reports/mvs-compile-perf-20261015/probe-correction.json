@@ -1,0 +1,8 @@
+{
+  "reason": "Own synthetic fixture used one-line IR blocks, rejected by parser; corrected to multiline blocks",
+  "initial_probe_sha256": "cabb3c637e6d64df9d64fccd4839b8e3fb0ac8d130b1900cf00a9923d7976a12",
+  "corrected_probe_sha256": "18a27aaf372406d2922575b4e3dfeb0740dcac63d8d07bfd2eac4f7f7599e4c9",
+  "initial_log": "join-baseline-first.log",
+  "measurements_from_failed_setup_used": false,
+  "dependency_bug": false
+}
