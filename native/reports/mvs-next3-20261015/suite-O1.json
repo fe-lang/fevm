@@ -1,0 +1,20 @@
+{
+  "status": 0,
+  "seconds": 401.405444992939,
+  "command": [
+    "/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/bin/fe",
+    "test",
+    "--backend",
+    "native",
+    "--jobs",
+    "1",
+    "-O",
+    "1",
+    "--report",
+    "--report-out",
+    "/tmp/fevm-mvs-next3-20261015-r1/suite-O1-native-report.tar.gz",
+    "/home/sean/code/fevm"
+  ],
+  "compiler_sha256": "f927d5fbc7acbed2499f5d511323b8281fc512e74b7c124f553fdbd3c77c71d8",
+  "scope": "Full one-thread O1 workspace with reports enabled on both sides; report serialization included"
+}

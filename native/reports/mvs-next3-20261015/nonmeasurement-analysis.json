@@ -1,0 +1,6 @@
+{
+  "operation": "perf report leaf-symbol postprocessing",
+  "status": 0,
+  "scope": "Postprocessing overlaps O2 verification, after every comparative observation and O1 profile has finished; O2 timing is not used as a speedup comparison",
+  "parser_setup": "Initial four-column parser ignored perf trailing separator; fixed to accept trailing columns without recapturing or changing samples"
+}

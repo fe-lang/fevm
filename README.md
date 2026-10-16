@@ -29,11 +29,13 @@ pinned with its Sonatina revision, Rust version and Cargo lock hash in
 bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
 for reproducible compiler builds and the acceptance matrix. All seven native
 acceptance stages pass at O0/O1/O2 on x86_64 Linux
-([evidence](native/reports/mvs-compile-perf-20261015/README.md)). The compiler is
-based on fork MVS `8de35117e`, with a repair for repeated initialization-state
-joins. O1 workspace preparation improves from 11m30s to 10m21s on unchanged
-inputs in the measured pair. The new compiler commits are local; bootstrap needs
-the repository overrides above until publication. Earlier
+([evidence](native/reports/mvs-next3-20261015/README.md)). The compiler is
+based on fork MVS `8de35117e`, with shared enum-proof indexes, borrowed native
+layout definitions and one compiled native test runtime across source modules.
+The matched O1 workspace run with reports improves from 10m37s to 6m41s
+(36.98% less wall time), with identical inputs and one suite/Rayon worker.
+Compiler commits are local; bootstrap needs the repository overrides above
+until publication. Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 

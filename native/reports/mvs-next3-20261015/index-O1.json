@@ -1,0 +1,20 @@
+{
+  "status": 0,
+  "seconds": 685.5956314019859,
+  "command": [
+    "/tmp/fevm-mvs-next3-20261015-r1/ablation-index/bin/fe",
+    "test",
+    "--backend",
+    "native",
+    "--jobs",
+    "1",
+    "-O",
+    "1",
+    "--report",
+    "--report-out",
+    "/tmp/fevm-mvs-next3-20261015-r1/index-O1-native-report.tar.gz",
+    "/home/sean/code/fevm"
+  ],
+  "compiler_sha256": "aa516b3c7e8036073dee6092ac29807e4b8bbb121a0359582147ed3da5f16d55",
+  "scope": "Full one-thread O1 workspace with reports enabled on both sides; report serialization included"
+}

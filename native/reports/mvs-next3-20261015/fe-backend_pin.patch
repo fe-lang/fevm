@@ -1,0 +1,99 @@
+From dc8e64d66d0ba97b470bfee12c7c7669203134ec Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Thu, 15 Oct 2026 17:46:42 -0700
+Subject: [PATCH] Adopt shared enum proof indexes and borrowed native layouts
+
+---
+ Cargo.lock                                           | 12 ++++++------
+ Cargo.toml                                           |  8 ++++----
+ .../+native-view-index-layout.performance.md         |  1 +
+ 3 files changed, 11 insertions(+), 10 deletions(-)
+ create mode 100644 newsfragments/+native-view-index-layout.performance.md
+
+diff --git a/Cargo.lock b/Cargo.lock
+index c09041dd7..6c8fa4de8 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -6774,7 +6774,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-codegen"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "bit-set",
+  "cranelift-codegen",
+@@ -6800,7 +6800,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-ir"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "bit-set",
+  "bitflags 2.11.0",
+@@ -6825,7 +6825,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-macros"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -6835,7 +6835,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-parser"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "annotate-snippets",
+  "bimap",
+@@ -6856,7 +6856,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-triple"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "thiserror 2.0.18",
+ ]
+@@ -6864,7 +6864,7 @@ dependencies = [
+ [[package]]
+ name = "sonatina-verifier"
+ version = "0.0.3-alpha"
+-source = "git+https://github.com/fe-lang/sonatina?rev=498ce58134505992ccd1146dcbdb94a11483fcf0#498ce58134505992ccd1146dcbdb94a11483fcf0"
++source = "git+https://github.com/fe-lang/sonatina?rev=325114276de157cde38f5833ed8413166ef9741a#325114276de157cde38f5833ed8413166ef9741a"
+ dependencies = [
+  "cranelift-entity 0.136.1",
+  "rayon",
+diff --git a/Cargo.toml b/Cargo.toml
+index a47e9c940..f7d4af27d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -56,10 +56,10 @@ tracing-tree = "0.4.0"
+ wasm-bindgen-test = "0.3"
+ semver = "1.0.26"
+ petgraph = "0.8"
+-sonatina-ir = { git = "https://github.com/fe-lang/sonatina", rev = "498ce58134505992ccd1146dcbdb94a11483fcf0" }
+-sonatina-triple = { git = "https://github.com/fe-lang/sonatina", rev = "498ce58134505992ccd1146dcbdb94a11483fcf0" }
+-sonatina-codegen = { git = "https://github.com/fe-lang/sonatina", rev = "498ce58134505992ccd1146dcbdb94a11483fcf0" }
+-sonatina-verifier = { git = "https://github.com/fe-lang/sonatina", rev = "498ce58134505992ccd1146dcbdb94a11483fcf0" }
++sonatina-ir = { git = "https://github.com/fe-lang/sonatina", rev = "325114276de157cde38f5833ed8413166ef9741a" }
++sonatina-triple = { git = "https://github.com/fe-lang/sonatina", rev = "325114276de157cde38f5833ed8413166ef9741a" }
++sonatina-codegen = { git = "https://github.com/fe-lang/sonatina", rev = "325114276de157cde38f5833ed8413166ef9741a" }
++sonatina-verifier = { git = "https://github.com/fe-lang/sonatina", rev = "325114276de157cde38f5833ed8413166ef9741a" }
+ 
+ [profile.dev]
+ # Set to 0 to make the build faster and debugging more difficult.
+diff --git a/newsfragments/+native-view-index-layout.performance.md b/newsfragments/+native-view-index-layout.performance.md
+new file mode 100644
+index 000000000..012eb7ed9
+--- /dev/null
++++ b/newsfragments/+native-view-index-layout.performance.md
+@@ -0,0 +1 @@
++Update Sonatina to share enum-proof view-index snapshots and borrow native layout type definitions under one read guard. Full enum verification and native layout rules are preserved.
+-- 
+2.43.0
+

@@ -1,0 +1,578 @@
+[
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004640800"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000944800"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000939400"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004715800"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004616500"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000925500"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000930000"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004675600"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004605600"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000940101"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.000919400"
+  },
+  {
+    "count": "128",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004618300"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004610700"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001104300"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001092200"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004586800"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004533200"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001083100"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001073400"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004562900"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004554500"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001086200"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.001091100"
+  },
+  {
+    "count": "128",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.004550900"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027933700"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004566000"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004373000"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027874400"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027791500"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004518000"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004376500"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027764000"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027932300"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004559900"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004372400"
+  },
+  {
+    "count": "512",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.027753700"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028550300"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004888100"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004666400"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028322400"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028569000"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004870500"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004773700"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028211200"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028408200"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004863800"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.004723200"
+  },
+  {
+    "count": "512",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.028128300"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116710700"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021082200"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.020401700"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116191500"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116348300"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021314800"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.020842000"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116245000"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116172200"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.020936999"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.020886500"
+  },
+  {
+    "count": "2048",
+    "changed": "false",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.116156800"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117652600"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "0",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021848700"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021536800"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "1",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117523800"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117234900"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "2",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021921000"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021712500"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "3",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117700400"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117220800"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "4",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021939600"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "candidate",
+    "iterations": "64",
+    "seconds": "0.021333800"
+  },
+  {
+    "count": "2048",
+    "changed": "true",
+    "pair": "5",
+    "compiler": "baseline",
+    "iterations": "64",
+    "seconds": "0.117424400"
+  }
+]

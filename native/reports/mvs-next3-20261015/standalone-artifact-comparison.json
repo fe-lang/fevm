@@ -1,0 +1,70 @@
+{
+  "scope": "Three main CLI and six differential driver executables compared with the previous accepted d7fdfbb73 compiler on unchanged runtime inputs",
+  "all_identical": true,
+  "existing_frame_reason_differences_unchanged": true,
+  "executables": [
+    {
+      "suite": "cli",
+      "level": "0",
+      "baseline_sha256": "107955e26e19fce65e212e0bfb944eb94fa1283d4075360668b69904f45de916",
+      "candidate_sha256": "107955e26e19fce65e212e0bfb944eb94fa1283d4075360668b69904f45de916",
+      "identical": true
+    },
+    {
+      "suite": "cli",
+      "level": "1",
+      "baseline_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "candidate_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "identical": true
+    },
+    {
+      "suite": "cli",
+      "level": "2",
+      "baseline_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "candidate_sha256": "03caf843ebec5ebff57bf42c2cdf1bbbb2d454144f8bc6c9f270e861160c9dcd",
+      "identical": true
+    },
+    {
+      "suite": "cancun-frames",
+      "level": "0",
+      "baseline_sha256": "3d4992ca07d1146969a4ce59a407db63df7b7ac545a684a9de15fd16267dd73d",
+      "candidate_sha256": "3d4992ca07d1146969a4ce59a407db63df7b7ac545a684a9de15fd16267dd73d",
+      "identical": true
+    },
+    {
+      "suite": "cancun-frames",
+      "level": "1",
+      "baseline_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3",
+      "candidate_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3",
+      "identical": true
+    },
+    {
+      "suite": "cancun-frames",
+      "level": "2",
+      "baseline_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3",
+      "candidate_sha256": "52c4db940aaf5bd864f524443254b4b6fb664724fc646f62293859e357705ac3",
+      "identical": true
+    },
+    {
+      "suite": "cancun-state",
+      "level": "0",
+      "baseline_sha256": "5da920d95a86b837362d1a13faad185d80e8a35deac507ec0ac5968dd8ff74ba",
+      "candidate_sha256": "5da920d95a86b837362d1a13faad185d80e8a35deac507ec0ac5968dd8ff74ba",
+      "identical": true
+    },
+    {
+      "suite": "cancun-state",
+      "level": "1",
+      "baseline_sha256": "e2c99278236fc57e8ff5d10ab2eb4262803963883031f0dd18ac3fb6928ebc1b",
+      "candidate_sha256": "e2c99278236fc57e8ff5d10ab2eb4262803963883031f0dd18ac3fb6928ebc1b",
+      "identical": true
+    },
+    {
+      "suite": "cancun-state",
+      "level": "2",
+      "baseline_sha256": "e2c99278236fc57e8ff5d10ab2eb4262803963883031f0dd18ac3fb6928ebc1b",
+      "candidate_sha256": "e2c99278236fc57e8ff5d10ab2eb4262803963883031f0dd18ac3fb6928ebc1b",
+      "identical": true
+    }
+  ]
+}

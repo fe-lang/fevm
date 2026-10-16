@@ -1,0 +1,65 @@
++ git init /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/.git/
++ git -C /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe fetch /tmp/fevm-mvs-next3-20261015-r1/fe d1ccff352971945e4a9cd326fe5dc0b106a016ac
+From /tmp/fevm-mvs-next3-20261015-r1/fe
+ * branch                d1ccff352971945e4a9cd326fe5dc0b106a016ac -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe checkout --detach FETCH_HEAD
+HEAD is now at d1ccff352 Compile native test suites as one runtime package
++ git init /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/sonatina/.git/
++ git -C /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/sonatina fetch /tmp/fevm-mvs-next3-20261015-r1/sonatina 325114276de157cde38f5833ed8413166ef9741a
+From /tmp/fevm-mvs-next3-20261015-r1/sonatina
+ * branch              325114276de157cde38f5833ed8413166ef9741a -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 32511427 Retain enum proof indexes at control-flow joins
++ npm ci --ignore-scripts
+
+added 3 packages, and audited 4 packages in 703ms
+
+found 0 vulnerabilities
++ npm rebuild tree-sitter-cli
+rebuilt dependencies successfully
++ npx --no-install tree-sitter generate --abi=14
++ rustup run 1.99.0 cargo build --release --locked -p fe --features cranelift
+   Compiling fe-parser v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/parser)
+   Compiling fe-common v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/common)
+   Compiling fe-trace-facts-macros v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/trace-facts-macros)
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/hir)
+   Compiling fe-dataflow v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/fe-dataflow)
+   Compiling tree-sitter-fe v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/tree-sitter-fe)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/fe-web)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/codegen)
+   Compiling fe-fmt v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/fmt)
+   Compiling fe-test-utils v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/test-utils)
+   Compiling fe-trace-facts v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/trace-facts)
+   Compiling fe-resolver v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/resolver)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/fe)
+   Compiling fe-debug-export v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/debug-export)
+   Compiling fe-solc-runner v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/solc-runner)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/driver)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/mir)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/semantic-indexing)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/language-server)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/fe/crates/contract-harness)
+    Finished `release` profile [optimized] target(s) in 2m 29s
+Native compiler: /tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/bin/fe

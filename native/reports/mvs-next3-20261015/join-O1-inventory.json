@@ -1,0 +1,74 @@
+{
+  "modules": [
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-20/tests.rmir",
+      "functions": 370,
+      "rmir_sha256": "84dd7614760644033c46dc79aee5ffff2ec54058638ffc950281b2db08546649"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-18/tests.rmir",
+      "functions": 360,
+      "rmir_sha256": "f56416077bdac24def08c53db6b14f2221c5cda9bfc0fc78dfeaf2c2b8cb9d7e"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-17/tests.rmir",
+      "functions": 69,
+      "rmir_sha256": "4e3bcc78971f24ca6dd631360a784cb8578df49a8c90157ec022b5cec3a363eb"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-15/tests.rmir",
+      "functions": 323,
+      "rmir_sha256": "6237d902e70fd31ca40daf3191a1ac74875af4a76eea284de292f19ee24ae7e4"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-14/tests.rmir",
+      "functions": 30,
+      "rmir_sha256": "dbda4e8219cd2356bbcd8feff79f203f2986e659f43756634b151265106a56ef"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-13/tests.rmir",
+      "functions": 356,
+      "rmir_sha256": "70c4a7c0d82515aade1b7b269e734e51f05e3e25d3e4f79d4fe98ead6b46ae6b"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-11/tests.rmir",
+      "functions": 353,
+      "rmir_sha256": "1da53700b82b7a12fc31777854c5f2fa1569355b95d061762e705896ed974746"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-10/tests.rmir",
+      "functions": 325,
+      "rmir_sha256": "81f4d97ae56d147a8938c5128bb17841ea94de90e069ce6dded2dad045490e56"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-8/tests.rmir",
+      "functions": 330,
+      "rmir_sha256": "5a7db7afe54d253a44b5121ccf6627654c57b720cb2da9b6878e0b2f133a426e"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-5/tests.rmir",
+      "functions": 321,
+      "rmir_sha256": "d9363035ea1c208aa496781624beb166eaaa193af3828ff3f2bc967c5461f20a"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-2/tests.rmir",
+      "functions": 368,
+      "rmir_sha256": "aaf461ef38067222b033d7b7ecb52291eafd3ae191a06eacc657d0c437218bf6"
+    },
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/module-0/tests.rmir",
+      "functions": 177,
+      "rmir_sha256": "773b169ba7303e15366da95d4afb12421a83b16c8fe2892f74a3c8fa58e34904"
+    }
+  ],
+  "total_function_entries": 3382,
+  "groups": [
+    {
+      "suite": "fe-test-report/passed/evm",
+      "function_entries": 3382,
+      "unique_owner_body_summaries": 653,
+      "duplicate_owner_body_entries": 2729
+    }
+  ],
+  "identity_scope": "Exact owner/inline metadata and full rendered runtime body within one suite/process; header display symbol excluded because package-specific conflicts change it. No cross-process Salsa identity comparison."
+}

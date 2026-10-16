@@ -1,0 +1,10 @@
+{
+  "complete": true,
+  "experimental": true,
+  "source_fe_base": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "sonatina_revision": "ca25abf9a96ce4d31da3923cc4a6dddc13be3c81",
+  "seconds": 83.37241426296532,
+  "compiler": "/tmp/fevm-mvs-next3-20261015-r1/ablation-layout/bin/fe",
+  "compiler_sha256": "afaecee3515803341bc916ccf7565e8c65d5e36829b6a290b8915e27a59163db",
+  "cargo_lock_sha256": "87dea6f342fc9617a145804ff1c865c5ddcdd23f9de9b7614e2ffa62aface2de"
+}

@@ -1,0 +1,11 @@
+   Compiling sonatina-ir v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/ir)
+    Checking sonatina-triple v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/triple)
+   Compiling sonatina-macros v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/macros)
+   Compiling sonatina-parser v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/parser)
+   Compiling sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/codegen)
+   Compiling sonatina-interpreter v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/interpreter)
+    Checking sonatina-sp1 v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/sp1)
+    Checking sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/verifier)
+    Checking sonatina-filecheck v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/filecheck)
+    Checking sonatina-cli v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/cli)
+    Finished `release` profile [optimized] target(s) in 11.23s

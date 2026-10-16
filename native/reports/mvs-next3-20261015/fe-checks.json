@@ -1,0 +1,88 @@
+{
+  "complete": true,
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all"
+      ],
+      "status": 0,
+      "seconds": 1.593585932860151
+    },
+    {
+      "name": "nextest",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "nextest",
+        "r",
+        "--release",
+        "--no-fail-fast",
+        "--locked",
+        "--workspace",
+        "--all-features"
+      ],
+      "status": 0,
+      "seconds": 491.6171098849736
+    },
+    {
+      "name": "doctests",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--doc"
+      ],
+      "status": 0,
+      "seconds": 3.4810170559212565
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "clippy",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "status": 0,
+      "seconds": 28.54061210900545
+    },
+    {
+      "name": "notes",
+      "command": [
+        "make",
+        "check-notes",
+        "EISENBOTE=/tmp/fevm-mvs-refresh-20261014-r1/eisenbote"
+      ],
+      "status": 0,
+      "seconds": 0.17795960791409016
+    },
+    {
+      "name": "format-check",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "status": 0,
+      "seconds": 1.5911676741670817
+    }
+  ]
+}

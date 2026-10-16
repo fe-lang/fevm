@@ -1,0 +1,8 @@
+{
+  "scope": "Ignored snapshot probe on original std index and production-equivalent persistent index before the join refinement; one warmup plus five alternating pairs; frozen private test binaries remain in /tmp",
+  "source_base": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+  "baseline_sha256": "90cd70f5ad1a46d3dad82d7f960ef6b3a646933c2016a1a6db6dacd28b16157f",
+  "candidate_sha256": "50be93abea58aed8483c509abd7f0be326bd9b5c817c768afa0f307b3690ebc2",
+  "source": "index-probe.rs",
+  "results": "index-probe-results.json"
+}

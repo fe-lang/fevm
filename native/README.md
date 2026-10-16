@@ -41,36 +41,39 @@ The current compiler derives from
 [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs) at
 `8de35117e3de35c2f92967ec260e124db87c85bb`. This base already contains native
 `FixedStack` and the merged enum-proof fixes. Fe integration
-`d7fdfbb73956b2f3d41e7f4b8101a5a49de46509` pins Sonatina
-`498ce58134505992ccd1146dcbdb94a11483fcf0`, which avoids repeated initialization
-joins and retains shared unchanged facts. It uses Rust 1.99.0. The default
-[`toolchain.json`](toolchain.json) records these exact revisions and lock hash.
-No additional FeVM runtime migration is needed.
+`d1ccff352971945e4a9cd326fe5dc0b106a016ac` pins Sonatina
+`325114276de157cde38f5833ed8413166ef9741a`. It retains unchanged enum-proof
+indexes across snapshots and CFG joins, borrows native layout type definitions,
+and shares one native test runtime across source modules in an ingot. The earlier
+aggregate-initialization repair is included. It uses Rust 1.99.0; the default
+[`toolchain.json`](toolchain.json) records the exact revisions and lock hash.
 
 All seven native acceptance stages pass on x86_64 Linux: 52 workspace tests,
 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at
-each of O0/O1/O2, plus 74,676 arithmetic checks. O1 workspace preparation improves
-**690.43 → 620.67 seconds (10.10% less wall time)** in one matched-input run per
-compiler, with one suite/Rayon worker. All three main CLI executables are
-byte-for-byte identical to the latest-MVS baseline. The complete candidate matrix
-takes 40.97 minutes; no full-matrix baseline comparison is claimed for this revision.
+each of O0/O1/O2, plus 74,676 arithmetic checks. The matched report-enabled O1
+workspace run improves **636.90 → 401.41 seconds (36.98% less wall time)**,
+with one suite/Rayon worker and unchanged inputs. Peak compiler RSS falls from
+6.90 to 4.43 GiB. Runtime function entries shrink from 3,382 across twelve native
+objects to 653 in one object. Each test runs in its own process; native IR files
+use `<suite>.native.test.sona`/`.rmir` and reports use `artifacts/native/test-<index>/`.
+The complete candidate matrix takes 29.75 minutes; the matched performance
+comparison is the separate report-enabled O1 run.
 
-Fe passes 3,826 release workspace/all-feature tests; Sonatina passes 1,958 tests
-and 355 filechecks. Docs/doctests, strict Clippy, nightly formatting and release
-notes pass. The Python harness's 13 tests and Rust reference's nine tests pass.
-See [performance and acceptance evidence](reports/mvs-compile-perf-20261015/README.md).
+Fe passes 3,827 release workspace/all-feature tests; Sonatina passes 1,961 tests
+and 355 filechecks. Sonatina docs, both doctest suites, strict Clippy, nightly
+formatting and release notes pass. The Python harness's 13 tests and Rust reference's nine tests pass.
+See [performance and acceptance evidence](reports/mvs-next3-20261015/README.md).
 
-The new compiler commits remain local on `perf/fevm-native-compile-20261015`
-(Fe) and `perf/fevm-verifier-20261015` (Sonatina). Bootstrap therefore requires
-`--fe-repository` and `--sonatina-repository` paths containing those exact commits.
-On the investigation machine these are
-`/tmp/fevm-mvs-compile-perf-20261015-r1/fe` and
-`/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina`. The implementation and complete
-verification are finished; publication has not been requested. Keccak and
-SwissTable pins remain published and unchanged. Existing CALL edits remain
-unchanged and uncommitted.
+Compiler commits remain local on `perf/fevm-next3-20261015` in both repositories.
+Bootstrap requires `--fe-repository` and `--sonatina-repository` paths containing
+those exact commits. On the investigation machine these are
+`/tmp/fevm-mvs-next3-20261015-r1/fe` and
+`/tmp/fevm-mvs-next3-20261015-r1/sonatina`. Publication has not been requested.
+Keccak and SwissTable pins are unchanged. Existing CALL edits retain their
+original hashes and remain uncommitted.
 
-The earlier [enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
+The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
+[enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
 [MVS refresh](reports/mvs-refresh-20261014/README.md) and
 [MVS port](reports/mvs-port-20261012/README.md) retain their historical compilers,
 measurements and publication evidence.

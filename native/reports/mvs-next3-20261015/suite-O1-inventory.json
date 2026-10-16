@@ -1,0 +1,19 @@
+{
+  "modules": [
+    {
+      "path": "fe-test-report/passed/evm/artifacts/native/tests.rmir",
+      "functions": 653,
+      "rmir_sha256": "57e105441c698cf7ee8a9af397d9bfe1c4b5430b1377a687a8e95b108cfd03b3"
+    }
+  ],
+  "total_function_entries": 653,
+  "groups": [
+    {
+      "suite": "fe-test-report/passed/evm",
+      "function_entries": 653,
+      "unique_owner_body_summaries": 653,
+      "duplicate_owner_body_entries": 0
+    }
+  ],
+  "identity_scope": "Exact owner/inline metadata and full rendered runtime body within one suite/process; header display symbol excluded because package-specific conflicts change it. No cross-process Salsa identity comparison."
+}

@@ -1,0 +1,76 @@
+{
+  "complete": true,
+  "checks": [
+    {
+      "name": "python",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "native/differential",
+        "-p",
+        "test_*.py"
+      ],
+      "status": 0,
+      "seconds": 0.4357651078607887
+    },
+    {
+      "name": "reference-format",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all"
+      ],
+      "status": 0,
+      "seconds": 0.04389860085211694
+    },
+    {
+      "name": "reference-nextest",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "nextest",
+        "r",
+        "--release",
+        "--no-fail-fast",
+        "--locked",
+        "--all-features"
+      ],
+      "status": 0,
+      "seconds": 0.2792371059767902
+    },
+    {
+      "name": "reference-clippy",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "clippy",
+        "--release",
+        "--locked",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "status": 0,
+      "seconds": 0.1371836019679904
+    },
+    {
+      "name": "reference-format-check",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "status": 0,
+      "seconds": 0.03228390100412071
+    }
+  ]
+}

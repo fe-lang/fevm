@@ -1,0 +1,10 @@
+{
+  "complete": true,
+  "experimental": true,
+  "source_fe_base": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "sonatina_revision": "7d296244000adbf3cde76eb7a597b244d9ffe4e6",
+  "seconds": 195.81572211999446,
+  "compiler": "/tmp/fevm-mvs-next3-20261015-r1/ablation-index/bin/fe",
+  "compiler_sha256": "aa516b3c7e8036073dee6092ac29807e4b8bbb121a0359582147ed3da5f16d55",
+  "cargo_lock_sha256": "554b27f7f8ef7766ff18c10415dcaadf882af01f1718c797a8b31ccdf1a3a1a9"
+}

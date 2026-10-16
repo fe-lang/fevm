@@ -1,0 +1,8 @@
+    Checking sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/verifier)
+ Documenting sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/verifier)
+    Checking sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/codegen)
+ Documenting sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/codegen)
+ Documenting sonatina-filecheck v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/filecheck)
+ Documenting sonatina-cli v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/cli)
+    Finished `release` profile [optimized] target(s) in 4.80s
+   Generated /tmp/fevm-mvs-target-preserved-on-disk/doc/sonatina/index.html and 10 other files

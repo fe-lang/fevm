@@ -1,0 +1,16 @@
+{
+  "published": false,
+  "checked_at_utc": "2026-10-16T01:38:58.039718+00:00",
+  "fork_mvs": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "scope": "Local source commits and FeVM adoption only; no new refs or PRs were published. Exact proposed branch refs checked absent on remotes.",
+  "fe": {
+    "repository": "https://github.com/sbillig/fe",
+    "branch": "perf/fevm-next3-20261015",
+    "revision": "d1ccff352971945e4a9cd326fe5dc0b106a016ac"
+  },
+  "sonatina": {
+    "repository": "https://github.com/fe-lang/sonatina",
+    "branch": "perf/fevm-next3-20261015",
+    "revision": "325114276de157cde38f5833ed8413166ef9741a"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "compiler_sha256": "ac2438b9d02a41e3f74b6591d44b043be25cd9bc437a887f057e661816e9d5f5",
+  "source_base": "ca25abf9a96ce4d31da3923cc4a6dddc13be3c81",
+  "source_patch": "state-join-experimental.patch",
+  "command": [
+    "cargo",
+    "+1.99.0",
+    "test",
+    "--release",
+    "--locked",
+    "-p",
+    "sonatina-verifier",
+    "--all-features",
+    "--no-run",
+    "--message-format=json"
+  ]
+}
