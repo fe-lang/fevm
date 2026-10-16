@@ -17,13 +17,12 @@ fetches them when resolving the workspace.
 The executable accepts one hex bytecode argument and optional calldata, interprets a bounded EVM subset, and writes either returned bytes or the final top-of-stack as a 32-byte hex word.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0 \
-  --fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
 native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The compiler target is [`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs),
+The compiler target is [`sbillig/fe:fevm-compile-perf-20261015`](https://github.com/sbillig/fe/tree/fevm-compile-perf-20261015),
 pinned with its Sonatina revision, Rust version and Cargo lock hash in
 [`native/toolchain.json`](native/toolchain.json). Sources use MVS mutable value
 bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
@@ -34,8 +33,9 @@ based on fork MVS `8de35117e`, with shared enum-proof indexes, borrowed native
 layout definitions and one compiled native test runtime across source modules.
 The matched O1 workspace run with reports improves from 10m37s to 6m41s
 (36.98% less wall time), with identical inputs and one suite/Rayon worker.
-Compiler commits are local; bootstrap needs the repository overrides above
-until publication. Earlier
+The tested compiler commits are published on the Fe and Sonatina forks;
+bootstrap fetches them using the pinned repository URLs. See the
+[publication record](native/reports/mvs-next3-publication-20261015.json). Earlier
 [owned-input results](native/reports/owned-inputs.md) describe
 their historical compiler and do not establish MVS acceptance.
 

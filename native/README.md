@@ -38,7 +38,7 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler derives from
-[`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/mvs) at
+[`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/8de35117e3de35c2f92967ec260e124db87c85bb) at
 `8de35117e3de35c2f92967ec260e124db87c85bb`. This base already contains native
 `FixedStack` and the merged enum-proof fixes. Fe integration
 `d1ccff352971945e4a9cd326fe5dc0b106a016ac` pins Sonatina
@@ -64,11 +64,13 @@ and 355 filechecks. Sonatina docs, both doctest suites, strict Clippy, nightly
 formatting and release notes pass. The Python harness's 13 tests and Rust reference's nine tests pass.
 See [performance and acceptance evidence](reports/mvs-next3-20261015/README.md).
 
-Compiler commits remain local on `perf/fevm-next3-20261015` in both repositories.
-Bootstrap requires `--fe-repository` and `--sonatina-repository` paths containing
-those exact commits. On the investigation machine these are
-`/tmp/fevm-mvs-next3-20261015-r1/fe` and
-`/tmp/fevm-mvs-next3-20261015-r1/sonatina`. Publication has not been requested.
+The exact tested commits are published on `fevm-compile-perf-20261015` in
+[`sbillig/fe`](https://github.com/sbillig/fe/tree/fevm-compile-perf-20261015) and
+[`sbillig/sonatina`](https://github.com/sbillig/sonatina/tree/fevm-compile-perf-20261015).
+Fresh bootstrap source preparation verifies both pinned commits through the
+manifest's repository URLs, including Sonatina's existing upstream URL. See the
+[publication record](reports/mvs-next3-publication-20261015.json).
+The branches preserve the tested MVS baseline; MVS has advanced since testing.
 Keccak and SwissTable pins are unchanged. Existing CALL edits retain their
 original hashes and remain uncommitted.
 
@@ -91,8 +93,7 @@ acceptance defaults to one test suite at a time (`--jobs` overrides it), because
 preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0 \
-  --fe-repository /path/to/local/fe --sonatina-repository /path/to/local/sonatina
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```

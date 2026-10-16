@@ -9,7 +9,7 @@
   "features": [
     "cranelift"
   ],
-  "publication": "local latest-MVS compiler with shared native test runtimes, enum proof indexes, and borrowed native layouts; publication pending",
+  "publication": "exact tested compiler commits published on sbillig/fe and sbillig/sonatina branches fevm-compile-perf-20261015; pinned repository URLs verified by fresh source preparation",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

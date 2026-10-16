@@ -1,0 +1,111 @@
+{
+  "published": true,
+  "checked_at_utc": "2026-10-16T04:17:03.172353+00:00",
+  "scope": "Exact previously tested Fe and Sonatina commits published on new branches in sbillig forks; no PRs created.",
+  "refs": {
+    "fe": {
+      "repository": "https://github.com/sbillig/fe",
+      "branch": "fevm-compile-perf-20261015",
+      "revision": "d1ccff352971945e4a9cd326fe5dc0b106a016ac",
+      "tree": "cd5effc3b8e3c1e37f309e09452f109050bae614"
+    },
+    "sonatina": {
+      "repository": "https://github.com/sbillig/sonatina",
+      "branch": "fevm-compile-perf-20261015",
+      "revision": "325114276de157cde38f5833ed8413166ef9741a",
+      "tree": "5a4336919c02273ff268a9e82effcbd42c1f1da2"
+    }
+  },
+  "tested_mvs_base": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "mvs_at_publication": {
+    "status": "diverged",
+    "ahead_by": 57,
+    "behind_by": 25,
+    "total_commits": 57,
+    "merge_base_commit": "71544299cb6648f044e25ab3aa3f562303c3be9a",
+    "head": "1980eed6c506ebe79f0eb9312837e21cf842384e",
+    "tested_base": "8de35117e3de35c2f92967ec260e124db87c85bb"
+  },
+  "mvs_rebased": false,
+  "accepted_fe_vm_revision": "3a3494a8f0579311ab61ff88985a1c350e76e93c",
+  "compiler_source_changed": false,
+  "toolchain_manifest_change": "Only publication metadata; source URLs, revisions, Rust version, features, host list and Cargo.lock hash are unchanged.",
+  "remote_source_preparation": {
+    "complete": true,
+    "repository_overrides": false,
+    "compiler_build_performed": false,
+    "sources_clean": true,
+    "source_trees_match_tested_commits": true,
+    "cargo_lock_sha256": "fc965db5a4186453ac0ad7c6b752252d107b11191c8a2c75015873e185b4b542",
+    "source_directory": "/tmp/fevm-next3-publication-wgv60min/remote-bootstrap",
+    "command": [
+      "python3",
+      "native/bootstrap.py",
+      "--out",
+      "/tmp/fevm-next3-publication-wgv60min/remote-bootstrap",
+      "--toolchain",
+      "1.99.0",
+      "--prepare-only"
+    ],
+    "manifest_repository_urls": {
+      "fe_repository": "https://github.com/sbillig/fe",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina"
+    },
+    "sonatina_existing_upstream_url_fetch_verified": true
+  },
+  "prior_compiler_and_native_gates": "All prior compiler/native acceptance results continue to refer to the same exact published source commits. Full acceptance was not repeated for publication metadata.",
+  "checks": {
+    "complete": true,
+    "checks": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all"
+        ],
+        "status": 0,
+        "seconds": 0.033334599109366536
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "+1.99.0",
+          "clippy",
+          "--release",
+          "--locked",
+          "--all-features",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "status": 0,
+        "seconds": 0.11182349920272827
+      },
+      {
+        "name": "fmt-check",
+        "command": [
+          "cargo",
+          "+nightly",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "status": 0,
+        "seconds": 0.033490599831566215
+      }
+    ]
+  },
+  "preserved_user_files": {
+    "count": 14,
+    "hashes_unchanged": true
+  },
+  "prior_local_completion_record": "mvs-next3-20261015/publication.json",
+  "prior_evidence_directory_unchanged": "mvs-next3-20261015",
+  "local_publication_logs": "/tmp/fevm-next3-publication-wgv60min",
+  "branch_name_note": "The initially proposed perf/fevm-next3-20261015 conflicted with an existing Sonatina ref; the successfully published name is fevm-compile-perf-20261015."
+}
