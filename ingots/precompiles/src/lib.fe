@@ -1,5 +1,6 @@
+use core::Option
 use std::native::ByteBuffer
-use keccak::ByteSource
+use keccak::{ByteSource, keccak256}
 pub use hashes::{ripemd160, sha256}
 
 /// The call returned output and consumed `gas_used`.
@@ -55,11 +56,59 @@ fn right_aligned<T: ByteSource>(_ source: T, len: u64, gas_used: u64) -> Output 
     Output { status: SUCCESS, gas_used, output }
 }
 
+// The big-endian word at `offset`, zero-padded past the input as buffer_read.
+fn word_at<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        let index = offset + i
+        value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }
+        i += 1
+    }
+    value
+}
+
+// Recover the signer address of (hash, v, r, s). Malformed or unrecoverable
+// signatures succeed with empty output.
+fn ecrecover<T: ByteSource>(_ input: T) -> Output {
+    let hash = word_at(input, offset: 0)
+    let v = word_at(input, offset: 32)
+    let r = word_at(input, offset: 64)
+    let s = word_at(input, offset: 96)
+    let malformed = (v != 27 && v != 28) || r == 0 || r >= secp256k1::N || s == 0 || s >= secp256k1::N
+    let key = if malformed { Option::None } else { secp256k1::recover(hash, recovery_id: v - 27, r, s) }
+    match key {
+        Option::Some(key) => {
+            var preimage: [u8; 64] = [0; 64]
+            var i: u64 = 0
+            while i < 32 {
+                let shift = ((31 - i) * 8) as u256
+                preimage[i as usize] = (key.x >> shift).downcast_truncate()
+                preimage[(32 + i) as usize] = (key.y >> shift).downcast_truncate()
+                i += 1
+            }
+            let digest = keccak256(preimage)
+            var address: [u8; 32] = [0; 32]
+            i = 12
+            while i < 32 {
+                address[i as usize] = digest[i as usize]
+                i += 1
+            }
+            copied(address, gas_used: 3000)
+        },
+        Option::None => Output { status: SUCCESS, gas_used: 3000, output: ByteBuffer::new() },
+    }
+}
+
 /// Execute precompile `address` with `gas` available. Charges are computed and
 /// checked before any work or allocation.
 pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
     core::assert(is_precompile(address))
     let len = input.len()
+    if address == 1 {
+        if gas < 3000 { return failure(gas) }
+        return ecrecover(input)
+    }
     if address == 2 || address == 3 || address == 4 {
         let (base, per_word): (u128, u128) = if address == 2 { (60, 12) }
             else if address == 3 { (600, 120) } else { (15, 3) }

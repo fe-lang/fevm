@@ -1,0 +1,219 @@
+use core::Option
+use core::ops::WrappingAdd
+use std::evm::crypto::mulmod
+
+// secp256k1 (SEC 2): y^2 = x^3 + 7 over F_p, with a prime-order group of order n.
+pub const P: u256 = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
+pub const N: u256 = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
+const GX: u256 = 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798
+const GY: u256 = 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8
+
+pub struct PublicKey { pub x: u256, pub y: u256 }
+
+// Jacobian coordinates (X / Z^2, Y / Z^3); Z = 0 is the point at infinity.
+struct Point { x: u256, y: u256, z: u256 }
+
+impl Copy for Point {}
+
+const INFINITY: Point = Point { x: 0, y: 1, z: 0 }
+
+// 2^256 - P. Folding a product's high word multiplies it by this constant.
+const FOLD: u256 = 0x1000003d1
+const LOW_HALF: u256 = 0xffffffffffffffffffffffffffffffff
+
+struct Wide { high: u256, low: u256 }
+
+// The full 512-bit product from four 128-bit partial products, none of which
+// overflows 256 bits. The native backend's general mulmod is bit-serial.
+fn wide_mul(_ a: u256, _ b: u256) -> Wide {
+    let a0 = a & LOW_HALF
+    let a1 = a >> 128
+    let b0 = b & LOW_HALF
+    let b1 = b >> 128
+    let p00 = a0 * b0
+    let p01 = a0 * b1
+    let mid = p01.wrapping_add(a1 * b0)
+    let mid_carry: u256 = if mid < p01 { 1 << 128 } else { 0 }
+    let low = p00.wrapping_add(mid << 128)
+    let low_carry: u256 = if low < p00 { 1 } else { 0 }
+    Wide { high: a1 * b1 + (mid >> 128) + mid_carry + low_carry, low }
+}
+
+// high * 2^256 + low = high * FOLD + low (mod P), folded until it fits.
+fn reduce(_ wide: Wide) -> u256 {
+    let folded = wide_mul(wide.high, FOLD)
+    let sum = wide.low.wrapping_add(folded.low)
+    let carry: u256 = if sum < wide.low { 1 } else { 0 }
+    // (folded.high + carry) is below 2^34, so this term is below 2^67.
+    let tail = (folded.high + carry) * FOLD
+    var result = sum.wrapping_add(tail)
+    // A wrap drops 2^256, which is FOLD modulo P; the result is then tiny.
+    if result < sum { result += FOLD }
+    if result >= P { result -= P }
+    result
+}
+
+fn mul(_ a: u256, _ b: u256) -> u256 { reduce(wide_mul(a, b)) }
+
+// Reduced operands: a wrapped sum dropped 2^256, which is FOLD modulo P.
+fn add(_ a: u256, _ b: u256) -> u256 {
+    let sum = a.wrapping_add(b)
+    if sum < a { sum + FOLD } else if sum >= P { sum - P } else { sum }
+}
+
+fn sub(_ a: u256, _ b: u256) -> u256 { if a >= b { a - b } else { P - (b - a) } }
+
+fn pow(_ base: u256, _ exponent: u256) -> u256 {
+    var result: u256 = 1
+    var square = base
+    var rest = exponent
+    while rest != 0 {
+        if rest & 1 == 1 { result = mul(result, square) }
+        square = mul(square, square)
+        rest >>= 1
+    }
+    result
+}
+
+// (x / 2) mod an odd `m` without forming x + m, which can exceed 256 bits.
+fn half(_ x: u256, _ m: u256) -> u256 { if x & 1 == 0 { x >> 1 } else { (x >> 1) + (m >> 1) + 1 } }
+
+fn sub_mod(_ a: u256, _ b: u256, _ m: u256) -> u256 { if a >= b { a - b } else { m - (b - a) } }
+
+// Binary extended Euclid for 0 < a < m with m an odd prime.
+fn inverse(_ a: u256, _ m: u256) -> u256 {
+    var u = a
+    var v = m
+    var x1: u256 = 1
+    var x2: u256 = 0
+    while u != 1 && v != 1 {
+        while u & 1 == 0 {
+            u >>= 1
+            x1 = half(x1, m)
+        }
+        while v & 1 == 0 {
+            v >>= 1
+            x2 = half(x2, m)
+        }
+        if u >= v {
+            u -= v
+            x1 = sub_mod(x1, x2, m)
+        } else {
+            v -= u
+            x2 = sub_mod(x2, x1, m)
+        }
+    }
+    if u == 1 { x1 } else { x2 }
+}
+
+// dbl-2009-l for a = 0.
+fn double(_ p: Point) -> Point {
+    if p.z == 0 || p.y == 0 { return INFINITY }
+    let a = mul(p.x, p.x)
+    let b = mul(p.y, p.y)
+    let c = mul(b, b)
+    let xb = add(p.x, b)
+    let t = sub(sub(mul(xb, xb), a), c)
+    let d = add(t, t)
+    let e = add(add(a, a), a)
+    let x = sub(mul(e, e), add(d, d))
+    let c2 = add(c, c)
+    let c4 = add(c2, c2)
+    let y = sub(mul(e, sub(d, x)), add(c4, c4))
+    let yz = mul(p.y, p.z)
+    Point { x, y, z: add(yz, yz) }
+}
+
+// add-2007-bl, falling back to doubling for equal points.
+fn add_points(_ p: Point, _ q: Point) -> Point {
+    if p.z == 0 { return q }
+    if q.z == 0 { return p }
+    let z1z1 = mul(p.z, p.z)
+    let z2z2 = mul(q.z, q.z)
+    let u1 = mul(p.x, z2z2)
+    let u2 = mul(q.x, z1z1)
+    let s1 = mul(mul(p.y, q.z), z2z2)
+    let s2 = mul(mul(q.y, p.z), z1z1)
+    if u1 == u2 {
+        return if s1 == s2 { double(p) } else { INFINITY }
+    }
+    let h = sub(u2, u1)
+    let h2 = add(h, h)
+    let i = mul(h2, h2)
+    let j = mul(h, i)
+    let s21 = sub(s2, s1)
+    let r = add(s21, s21)
+    let v = mul(u1, i)
+    let x = sub(sub(mul(r, r), j), add(v, v))
+    let s1j = mul(s1, j)
+    let y = sub(mul(r, sub(v, x)), add(s1j, s1j))
+    let zs = add(p.z, q.z)
+    let z = mul(sub(sub(mul(zs, zs), z1z1), z2z2), h)
+    Point { x, y, z }
+}
+
+// u * G + v * Q by Shamir's simultaneous double-and-add.
+fn combination(u: u256, v: u256, q: Point) -> Point {
+    let g = Point { x: GX, y: GY, z: 1 }
+    let both = add_points(g, q)
+    var result = INFINITY
+    var bit: u64 = 256
+    while bit > 0 {
+        bit -= 1
+        result = double(result)
+        let shift = bit as u256
+        let take_u = (u >> shift) & 1 == 1
+        let take_v = (v >> shift) & 1 == 1
+        if take_u && take_v {
+            result = add_points(result, both)
+        } else if take_u {
+            result = add_points(result, g)
+        } else if take_v {
+            result = add_points(result, q)
+        }
+    }
+    result
+}
+
+/// Recover the signer's public key from a 32-byte message hash, a recovery id
+/// (0 or 1: the parity of R's y coordinate) and a signature with 0 < r, s < n.
+/// None when r is not the x coordinate of a curve point or the key is infinity.
+pub fn recover(hash: u256, recovery_id: u256, r: u256, s: u256) -> Option<PublicKey> {
+    core::assert(recovery_id <= 1 && r != 0 && r < N && s != 0 && s < N)
+    let alpha = add(mul(mul(r, r), r), 7)
+    // p = 3 (mod 4), so a square root of alpha is alpha^((p + 1) / 4).
+    let beta = pow(alpha, (P + 1) / 4)
+    if mul(beta, beta) != alpha { return Option::None }
+    let y = if beta & 1 == recovery_id { beta } else { P - beta }
+    let r_inverse = inverse(r, N)
+    let e = hash % N
+    let u = mulmod(N - e, r_inverse, N)
+    let v = mulmod(s, r_inverse, N)
+    let key = combination(u, v, q: Point { x: r, y, z: 1 })
+    if key.z == 0 { return Option::None }
+    let z_inverse = inverse(key.z, P)
+    let z2 = mul(z_inverse, z_inverse)
+    Option::Some(PublicKey { x: mul(key.x, z2), y: mul(key.y, mul(z2, z_inverse)) })
+}
+
+#[test]
+fn secp256k1_field_arithmetic_edges() {
+    // (-1)^2 = 1, -1 + -1 = -2, and products near both moduli reduce exactly.
+    core::assert(mul(P - 1, P - 1) == 1)
+    core::assert(add(P - 1, P - 1) == P - 2)
+    core::assert(sub(0, 1) == P - 1)
+    core::assert(mul(P - 1, 2) == P - 2)
+    core::assert(mul(1 << 255, 2) == FOLD)
+    for x in [1 as u256, 2, 3, FOLD, P - 1, P - 2, 0x123456789abcdef0fedcba9876543210] {
+        core::assert(mul(inverse(x, P), x) == 1)
+        core::assert(mulmod(inverse(x, N), x, N) == 1)
+    }
+    // The generator lies on the curve: y^2 = x^3 + 7.
+    core::assert(mul(GY, GY) == add(mul(mul(GX, GX), GX), 7))
+    // n * G is the point at infinity, and (n - 1) * G = -G.
+    let g = Point { x: GX, y: GY, z: 1 }
+    core::assert(combination(u: N, v: 0, q: g).z == 0)
+    let minus = combination(u: N - 1, v: 0, q: g)
+    let z = inverse(minus.z, P)
+    core::assert(mul(minus.x, mul(z, z)) == GX && mul(minus.y, mul(mul(z, z), z)) == P - GY)
+}
