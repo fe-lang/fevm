@@ -73,11 +73,7 @@ impl LogBuffer {
         }
         let metadata = start as u256 | (len as u256) << 64 | (topic_count as u256) << 128
         write_word(mut self.records, offset: record + 160, value: metadata)
-        var byte: u64 = 0
-        while byte < len {
-            self.data.set_byte(index: start + byte, value: data.byte_at(offset + byte))
-            byte += 1
-        }
+        self.data.copy_from(dest: start, source: data, offset, len)
         true
     }
     pub fn truncate(mut self, _ count: u64) {

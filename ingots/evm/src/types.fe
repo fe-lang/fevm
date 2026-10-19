@@ -46,6 +46,10 @@ impl Program {
         core::assert(index < self.len())
         self.bytes.byte_at(index.downcast_unchecked())
     }
+    // Copy code bytes `offset..offset + len` into `into` at `at`.
+    pub fn copy_into(self, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+        into.copy_from(dest: at, source: self.bytes, offset, len)
+    }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
         if self.status != OK || destination >= self.bytes.len() as u256 {
             return false
@@ -80,6 +84,17 @@ impl InputData {
             }
         }
         Self { bytes, status }
+    }
+    // One bulk copy of a buffer range, such as call input from frame memory.
+    pub fn copy_bytes(_ source: ByteBuffer, offset: u64, len: u64) -> Self {
+        var bytes = ByteBuffer::new()
+        if !bytes.try_resize(len) { return Self { bytes, status: ERR_HOST_ALLOCATION } }
+        bytes.copy_from(dest: 0, source, offset, len)
+        Self { bytes, status: OK }
+    }
+    // Copy bytes `offset..offset + len` into `into` at `at`.
+    pub fn copy_into(self, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+        into.copy_from(dest: at, source: self.bytes, offset, len)
     }
     pub fn len(self) -> u64 { self.bytes.len() }
     pub fn byte_at(self, _ index: u64) -> u8 { self.bytes.byte_at(index) }

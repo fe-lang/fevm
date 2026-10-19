@@ -135,6 +135,15 @@ impl Vm {
         self.charge(gas)
     }
 
+    // Copies pad past their source with zeros.
+    fn zero_memory(mut self, from: u64, to: u64) {
+        var index = from
+        while index < to {
+            self.memory.set_byte(index, value: 0)
+            index += 1
+        }
+    }
+
     fn expand_memory(mut self, _ size: u64) -> bool {
         if !self.memory.try_resize(size) {
             self.fault(ERR_HOST_ALLOCATION)
@@ -239,17 +248,9 @@ impl Vm {
         } else {
             0
         }
-        var i: u64 = 0
-        while i < count {
-            let value = if (i as u256) < available {
-                let index: usize = (source + i as u256).downcast_unchecked()
-                program.byte_at(index)
-            } else {
-                0
-            }
-            self.memory.set_byte(index: dest + i, value)
-            i += 1
-        }
+        let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
+        if copied != 0 { program.copy_into(mut self.memory, at: dest, offset: source.downcast_unchecked(), len: copied) }
+        self.zero_memory(from: dest + copied, to: dest + count)
     }
 
     fn mcopy(mut self) {
@@ -321,17 +322,9 @@ impl Vm {
         } else {
             0
         }
-        var i: u64 = 0
-        while i < count {
-            let value = if (i as u256) < available {
-                let index: u64 = (source + i as u256).downcast_unchecked()
-                calldata.byte_at(index)
-            } else {
-                0
-            }
-            self.memory.set_byte(index: dest + i, value)
-            i += 1
-        }
+        let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
+        if copied != 0 { calldata.copy_into(mut self.memory, at: dest, offset: source.downcast_unchecked(), len: copied) }
+        self.zero_memory(from: dest + copied, to: dest + count)
     }
 
     fn returndatacopy(mut self) {
@@ -346,14 +339,8 @@ impl Vm {
                 if source > available || len > available - source {
                     self.fault(ERR_RETURN_DATA_OOB)
                 } else if self.expand_memory(plan.size) && len != 0 {
-                    let destination: u64 = offset.downcast_unchecked()
-                    let source: u64 = source.downcast_unchecked()
-                    let count: u64 = len.downcast_unchecked()
-                    var index: u64 = 0
-                    while index < count {
-                        self.memory.set_byte(index: destination + index, value: self.return_data.byte_at(source + index))
-                        index += 1
-                    }
+                    self.memory.copy_from(dest: offset.downcast_unchecked(), source: self.return_data,
+                                          offset: source.downcast_unchecked(), len: len.downcast_unchecked())
                 }
             },
             Option::None => {},
@@ -378,12 +365,7 @@ impl Vm {
             return
         }
         if count != 0 {
-            let start: u64 = offset.downcast_unchecked()
-            var i: u64 = 0
-            while i < count {
-                self.output.set_byte(index: i, value: self.memory.byte_at(start + i))
-                i += 1
-            }
+            self.output.copy_from(dest: 0, source: self.memory, offset: offset.downcast_unchecked(), len: count)
         }
         self.output_valid = true
         self.status = status
@@ -668,15 +650,8 @@ impl Vm {
         let copied: u64 = (if len < available { len } else { available }).downcast_unchecked()
         let source: u64 = if copied == 0 { 0 } else { source.downcast_unchecked() }
         let dest: u64 = dest.downcast_unchecked()
-        let len: u64 = len.downcast_unchecked()
-        var i: u64 = 0
-        while i < len {
-            let byte = if i < copied {
-                state.code_byte(address, index: source + i)
-            } else { 0 }
-            self.memory.set_byte(index: dest + i, value: byte)
-            i += 1
-        }
+        if copied != 0 { state.copy_code(address, mut self.memory, at: dest, offset: source, len: copied) }
+        self.zero_memory(from: dest + copied, to: dest + len.downcast_unchecked())
     }
 
     fn log(mut self, _ topics_count: u64, _ call: CallEnv, _ state: mut Transaction) {
@@ -1070,11 +1045,7 @@ pub fn load_program(_ state: Transaction, address: u256) -> Program {
     let len = state.code_size(address)
     var code = ByteBuffer::new()
     if !code.try_resize(len) { return Program::new(InputData::new(code, status: ERR_HOST_ALLOCATION)) }
-    var index: u64 = 0
-    while index < len {
-        code.set_byte(index, value: state.code_byte(address, index))
-        index += 1
-    }
+    state.copy_code(address, mut code, at: 0, offset: 0, len)
     Program::new(InputData::new(code, status: OK))
 }
 
@@ -1155,11 +1126,7 @@ impl Vm {
             }
         } else {
             let count = if len < result.output.len() { len } else { result.output.len() }
-            var index: u64 = 0
-            while index < count {
-                self.memory.set_byte(index: offset + index, value: result.output.byte_at(index))
-                index += 1
-            }
+            self.memory.copy_from(dest: offset, source: result.output, offset: 0, len: count)
             self.push_bool(result.status == OK)
         }
         let previous = self.return_data
@@ -1242,7 +1209,7 @@ impl Vm {
         }
         let out_offset: u64 = if output_len == 0 { 0 } else { output_offset.downcast_unchecked() }
         let out_len: u64 = output_len.downcast_unchecked()
-        let calldata = InputData::copy_from(self.memory,
+        let calldata = InputData::copy_bytes(self.memory,
             offset: if input_len == 0 { 0 } else { input_offset.downcast_unchecked() },
             len: input_len.downcast_unchecked())
         if calldata.status != OK {
@@ -1345,7 +1312,7 @@ impl Vm {
                 return Option::None
             },
         }
-        let program = Program::new(InputData::copy_from(self.memory, offset: start, len: count))
+        let program = Program::new(InputData::copy_bytes(self.memory, offset: start, len: count))
         if program.status != OK {
             self.fault(program.status)
             program.release()

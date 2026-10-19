@@ -158,6 +158,12 @@ impl WorldState {
         core::assert(index < account.code_len)
         self.code.byte_at(account.code_offset + 64 + index)
     }
+    // Copy an account's code bytes `offset..offset + len` into `into` at `at`.
+    pub fn copy_code(self, address: u256, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+        let account = self.accounts.get(address_word(address)).value
+        core::assert(offset <= account.code_len && len <= account.code_len - offset)
+        into.copy_from(dest: at, source: self.code, offset: account.code_offset + 64 + offset, len)
+    }
     fn code_word(self, offset: u64) -> u256 {
         var value: u256 = 0
         var i: u64 = 0

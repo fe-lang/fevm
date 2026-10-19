@@ -281,6 +281,9 @@ impl Transaction {
     pub fn code_size(self, _ address: u256) -> u64 { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
     pub fn code_byte(self, address: u256, index: u64) -> u8 { self.state.code_byte(address, index) }
+    pub fn copy_code(self, address: u256, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+        self.state.copy_code(address, mut into, at, offset, len)
+    }
     pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
     pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {
