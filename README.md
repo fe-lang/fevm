@@ -236,8 +236,10 @@ Near-term expansion:
 
 - Growable state tables in place of the 256-entry SwissTables.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
-results against pinned revm. Full Cancun conformance and performance comparisons
-remain future work.
+results against pinned revm. On the execution-spec-tests v5.4.0 Cancun state
+tests, FeVM passes 16,800 of 16,847 cases; the other 47 exceed the 256-entry state
+tables ([report](native/reports/cancun-conformance-20261019/README.md)).
+Performance comparisons with other EVMs remain future work.
 
 Native compiler arithmetic checks, performance measurements, and reproducible
 build instructions are documented in [native/README.md](native/README.md).
