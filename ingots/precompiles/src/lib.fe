@@ -119,6 +119,28 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
             else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
             else { copied(input, gas_used: used) }
     }
+    if address == 6 || address == 7 {
+        // EIP-1108 prices; invalid points are exceptional failures.
+        let cost: u64 = if address == 6 { 150 } else { 6000 }
+        if cost > gas { return failure(gas) }
+        let point = if address == 6 { bn254::add(input) } else { bn254::mul(input) }
+        return match point {
+            Option::Some(encoded) => copied(encoded, gas_used: cost),
+            Option::None => failure(gas),
+        }
+    }
+    if address == 8 {
+        let cost = 45000 + 34000 * (len / 192) as u128
+        if cost > gas as u128 { return failure(gas) }
+        return match bn254::pairing(input) {
+            Option::Some(holds) => {
+                var result: [u8; 32] = [0; 32]
+                if holds { result[31] = 1 }
+                copied(result, gas_used: cost.downcast_unchecked())
+            },
+            Option::None => failure(gas),
+        }
+    }
     if address == 9 {
         if len != blake2f::INPUT_LEN { return failure(gas) }
         let rounds = blake2f::rounds(input)

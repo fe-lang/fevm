@@ -1,0 +1,102 @@
+use core::Option
+use keccak::ByteSource
+use ingot::bn254_curve::{Point, on_curve}
+use ingot::bn254_field::{Field, Fp, Fp2, Fp12, MODULUS, fp, fp_value}
+use ingot::bn254_pairing::{final_exponentiation, miller_loop, twist_b}
+
+// The prime order r of G1 and of the G2 subgroup.
+const CURVE_ORDER: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+
+// A big-endian word at `offset`; bytes past the input read as zero.
+fn word<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        let byte: u256 = if offset + i < input.len() { input.byte_at(offset + i) as u256 } else { 0 }
+        value = (value << 8) | byte
+        i += 1
+    }
+    value
+}
+
+// EIP-196 G1 encoding: (x, y) below p and on y^2 = x^3 + 3; (0, 0) is infinity.
+fn g1_point<T: ByteSource>(_ input: T, offset: u64) -> Option<Point<Fp>> {
+    let x = word(input, offset)
+    let y = word(input, offset: offset + 32)
+    if x >= MODULUS || y >= MODULUS { return Option::None }
+    if x == 0 && y == 0 { return Option::Some(Point::infinity()) }
+    let point = Point::affine(x: fp(x), y: fp(y))
+    if !on_curve(x: point.x, y: point.y, b: fp(3)) { return Option::None }
+    Option::Some(point)
+}
+
+// EIP-197 G2 encoding: x = x0 * u + x1 and y = y0 * u + y1, each word below p,
+// on the twist; all zeros is infinity. Subgroup membership is checked separately.
+fn g2_point<T: ByteSource>(_ input: T, offset: u64) -> Option<Point<Fp2>> {
+    let x_im = word(input, offset)
+    let x_re = word(input, offset: offset + 32)
+    let y_im = word(input, offset: offset + 64)
+    let y_re = word(input, offset: offset + 96)
+    if x_im >= MODULUS || x_re >= MODULUS || y_im >= MODULUS || y_re >= MODULUS { return Option::None }
+    if x_im == 0 && x_re == 0 && y_im == 0 && y_re == 0 { return Option::Some(Point::infinity()) }
+    let point = Point::affine(x: Fp2 { c0: fp(x_re), c1: fp(x_im) }, y: Fp2 { c0: fp(y_re), c1: fp(y_im) })
+    if !on_curve(x: point.x, y: point.y, b: twist_b()) { return Option::None }
+    Option::Some(point)
+}
+
+fn encode(_ point: Point<Fp>) -> [u8; 64] {
+    var output: [u8; 64] = [0; 64]
+    if point.is_infinity() { return output }
+    let x = fp_value(point.affine_x())
+    let y = fp_value(point.affine_y())
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        output[i as usize] = (x >> shift).downcast_truncate()
+        output[(32 + i) as usize] = (y >> shift).downcast_truncate()
+        i += 1
+    }
+    output
+}
+
+/// ECADD (0x06): the encoded sum of two G1 points, or None for invalid input.
+pub fn add<T: ByteSource>(_ input: T) -> Option<[u8; 64]> {
+    match (g1_point(input, offset: 0), g1_point(input, offset: 64)) {
+        (Option::Some(a), Option::Some(b)) => Option::Some(encode(a.add(b))),
+        _ => Option::None,
+    }
+}
+
+/// ECMUL (0x07): the encoded product of a G1 point and a 256-bit scalar.
+pub fn mul<T: ByteSource>(_ input: T) -> Option<[u8; 64]> {
+    match g1_point(input, offset: 0) {
+        Option::Some(point) => Option::Some(encode(point.multiply(word(input, offset: 64)))),
+        Option::None => Option::None,
+    }
+}
+
+/// ECPAIRING (0x08): whether the product of the pairings of 192-byte (G1, G2)
+/// pairs is one, or None for invalid input. G1 has cofactor one, so on-curve
+/// points are in the subgroup; G2 points must have order r.
+pub fn pairing<T: ByteSource>(_ input: T) -> Option<bool> {
+    let len = input.len()
+    if len % 192 != 0 { return Option::None }
+    var product = Fp12::one()
+    var offset: u64 = 0
+    while offset < len {
+        let p = match g1_point(input, offset) {
+            Option::Some(p) => p,
+            Option::None => return Option::None,
+        }
+        let q = match g2_point(input, offset: offset + 64) {
+            Option::Some(q) => q,
+            Option::None => return Option::None,
+        }
+        if !q.multiply(CURVE_ORDER).is_infinity() { return Option::None }
+        if !p.is_infinity() && !q.is_infinity() {
+            product = product.mul(miller_loop(qx: q.x, qy: q.y, px: p.x, py: p.y))
+        }
+        offset += 192
+    }
+    Option::Some(final_exponentiation(product).equals(Fp12::one()))
+}
