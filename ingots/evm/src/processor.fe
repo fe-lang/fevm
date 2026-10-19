@@ -246,7 +246,7 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         return status_result(moved)
     }
     if is_precompile(target) {
-        let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit, op: 0)
+        let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }

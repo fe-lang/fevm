@@ -19,7 +19,7 @@ use ingot::constants::{
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
     ERR_STATIC_WRITE,
-    ERR_TODO_OPCODE,
+    ERR_UNSUPPORTED_PRECOMPILE,
     I256_MIN,
     OK,
     STACK_LIMIT,
@@ -1092,14 +1092,14 @@ pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value
 }
 
 /// Run a precompile and express its outcome as a frame result. Invalid input and
-/// insufficient gas are exceptional halts that consume all `gas`; unimplemented
-/// precompiles and allocation failures are host errors.
-pub fn run_precompile(address: u256, input: InputData, gas: u64, op: i32) -> ExecutionResult {
+/// insufficient gas are exceptional halts that consume all `gas`; unsupported
+/// input sizes and allocation failures are host errors.
+pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionResult {
     let outcome = fevm_precompiles::run(address, input, gas)
     let status = if outcome.status == SUCCESS { OK }
         else if outcome.status == FAILURE { ERR_PRECOMPILE }
         else if outcome.status == HOST_ALLOCATION { ERR_HOST_ALLOCATION }
-        else { ERR_TODO_OPCODE }
+        else { ERR_UNSUPPORTED_PRECOMPILE }
     let gas_remaining = if status == OK { gas - outcome.gas_used } else { 0 }
     ExecutionResult {
         status,
@@ -1109,7 +1109,7 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64, op: i32) -> Exe
         output_valid: status == OK,
         stack_top: 0,
         stack_len: 0,
-        unsupported_opcode: if status == ERR_TODO_OPCODE { op } else { 0 },
+        unsupported_opcode: 0,
     }
 }
 
@@ -1252,7 +1252,7 @@ impl Vm {
             return Option::None
         }
         if is_precompile(code_address) {
-            let result = run_precompile(address: code_address, input: calldata, gas: child_gas, op)
+            let result = run_precompile(address: code_address, input: calldata, gas: child_gas)
             calldata.release()
             if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
             self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })

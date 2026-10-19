@@ -13,7 +13,7 @@ use ingot::constants::{
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
     ERR_STATE_LIMIT,
-    ERR_TODO_OPCODE,
+    ERR_UNSUPPORTED_PRECOMPILE,
     ERR_USAGE,
     OK,
 }
@@ -47,13 +47,7 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
     match vm.status {
         ERR_STACK_UNDERFLOW => writeln("stack underflow"),
         ERR_STACK_OVERFLOW => writeln("stack overflow"),
-        ERR_TODO_OPCODE => {
-            write("todo opcode 0x")
-            write_hex_byte(vm.unsupported_opcode)
-            write(" ")
-            write_opcode_name(vm.unsupported_opcode)
-            write_char(10)
-        },
+        ERR_UNSUPPORTED_PRECOMPILE => writeln("unsupported precompile input"),
         ERR_HOST_ALLOCATION => writeln("host allocation failed"),
         ERR_OUT_OF_GAS => writeln("out of gas"),
         ERR_INVALID_JUMP => writeln("invalid jump destination"),
