@@ -114,9 +114,14 @@ EIP-3541 prefix check, 200 gas per byte and the EIP-170 size limit; a failed
 deposit is an exceptional halt. `SELFDESTRUCT` (EIP-6780) moves the balance to
 its beneficiary and deletes the account only if this transaction created it.
 
-Precompiles live in the separate `fevm_precompiles` workspace ingot. SHA-256,
-RIPEMD-160, IDENTITY and BLAKE2F are implemented; calls to the remaining
-precompile addresses stop with a TODO fault.
+All ten Cancun precompiles live in the separate `fevm_precompiles` workspace
+ingot: ECRECOVER (secp256k1), SHA-256, RIPEMD-160, IDENTITY, MODEXP (EIP-198 with
+EIP-2565 gas), BN254 ECADD/ECMUL/ECPAIRING (EIP-196/197 with EIP-1108 gas),
+BLAKE2F (EIP-152) and KZG point evaluation (EIP-4844, BLS12-381 with the mainnet
+trusted setup's `[τ]G2`). Each charges its gas before doing work; invalid input
+or insufficient gas is an exceptional halt. MODEXP moduli wider than 8,192
+significant bytes stop with a host `unsupported precompile input` status, because
+its limbs use fixed arrays until `std::native` offers typed heap arrays.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
 owned logs, capped `gas_refunded`, and net `gas_used`. Aborting first undoes all
@@ -229,7 +234,7 @@ Smoke samples:
 
 Near-term expansion:
 
-- The remaining precompiles: ECRECOVER, MODEXP, BN254 and KZG point evaluation.
+- Growable state tables in place of the 256-entry SwissTables.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. Full Cancun conformance and performance comparisons
 remain future work.
