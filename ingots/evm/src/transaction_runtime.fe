@@ -1,7 +1,6 @@
-use core::Option
-use ingot::constants::{ERR_CALL_DEPTH, ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATE_LIMIT, ERR_STATIC_WRITE, ERR_TODO_OPCODE, OK}
+use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATE_LIMIT, ERR_STATIC_WRITE, ERR_TODO_OPCODE, OK}
 use ingot::state::WorldState
-use ingot::transaction::{CALL_DEPTH_LIMIT, Checkpoint, Transaction}
+use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute}
 
@@ -10,10 +9,7 @@ pub fn program<const N: usize>(_ ops: [u8; N]) -> Program {
 }
 
 pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint {
-    match transaction.checkpoint(is_static) {
-        Option::Some(point) => point,
-        Option::None => core::panic(),
-    }
+    transaction.checkpoint(is_static)
 }
 
 #[test]
@@ -110,30 +106,15 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
     world.release()
 }
 
-// Keep the one-time VM/code buffers out of every recursive checkpoint frame.
-#[inline(never)]
-fn assert_frame_depth_limit(_ tx: mut Transaction) {
+#[test]
+fn transaction_checkpoints_do_not_consume_evm_call_depth() {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let parent = checkpoint(mut tx, is_static: false)
     var vm = Vm::new()
     vm.run_owned(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
-    core::assert(vm.status == ERR_CALL_DEPTH && tx.depth() == CALL_DEPTH_LIMIT)
+    core::assert(vm.status == OK && tx.depth() == 1)
     vm.release()
-}
-
-fn nested_depth(_ tx: mut Transaction, remaining: usize) {
-    if remaining == 0 {
-        assert_frame_depth_limit(mut tx)
-    } else {
-        let point = checkpoint(mut tx, is_static: false)
-        nested_depth(mut tx, remaining: remaining - 1)
-        tx.commit(point)
-    }
-}
-
-#[test]
-fn transaction_enforces_frame_depth_without_closing_parent() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    nested_depth(mut tx, remaining: CALL_DEPTH_LIMIT)
-    core::assert(tx.depth() == 0)
+    tx.commit(parent)
     tx.finish(commit: true, gas_spent: 0).release()
 }
 
@@ -141,8 +122,8 @@ fn transaction_enforces_frame_depth_without_closing_parent() {
 fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // Both persistent and transient writes precede each exit. TODO remains an
     // operational failure, but it must still roll back the frame's writes.
-    // CALL supplies that exit until nested call execution is implemented.
-    for exit in [0xfd, 0xfe, 0x01, 0xf1] {
+    // CREATE supplies that exit until contract creation is implemented.
+    for exit in [0xfd, 0xfe, 0x01, 0xf0] {
         var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         // ADD has two operands here; use a second ADD to trigger underflow.
         let selected = if exit == 0x01 {

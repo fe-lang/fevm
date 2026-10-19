@@ -1,0 +1,13 @@
+use std::io::{Write, host, write}
+
+pub fn main() -> i32 {
+    calls_runtime::call_variants_preserve_environment_and_value()
+    calls_runtime::call_revert_restores_state_and_keeps_output_prefix()
+    calls_runtime::call_empty_and_insufficient_funds_charge_exact_gas()
+    calls_runtime::call_static_rules_and_return_data_bounds()
+    calls_runtime::call_protocol_depth_is_iterative_and_independent_of_checkpoints()
+    with (Write = host()) {
+        write("CALL cases passed\n")
+    }
+    0
+}

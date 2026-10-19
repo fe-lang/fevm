@@ -1,5 +1,5 @@
-use core::Option
-use std::native::ByteBuffer
+use core::{Option, Result}
+use std::native::{ByteBuffer, FixedStack}
 use keccak::Keccak256
 use ingot::memory::{MemoryExpansion, memory_expansion, copy_expansion, copy_gas}
 use ingot::gas::base_cost
@@ -15,7 +15,6 @@ use ingot::constants::{
     ERR_REVERT,
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
-    ERR_CALL_DEPTH,
     ERR_STATIC_WRITE,
     ERR_TODO_OPCODE,
     ERR_UNSUPPORTED_OPCODE,
@@ -24,12 +23,13 @@ use ingot::constants::{
     STACK_LIMIT,
 }
 use ingot::opcodes::is_todo_opcode
-use ingot::transaction::Transaction
+use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program}
 
 pub struct Vm {
     pub memory: ByteBuffer,
     pub output: ByteBuffer,
+    pub return_data: ByteBuffer,
     pub gas_remaining: u64,
     pub refund_delta: i128,
     pub output_valid: bool,
@@ -46,6 +46,7 @@ impl Vm {
         Vm {
             memory: ByteBuffer::new(),
             output: ByteBuffer::new(),
+            return_data: ByteBuffer::new(),
             gas_remaining: 0,
             refund_delta: 0,
             output_valid: false,
@@ -65,15 +66,7 @@ impl Vm {
     fn fault(mut self, _ status: i32) {
         if self.status == OK {
             self.status = status
-            if status == ERR_STACK_UNDERFLOW
-                || status == ERR_STACK_OVERFLOW
-                || status == ERR_INVALID_JUMP
-                || status == ERR_INVALID_OPCODE
-                || status == ERR_RETURN_DATA_OOB
-                || status == ERR_STATIC_WRITE
-                || status == ERR_OUT_OF_GAS {
-                self.gas_remaining = 0
-            }
+            if exceptional(status) { self.gas_remaining = 0 }
         }
     }
 
@@ -343,14 +336,21 @@ impl Vm {
         let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        // The frame currently has no nested calls, hence empty return data.
         // Charge first, then check bounds even for length zero, then allocate.
         match self.plan_memory(offset, len, copying: true) {
             Option::Some(plan,) => {
-                if source != 0 || len != 0 {
+                let available = self.return_data.len() as u256
+                if source > available || len > available - source {
                     self.fault(ERR_RETURN_DATA_OOB)
-                } else {
-                    let _ = self.expand_memory(plan.size)
+                } else if self.expand_memory(plan.size) && len != 0 {
+                    let destination: u64 = offset.downcast_unchecked()
+                    let source: u64 = source.downcast_unchecked()
+                    let count: u64 = len.downcast_unchecked()
+                    var index: u64 = 0
+                    while index < count {
+                        self.memory.set_byte(index: destination + index, value: self.return_data.byte_at(source + index))
+                        index += 1
+                    }
                 }
             },
             Option::None => {},
@@ -862,7 +862,7 @@ impl Vm {
         }
 
         if op == 0x3d {
-            self.push(0)
+            self.push(self.return_data.len() as u256)
             return
         }
 
@@ -1009,17 +1009,260 @@ fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
     value
 }
 
+// The root is depth zero; at most 1024 child frames may execute beneath it.
+pub const CALL_DEPTH_LIMIT: usize = 1024
+
+struct Frame {
+    vm: Vm,
+    program: Program,
+    calldata: InputData,
+    call: CallEnv,
+    checkpoint: Checkpoint,
+    output_offset: u64,
+    output_len: u64,
+}
+
+struct ChildResult { result: ExecutionResult, offset: u64, len: u64 }
+
+impl Frame {
+    fn resume(mut self, _ block: BlockEnv, _ state: mut Transaction, depth: usize) -> Option<Frame> {
+        self.vm.run_until_child(self.program, self.calldata, self.call, block, mut state, depth)
+    }
+
+    fn finish(own self, _ state: mut Transaction) -> ChildResult {
+        if self.vm.status == OK { state.commit(self.checkpoint) }
+        else { state.revert(self.checkpoint) }
+        self.program.release()
+        self.calldata.release()
+        ChildResult { result: self.vm.into_result(), offset: self.output_offset, len: self.output_len }
+    }
+
+    fn abort(own self, _ state: mut Transaction) {
+        state.revert(self.checkpoint)
+        self.program.release()
+        self.calldata.release()
+        self.vm.release()
+    }
+}
+
+fn exceptional(_ status: i32) -> bool {
+    status == ERR_STACK_UNDERFLOW || status == ERR_STACK_OVERFLOW
+        || status == ERR_INVALID_JUMP || status == ERR_INVALID_OPCODE
+        || status == ERR_RETURN_DATA_OOB || status == ERR_STATIC_WRITE
+        || status == ERR_OUT_OF_GAS
+}
+
 impl Vm {
-    pub fn run(
-        mut self,
-        _ program: Program,
-        _ calldata: InputData,
-        _ call: CallEnv,
-        _ block: BlockEnv,
-        _ state: mut Transaction,
-    ) {
+    fn accept_child(mut self, _ child: own ChildResult) {
+        let offset = child.offset
+        let len = child.len
+        let result = child.result
+        if result.status != OK && result.status != ERR_REVERT && !exceptional(result.status) {
+            // Host failures and unfinished VM features abort the execution. They
+            // must never be reported to EVM code as an ordinary failed CALL.
+            self.unsupported_opcode = result.unsupported_opcode
+            self.fault(result.status)
+            result.release()
+            return
+        }
+        if result.status == OK || result.status == ERR_REVERT {
+            self.gas_remaining += result.gas_remaining
+            let count = if len < result.output.len() { len } else { result.output.len() }
+            var index: u64 = 0
+            while index < count {
+                self.memory.set_byte(index: offset + index, value: result.output.byte_at(index))
+                index += 1
+            }
+        }
+        self.push_bool(result.status == OK)
+        let previous = self.return_data
+        self.return_data = result.output
+        previous.release()
+    }
+
+    fn start_call(mut self, op: i32, _ call: CallEnv, _ state: mut Transaction, depth: usize) -> Option<Frame> {
+        let requested = self.pop()
+        let code_address = address_word(self.pop())
+        let sender = address_word(call.address)
+        let transfers = op == 0xf1 || op == 0xf2
+        let value = if transfers { self.pop() } else { 0 }
+        if !self.ok() { return Option::None }
+        if op == 0xf1 && value != 0 && state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return Option::None
+        }
+        let input_offset = self.pop()
+        let input_len = self.pop()
+        let output_offset = self.pop()
+        let output_len = self.pop()
+        if !self.ok() { return Option::None }
+        // Zero-length ranges ignore their offsets, including oversized words.
+        for (offset, len) in [(input_offset, input_len), (output_offset, output_len)] {
+            match self.plan_memory(offset, len, copying: false) {
+                Option::Some(plan) => if !self.expand_memory(plan.size) { return Option::None },
+                Option::None => return Option::None,
+            }
+        }
+        let has_value = transfers && value != 0
+        if !self.charge(100 + if has_value { 9000 } else { 0 }) { return Option::None }
+        let cold = !state.account_is_warm(code_address)
+        let empty = state.balance(code_address) == 0 && state.nonce(code_address) == 0 && state.code_size(code_address) == 0
+        let access_status = state.warm_account(address: code_address)
+        if access_status != OK {
+            self.fault(access_status)
+            return Option::None
+        }
+        let extra: u128 = (if cold { 2500 } else { 0 }) + if op == 0xf1 && has_value && empty { 25000 } else { 0 }
+        if !self.charge(extra) { return Option::None }
+        let cap = self.gas_remaining - self.gas_remaining / 64
+        let forwarded: u64 = if requested < cap as u256 { requested.downcast_unchecked() } else { cap }
+        self.gas_remaining -= forwarded
+        let child_gas = forwarded + if has_value { 2300 } else { 0 }
+        self.return_data.clear()
+        // Target warming belongs to the caller checkpoint, including failures.
+        if depth == CALL_DEPTH_LIMIT || (transfers && state.balance(sender) < value) {
+            self.gas_remaining += child_gas
+            self.push(0)
+            return Option::None
+        }
+        let address = if op == 0xf2 || op == 0xf4 { sender } else { code_address }
+        let is_static = state.is_static() || op == 0xfa
+        let checkpoint = state.checkpoint(is_static)
+        if op == 0xf1 && has_value && sender != address {
+            let balance = state.balance(address)
+            if value > !(0 as u256) - balance {
+                state.revert(checkpoint)
+                self.push(0)
+                return Option::None
+            }
+            var status = state.set_balance(address: sender, value: state.balance(sender) - value)
+            if status == OK { status = state.set_balance(address, value: balance + value) }
+            if status != OK {
+                state.revert(checkpoint)
+                self.fault(status)
+                return Option::None
+            }
+        }
+        // Precompiles are a separate implementation milestone. Never execute
+        // them as empty accounts in the meantime.
+        if code_address >= 1 && code_address <= 10 {
+            state.revert(checkpoint)
+            self.unsupported_opcode = op
+            self.fault(ERR_TODO_OPCODE)
+            return Option::None
+        }
+        let code_len = state.code_size(code_address)
+        if code_len == 0 {
+            state.commit(checkpoint)
+            self.gas_remaining += child_gas
+            self.push(1)
+            return Option::None
+        }
+        var code = ByteBuffer::new()
+        if !code.try_resize(code_len) {
+            code.release()
+            state.revert(checkpoint)
+            self.fault(ERR_HOST_ALLOCATION)
+            return Option::None
+        }
+        var index: u64 = 0
+        while index < code_len {
+            code.set_byte(index, value: state.code_byte(address: code_address, index))
+            index += 1
+        }
+        let program = Program::new(InputData::new(code, status: OK))
+        let calldata = InputData::copy_from(self.memory,
+            offset: if input_len == 0 { 0 } else { input_offset.downcast_unchecked() },
+            len: input_len.downcast_unchecked())
+        if program.status != OK || calldata.status != OK {
+            self.fault(if program.status != OK { program.status } else { calldata.status })
+            program.release()
+            calldata.release()
+            state.revert(checkpoint)
+            return Option::None
+        }
+        let child_call = CallEnv {
+            address, caller: if op == 0xf4 { address_word(call.caller) } else { sender },
+            callvalue: if op == 0xf4 { call.callvalue } else { value },
+            origin: call.origin, gasprice: call.gasprice, gas_limit: child_gas, is_static,
+        }
+        var vm = Vm::new()
+        vm.gas_remaining = child_gas
+        Option::Some(Frame { vm, program, calldata, call: child_call, checkpoint,
+            output_offset: if output_len == 0 { 0 } else { output_offset.downcast_unchecked() },
+            output_len: output_len.downcast_unchecked() })
+    }
+
+    fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
+                       _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
+                       depth: usize) -> Option<Frame> {
+        while self.pc < program.len() && self.ok() && !self.halted {
+            let op = program.byte_at(self.pc) as i32
+            self.pc += 1
+            if !self.charge(base_cost(op) as u128) { break }
+            if op == 0x00 {
+                self.halted = true
+            } else if op == 0x5f {
+                self.push(0)
+            } else if op >= 0x60 && op <= 0x7f {
+                let len: usize = (op - 0x5f).downcast_unchecked()
+                let value = read_push_value(mut self, program, len)
+                self.push(value)
+            } else if op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xfa {
+                match self.start_call(op, call, mut state, depth) {
+                    Option::Some(frame) => return Option::Some(frame),
+                    Option::None => {},
+                }
+            } else if !self.step_state(op, call, block, mut state) {
+                self.step(op, program, calldata, call, block)
+            }
+        }
+        Option::None
+    }
+
+    fn run_children(mut self, _ first: own Frame, _ program: Program, _ calldata: InputData,
+                    _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
+        // Allocate frame slots only if code actually starts executing in a child.
+        var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+            Option::Some(frames) => frames,
+            Option::None => {
+                first.abort(mut state)
+                self.fault(ERR_HOST_ALLOCATION)
+                return
+            },
+        }
+        match frames.try_push(first) {
+            Result::Ok(()) => {},
+            Result::Err(_) => core::panic(),
+        }
+        while true {
+            let depth = frames.len()
+            let next = if depth == 0 {
+                self.run_until_child(program, calldata, call, block, mut state, depth: 0)
+            } else {
+                frames.top().resume(block, mut state, depth)
+            }
+            match next {
+                Option::Some(frame) => match frames.try_push(frame) {
+                    Result::Ok(()) => {},
+                    Result::Err(_) => core::panic(),
+                },
+                Option::None => {
+                    if depth == 0 { break }
+                    let result = frames.pop().finish(mut state)
+                    if frames.len() == 0 { self.accept_child(result) }
+                    else { frames.top().vm.accept_child(result) }
+                },
+            }
+        }
+        frames.release()
+    }
+
+    pub fn run(mut self, _ program: Program, _ calldata: InputData,
+               _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
         self.memory.clear()
         self.output.clear()
+        self.return_data.clear()
         self.output_valid = false
         self.sp = 0
         self.pc = 0
@@ -1033,30 +1276,10 @@ impl Vm {
             return
         }
         let refund_before = state.refund()
-        let checkpoint = match state.checkpoint(is_static: call.is_static) {
-            Option::Some(checkpoint) => checkpoint,
-            Option::None => {
-                self.fault(ERR_CALL_DEPTH)
-                return
-            },
-        }
-        while self.pc < program.len() && self.ok() && !self.halted {
-            let op = program.byte_at(self.pc) as i32
-            self.pc += 1
-            if !self.charge(base_cost(op) as u128) {
-                break
-            }
-            if op == 0x00 {
-                self.halted = true
-            } else if op == 0x5f {
-                self.push(0)
-            } else if op >= 0x60 && op <= 0x7f {
-                let len: usize = (op - 0x5f).downcast_unchecked()
-                let value = read_push_value(mut self, program, len)
-                self.push(value)
-            } else if !self.step_state(op, call, block, mut state) {
-                self.step(op, program, calldata, call, block)
-            }
+        let checkpoint = state.checkpoint(is_static: call.is_static)
+        match self.run_until_child(program, calldata, call, block, mut state, depth: 0) {
+            Option::Some(first) => self.run_children(first, program, calldata, call, block, mut state),
+            Option::None => {},
         }
         if self.status == OK {
             state.commit(checkpoint)
@@ -1078,6 +1301,7 @@ impl Vm {
     pub fn release(own self) {
         self.memory.release()
         self.output.release()
+        self.return_data.release()
     }
     pub fn into_result(own self) -> ExecutionResult {
         let stack_top: u256 = if self.sp == 0 {
@@ -1086,6 +1310,7 @@ impl Vm {
             self.stack[self.sp - 1]
         }
         self.memory.release()
+        self.return_data.release()
         ExecutionResult {
             status: self.status,
             output: self.output,

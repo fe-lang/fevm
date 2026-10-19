@@ -75,8 +75,20 @@ A `Transaction` owns the world state while execution is active. Each `Vm::run`
 opens a frame checkpoint: success commits it, while REVERT and every exceptional
 or operational failure undo that frame's writes. Explicit nested checkpoints
 support child commit and rollback; a committed child remains reversible by its
-parent. Close checkpoints once in reverse order. Static mode is inherited, and
-opening a frame beyond depth 1,024 fails without closing its parent.
+parent. Close checkpoints once in reverse order. Static mode is inherited.
+Checkpoints are journal scopes only; they do not count toward EVM call depth.
+
+`CALL`, `CALLCODE`, `DELEGATECALL` and `STATICCALL` run child frames on an
+explicit frame stack rather than native recursion, so the 1,024-frame depth limit
+does not depend on native stack size. Each child runs under its own checkpoint.
+Calls charge Cancun warm/cold access, value-transfer and new-account costs,
+forward at most all but one 64th of the remaining gas plus the 2,300-gas stipend,
+and fail without executing on insufficient balance or at the depth limit.
+Children write their output prefix into the caller's memory and replace its
+return data; RETURNDATASIZE and RETURNDATACOPY read that buffer. Host failures
+and unimplemented features in a child abort the whole execution rather than being
+reported to EVM code as a failed call. Calls to precompile addresses currently
+stop with a TODO fault.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
 owned logs, capped `gas_refunded`, and net `gas_used`. Aborting first undoes all
@@ -166,12 +178,13 @@ Implemented opcode slice:
 - `MLOAD`, `MSTORE`, `MSTORE8`, `SLOAD`, `SSTORE`, `MSIZE`, `TLOAD`, `TSTORE`, `MCOPY`
 - validated `JUMP`, `JUMPI`, `PC`, `GAS`, `JUMPDEST`
 - `LOG0` through `LOG4`
+- `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`
 - `RETURN`, `REVERT`
 - `INVALID` as an explicit execution fault
 
 Recognized TODO opcodes:
 
-- create/call opcodes: `CREATE`, `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE2`, `STATICCALL`, `SELFDESTRUCT`
+- `CREATE`, `CREATE2`, `SELFDESTRUCT`, and calls to precompile addresses
 
 Undefined byte values still fail as unsupported opcodes.
 
@@ -191,7 +204,8 @@ Smoke samples:
 
 Near-term expansion:
 
-- Call frames and exact `CREATE`/`CREATE2` deployment semantics.
+- Exact `CREATE`/`CREATE2` deployment and `SELFDESTRUCT` semantics.
+- Precompiled contracts and full transaction processing.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. Full Cancun conformance and performance comparisons
 remain future work.

@@ -107,8 +107,5 @@ pub fn write_opcode_name(_ op: i32) uses (w: mut Write) {
 }
 
 pub fn is_todo_opcode(_ op: i32) -> bool {
-    if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 {
-        return true
-    }
-    op == 0xfa || op == 0xff
+    op == 0xf0 || op == 0xf5 || op == 0xff
 }

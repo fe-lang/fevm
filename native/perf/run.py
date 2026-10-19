@@ -20,6 +20,8 @@ from arith.run import artifacts as collect_artifacts
 MODULES = {
     'checkpoints': ('buffer', 'constants', 'gas', 'journal', 'logs', 'state', 'transaction'),
     'inputs': ('constants', 'hex', 'types'),
+    'calls': ('buffer', 'calls_runtime', 'constants', 'gas', 'journal', 'logs',
+              'memory', 'opcodes', 'state', 'transaction', 'types', 'vm'),
     'vm_inputs': ('buffer', 'constants', 'gas', 'inputs_runtime', 'journal', 'logs',
                   'memory', 'opcodes', 'state', 'transaction', 'types', 'vm'),
 }
@@ -108,7 +110,7 @@ def main():
             raise RuntimeError(f'build failed with status {status}; see build.log')
         executable = artifacts / ingot_name
         expected = {'checkpoints': b'11111111', 'inputs': b'inputs passed\n',
-                    'vm_inputs': b'VM inputs passed\n'}[args.probe]
+                    'vm_inputs': b'VM inputs passed\n', 'calls': b'CALL cases passed\n'}[args.probe]
         cases = [('execution', executable, [])]
         if args.probe == 'inputs':
             cases.extend((f'{kind}-{name}', executable, [kind, encoded, status])

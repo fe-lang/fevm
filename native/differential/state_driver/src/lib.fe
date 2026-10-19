@@ -1,4 +1,3 @@
-use core::Option
 use std::io::{Write, host, write, writeln}
 use std::native::{Args, ByteBuffer}
 use fevm::{LogBuffer, BlockEnv, CallEnv, InputData, Program, StorageKey, Transaction, WorldState, default_block_env, default_call_env}
@@ -180,10 +179,7 @@ fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ ca
             core::assert(kind == 1)
             let is_static = reader.flag()
             let commit = reader.flag()
-            let point = match tx.checkpoint(is_static) {
-                Option::Some(point) => point,
-                Option::None => core::panic(),
-            }
+            let point = tx.checkpoint(is_static)
             gas_spent += run_actions(mut tx, mut reader, watch, call, block, mut emitted)
             if commit { tx.commit(point) } else { tx.revert(point) }
             if emitted { write(",") }

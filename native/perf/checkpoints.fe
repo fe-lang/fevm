@@ -1,4 +1,3 @@
-use core::Option
 use std::io::{Write, host, write}
 use std::native::ByteBuffer
 use ingot::logs::LogBuffer
@@ -56,10 +55,7 @@ fn actions(_ tx: mut Transaction, _ reader: mut Reader) uses (w: mut Write) {
             frame(mut tx)
         } else {
             let commit = reader.read()
-            let point = match tx.checkpoint(is_static: false) {
-                Option::Some(point) => point,
-                Option::None => core::panic(),
-            }
+            let point = tx.checkpoint(is_static: false)
             actions(mut tx, mut reader)
             if commit == 0 { tx.revert(point) } else { tx.commit(point) }
         }

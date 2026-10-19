@@ -1,12 +1,8 @@
-use core::Option
 use fevm::{Checkpoint, Transaction, WorldState, OK}
 use fevm::constants::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
-    match transaction.checkpoint(is_static: false) {
-        Option::Some(point) => point,
-        Option::None => core::panic(),
-    }
+    transaction.checkpoint(is_static: false)
 }
 
 // Linked with vm_allocator.c and FAIL_AT=1. Growing the journal to 131,072

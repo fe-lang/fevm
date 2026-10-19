@@ -1,13 +1,9 @@
-use core::Option
 use std::native::{Args, ByteBuffer}
 use fevm::{Checkpoint, Transaction, WorldState, OK}
 use fevm::constants::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
-    match tx.checkpoint(is_static: false) {
-        Option::Some(point) => point,
-        Option::None => core::panic(),
-    }
+    tx.checkpoint(is_static: false)
 }
 
 // WATCH_SIZE=131072 tests log-header growth after a retained first record.
