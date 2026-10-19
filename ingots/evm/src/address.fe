@@ -1,0 +1,66 @@
+use keccak::Keccak256
+
+fn hashed_address<const N: usize>(_ preimage: [u8; N], len: u64) -> u256 {
+    var hash = Keccak256::new()
+    hash.update(preimage, offset: 0, len)
+    var value: u256 = 0
+    for byte in hash.finish() { value = (value << 8) | byte as u256 }
+    value & 0xffffffffffffffffffffffffffffffffffffffff
+}
+
+fn put_word(_ bytes: mut [u8; 85], offset: u64, value: u256, width: u64) {
+    var i: u64 = 0
+    while i < width {
+        bytes[(offset + i) as usize] = (value >> ((width - 1 - i) * 8) as u256).downcast_truncate()
+        i += 1
+    }
+}
+
+/// CREATE: the low 160 bits of keccak256(rlp([sender, nonce])).
+pub fn create_address(sender: u256, nonce: u256) -> u256 {
+    core::assert(nonce <= 0xffffffffffffffff)
+    var nonce_len: u64 = 0
+    while nonce >> (nonce_len * 8) as u256 != 0 { nonce_len += 1 }
+    // RLP encodes zero as the empty string and a byte below 0x80 as itself.
+    let encoded_len = if nonce < 0x80 { 1 } else { 1 + nonce_len }
+    var rlp: [u8; 85] = [0; 85]
+    rlp[0] = (0xc0 + 21 + encoded_len).downcast_unchecked()
+    rlp[1] = 0x94
+    put_word(mut rlp, offset: 2, value: sender, width: 20)
+    if nonce == 0 {
+        rlp[22] = 0x80
+    } else if nonce < 0x80 {
+        rlp[22] = nonce.downcast_unchecked()
+    } else {
+        rlp[22] = (0x80 + nonce_len).downcast_unchecked()
+        put_word(mut rlp, offset: 23, value: nonce, width: nonce_len)
+    }
+    hashed_address(rlp, len: 22 + encoded_len)
+}
+
+/// CREATE2 (EIP-1014): the low 160 bits of keccak256(0xff ++ sender ++ salt ++ code_hash).
+pub fn create2_address(sender: u256, salt: u256, code_hash: u256) -> u256 {
+    var preimage: [u8; 85] = [0; 85]
+    preimage[0] = 0xff
+    put_word(mut preimage, offset: 1, value: sender, width: 20)
+    put_word(mut preimage, offset: 21, value: salt, width: 32)
+    put_word(mut preimage, offset: 53, value: code_hash, width: 32)
+    hashed_address(preimage, len: 85)
+}
+
+#[test]
+fn contract_addresses_match_known_derivations() {
+    // Yellow paper / EIP-1014 examples.
+    let sender = 0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0
+    core::assert(create_address(sender, nonce: 0) == 0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d)
+    core::assert(create_address(sender, nonce: 1) == 0x343c43a37d37dff08ae8c4a11544c718abb4fcf8)
+    core::assert(create_address(sender, nonce: 2) == 0xf778b86fa74e846c4f0a1fbd1335fe81c00a0c91)
+    core::assert(create_address(sender, nonce: 300) == 0x47bbbb5fe97aa84c3fa30dafbb067284d250c24c)
+    core::assert(create_address(sender, nonce: 0xfffffffffffffffe) == 0x9ab3917bcc9efbcf7de35bced143ed95c3b3cbf5)
+    core::assert(create2_address(sender: 0, salt: 0,
+        code_hash: 0xbc36789e7a1e281436464229828f817d6612f7b477d66591ff96a9e064bcc98a)
+        == 0x4d1a2e2bb4f88f0250f26ffff098b0b30b26bf38)
+    core::assert(create2_address(sender: 0xdeadbeef00000000000000000000000000000000, salt: 0,
+        code_hash: 0xbc36789e7a1e281436464229828f817d6612f7b477d66591ff96a9e064bcc98a)
+        == 0xb928f69bb1d91cd65274e3c79d8986362984fda3)
+}

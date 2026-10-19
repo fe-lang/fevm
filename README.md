@@ -5,8 +5,10 @@
 The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and CLI executable
+- `ingots/precompiles`: the Cancun precompiled contracts
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
+- `native/conformance/driver`: runs one Ethereum state test transaction through `transact`
 - `native/fixtures/journal`, `native/fixtures/accounts`, `native/fixtures/logs`, and `native/fixtures/calls`: allocation-failure fixtures run by the native harness
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
@@ -59,6 +61,20 @@ let world = settled.into_state()
 world.release()
 ```
 
+Complete Cancun transactions go through `fevm::transact(world, request, block)`.
+A `TxRequest` holds a `TxEnv` (envelope kind, sender, recipient or creation flag,
+nonce, gas limit and fee fields, value) together with owned calldata or initcode,
+access-list entries and versioned blob hashes. `transact` applies the
+specification's includability checks; an invalid transaction returns the
+untouched state and a receipt whose `invalid` field names the reason. A valid one
+buys its gas, increments the sender nonce, warms the sender, recipient, coinbase,
+precompiles and access list, and runs the call or creation. It then refunds unused
+gas and the capped refund to the sender, pays the priority fee to the coinbase,
+deletes self-destructed new accounts and accounts left empty by a balance, nonce
+or code write, and returns the receipt's status, gas used, output and logs. Host
+failures (allocation or table capacity) return the pre-state with that status.
+The [Ethereum state-test runner](native/conformance/README.md) drives `transact`.
+
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.
 
 `execute` and `execute_vm` consume and release their code and calldata. `Vm::run`
@@ -89,8 +105,20 @@ and fail without executing on insufficient balance or at the depth limit.
 Children write their output prefix into the caller's memory and replace its
 return data; RETURNDATASIZE and RETURNDATACOPY read that buffer. Host failures
 and unimplemented features in a child abort the whole execution rather than being
-reported to EVM code as a failed call. Calls to precompile addresses currently
-stop with a TODO fault.
+reported to EVM code as a failed call.
+
+`CREATE` and `CREATE2` charge initcode words (EIP-3860) and, for CREATE2, the
+hashing words; derive the address from the sender's nonce or salt and initcode
+hash; and run the initcode as a child frame under its own checkpoint. A target
+with a nonce, code or storage collides (EIP-684/EIP-7610) and consumes the
+forwarded gas. Successful initcode output is deposited as code after the
+EIP-3541 prefix check, 200 gas per byte and the EIP-170 size limit; a failed
+deposit is an exceptional halt. `SELFDESTRUCT` (EIP-6780) moves the balance to
+its beneficiary and deletes the account only if this transaction created it.
+
+Precompiles live in the separate `fevm_precompiles` workspace ingot. SHA-256,
+RIPEMD-160, IDENTITY and BLAKE2F are implemented; calls to the remaining
+precompile addresses stop with a TODO fault.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
 owned logs, capped `gas_refunded`, and net `gas_used`. Aborting first undoes all
@@ -146,8 +174,8 @@ returns zero for absent accounts and EIP-161 empty accounts (zero balance, nonce
 and code), and the empty Keccak digest for nonempty accounts without code.
 EXTCODECOPY zero-fills beyond stored code and charges memory expansion, three gas
 per copied word, and the shared warm/cold account access cost, including access
-cost for an empty copy. Code is immutable during transactions in this slice;
-CREATE, SELFDESTRUCT and their account lifecycle rules remain pending.
+cost for an empty copy. Contract creation is the only code write during a
+transaction; it is journaled and undone with its frame.
 The [account-code checkpoint](native/reports/account-code.md) passes all seven
 native acceptance stages at O0/O1/O2 on x86_64 Linux using local Fe `4c03313f1`.
 
@@ -180,15 +208,12 @@ Implemented opcode slice:
 - `MLOAD`, `MSTORE`, `MSTORE8`, `SLOAD`, `SSTORE`, `MSIZE`, `TLOAD`, `TSTORE`, `MCOPY`
 - validated `JUMP`, `JUMPI`, `PC`, `GAS`, `JUMPDEST`
 - `LOG0` through `LOG4`
-- `CALL`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`
+- `CREATE`, `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE2`, `STATICCALL`, `SELFDESTRUCT`
 - `RETURN`, `REVERT`
 - `INVALID` as an explicit execution fault
 
-Recognized TODO opcodes:
-
-- `CREATE`, `CREATE2`, `SELFDESTRUCT`, and calls to precompile addresses
-
-Undefined byte values still fail as unsupported opcodes.
+`INVALID` (0xfe) and every undefined byte are exceptional halts that consume all
+frame gas.
 
 Smoke samples:
 
@@ -201,13 +226,12 @@ Smoke samples:
 ./out/fevm 0x5f3500 0x1234  # CALLDATALOAD
 ./out/fevm 0x602a5f5260205ff3 # RETURN 32 bytes
 ./out/fevm 0x600160005560005400 # SSTORE then SLOAD
-./out/fevm 0x0c             # unsupported undefined opcode
+./out/fevm 0x0c             # undefined opcode: invalid
 ```
 
 Near-term expansion:
 
-- Exact `CREATE`/`CREATE2` deployment and `SELFDESTRUCT` semantics.
-- Precompiled contracts and full transaction processing.
+- The remaining precompiles: ECRECOVER, MODEXP, BN254 and KZG point evaluation.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. Full Cancun conformance and performance comparisons
 remain future work.

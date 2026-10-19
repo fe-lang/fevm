@@ -31,17 +31,25 @@ impl Journal {
         true
     }
 
-    pub fn pop(mut self) -> Change {
-        core::assert(self.len() >= RECORD_SIZE)
-        let offset = self.len() - RECORD_SIZE
-        let change = Change {
+    pub fn count(self) -> u64 { self.len() / RECORD_SIZE }
+
+    pub fn change(self, _ index: u64) -> Change {
+        core::assert(index < self.count())
+        let offset = index * RECORD_SIZE
+        Change {
             kind: self.bytes.byte_at(offset),
             address: read_word(self.bytes, offset: offset + 1),
             slot: read_word(self.bytes, offset: offset + 33),
             previous: read_word(self.bytes, offset: offset + 65),
             existed: self.bytes.byte_at(offset + 97) != 0,
         }
-        core::assert(self.bytes.try_resize(offset))
+    }
+
+    pub fn pop(mut self) -> Change {
+        let index = self.count()
+        core::assert(index > 0)
+        let change = self.change(index - 1)
+        core::assert(self.bytes.try_resize((index - 1) * RECORD_SIZE))
         change
     }
 

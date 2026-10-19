@@ -25,6 +25,16 @@ pub fn address_word(_ word: u256) -> u256 { word & 0xfffffffffffffffffffffffffff
 
 pub struct StorageKey { pub address: u256, pub slot: u256 }
 
+// Physical table slots for iterating the world; `occupied` is false for free slots.
+pub struct AccountEntry {
+    pub occupied: bool,
+    pub address: u256,
+    pub balance: u256,
+    pub nonce: u256,
+    pub code_len: u64,
+}
+pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
+
 impl Copy for StorageKey {}
 
 impl Default for StorageKey {
@@ -63,6 +73,41 @@ impl WorldState {
     }
     pub fn exists(self, _ address: u256) -> bool {
         self.accounts.contains(address_word(address))
+    }
+    // EIP-161 emptiness: zero balance and nonce, and no code. Absent accounts are empty.
+    pub fn is_empty(self, _ address: u256) -> bool {
+        let account = self.accounts.get(address_word(address)).value
+        account.balance == 0 && account.nonce == 0 && account.code_len == 0
+    }
+    // Delete an account record and its code; storage entries are left to the caller.
+    pub fn remove_account(mut self, _ address: u256) {
+        let address = address_word(address)
+        let empty: [u8; 0] = []
+        core::assert(self.set_code(address, code: empty) == OK)
+        let _ = self.accounts.remove(address)
+    }
+    pub fn has_storage(self, _ address: u256) -> bool {
+        let address = address_word(address)
+        var slot: usize = 0
+        while slot < self.storage.capacity() {
+            let entry = self.storage.entry(slot)
+            if entry.occupied && entry.key.address == address { return true }
+            slot += 1
+        }
+        false
+    }
+    pub fn table_slots(self) -> usize { self.accounts.capacity() }
+    pub fn account_at(self, _ slot: usize) -> AccountEntry {
+        let entry = self.accounts.entry(slot)
+        AccountEntry {
+            occupied: entry.occupied, address: entry.key, balance: entry.value.balance,
+            nonce: entry.value.nonce, code_len: entry.value.code_len,
+        }
+    }
+    pub fn storage_slots(self) -> usize { self.storage.capacity() }
+    pub fn storage_at(self, _ slot: usize) -> StorageEntry {
+        let entry = self.storage.entry(slot)
+        StorageEntry { occupied: entry.occupied, address: entry.key.address, slot: entry.key.slot, value: entry.value }
     }
     pub fn ensure_account(mut self, _ address: u256) -> bool {
         let address = address_word(address)

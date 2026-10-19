@@ -1,4 +1,4 @@
-use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATE_LIMIT, ERR_STATIC_WRITE, ERR_TODO_OPCODE, OK}
+use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
 use ingot::state::WorldState
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
@@ -120,14 +120,18 @@ fn transaction_checkpoints_do_not_consume_evm_call_depth() {
 
 #[test]
 fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
-    // Both persistent and transient writes precede each exit. TODO remains an
-    // operational failure, but it must still roll back the frame's writes.
-    // CREATE supplies that exit until contract creation is implemented.
-    for exit in [0xfd, 0xfe, 0x01, 0xf0] {
+    // Both persistent and transient writes precede each exit. Exhausting the
+    // transient table is an operational failure, but it must still roll back
+    // the frame's writes.
+    for exit in [0xfd, 0xfe, 0x01, 0x5d] {
         var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         // ADD has two operands here; use a second ADD to trigger underflow.
         let selected = if exit == 0x01 {
             program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
+        } else if exit == 0x5d {
+            // Store 1 under keys 257 down to 1; the 256-entry table fills first.
+            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x61, 1, 1, 0x5b, 0x60, 1, 0x81, 0x5d,
+                     0x60, 1, 0x90, 0x03, 0x80, 0x60, 11, 0x57, 0x00])
         } else {
             program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
         }
@@ -135,7 +139,7 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
             0xfd => ERR_REVERT,
             0xfe => ERR_INVALID_OPCODE,
             0x01 => ERR_STACK_UNDERFLOW,
-            _ => ERR_TODO_OPCODE,
+            _ => ERR_STATE_LIMIT,
         }
         let result = execute(selected, empty_bytes(), default_call_env(), default_block_env(), mut tx)
         core::assert(result.status == expected && tx.depth() == 0)

@@ -1,5 +1,5 @@
 use std::native::ByteBuffer
-use ingot::constants::{ERR_RETURN_DATA_OOB, ERR_STATIC_WRITE, ERR_TODO_OPCODE, OK}
+use ingot::constants::{ERR_RETURN_DATA_OOB, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
@@ -106,40 +106,28 @@ pub fn call_variants_preserve_environment_and_value() {
 
 #[test]
 pub fn call_revert_restores_state_and_keeps_output_prefix() {
-    for exit in [0xf3 as u8, 0xfd, 0xfe, 0xf0] {
+    // 0x5d marks an operational failure: the child exhausts the transient table.
+    for exit in [0xf3 as u8, 0xfd, 0xfe, 0x5d] {
         var world = WorldState::empty()
         core::assert(world.set_balance(0xaa, 100))
-        core::assert(
-            world
-                    .set_code(
-                        address: 0xbb,
-                        code: [
-                            0x60 as u8,
-                            0xcc,
-                            0x31,
-                            0x50,
-                            0x60,
-                            9,
-                            0x5f,
-                            0x55,
-                            0x60,
-                            8,
-                            0x5f,
-                            0x5d,
-                            0x61,
-                            0x11,
-                            0x22,
-                            0x5f,
-                            0x52,
-                            0x60,
-                            2,
-                            0x60,
-                            30,
-                            exit,
-                        ],
-                    )
-                == OK,
-        )
+        // BALANCE(0xcc), SSTORE(0, 9), TSTORE(0, 8), MSTORE(0, 0x1122), then exit.
+        let prefix = [
+            0x60 as u8, 0xcc, 0x31, 0x50, 0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d,
+            0x61, 0x11, 0x22, 0x5f, 0x52,
+        ]
+        var code = ByteBuffer::new()
+        for byte in prefix { append(mut code, byte) }
+        if exit == 0x5d {
+            // TSTORE 1 under keys 257 down to 1, looping at offset 20.
+            for byte in [0x61 as u8, 1, 1, 0x5b, 0x60, 1, 0x81, 0x5d, 0x60, 1, 0x90, 0x03, 0x80,
+                         0x60, 20, 0x57, 0x00] {
+                append(mut code, byte)
+            }
+        } else {
+            for byte in [0x60 as u8, 2, 0x60, 30, exit] { append(mut code, byte) }
+        }
+        core::assert(world.set_code(address: 0xbb, code) == OK)
+        code.release()
         var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
         var call = default_call_env()
         call.address = 0xaa
@@ -174,9 +162,9 @@ pub fn call_revert_restores_state_and_keeps_output_prefix() {
             mut tx,
         )
         core::assert(
-            vm.status == if exit == 0xf0 { ERR_TODO_OPCODE } else { OK },
+            vm.status == if exit == 0x5d { ERR_STATE_LIMIT } else { OK },
         )
-        if exit != 0xf0 {
+        if exit != 0x5d {
             core::assert(
                 vm.sp == 1 && vm.stack[0] == if exit == 0xf3 { 1 } else { 0 },
             )
@@ -194,7 +182,7 @@ pub fn call_revert_restores_state_and_keeps_output_prefix() {
         core::assert(
             tx.transient_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 8 } else { 0 },
         )
-        core::assert(tx.account_is_warm(0xbb) == (exit != 0xf0))
+        core::assert(tx.account_is_warm(0xbb) == (exit != 0x5d))
         core::assert(tx.account_is_warm(0xcc) == (exit == 0xf3))
         core::assert(tx.depth() == 0)
         vm.release()
