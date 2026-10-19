@@ -37,42 +37,21 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current compiler derives from
-[`sbillig/fe:mvs`](https://github.com/sbillig/fe/tree/8de35117e3de35c2f92967ec260e124db87c85bb) at
-`8de35117e3de35c2f92967ec260e124db87c85bb`. This base already contains native
-`FixedStack` and the merged enum-proof fixes. Fe integration
-`d1ccff352971945e4a9cd326fe5dc0b106a016ac` pins Sonatina
-`325114276de157cde38f5833ed8413166ef9741a`. It retains unchanged enum-proof
-indexes across snapshots and CFG joins, borrows native layout type definitions,
-and shares one native test runtime across source modules in an ingot. The earlier
-aggregate-initialization repair is included. It uses Rust 1.99.0; the default
-[`toolchain.json`](toolchain.json) records the exact revisions and lock hash.
+The current compiler is upstream Fe master
+[`f69b911ce544c4fe72b2481adcafabf1d967a278`](https://github.com/argotorg/fe/tree/f69b911ce544c4fe72b2481adcafabf1d967a278).
+Its Cargo.lock pins Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`. Master
+includes MVS, native `FixedStack` and the FeVM compile-time work previously pinned
+from forks (enum-proof indexes, borrowed native layouts and one shared native test
+runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchain.json)
+records the exact revisions and lock hash, and bootstrap fetches both from their
+upstream repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 52 workspace tests,
+All seven native acceptance stages pass on x86_64 Linux: 47 workspace tests,
 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at
-each of O0/O1/O2, plus 74,676 arithmetic checks. The matched report-enabled O1
-workspace run improves **636.90 → 401.41 seconds (36.98% less wall time)**,
-with one suite/Rayon worker and unchanged inputs. Peak compiler RSS falls from
-6.90 to 4.43 GiB. Runtime function entries shrink from 3,382 across twelve native
-objects to 653 in one object. Each test runs in its own process; native IR files
-use `<suite>.native.test.sona`/`.rmir` and reports use `artifacts/native/test-<index>/`.
-The complete candidate matrix takes 29.75 minutes; the matched performance
-comparison is the separate report-enabled O1 run.
-
-Fe passes 3,827 release workspace/all-feature tests; Sonatina passes 1,961 tests
-and 355 filechecks. Sonatina docs, both doctest suites, strict Clippy, nightly
-formatting and release notes pass. The Python harness's 13 tests and Rust reference's nine tests pass.
-See [performance and acceptance evidence](reports/mvs-next3-20261015/README.md).
-
-The exact tested commits are published on `fevm-compile-perf-20261015` in
-[`sbillig/fe`](https://github.com/sbillig/fe/tree/fevm-compile-perf-20261015) and
-[`sbillig/sonatina`](https://github.com/sbillig/sonatina/tree/fevm-compile-perf-20261015).
-Fresh bootstrap source preparation verifies both pinned commits through the
-manifest's repository URLs, including Sonatina's existing upstream URL. See the
-[publication record](reports/mvs-next3-publication-20261015.json).
-The branches preserve the tested MVS baseline; MVS has advanced since testing.
-Keccak and SwissTable pins are unchanged. Existing CALL edits retain their
-original hashes and remain uncommitted.
+each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
+simultaneous-fault reason differences per level. The Python harness's 13 tests and
+the Rust reference's nine tests pass. See the
+[Fe master acceptance report](reports/fe-master-20261019/README.md).
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
 [enum-proof repair](reports/mvs-compile-perf-20261014/README.md),

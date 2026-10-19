@@ -22,22 +22,16 @@ native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The compiler target is [`sbillig/fe:fevm-compile-perf-20261015`](https://github.com/sbillig/fe/tree/fevm-compile-perf-20261015),
-pinned with its Sonatina revision, Rust version and Cargo lock hash in
-[`native/toolchain.json`](native/toolchain.json). Sources use MVS mutable value
-bindings and explicit unsafe boundaries. See [native build instructions](native/README.md)
-for reproducible compiler builds and the acceptance matrix. All seven native
-acceptance stages pass at O0/O1/O2 on x86_64 Linux
-([evidence](native/reports/mvs-next3-20261015/README.md)). The compiler is
-based on fork MVS `8de35117e`, with shared enum-proof indexes, borrowed native
-layout definitions and one compiled native test runtime across source modules.
-The matched O1 workspace run with reports improves from 10m37s to 6m41s
-(36.98% less wall time), with identical inputs and one suite/Rayon worker.
-The tested compiler commits are published on the Fe and Sonatina forks;
-bootstrap fetches them using the pinned repository URLs. See the
-[publication record](native/reports/mvs-next3-publication-20261015.json). Earlier
-[owned-input results](native/reports/owned-inputs.md) describe
-their historical compiler and do not establish MVS acceptance.
+The compiler target is upstream [Fe master](https://github.com/argotorg/fe/tree/f69b911ce544c4fe72b2481adcafabf1d967a278)
+at `f69b911ce544c4fe72b2481adcafabf1d967a278`, pinned with its Sonatina revision,
+Rust version and Cargo lock hash in [`native/toolchain.json`](native/toolchain.json).
+Sources use MVS mutable value bindings and explicit unsafe boundaries. See
+[native build instructions](native/README.md) for reproducible compiler builds and
+the acceptance matrix. All seven native acceptance stages pass at O0/O1/O2 on
+x86_64 Linux ([evidence](native/reports/fe-master-20261019/README.md)). Earlier
+reports describe their historical compilers; the
+[fork performance work](native/reports/mvs-next3-20261015/README.md) they measured
+is now part of Fe master.
 
 Sample output:
 

@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "fe_repository": "https://github.com/sbillig/fe",
-  "fe_revision": "d1ccff352971945e4a9cd326fe5dc0b106a016ac",
+  "fe_repository": "https://github.com/argotorg/fe",
+  "fe_revision": "f69b911ce544c4fe72b2481adcafabf1d967a278",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "325114276de157cde38f5833ed8413166ef9741a",
-  "cargo_lock_sha256": "fc965db5a4186453ac0ad7c6b752252d107b11191c8a2c75015873e185b4b542",
+  "sonatina_revision": "6bef907f7e5854d0c77cf18624b7042213526960",
+  "cargo_lock_sha256": "90db1b0c9789e57a7a2faaf76309c501ffbde90a0b43e3f70854e942216e8b39",
   "rust_version": "1.99.0",
   "features": [
     "cranelift"
   ],
-  "publication": "exact tested compiler commits published on sbillig/fe and sbillig/sonatina branches fevm-compile-perf-20261015; pinned repository URLs verified by fresh source preparation",
+  "publication": "upstream argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"

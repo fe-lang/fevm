@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "f69b911ce544c4fe72b2481adcafabf1d967a278",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "6bef907f7e5854d0c77cf18624b7042213526960",
+    "cargo_lock_sha256": "90db1b0c9789e57a7a2faaf76309c501ffbde90a0b43e3f70854e942216e8b39",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "upstream argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/home/sean/code/fevm/native/out/fe-master-20261019/toolchain/fe",
+  "sonatina_source_directory": "/home/sean/code/fevm/native/out/fe-master-20261019/toolchain/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v20.20.2",
+  "npm": "10.8.2",
+  "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "target_directory": "/tmp/claude-1000/-home-sean-code-fevm/19bf8778-dfea-47dd-9f9b-9fce54efb227/scratchpad/fe-master-target",
+  "complete": true,
+  "compiler_build_seconds": 62.799080160912126,
+  "compiler": "/home/sean/code/fevm/native/out/fe-master-20261019/toolchain/bin/fe",
+  "compiler_sha256": "f6d5d7db4c07f4563ae7e604ac6958f82a61f190aa241e37eea2eedc3cf6ff00",
+  "compiler_version": "fe 26.4.0 (f69b911ce)"
+}
