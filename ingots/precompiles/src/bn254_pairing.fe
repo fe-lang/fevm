@@ -1,0 +1,107 @@
+use ingot::bn254_field::{Field, Fp, Fp2, Fp6, Fp12, fp}
+
+// The ate pairing loop count t - 1 = 6x^2 for the BN parameter x = 4965661367192848881.
+const ATE_LOOP: u256 = 0x6f4d8248eeb859fbf83e9682e87cfd46
+const ATE_LOOP_BITS: u64 = 127
+// The final exponent (p^12 - 1)/r splits as (p^6 - 1) * (p^6 + 1)/r; this is
+// (p^6 + 1)/r as little-endian 64-bit limbs.
+const FINAL_EXPONENT: [u64; 20] = [
+    0x5250a54036e3f812, 0xa5635f1596789051, 0xd1138bf54d5bd1d4, 0xa8ce2533be36c7a2,
+    0x94f69f6b84e09bf6, 0x42ad1f5e50ef3644, 0x0fcc420e48c3454c, 0x758e4408ecc9952c,
+    0xc901bf1887c6042c, 0xa733cd65b14bb3b5, 0xdf6d76bdcf51b0d8, 0xca64c0fd82eb59e1,
+    0x1d2e5726e39276a1, 0xc2d1ea74a391cae9, 0x07409206c82d647e, 0x051c6d1aa5afdd17,
+    0xb37f601919667af5, 0x150e578c5084015b, 0xfbdea556c23998e4, 0x000fd14cc52f5b83,
+]
+const FINAL_EXPONENT_BITS: u64 = 1268
+
+/// b / (9 + u), the D-type twist coefficient of y^2 = x^3 + b on G2.
+pub fn twist_b() -> Fp2 {
+    Fp2 {
+        c0: fp(19485874751759354771024239261021720505790618469301721065564631296452457478373),
+        c1: fp(266929791119991161246907387137283842545076965332900288569378510910307636690),
+    }
+}
+
+// Homogeneous projective (x/z, y/z) on the twist.
+struct Projective { x: Fp2, y: Fp2, z: Fp2 }
+impl Copy for Projective {}
+
+// A line through points of the twist, evaluated at P as c0*py + c1*px w + c2 v w.
+struct Line { c0: Fp2, c1: Fp2, c2: Fp2 }
+impl Copy for Line {}
+
+// Costello-Lange-Naehrig doubling with its tangent line (eprint 2013/722, eq. 3).
+fn double_step(_ r: Projective, two_inv: Fp, b: Fp2) -> (Projective, Line) {
+    let a = r.x.mul(r.y).scale(two_inv)
+    let yy = r.y.square()
+    let zz = r.z.square()
+    let e = b.mul(zz.double().add(zz))
+    let f = e.double().add(e)
+    let g = yy.add(f).scale(two_inv)
+    let h = r.y.add(r.z).square().sub(yy.add(zz))
+    let i = e.sub(yy)
+    let j = r.x.square()
+    let ee = e.square()
+    let doubled = Projective { x: a.mul(yy.sub(f)), y: g.square().sub(ee.double().add(ee)), z: yy.mul(h) }
+    (doubled, Line { c0: h.neg(), c1: j.double().add(j), c2: i })
+}
+
+// Mixed addition of affine Q with its chord line (eprint 2013/722, eq. 4).
+fn add_step(_ r: Projective, qx: Fp2, qy: Fp2) -> (Projective, Line) {
+    let theta = r.y.sub(qy.mul(r.z))
+    let lambda = r.x.sub(qx.mul(r.z))
+    let c = theta.square()
+    let d = lambda.square()
+    let e = lambda.mul(d)
+    let f = r.z.mul(c)
+    let g = r.x.mul(d)
+    let h = e.add(f).sub(g.double())
+    let sum = Projective { x: lambda.mul(h), y: theta.mul(g.sub(h)).sub(e.mul(r.y)), z: r.z.mul(e) }
+    (sum, Line { c0: lambda, c1: theta.neg(), c2: theta.mul(qx).sub(lambda.mul(qy)) })
+}
+
+fn ell(_ f: Fp12, _ line: Line, px: Fp, py: Fp) -> Fp12 {
+    let zero = Fp2::zero()
+    f.mul(Fp12 {
+        c0: Fp6 { c0: line.c0.scale(py), c1: zero, c2: zero },
+        c1: Fp6 { c0: line.c1.scale(px), c1: line.c2, c2: zero },
+    })
+}
+
+/// The Miller function f_{6x^2, Q}(P) of the ate pairing for affine Q on the
+/// twist and affine P in G1. Line scalars in proper subfields are left in,
+/// since the final exponentiation removes them.
+pub fn miller_loop(qx: Fp2, qy: Fp2, px: Fp, py: Fp) -> Fp12 {
+    let two_inv = fp(2).inverse()
+    let b = twist_b()
+    var r = Projective { x: qx, y: qy, z: Fp2::one() }
+    var f = Fp12::one()
+    var bit: u64 = ATE_LOOP_BITS - 1
+    while bit > 0 {
+        bit -= 1
+        f = f.square()
+        let (doubled, tangent) = double_step(r, two_inv, b)
+        r = doubled
+        f = ell(f, tangent, px, py)
+        if (ATE_LOOP >> bit as u256) & 1 == 1 {
+            let (sum, chord) = add_step(r, qx, qy)
+            r = sum
+            f = ell(f, chord, px, py)
+        }
+    }
+    f
+}
+
+/// Raise to (p^12 - 1)/r: the easy part f^(p^6 - 1) by conjugation, then
+/// square-and-multiply by (p^6 + 1)/r.
+pub fn final_exponentiation(_ f: Fp12) -> Fp12 {
+    let g = f.conjugate().mul(f.inverse())
+    var result = Fp12::one()
+    var bit: u64 = FINAL_EXPONENT_BITS
+    while bit > 0 {
+        bit -= 1
+        result = result.square()
+        if (FINAL_EXPONENT[(bit / 64) as usize] >> (bit % 64)) & 1 == 1 { result = result.mul(g) }
+    }
+    result
+}
