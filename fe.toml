@@ -3,6 +3,7 @@ name = "fevm"
 version = "0.1.0"
 members = [
   { path = "ingots/evm", name = "fevm" },
+  { path = "ingots/precompiles", name = "fevm_precompiles" },
   { path = "native/differential/driver", name = "fevm_frame" },
   { path = "native/differential/state_driver", name = "fevm_state" },
   { path = "native/fixtures/journal", name = "fevm_journal" },

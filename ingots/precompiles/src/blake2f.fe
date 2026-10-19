@@ -1,0 +1,103 @@
+use core::ops::WrappingAdd
+use keccak::ByteSource
+
+// RFC 7693 BLAKE2b compression function F with an explicit round count (EIP-152).
+const IV: [u64; 8] = [
+    0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
+    0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
+]
+const SIGMA: [u8; 160] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+    11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+    7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+    9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+    2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+    12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+    13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+    6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+    10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
+]
+
+pub const INPUT_LEN: u64 = 213
+
+fn rotate_right(_ value: u64, by: u64) -> u64 {
+    (value >> by) | (value << (64 - by))
+}
+
+fn read_le<T: ByteSource>(_ input: T, offset: u64) -> u64 {
+    var value: u64 = 0
+    var i: u64 = 0
+    while i < 8 {
+        value |= (input.byte_at(offset + i) as u64) << (i * 8)
+        i += 1
+    }
+    value
+}
+
+fn mix(_ v: mut [u64; 16], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64) {
+    v[a] = v[a].wrapping_add(v[b]).wrapping_add(x)
+    v[d] = rotate_right(v[d] ^ v[a], by: 32)
+    v[c] = v[c].wrapping_add(v[d])
+    v[b] = rotate_right(v[b] ^ v[c], by: 24)
+    v[a] = v[a].wrapping_add(v[b]).wrapping_add(y)
+    v[d] = rotate_right(v[d] ^ v[a], by: 16)
+    v[c] = v[c].wrapping_add(v[d])
+    v[b] = rotate_right(v[b] ^ v[c], by: 63)
+}
+
+/// The big-endian round count of a 213-byte input; the caller charges one gas per round.
+pub fn rounds<T: ByteSource>(_ input: T) -> u64 {
+    core::assert(input.len() == INPUT_LEN)
+    (input.byte_at(0) as u64) << 24 | (input.byte_at(1) as u64) << 16
+        | (input.byte_at(2) as u64) << 8 | input.byte_at(3) as u64
+}
+
+/// Compress a valid 213-byte input whose final-block flag is 0 or 1.
+pub fn compress<T: ByteSource>(_ input: T) -> [u8; 64] {
+    core::assert(input.len() == INPUT_LEN && input.byte_at(212) <= 1)
+    var h: [u64; 8] = [0; 8]
+    var m: [u64; 16] = [0; 16]
+    var i: u64 = 0
+    while i < 8 {
+        h[i as usize] = read_le(input, offset: 4 + i * 8)
+        i += 1
+    }
+    i = 0
+    while i < 16 {
+        m[i as usize] = read_le(input, offset: 68 + i * 8)
+        i += 1
+    }
+    var v: [u64; 16] = [0; 16]
+    i = 0
+    while i < 8 {
+        v[i as usize] = h[i as usize]
+        v[(i + 8) as usize] = IV[i as usize]
+        i += 1
+    }
+    v[12] ^= read_le(input, offset: 196)
+    v[13] ^= read_le(input, offset: 204)
+    if input.byte_at(212) == 1 { v[14] = !v[14] }
+    let total = rounds(input)
+    var round: u64 = 0
+    while round < total {
+        let s = ((round % 10) * 16) as usize
+        mix(mut v, a: 0, b: 4, c: 8, d: 12, x: m[SIGMA[s] as usize], y: m[SIGMA[s + 1] as usize])
+        mix(mut v, a: 1, b: 5, c: 9, d: 13, x: m[SIGMA[s + 2] as usize], y: m[SIGMA[s + 3] as usize])
+        mix(mut v, a: 2, b: 6, c: 10, d: 14, x: m[SIGMA[s + 4] as usize], y: m[SIGMA[s + 5] as usize])
+        mix(mut v, a: 3, b: 7, c: 11, d: 15, x: m[SIGMA[s + 6] as usize], y: m[SIGMA[s + 7] as usize])
+        mix(mut v, a: 0, b: 5, c: 10, d: 15, x: m[SIGMA[s + 8] as usize], y: m[SIGMA[s + 9] as usize])
+        mix(mut v, a: 1, b: 6, c: 11, d: 12, x: m[SIGMA[s + 10] as usize], y: m[SIGMA[s + 11] as usize])
+        mix(mut v, a: 2, b: 7, c: 8, d: 13, x: m[SIGMA[s + 12] as usize], y: m[SIGMA[s + 13] as usize])
+        mix(mut v, a: 3, b: 4, c: 9, d: 14, x: m[SIGMA[s + 14] as usize], y: m[SIGMA[s + 15] as usize])
+        round += 1
+    }
+    var output: [u8; 64] = [0; 64]
+    i = 0
+    while i < 64 {
+        let word = h[(i / 8) as usize] ^ v[(i / 8) as usize] ^ v[(i / 8 + 8) as usize]
+        output[i as usize] = (word >> ((i % 8) * 8)).downcast_truncate()
+        i += 1
+    }
+    output
+}
