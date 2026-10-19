@@ -1,0 +1,137 @@
+use core::Option
+use keccak::ByteSource
+use ingot::bls_field::{Field, Fp}
+use ingot::bls_tower::Fp2
+
+// The scalar field order r of G1 and G2.
+pub const ORDER: u256 = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+// y^2 = x^3 + 4 in Montgomery form.
+const B_G1: [u64; 6] = [0xaa270000000cfff3, 0x53cc0032fc34000a, 0x478fe97a6b0a807f, 0xb1d37ebee6ba24d7, 0x8ec9733bbf78ab2f, 0x09d645513d83de7e]
+const G1_X: [u64; 6] = [0x5cb38790fd530c16, 0x7817fc679976fff5, 0x154f95c7143ba1c1, 0xf0ae6acdf3d0e747, 0xedce6ecc21dbf440, 0x120177419e0bfb75]
+const G1_Y: [u64; 6] = [0xbaac93d50ce72271, 0x8c22631a7918fd8e, 0xdd595f13570725ce, 0x51ac582950405194, 0x0e1c8c3fad0059c0, 0x0bbc3efc5008a26a]
+const G2_X0: [u64; 6] = [0xf5f28fa202940a10, 0xb3f5fb2687b4961a, 0xa1a893b53e2ae580, 0x9894999d1a3caee9, 0x6f67b7631863366b, 0x058191924350bcd7]
+const G2_X1: [u64; 6] = [0xa5a9c0759e23f606, 0xaaa0c59dbccd60c3, 0x3bb17e18e2867806, 0x1b1ab6cc8541b367, 0xc2b6ed0ef2158547, 0x11922a097360edf3]
+const G2_Y0: [u64; 6] = [0x4c730af860494c4a, 0x597cfa1f5e369c5a, 0xe7e6856caa0a635a, 0xbbefb5e96e0d495f, 0x07d3a975f0ef25a2, 0x0083fd8e7e80dae5]
+const G2_Y1: [u64; 6] = [0xadc0fc92df64b05d, 0x18aa270a2b1461dc, 0x86adac6a3be4eba0, 0x79495c4ec93da33a, 0xe7175850a43ccaed, 0x0b2bc2a163de1bf2]
+
+/// A point in Jacobian coordinates (x/z^2, y/z^3) on y^2 = x^3 + b; z = 0 is infinity.
+pub struct Point<F> { pub x: F, pub y: F, pub z: F }
+
+impl<F> Copy for Point<F> where F: Copy {}
+
+/// An affine point; `infinity` marks the identity.
+pub struct Affine<F> { pub x: F, pub y: F, pub infinity: bool }
+
+impl<F> Copy for Affine<F> where F: Copy {}
+
+impl<F> Point<F> where F: Field + Copy {
+    pub fn identity() -> Point<F> { Point { x: F::one(), y: F::one(), z: F::zero() } }
+    pub fn from_affine(_ point: Affine<F>) -> Point<F> {
+        if point.infinity { Point::identity() } else { Point { x: point.x, y: point.y, z: F::one() } }
+    }
+    pub fn is_identity(self) -> bool { self.z.is_zero() }
+    pub fn neg(self) -> Point<F> { Point { x: self.x, y: self.y.neg(), z: self.z } }
+
+    // dbl-2009-l for a = 0.
+    pub fn double(self) -> Point<F> {
+        if self.is_identity() { return self }
+        let a = self.x.square()
+        let b = self.y.square()
+        let c = b.square()
+        let d = self.x.add(b).square().sub(a).sub(c).double()
+        let e = a.double().add(a)
+        let f = e.square()
+        let x = f.sub(d.double())
+        let y = e.mul(d.sub(x)).sub(c.double().double().double())
+        Point { x, y, z: self.y.mul(self.z).double() }
+    }
+
+    // add-2007-bl, with the doubling and inverse cases.
+    pub fn add(self, _ other: Point<F>) -> Point<F> {
+        if self.is_identity() { return other }
+        if other.is_identity() { return self }
+        let z1z1 = self.z.square()
+        let z2z2 = other.z.square()
+        let u1 = self.x.mul(z2z2)
+        let u2 = other.x.mul(z1z1)
+        let s1 = self.y.mul(other.z).mul(z2z2)
+        let s2 = other.y.mul(self.z).mul(z1z1)
+        let h = u2.sub(u1)
+        let r = s2.sub(s1).double()
+        if h.is_zero() {
+            return if r.is_zero() { self.double() } else { Point::identity() }
+        }
+        let i = h.double().square()
+        let j = h.mul(i)
+        let v = u1.mul(i)
+        let x = r.square().sub(j).sub(v.double())
+        let y = r.mul(v.sub(x)).sub(s1.mul(j).double())
+        let z = self.z.add(other.z).square().sub(z1z1).sub(z2z2).mul(h)
+        Point { x, y, z }
+    }
+
+    pub fn multiply(self, _ scalar: u256) -> Point<F> {
+        var result = Point::identity()
+        var bit: u64 = 256
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (scalar >> bit as u256) & 1 == 1 { result = result.add(self) }
+        }
+        result
+    }
+
+    pub fn to_affine(self) -> Affine<F> {
+        if self.is_identity() { return Affine { x: F::zero(), y: F::zero(), infinity: true } }
+        let inverse = self.z.invert()
+        let inverse_squared = inverse.square()
+        Affine { x: self.x.mul(inverse_squared), y: self.y.mul(inverse_squared).mul(inverse), infinity: false }
+    }
+
+    pub fn in_subgroup(self) -> bool { self.multiply(ORDER).is_identity() }
+}
+
+pub fn g1_generator() -> Point<Fp> {
+    Point { x: Fp::from_montgomery(G1_X), y: Fp::from_montgomery(G1_Y), z: Fp::one() }
+}
+
+pub fn g2_generator() -> Point<Fp2> {
+    Point {
+        x: Fp2::new(c0: Fp::from_montgomery(G2_X0), c1: Fp::from_montgomery(G2_X1)),
+        y: Fp2::new(c0: Fp::from_montgomery(G2_Y0), c1: Fp::from_montgomery(G2_Y1)),
+        z: Fp2::one(),
+    }
+}
+
+/// Decode a 48-byte compressed G1 point (ZCash serialization) as py_ecc's
+/// decompress_G1 does: the compression flag must be set; the infinity flag
+/// must agree with an all-zero x and excludes the sign flag; x must be below p
+/// and x^3 + 4 a square, and the sign flag selects the larger root.
+pub fn decompress_g1<T: ByteSource>(_ source: T, offset: u64) -> Option<Affine<Fp>> {
+    let flags = source.byte_at(offset)
+    let compressed = flags & 0x80 != 0
+    let infinity = flags & 0x40 != 0
+    let largest = flags & 0x20 != 0
+    if !compressed { return Option::None }
+    var x_is_zero = flags & 0x1f == 0
+    var i: u64 = 1
+    while i < 48 {
+        if source.byte_at(offset + i) != 0 { x_is_zero = false }
+        i += 1
+    }
+    if infinity != x_is_zero { return Option::None }
+    if infinity {
+        if largest { return Option::None }
+        return Option::Some(Affine { x: Fp::zero(), y: Fp::zero(), infinity: true })
+    }
+    let x = match Fp::from_be_bytes(source, offset, masked: true) {
+        Option::Some(x) => x,
+        Option::None => return Option::None,
+    }
+    let y = match x.square().mul(x).add(Fp::from_montgomery(B_G1)).sqrt() {
+        Option::Some(y) => y,
+        Option::None => return Option::None,
+    }
+    let y = if y.lexicographically_largest() != largest { y.neg() } else { y }
+    Option::Some(Affine { x, y, infinity: false })
+}
