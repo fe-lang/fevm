@@ -1,0 +1,88 @@
+use core::Option
+use keccak::ByteSource
+use ingot::bls_curve::{Affine, ORDER, Point, decompress_g1, g1_generator, g2_generator}
+use ingot::bls_field::{Field, Fp}
+use ingot::bls_pairing::pairing_product_is_one
+use ingot::bls_tower::Fp2
+use ingot::hashes::sha256
+
+/// EIP-4844 point evaluation input: versioned hash, z, y, commitment, proof.
+pub const INPUT_LEN: u64 = 192
+pub const GAS: u64 = 50000
+pub const FIELD_ELEMENTS_PER_BLOB: u256 = 4096
+/// The BLS12-381 scalar field order, BLS_MODULUS in EIP-4844.
+pub const BLS_MODULUS: u256 = ORDER
+
+// [tau]G2, monomial G2 point 1 of the mainnet KZG trusted setup: compressed
+// 0xb5bfd7dd8cdeb128...a20c1def2, line 4100 of c-kzg-4844's src/trusted_setup.txt
+// and KZG_SETUP_G2_MONOMIAL_1 in execution-specs' ethereum/crypto/kzg.py.
+// Stored decompressed, in Montgomery form (x = x0 + x1 u, y = y0 + y1 u).
+const TAU_G2_X0: [u64; 6] = [0x6120a2099b0379f9, 0xa2df815cb8210e4e, 0xcb57be5577bd3d4f, 0x62da0ea89a0c93f8, 0x02e0ee16968e150d, 0x171f09aea833acd5]
+const TAU_G2_X1: [u64; 6] = [0x11a3670749dfd455, 0x04991d7b3abffadc, 0x85446a8e14437f41, 0x27174e7b4e76e3f2, 0x7bfa6dd397f60a20, 0x02fcc329ac07080f]
+const TAU_G2_Y0: [u64; 6] = [0xaa130838793b2317, 0xe236dd220f891637, 0x6502782925760980, 0xd05c25f60557ec89, 0x6095767a44064474, 0x185693917080d405]
+const TAU_G2_Y1: [u64; 6] = [0x549f9e175b03dc0a, 0x32c0c95a77106cfe, 0x64a74eae5705d080, 0x53deeaf56659ed9e, 0x09a1d368508afb93, 0x12cf3a4525b5e9bd]
+
+fn word<T: ByteSource>(_ source: T, offset: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        value = (value << 8) | source.byte_at(offset + i) as u256
+        i += 1
+    }
+    value
+}
+
+/// KZG commitments and proofs: the encoded identity, or a valid compressed
+/// point in the prime-order subgroup (validate_kzg_g1 and KeyValidate).
+pub fn decode_kzg_g1<T: ByteSource>(_ source: T, offset: u64) -> Option<Affine<Fp>> {
+    let point = match decompress_g1(source, offset) {
+        Option::Some(point) => point,
+        Option::None => return Option::None,
+    }
+    if !point.infinity && !Point::from_affine(point).in_subgroup() { return Option::None }
+    Option::Some(point)
+}
+
+fn tau_g2() -> Point<Fp2> {
+    Point {
+        x: Fp2::new(c0: Fp::from_montgomery(TAU_G2_X0), c1: Fp::from_montgomery(TAU_G2_X1)),
+        y: Fp2::new(c0: Fp::from_montgomery(TAU_G2_Y0), c1: Fp::from_montgomery(TAU_G2_Y1)),
+        z: Fp2::one(),
+    }
+}
+
+/// Verify the proof that the committed polynomial evaluates to y at z:
+/// e(C - [y]G1, -G2) * e(proof, [tau]G2 - [z]G2) == 1. `input` is the 192-byte
+/// precompile input; the versioned hash must match the commitment.
+pub fn verify<T: ByteSource>(_ input: T) -> bool {
+    core::assert(input.len() == INPUT_LEN)
+    var commitment_bytes: [u8; 48] = [0; 48]
+    var i: u64 = 0
+    while i < 48 {
+        commitment_bytes[i as usize] = input.byte_at(96 + i)
+        i += 1
+    }
+    let digest = sha256(commitment_bytes)
+    if input.byte_at(0) != 0x01 { return false }
+    i = 1
+    while i < 32 {
+        if input.byte_at(i) != digest[i as usize] { return false }
+        i += 1
+    }
+    let z = word(input, offset: 32)
+    let y = word(input, offset: 64)
+    if z >= BLS_MODULUS || y >= BLS_MODULUS { return false }
+    let commitment = match decode_kzg_g1(input, offset: 96) {
+        Option::Some(point) => point,
+        Option::None => return false,
+    }
+    let proof = match decode_kzg_g1(input, offset: 144) {
+        Option::Some(point) => point,
+        Option::None => return false,
+    }
+    let p_minus_y = Point::from_affine(commitment).add(g1_generator().multiply(y).neg()).to_affine()
+    let x_minus_z = tau_g2().add(g2_generator().multiply(z).neg()).to_affine()
+    let neg_g2 = g2_generator().neg().to_affine()
+    pairing_product_is_one(p_minus_y, neg_g2, proof, x_minus_z)
+}
+

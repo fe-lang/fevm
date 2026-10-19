@@ -1,0 +1,197 @@
+use core::Option
+use core::ops::{WrappingMul, WrappingSub}
+use keccak::ByteSource
+
+// BLS12-381 base field: p = 0x1a0111ea...ffaaab (381 bits). Elements are six
+// little-endian 64-bit limbs in Montgomery form, x * 2^384 mod p. Constants
+// match the zkcrypto bls12_381 crate and were checked against py_ecc.
+const MODULUS: [u64; 6] = [0xb9feffffffffaaab, 0x1eabfffeb153ffff, 0x6730d2a0f6b0f624, 0x64774b84f38512bf, 0x4b1ba7b6434bacd7, 0x1a0111ea397fe69a]
+// -p^-1 mod 2^64.
+const INV: u64 = 0x89f3fffcfffcfffd
+// 2^384 mod p (one) and 2^768 mod p.
+const R1: [u64; 6] = [0x760900000002fffd, 0xebf4000bc40c0002, 0x5f48985753c758ba, 0x77ce585370525745, 0x5c071a97a256ec6d, 0x15f65ec3fa80e493]
+const R2: [u64; 6] = [0xf4df1f341c341746, 0x0a76e6a609d104f1, 0x8de5476c4c95b6d5, 0x67eb88a9939d83c0, 0x9a793e85b519952d, 0x11988fe592cae3aa]
+const P_MINUS_2: [u64; 6] = [0xb9feffffffffaaa9, 0x1eabfffeb153ffff, 0x6730d2a0f6b0f624, 0x64774b84f38512bf, 0x4b1ba7b6434bacd7, 0x1a0111ea397fe69a]
+// (p + 1) / 4: p = 3 mod 4, so a^((p+1)/4) is a square root of any square a.
+const SQRT_EXPONENT: [u64; 6] = [0xee7fbfffffffeaab, 0x07aaffffac54ffff, 0xd9cc34a83dac3d89, 0xd91dd2e13ce144af, 0x92c6e9ed90d2eb35, 0x0680447a8e5ff9a6]
+const HALF_MODULUS: [u64; 6] = [0xdcff7fffffffd555, 0x0f55ffff58a9ffff, 0xb39869507b587b12, 0xb23ba5c279c2895f, 0x258dd3db21a5d66b, 0x0d0088f51cbff34d]
+
+/// Operations shared by the base field and its quadratic extension, so curve
+/// arithmetic is written once for G1 (over Fp) and G2 (over Fp2).
+pub trait Field {
+    fn zero() -> Self
+    fn one() -> Self
+    fn is_zero(self) -> bool
+    fn equals(self, _ other: Self) -> bool
+    fn add(self, _ other: Self) -> Self
+    fn sub(self, _ other: Self) -> Self
+    fn mul(self, _ other: Self) -> Self
+    fn square(self) -> Self
+    fn double(self) -> Self
+    fn neg(self) -> Self
+    fn invert(self) -> Self
+}
+
+pub struct Fp { pub limbs: [u64; 6] }
+
+impl Copy for Fp {}
+
+// a >= b over six limbs.
+fn at_least(_ a: [u64; 6], _ b: [u64; 6]) -> bool {
+    var i: u64 = 6
+    while i > 0 {
+        i -= 1
+        if a[i as usize] != b[i as usize] { return a[i as usize] > b[i as usize] }
+    }
+    true
+}
+
+// a - b with the final borrow, for limbs where the caller knows the sign.
+fn subtract(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 6] {
+    var out: [u64; 6] = [0; 6]
+    var borrow: u64 = 0
+    var i: u64 = 0
+    while i < 6 {
+        let x = a[i as usize]
+        let y = b[i as usize]
+        let difference = x.wrapping_sub(y).wrapping_sub(borrow)
+        borrow = if x < y || (x == y && borrow == 1) { 1 } else { 0 }
+        out[i as usize] = difference
+        i += 1
+    }
+    out
+}
+
+impl Fp {
+    /// A canonical integer below p, given as little-endian limbs.
+    pub fn from_canonical(_ limbs: [u64; 6]) -> Fp {
+        core::assert(!at_least(limbs, MODULUS))
+        Fp { limbs }.mul(Fp { limbs: R2 })
+    }
+
+    /// Montgomery limbs of a constant precomputed off-line.
+    pub fn from_montgomery(_ limbs: [u64; 6]) -> Fp { Fp { limbs } }
+
+    /// A 48-byte big-endian integer from `source` at `offset`, ignoring the top
+    /// three bits when `masked` (compressed-point flags); None if not below p.
+    pub fn from_be_bytes<T: ByteSource>(_ source: T, offset: u64, masked: bool) -> Option<Fp> {
+        var limbs: [u64; 6] = [0; 6]
+        var i: u64 = 0
+        while i < 48 {
+            var byte = source.byte_at(offset + i)
+            if i == 0 && masked { byte &= 0x1f }
+            let limb = (47 - i) / 8
+            limbs[limb as usize] |= (byte as u64) << (((47 - i) % 8) * 8)
+            i += 1
+        }
+        if at_least(limbs, MODULUS) { return Option::None }
+        Option::Some(Fp::from_canonical(limbs))
+    }
+
+    /// The canonical integer, as little-endian limbs.
+    pub fn to_canonical(self) -> [u64; 6] {
+        self.mul(Fp { limbs: [1, 0, 0, 0, 0, 0] }).limbs
+    }
+
+    /// Whether the canonical value exceeds (p - 1) / 2: the compressed-point sign.
+    pub fn lexicographically_largest(self) -> bool {
+        let value = self.to_canonical()
+        at_least(value, HALF_MODULUS) && !at_least(HALF_MODULUS, value)
+    }
+
+    pub fn pow(self, _ exponent: [u64; 6]) -> Fp {
+        var result = Fp { limbs: R1 }
+        var i: u64 = 384
+        while i > 0 {
+            i -= 1
+            result = result.square()
+            if (exponent[(i / 64) as usize] >> (i % 64)) & 1 == 1 { result = result.mul(self) }
+        }
+        result
+    }
+
+    /// A square root, if one exists.
+    pub fn sqrt(self) -> Option<Fp> {
+        let root = self.pow(SQRT_EXPONENT)
+        if root.square().equals(self) { Option::Some(root) } else { Option::None }
+    }
+}
+
+impl Field for Fp {
+    fn zero() -> Fp { Fp { limbs: [0; 6] } }
+    fn one() -> Fp { Fp { limbs: R1 } }
+
+    fn is_zero(self) -> bool {
+        (self.limbs[0] | self.limbs[1] | self.limbs[2] | self.limbs[3] | self.limbs[4] | self.limbs[5]) == 0
+    }
+
+    fn equals(self, _ other: Fp) -> bool {
+        self.limbs[0] == other.limbs[0] && self.limbs[1] == other.limbs[1] && self.limbs[2] == other.limbs[2]
+            && self.limbs[3] == other.limbs[3] && self.limbs[4] == other.limbs[4] && self.limbs[5] == other.limbs[5]
+    }
+
+    fn add(self, _ other: Fp) -> Fp {
+        // Both operands are below p < 2^382, so the sum fits six limbs.
+        var out: [u64; 6] = [0; 6]
+        var carry: u64 = 0
+        var i: u64 = 0
+        while i < 6 {
+            let sum = self.limbs[i as usize] as u128 + other.limbs[i as usize] as u128 + carry as u128
+            out[i as usize] = sum.downcast_truncate()
+            carry = (sum >> 64).downcast_truncate()
+            i += 1
+        }
+        if at_least(out, MODULUS) { out = subtract(out, MODULUS) }
+        Fp { limbs: out }
+    }
+
+    fn sub(self, _ other: Fp) -> Fp {
+        if at_least(self.limbs, other.limbs) { return Fp { limbs: subtract(self.limbs, other.limbs) } }
+        // self - other + p, computed as p - (other - self).
+        Fp { limbs: subtract(MODULUS, subtract(other.limbs, self.limbs)) }
+    }
+
+    // Montgomery multiplication (CIOS): a * b * 2^-384 mod p.
+    fn mul(self, _ other: Fp) -> Fp {
+        var t: [u64; 8] = [0; 8]
+        var i: u64 = 0
+        while i < 6 {
+            let b = other.limbs[i as usize] as u128
+            var carry: u64 = 0
+            var j: u64 = 0
+            while j < 6 {
+                let s = t[j as usize] as u128 + (self.limbs[j as usize] as u128) * b + carry as u128
+                t[j as usize] = s.downcast_truncate()
+                carry = (s >> 64).downcast_truncate()
+                j += 1
+            }
+            let top = t[6] as u128 + carry as u128
+            t[6] = top.downcast_truncate()
+            t[7] = (top >> 64).downcast_truncate()
+            let m = t[0].wrapping_mul(INV) as u128
+            var s = t[0] as u128 + m * MODULUS[0] as u128
+            carry = (s >> 64).downcast_truncate()
+            j = 1
+            while j < 6 {
+                s = t[j as usize] as u128 + m * MODULUS[j as usize] as u128 + carry as u128
+                t[(j - 1) as usize] = s.downcast_truncate()
+                carry = (s >> 64).downcast_truncate()
+                j += 1
+            }
+            s = t[6] as u128 + carry as u128
+            t[5] = s.downcast_truncate()
+            t[6] = t[7] + (s >> 64).downcast_truncate()
+            i += 1
+        }
+        var out: [u64; 6] = [t[0], t[1], t[2], t[3], t[4], t[5]]
+        if t[6] != 0 || at_least(out, MODULUS) { out = subtract(out, MODULUS) }
+        Fp { limbs: out }
+    }
+
+    fn square(self) -> Fp { self.mul(self) }
+    fn double(self) -> Fp { self.add(self) }
+    fn neg(self) -> Fp { if self.is_zero() { self } else { Fp { limbs: subtract(MODULUS, self.limbs) } } }
+
+    // Fermat inversion; zero maps to zero.
+    fn invert(self) -> Fp { self.pow(P_MINUS_2) }
+}

@@ -1,0 +1,158 @@
+use ingot::bls_field::{Field, Fp}
+
+// The BLS12-381 tower used by the zkcrypto bls12_381 crate:
+// Fp2 = Fp[u]/(u^2 + 1), Fp6 = Fp2[v]/(v^3 - (u + 1)), Fp12 = Fp6[w]/(w^2 - v).
+// Frobenius coefficients: (u+1)^((p-1)/3), (u+1)^(2(p-1)/3) and (u+1)^((p-1)/6).
+const FROBENIUS_V_C1: [u64; 6] = [0xcd03c9e48671f071, 0x5dab22461fcda5d2, 0x587042afd3851b95, 0x8eb60ebe01bacb9e, 0x03f97d6e83d050d2, 0x18f0206554638741]
+const FROBENIUS_V2_C0: [u64; 6] = [0x890dc9e4867545c3, 0x2af322533285a5d5, 0x50880866309b7e2c, 0xa20d1b8c7e881024, 0x14e4f04fe2db9068, 0x14e56d3f1564853a]
+const FROBENIUS_W_C0: [u64; 6] = [0x07089552b319d465, 0xc6695f92b50a8313, 0x97e83cccd117228f, 0xa35baecab2dc29ee, 0x1ce393ea5daace4d, 0x08f2220fb0fb66eb]
+const FROBENIUS_W_C1: [u64; 6] = [0xb2f66aad4ce5d646, 0x5842a06bfc497cec, 0xcf4895d42599d394, 0xc11b9cba40a8e8d0, 0x2e3813cbe5a0de89, 0x110eefda88847faf]
+
+pub struct Fp2 { pub c0: Fp, pub c1: Fp }
+
+impl Copy for Fp2 {}
+
+impl Fp2 {
+    pub fn new(c0: Fp, c1: Fp) -> Fp2 { Fp2 { c0, c1 } }
+    pub fn conjugate(self) -> Fp2 { Fp2 { c0: self.c0, c1: self.c1.neg() } }
+    // Multiply by the sextic non-residue u + 1.
+    pub fn mul_by_nonresidue(self) -> Fp2 { Fp2 { c0: self.c0.sub(self.c1), c1: self.c0.add(self.c1) } }
+    pub fn mul_fp(self, _ scalar: Fp) -> Fp2 { Fp2 { c0: self.c0.mul(scalar), c1: self.c1.mul(scalar) } }
+}
+
+impl Field for Fp2 {
+    fn zero() -> Fp2 { Fp2 { c0: Fp::zero(), c1: Fp::zero() } }
+    fn one() -> Fp2 { Fp2 { c0: Fp::one(), c1: Fp::zero() } }
+    fn is_zero(self) -> bool { self.c0.is_zero() && self.c1.is_zero() }
+    fn equals(self, _ other: Fp2) -> bool { self.c0.equals(other.c0) && self.c1.equals(other.c1) }
+    fn add(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.add(other.c0), c1: self.c1.add(other.c1) } }
+    fn sub(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.sub(other.c0), c1: self.c1.sub(other.c1) } }
+    fn mul(self, _ other: Fp2) -> Fp2 {
+        let aa = self.c0.mul(other.c0)
+        let bb = self.c1.mul(other.c1)
+        let cross = self.c0.add(self.c1).mul(other.c0.add(other.c1))
+        Fp2 { c0: aa.sub(bb), c1: cross.sub(aa).sub(bb) }
+    }
+    fn square(self) -> Fp2 {
+        let product = self.c0.mul(self.c1)
+        Fp2 { c0: self.c0.add(self.c1).mul(self.c0.sub(self.c1)), c1: product.double() }
+    }
+    fn double(self) -> Fp2 { self.add(self) }
+    fn neg(self) -> Fp2 { Fp2 { c0: self.c0.neg(), c1: self.c1.neg() } }
+    fn invert(self) -> Fp2 {
+        let norm = self.c0.square().add(self.c1.square()).invert()
+        Fp2 { c0: self.c0.mul(norm), c1: self.c1.mul(norm).neg() }
+    }
+}
+
+pub struct Fp6 { pub c0: Fp2, pub c1: Fp2, pub c2: Fp2 }
+
+impl Copy for Fp6 {}
+
+impl Fp6 {
+    pub fn zero() -> Fp6 { Fp6 { c0: Fp2::zero(), c1: Fp2::zero(), c2: Fp2::zero() } }
+    pub fn one() -> Fp6 { Fp6 { c0: Fp2::one(), c1: Fp2::zero(), c2: Fp2::zero() } }
+    pub fn is_zero(self) -> bool { self.c0.is_zero() && self.c1.is_zero() && self.c2.is_zero() }
+    pub fn equals(self, _ other: Fp6) -> bool {
+        self.c0.equals(other.c0) && self.c1.equals(other.c1) && self.c2.equals(other.c2)
+    }
+    pub fn add(self, _ other: Fp6) -> Fp6 {
+        Fp6 { c0: self.c0.add(other.c0), c1: self.c1.add(other.c1), c2: self.c2.add(other.c2) }
+    }
+    pub fn sub(self, _ other: Fp6) -> Fp6 {
+        Fp6 { c0: self.c0.sub(other.c0), c1: self.c1.sub(other.c1), c2: self.c2.sub(other.c2) }
+    }
+    pub fn neg(self) -> Fp6 { Fp6 { c0: self.c0.neg(), c1: self.c1.neg(), c2: self.c2.neg() } }
+
+    pub fn mul(self, _ other: Fp6) -> Fp6 {
+        let t0 = self.c0.mul(other.c0)
+        let t1 = self.c1.mul(other.c1)
+        let t2 = self.c2.mul(other.c2)
+        let c0 = self.c1.add(self.c2).mul(other.c1.add(other.c2)).sub(t1).sub(t2).mul_by_nonresidue().add(t0)
+        let c1 = self.c0.add(self.c1).mul(other.c0.add(other.c1)).sub(t0).sub(t1).add(t2.mul_by_nonresidue())
+        let c2 = self.c0.add(self.c2).mul(other.c0.add(other.c2)).sub(t0).sub(t2).add(t1)
+        Fp6 { c0, c1, c2 }
+    }
+
+    pub fn square(self) -> Fp6 { self.mul(self) }
+
+    // Multiply by v.
+    pub fn mul_by_nonresidue(self) -> Fp6 { Fp6 { c0: self.c2.mul_by_nonresidue(), c1: self.c0, c2: self.c1 } }
+
+    // Multiply by c0 + c1 v.
+    pub fn mul_by_01(self, c0: Fp2, c1: Fp2) -> Fp6 {
+        let aa = self.c0.mul(c0)
+        let bb = self.c1.mul(c1)
+        Fp6 {
+            c0: self.c2.mul(c1).mul_by_nonresidue().add(aa),
+            c1: c0.add(c1).mul(self.c0.add(self.c1)).sub(aa).sub(bb),
+            c2: self.c2.mul(c0).add(bb),
+        }
+    }
+
+    // Multiply by c1 v.
+    pub fn mul_by_1(self, _ c1: Fp2) -> Fp6 {
+        Fp6 { c0: self.c2.mul(c1).mul_by_nonresidue(), c1: self.c0.mul(c1), c2: self.c1.mul(c1) }
+    }
+
+    pub fn invert(self) -> Fp6 {
+        let t0 = self.c0.square().sub(self.c1.mul(self.c2).mul_by_nonresidue())
+        let t1 = self.c2.square().mul_by_nonresidue().sub(self.c0.mul(self.c1))
+        let t2 = self.c1.square().sub(self.c0.mul(self.c2))
+        let norm = self.c0.mul(t0).add(self.c2.mul(t1).add(self.c1.mul(t2)).mul_by_nonresidue()).invert()
+        Fp6 { c0: t0.mul(norm), c1: t1.mul(norm), c2: t2.mul(norm) }
+    }
+
+    pub fn frobenius(self) -> Fp6 {
+        // (u+1)^((p-1)/3) is purely imaginary and (u+1)^(2(p-1)/3) purely real.
+        let v = Fp2 { c0: Fp::zero(), c1: Fp::from_montgomery(FROBENIUS_V_C1) }
+        let v2 = Fp2 { c0: Fp::from_montgomery(FROBENIUS_V2_C0), c1: Fp::zero() }
+        Fp6 { c0: self.c0.conjugate(), c1: self.c1.conjugate().mul(v), c2: self.c2.conjugate().mul(v2) }
+    }
+}
+
+pub struct Fp12 { pub c0: Fp6, pub c1: Fp6 }
+
+impl Copy for Fp12 {}
+
+impl Fp12 {
+    pub fn one() -> Fp12 { Fp12 { c0: Fp6::one(), c1: Fp6::zero() } }
+    pub fn equals(self, _ other: Fp12) -> bool { self.c0.equals(other.c0) && self.c1.equals(other.c1) }
+    pub fn is_one(self) -> bool { self.equals(Fp12::one()) }
+
+    pub fn mul(self, _ other: Fp12) -> Fp12 {
+        let aa = self.c0.mul(other.c0)
+        let bb = self.c1.mul(other.c1)
+        Fp12 {
+            c0: bb.mul_by_nonresidue().add(aa),
+            c1: self.c0.add(self.c1).mul(other.c0.add(other.c1)).sub(aa).sub(bb),
+        }
+    }
+
+    pub fn square(self) -> Fp12 {
+        let ab = self.c0.mul(self.c1)
+        let c0 = self.c0.add(self.c1).mul(self.c0.add(self.c1.mul_by_nonresidue())).sub(ab).sub(ab.mul_by_nonresidue())
+        Fp12 { c0, c1: ab.add(ab) }
+    }
+
+    pub fn conjugate(self) -> Fp12 { Fp12 { c0: self.c0, c1: self.c1.neg() } }
+
+    pub fn invert(self) -> Fp12 {
+        let norm = self.c0.square().sub(self.c1.square().mul_by_nonresidue()).invert()
+        Fp12 { c0: self.c0.mul(norm), c1: self.c1.mul(norm).neg() }
+    }
+
+    // Multiply by the sparse line value c0 + c1 v + c4 v w.
+    pub fn mul_by_014(self, c0: Fp2, c1: Fp2, c4: Fp2) -> Fp12 {
+        let aa = self.c0.mul_by_01(c0, c1)
+        let bb = self.c1.mul_by_1(c4)
+        let cross = self.c1.add(self.c0).mul_by_01(c0, c1: c1.add(c4))
+        Fp12 { c0: bb.mul_by_nonresidue().add(aa), c1: cross.sub(aa).sub(bb) }
+    }
+
+    pub fn frobenius(self) -> Fp12 {
+        let w = Fp2 { c0: Fp::from_montgomery(FROBENIUS_W_C0), c1: Fp::from_montgomery(FROBENIUS_W_C1) }
+        let c1 = self.c1.frobenius()
+        Fp12 { c0: self.c0.frobenius(), c1: Fp6 { c0: c1.c0.mul(w), c1: c1.c1.mul(w), c2: c1.c2.mul(w) } }
+    }
+}
