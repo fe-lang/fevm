@@ -142,3 +142,24 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     rejected.receipt.release()
     rejected.state.release()
 }
+
+#[test]
+fn transact_calls_accounts_without_code_in_a_world_without_code() {
+    // No account has code, so the code arena is empty.
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    let env = TxEnv {
+        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xdd, creates: false, nonce: 0, gas_limit: 21_000,
+        gas_price: 1, max_priority_fee_per_gas: 1, max_fee_per_blob_gas: 0, value: 5,
+    }
+    let request = TxRequest::new(env, data: empty_bytes())
+    let applied = transact(world, request, block)
+    request.release()
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    core::assert(applied.receipt.gas_used == 21000 && applied.state.balance(0xdd) == 5)
+    core::assert(applied.state.balance(0x1000) == 1_000_000 - 21000 - 5)
+    applied.receipt.release()
+    applied.state.release()
+}
