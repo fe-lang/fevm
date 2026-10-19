@@ -76,5 +76,6 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
         return copied(blake2f::compress(input), gas_used: rounds)
     }
+    if address == 5 { return modexp::run(input, gas) }
     Output { status: UNIMPLEMENTED, gas_used: 0, output: ByteBuffer::new() }
 }
