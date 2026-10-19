@@ -1,4 +1,4 @@
-use ingot::{FAILURE, SUCCESS, UNIMPLEMENTED, run}
+use ingot::{FAILURE, SUCCESS, run}
 use ingot::hashes::{ripemd160, sha256}
 
 fn word_at<const N: usize>(_ bytes: [u8; N], offset: usize) -> u256 {
@@ -66,9 +66,6 @@ fn hash_precompiles_charge_per_word_and_return_padded_digests() {
     let none = run(address: 4, input: empty, gas: 15)
     core::assert(none.status == SUCCESS && none.gas_used == 15 && none.output.len() == 0)
     none.release()
-    let pending = run(address: 1, input, gas: 100000)
-    core::assert(pending.status == UNIMPLEMENTED)
-    pending.release()
 }
 
 // EIP-152 test vectors 4 and 5 (12 rounds, final and non-final block).
@@ -129,4 +126,70 @@ fn blake2f_known_answers_and_validation() {
     let bad_flag = run(address: 9, input: blake2f_input(2), gas: 12)
     core::assert(bad_flag.status == FAILURE)
     bad_flag.release()
+}
+
+fn signature(hash: u256, v: u256, r: u256, s: u256) -> [u8; 128] {
+    var input: [u8; 128] = [0; 128]
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        input[i as usize] = (hash >> shift).downcast_truncate()
+        input[(32 + i) as usize] = (v >> shift).downcast_truncate()
+        input[(64 + i) as usize] = (r >> shift).downcast_truncate()
+        input[(96 + i) as usize] = (s >> shift).downcast_truncate()
+        i += 1
+    }
+    input
+}
+
+fn recovered_address(_ input: [u8; 128], gas: u64) -> u256 {
+    let result = run(address: 1, input, gas)
+    core::assert(result.status == SUCCESS && result.gas_used == 3000 && result.output.len() == 32)
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        value = (value << 8) | result.output.byte_at(i) as u256
+        i += 1
+    }
+    result.release()
+    value
+}
+
+fn recovers_nothing(_ input: [u8; 128]) -> bool {
+    let result = run(address: 1, input, gas: 3000)
+    let empty = result.status == SUCCESS && result.gas_used == 3000 && result.output.len() == 0
+    result.release()
+    empty
+}
+
+#[test]
+fn ecrecover_known_signatures_and_rejections() {
+    // go-ethereum's precompile vector (v = 28) and a `cast wallet sign` signature (v = 27).
+    let geth = signature(
+        hash: 0x456e9aea5e197a1f1af7a3e85a3212fa4049a3ba34c2289b4c860fc0b0c64ef3, v: 28,
+        r: 0x9242685bf161793cc25603c231bc2f568eb630ea16aa137d2664ac8038825608,
+        s: 0x4f8ae3bd7535248d0bd448298cc2e2071e56992d0774dc340c368ae950852ada,
+    )
+    core::assert(recovered_address(geth, gas: 3000) == 0x7156526fbd7a3c72969b54f64e42c10fbb768c8a)
+    let signed = signature(
+        hash: 0x1111111111111111111111111111111111111111111111111111111111111111, v: 27,
+        r: 0x004375c2180a2a322c6b22b43ca111dadb74ddb0a2f96e427eac82982fd68b4e,
+        s: 0x3dfee5991d071b74211a070b6660783820a15fdd5355fabb31702dac53e62c72,
+    )
+    core::assert(recovered_address(signed, gas: 100000) == 0x2c7536e3605d9c16a7a3d7b1898e529396a65c23)
+    let short = run(address: 1, input: signed, gas: 2999)
+    core::assert(short.status == FAILURE && short.gas_used == 2999)
+    short.release()
+    // Wrong v, zero or oversized r and s, and an r with no curve point recover nothing.
+    let n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
+    core::assert(recovers_nothing(signature(hash: 1, v: 29, r: 1, s: 1)))
+    core::assert(recovers_nothing(signature(hash: 1, v: 27, r: 0, s: 1)))
+    core::assert(recovers_nothing(signature(hash: 1, v: 27, r: n, s: 1)))
+    core::assert(recovers_nothing(signature(hash: 1, v: 27, r: 1, s: n)))
+    core::assert(recovers_nothing(signature(hash: 1, v: 27, r: 5, s: 1)))
+    // Input shorter than 128 bytes is zero-padded: v reads as zero.
+    let truncated: [u8; 40] = [1; 40]
+    let padded = run(address: 1, input: truncated, gas: 3000)
+    core::assert(padded.status == SUCCESS && padded.output.len() == 0)
+    padded.release()
 }
