@@ -46,12 +46,15 @@ runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchai
 records the exact revisions and lock hash, and bootstrap fetches both from their
 upstream repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 47 workspace tests,
-35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at
-each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
-simultaneous-fault reason differences per level. The Python harness's 13 tests and
-the Rust reference's nine tests pass. See the
-[Fe master acceptance report](reports/fe-master-20261019/README.md).
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 75
+workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
+comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
+three declared simultaneous-fault reason differences per level. The Python
+harness's 13 tests and the Rust reference's nine tests pass. See the
+[Fe master report](reports/fe-master-20261019/README.md) (47 workspace tests
+before the CALL and transaction work) and the
+[macOS report](reports/macos-arm64-20261019/README.md). The
+[Cancun state-test runner](conformance/README.md) is separate from acceptance.
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
 [enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
