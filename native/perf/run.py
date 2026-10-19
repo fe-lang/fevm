@@ -20,10 +20,10 @@ from arith.run import artifacts as collect_artifacts
 MODULES = {
     'checkpoints': ('buffer', 'constants', 'gas', 'journal', 'logs', 'state', 'transaction'),
     'inputs': ('constants', 'hex', 'types'),
-    'calls': ('buffer', 'calls_runtime', 'constants', 'gas', 'journal', 'logs',
-              'memory', 'opcodes', 'state', 'transaction', 'types', 'vm'),
-    'vm_inputs': ('buffer', 'constants', 'gas', 'inputs_runtime', 'journal', 'logs',
-                  'memory', 'opcodes', 'state', 'transaction', 'types', 'vm'),
+    'calls': ('address', 'buffer', 'calls_runtime', 'constants', 'gas', 'journal', 'logs',
+              'memory', 'state', 'transaction', 'types', 'vm'),
+    'vm_inputs': ('address', 'buffer', 'constants', 'gas', 'inputs_runtime', 'journal', 'logs',
+                  'memory', 'state', 'transaction', 'types', 'vm'),
 }
 
 
@@ -69,6 +69,9 @@ def main():
     if config.count('name = "fevm"') != 1:
         raise ValueError('unexpected FeVM ingot manifest')
     ingot_name = f'{args.probe}_probe'
+    # The probe sits outside the workspace, so the precompiles become a path dependency.
+    config = config.replace('fevm_precompiles = true',
+                            f'fevm_precompiles = {{ path = "{os.path.relpath(ROOT / "ingots/precompiles", ingot)}" }}')
     (ingot / 'fe.toml').write_text(config.replace('name = "fevm"', f'name = "{ingot_name}"'))
     shutil.copy2(entry, ingot / 'src/lib.fe')
     for name in modules:
