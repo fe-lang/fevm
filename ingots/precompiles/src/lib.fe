@@ -1,0 +1,80 @@
+use std::native::ByteBuffer
+use keccak::ByteSource
+pub use hashes::{ripemd160, sha256}
+
+/// The call returned output and consumed `gas_used`.
+pub const SUCCESS: u8 = 0
+/// An exceptional halt: invalid input or insufficient gas consumes all forwarded gas.
+pub const FAILURE: u8 = 1
+/// The host could not allocate the output; this is not an EVM outcome.
+pub const HOST_ALLOCATION: u8 = 2
+/// The precompile is not implemented yet; this is not an EVM outcome.
+pub const UNIMPLEMENTED: u8 = 3
+
+pub struct Output { pub status: u8, pub gas_used: u64, pub output: ByteBuffer }
+
+impl Output {
+    pub fn release(own self) { self.output.release() }
+}
+
+/// Cancun precompiles occupy addresses 0x01 through 0x0a.
+pub fn is_precompile(_ address: u256) -> bool { address >= 1 && address <= 10 }
+
+fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
+
+fn failure(_ gas: u64) -> Output {
+    Output { status: FAILURE, gas_used: gas, output: ByteBuffer::new() }
+}
+
+fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
+    var output = ByteBuffer::new()
+    let len = source.len()
+    if !output.try_resize(len) {
+        return Output { status: HOST_ALLOCATION, gas_used, output }
+    }
+    var i: u64 = 0
+    while i < len {
+        output.set_byte(index: i, value: source.byte_at(i))
+        i += 1
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+// Copy `source` into a zero-filled output of `len` bytes, ending at its last byte.
+fn right_aligned<T: ByteSource>(_ source: T, len: u64, gas_used: u64) -> Output {
+    var output = ByteBuffer::new()
+    if !output.try_resize(len) {
+        return Output { status: HOST_ALLOCATION, gas_used, output }
+    }
+    let offset = len - source.len()
+    var i: u64 = 0
+    while i < source.len() {
+        output.set_byte(index: offset + i, value: source.byte_at(i))
+        i += 1
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+/// Execute precompile `address` with `gas` available. Charges are computed and
+/// checked before any work or allocation.
+pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
+    core::assert(is_precompile(address))
+    let len = input.len()
+    if address == 2 || address == 3 || address == 4 {
+        let (base, per_word): (u128, u128) = if address == 2 { (60, 12) }
+            else if address == 3 { (600, 120) } else { (15, 3) }
+        let cost = base + per_word * words(len)
+        if cost > gas as u128 { return failure(gas) }
+        let used: u64 = cost.downcast_unchecked()
+        return if address == 2 { copied(sha256(input), gas_used: used) }
+            else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
+            else { copied(input, gas_used: used) }
+    }
+    if address == 9 {
+        if len != blake2f::INPUT_LEN { return failure(gas) }
+        let rounds = blake2f::rounds(input)
+        if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
+        return copied(blake2f::compress(input), gas_used: rounds)
+    }
+    Output { status: UNIMPLEMENTED, gas_used: 0, output: ByteBuffer::new() }
+}

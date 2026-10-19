@@ -1,0 +1,6 @@
+[ingot]
+name = "fevm_precompiles"
+version = "0.1.0"
+
+[dependencies]
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "0702d006a37efc85390726b933b2a275b215c2ae" }
