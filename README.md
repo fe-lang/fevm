@@ -30,7 +30,8 @@ Rust version and Cargo lock hash in [`native/toolchain.json`](native/toolchain.j
 Sources use MVS mutable value bindings and explicit unsafe boundaries. See
 [native build instructions](native/README.md) for reproducible compiler builds and
 the acceptance matrix. All seven native acceptance stages pass at O0/O1/O2 on
-x86_64 Linux ([evidence](native/reports/fe-master-20261019/README.md)). Earlier
+x86_64 Linux ([evidence](native/reports/fe-master-20261019/README.md)) and AArch64
+macOS ([evidence](native/reports/macos-arm64-20261019/README.md)). Earlier
 reports describe their historical compilers; the
 [fork performance work](native/reports/mvs-next3-20261015/README.md) they measured
 is now part of Fe master.
