@@ -9,8 +9,9 @@ pub const SUCCESS: u8 = 0
 pub const FAILURE: u8 = 1
 /// The host could not allocate the output; this is not an EVM outcome.
 pub const HOST_ALLOCATION: u8 = 2
-/// The precompile is not implemented yet; this is not an EVM outcome.
-pub const UNIMPLEMENTED: u8 = 3
+/// The host cannot evaluate this input (a MODEXP modulus beyond its limb
+/// capacity); this is not an EVM outcome.
+pub const UNSUPPORTED: u8 = 3
 
 pub struct Output { pub status: u8, pub gas_used: u64, pub output: ByteBuffer }
 
@@ -119,6 +120,7 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
             else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
             else { copied(input, gas_used: used) }
     }
+    if address == 5 { return modexp::run(input, gas) }
     if address == 6 || address == 7 {
         // EIP-1108 prices; invalid points are exceptional failures.
         let cost: u64 = if address == 6 { 150 } else { 6000 }
@@ -147,17 +149,15 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
         return copied(blake2f::compress(input), gas_used: rounds)
     }
-    if address == 10 {
-        if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }
-        var result: [u8; 64] = [0; 64]
-        var i: u64 = 0
-        while i < 32 {
-            let shift = ((31 - i) * 8) as u256
-            result[i as usize] = (kzg::FIELD_ELEMENTS_PER_BLOB >> shift).downcast_truncate()
-            result[(32 + i) as usize] = (kzg::BLS_MODULUS >> shift).downcast_truncate()
-            i += 1
-        }
-        return copied(result, gas_used: kzg::GAS)
+    // Address 10: KZG point evaluation (EIP-4844).
+    if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }
+    var result: [u8; 64] = [0; 64]
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        result[i as usize] = (kzg::FIELD_ELEMENTS_PER_BLOB >> shift).downcast_truncate()
+        result[(32 + i) as usize] = (kzg::BLS_MODULUS >> shift).downcast_truncate()
+        i += 1
     }
-    Output { status: UNIMPLEMENTED, gas_used: 0, output: ByteBuffer::new() }
+    copied(result, gas_used: kzg::GAS)
 }

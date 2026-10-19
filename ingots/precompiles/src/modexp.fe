@@ -1,0 +1,183 @@
+use std::native::ByteBuffer
+use keccak::ByteSource
+use ingot::{FAILURE, HOST_ALLOCATION, Output, SUCCESS, UNSUPPORTED}
+use ingot::bignum::{Limbs, MAX_LIMBS, Modulus, Wide}
+
+const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+// Input bytes beyond the calldata read as zero (EIP-198 right padding).
+fn input_byte<T: ByteSource>(_ input: T, _ index: u256) -> u8 {
+    if index < input.len() as u256 { input.byte_at(index.downcast_unchecked()) } else { 0 }
+}
+
+// A big-endian integer of `len` (at most 32) bytes starting at `offset`.
+fn input_word<T: ByteSource>(_ input: T, offset: u256, len: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < len {
+        let index = if offset > MAX_U256 - i as u256 { MAX_U256 } else { offset + i as u256 }
+        value = (value << 8) | input_byte(input, index) as u256
+        i += 1
+    }
+    value
+}
+
+fn saturating_mul(_ a: u256, _ b: u256) -> u256 {
+    if a != 0 && b > MAX_U256 / a { MAX_U256 } else { a * b }
+}
+
+fn bit_length(_ value: u256) -> u256 {
+    var bits: u256 = 0
+    while bits < 256 && value >> bits != 0 { bits += 1 }
+    bits
+}
+
+struct Lengths { base: u256, exponent: u256, modulus: u256 }
+
+fn lengths<T: ByteSource>(_ input: T) -> Lengths {
+    Lengths {
+        base: input_word(input, offset: 0, len: 32),
+        exponent: input_word(input, offset: 32, len: 32),
+        modulus: input_word(input, offset: 64, len: 32),
+    }
+}
+
+// EIP-2565 gas. Lengths that make the cost exceed any u64 gas return only a
+// lower bound above u64, and saturating arithmetic covers absurd lengths.
+fn gas_cost<T: ByteSource>(_ input: T) -> u256 {
+    let sizes = lengths(input)
+    let longest = if sizes.base > sizes.modulus { sizes.base } else { sizes.modulus }
+    let words = longest / 8 + if longest % 8 == 0 { 0 } else { 1 }
+    let complexity = saturating_mul(words, words)
+    // At least one iteration is charged, so this bound decides affordability by
+    // itself; below it the base length is small enough to locate the exponent.
+    if complexity / 3 > 0xffffffffffffffff { return complexity / 3 }
+    let head_len: u64 = if sizes.exponent < 32 { sizes.exponent.downcast_unchecked() } else { 32 }
+    let head = input_word(input, offset: 96 + sizes.base, len: head_len)
+    let head_bits = bit_length(head)
+    let top_bits = if head_bits > 0 { head_bits - 1 } else { 0 }
+    let count = if sizes.exponent <= 32 { top_bits } else {
+        let tail = saturating_mul(8, sizes.exponent - 32)
+        if tail > MAX_U256 - top_bits { MAX_U256 } else { tail + top_bits }
+    }
+    let iterations = if count == 0 { 1 } else { count }
+    let cost = saturating_mul(complexity, iterations) / 3
+    if cost < 200 { 200 } else { cost }
+}
+
+// One limb of a big-endian number of `len` bytes at `offset`; limb 0 is least significant.
+fn input_limb<T: ByteSource>(_ input: T, offset: u256, len: u256, limb: u256) -> u64 {
+    var value: u64 = 0
+    var byte: u256 = 8
+    while byte > 0 {
+        byte -= 1
+        let position = limb * 8 + byte
+        value = value << 8
+        if position < len { value |= input_byte(input, offset + len - 1 - position) as u64 }
+    }
+    value
+}
+
+/// MODEXP (EIP-198 with EIP-2565 gas): `base ** exponent % modulus`, as
+/// exactly modulus-length big-endian bytes. A significant modulus wider than
+/// MAX_LIMBS limbs reports UNSUPPORTED rather than a result.
+pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
+    let cost = gas_cost(input)
+    if cost > gas as u256 { return Output { status: FAILURE, gas_used: gas, output: ByteBuffer::new() } }
+    let gas_used: u64 = cost.downcast_unchecked()
+    let sizes = lengths(input)
+    // The charged cost bounds the base and modulus lengths below 2^36 bytes and
+    // the exponent length below 2^63 bytes.
+    let modulus_len: u64 = sizes.modulus.downcast_unchecked()
+    var output = ByteBuffer::new()
+    if sizes.base == 0 && sizes.modulus == 0 { return Output { status: SUCCESS, gas_used, output } }
+    let exponent_start = 96 + sizes.base
+    let modulus_start = exponent_start + sizes.exponent
+    // Locate the modulus's most significant nonzero byte.
+    var significant = sizes.modulus
+    while significant > 0 && input_byte(input, modulus_start + sizes.modulus - significant) == 0 { significant -= 1 }
+    let limbs = (significant + 7) / 8
+    if limbs > MAX_LIMBS as u256 { return Output { status: UNSUPPORTED, gas_used: 0, output } }
+    if !output.try_resize(modulus_len) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    // A zero modulus yields zero bytes.
+    if significant == 0 { return Output { status: SUCCESS, gas_used, output } }
+    let n: u64 = limbs.downcast_unchecked()
+    var value: Limbs = [0; 1024]
+    var i: u64 = 0
+    while i < n {
+        value[i as usize] = input_limb(input, offset: modulus_start, len: sizes.modulus, limb: i as u256)
+        i += 1
+    }
+    let modulus = Modulus::new(value, len: n)
+    var work: Wide = [0; 2049]
+    // Reduce the base limb by limb, most significant first.
+    var base: Limbs = [0; 1024]
+    var limb = (sizes.base + 7) / 8
+    while limb > 0 {
+        limb -= 1
+        i = n
+        while i > 0 {
+            work[i as usize] = base[(i - 1) as usize]
+            i -= 1
+        }
+        work[0] = input_limb(input, offset: 96, len: sizes.base, limb)
+        modulus.reduce(mut work, len: n + 1)
+        i = 0
+        while i < n {
+            base[i as usize] = work[i as usize]
+            i += 1
+        }
+    }
+    // Left-to-right square and multiply from the exponent's top set bit.
+    var result: Limbs = [0; 1024]
+    work[0] = 1
+    modulus.reduce(mut work, len: 1)
+    i = 0
+    while i < n {
+        result[i as usize] = work[i as usize]
+        i += 1
+    }
+    var started = false
+    var index: u256 = 0
+    while index < sizes.exponent {
+        let byte = input_byte(input, exponent_start + index)
+        if started || byte != 0 {
+            var bit: u8 = 8
+            while bit > 0 {
+                bit -= 1
+                if started {
+                    modulus.mul_mod(result, result, mut work)
+                    copy_limbs(work, mut result, n)
+                }
+                if ((byte >> bit) & 1) == 1 {
+                    if started {
+                        modulus.mul_mod(result, base, mut work)
+                        copy_limbs(work, mut result, n)
+                    } else {
+                        copy_limbs(base, mut result, n)
+                        started = true
+                    }
+                }
+            }
+        }
+        index += 1
+    }
+    i = 0
+    while i < modulus_len {
+        let position = modulus_len - 1 - i
+        let limb_index = position / 8
+        if limb_index < n {
+            output.set_byte(index: i, value: (result[limb_index as usize] >> ((position % 8) * 8)).downcast_truncate())
+        }
+        i += 1
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+fn copy_limbs<const N: usize>(_ from: [u64; N], _ to: mut Limbs, _ n: u64) {
+    var i: u64 = 0
+    while i < n {
+        to[i as usize] = from[i as usize]
+        i += 1
+    }
+}
