@@ -34,3 +34,6 @@ the case's data/gas/value indexes; it derives the blob base fee from
 state-test clients, `BLOCKHASH(n)` for the previous 256 blocks is the Keccak-256
 hash of `n`'s decimal digits. The driver checks the post-state directly instead
 of recomputing the state root.
+
+The [first complete run](../reports/cancun-conformance-20261019/README.md) passes
+16,800 of 16,847 Cancun cases; the rest exceed FeVM's 256-entry state tables.
