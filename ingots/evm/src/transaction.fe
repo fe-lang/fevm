@@ -13,6 +13,9 @@ const STORAGE: u8 = 2
 const TRANSIENT: u8 = 3
 const WARM_ACCOUNT: u8 = 4
 const WARM_STORAGE: u8 = 5
+const CODE: u8 = 6
+const TOUCHED: u8 = 7
+const DOOMED: u8 = 8
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
@@ -48,6 +51,14 @@ pub struct Transaction {
     warm_accounts: SwissTable<u256, bool>,
     warm_storage: SwissTable<StorageKey, bool>,
     originals: SwissTable<StorageKey, u256>,
+    // Accounts whose balance, nonce or code a frame modified; settlement removes
+    // those left empty (the specification's modify_state deletion rule).
+    touched: SwissTable<u256, bool>,
+    // Accounts created by this transaction. Like the specification's
+    // created_accounts, the marks survive frame rollback.
+    created: SwissTable<u256, bool>,
+    // Self-destructed accounts created by this transaction, deleted at settlement.
+    doomed: SwissTable<u256, bool>,
     refund: i128,
     started: bool,
     depth: usize,
@@ -69,6 +80,9 @@ impl Transaction {
             warm_accounts,
             warm_storage: SwissTable<StorageKey, bool>::empty(),
             originals: SwissTable<StorageKey, u256>::empty(),
+            touched: SwissTable<u256, bool>::empty(),
+            created: SwissTable<u256, bool>::empty(),
+            doomed: SwissTable<u256, bool>::empty(),
             refund: 0,
             started: false,
             depth: 0,
@@ -101,6 +115,13 @@ impl Transaction {
 
     pub fn refund(self) -> i128 { self.refund }
 
+    // EIP-3529: positive refunds are capped at one fifth of the gas spent.
+    pub fn capped_refund(self, gas_spent: u64) -> u64 {
+        if self.refund <= 0 { return 0 }
+        let cap = (gas_spent / 5) as i128
+        (if self.refund < cap { self.refund } else { cap }).downcast_unchecked()
+    }
+
     // Access-list initialization precedes all frames and is never rolled back.
     pub fn access_list_account(mut self, address: u256) -> bool {
         core::assert(!self.started)
@@ -127,22 +148,28 @@ impl Transaction {
         self.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
-    fn warm(mut self, kind: u8, address: u256, slot: u256) -> i32 {
+    // Journaled set membership: warm accounts and slots, touched and doomed accounts.
+    fn marked(self, kind: u8, address: u256, slot: u256) -> bool {
+        match kind {
+            WARM_ACCOUNT => self.warm_accounts.contains(address),
+            WARM_STORAGE => self.warm_storage.contains(StorageKey { address, slot }),
+            TOUCHED => self.touched.contains(address),
+            _ => self.doomed.contains(address),
+        }
+    }
+
+    fn mark(mut self, kind: u8, address: u256, slot: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        let present = if kind == WARM_ACCOUNT {
-            self.account_is_warm(address)
-        } else {
-            self.storage_is_warm(address, slot)
-        }
-        if present { return OK }
+        if self.marked(kind, address, slot) { return OK }
         if !self.journal.append(Change { kind, address, slot, previous: 0, existed: true }) {
             return ERR_HOST_ALLOCATION
         }
-        let inserted = if kind == WARM_ACCOUNT {
-            self.warm_accounts.insert(address, true)
-        } else {
-            self.warm_storage.insert(StorageKey { address, slot }, true)
+        let inserted = match kind {
+            WARM_ACCOUNT => self.warm_accounts.insert(address, true),
+            WARM_STORAGE => self.warm_storage.insert(StorageKey { address, slot }, true),
+            TOUCHED => self.touched.insert(address, true),
+            _ => self.doomed.insert(address, true),
         }
         if !inserted {
             let _ = self.journal.pop()
@@ -152,11 +179,28 @@ impl Transaction {
     }
 
     pub fn warm_account(mut self, address: u256) -> i32 {
-        self.warm(kind: WARM_ACCOUNT, address, slot: 0)
+        self.mark(kind: WARM_ACCOUNT, address, slot: 0)
     }
 
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
-        self.warm(kind: WARM_STORAGE, address, slot)
+        self.mark(kind: WARM_STORAGE, address, slot)
+    }
+
+    pub fn touch(mut self, _ address: u256) -> i32 {
+        self.mark(kind: TOUCHED, address, slot: 0)
+    }
+
+    // SELFDESTRUCT of an account created by this transaction (EIP-6780).
+    pub fn doom(mut self, _ address: u256) -> i32 {
+        self.mark(kind: DOOMED, address, slot: 0)
+    }
+
+    pub fn mark_created(mut self, _ address: u256) -> i32 {
+        if self.created.insert(address_word(address), true) { OK } else { ERR_STATE_LIMIT }
+    }
+
+    pub fn was_created(self, _ address: u256) -> bool {
+        self.created.contains(address_word(address))
     }
 
     pub fn original_storage(self, address: u256, slot: u256) -> u256 {
@@ -211,18 +255,29 @@ impl Transaction {
                 TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
                 WARM_ACCOUNT => self.warm_accounts.remove(change.address),
                 WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
+                CODE => {
+                    let empty: [u8; 0] = []
+                    self.state.set_code(address: change.address, code: empty) == OK
+                },
+                TOUCHED => self.touched.remove(change.address),
+                DOOMED => self.doomed.remove(change.address),
                 _ => core::panic(),
             }
             // Reverse replay never increases a table beyond an earlier valid
             // occupancy, including deletion followed by insertion at capacity.
             core::assert(restored)
-            if !change.existed && (change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE) {
+            if !change.existed && (change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE || change.kind == CODE) {
                 core::assert(self.state.remove_empty_account(change.address))
             }
         }
     }
 
     pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
+    pub fn is_empty(self, _ address: u256) -> bool { self.state.is_empty(address) }
+    // EIP-684/EIP-7610: creation needs an address without nonce, code or storage.
+    pub fn deployable(self, _ address: u256) -> bool {
+        self.state.nonce(address) == 0 && self.state.code_size(address) == 0 && !self.state.has_storage(address)
+    }
     pub fn code_size(self, _ address: u256) -> u64 { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
     pub fn code_byte(self, address: u256, index: u64) -> u8 { self.state.code_byte(address, index) }
@@ -275,11 +330,34 @@ impl Transaction {
         OK
     }
 
+    // Balance, nonce and code writes touch their account even when unchanged.
     pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
+        let status = self.touch(address)
+        if status != OK { return status }
         self.write(kind: BALANCE, address, slot: 0, value)
     }
     pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
+        let status = self.touch(address)
+        if status != OK { return status }
         self.write(kind: NONCE, address, slot: 0, value)
+    }
+    pub fn increment_nonce(mut self, _ address: u256) -> i32 {
+        self.set_nonce(address, value: self.nonce(address) + 1)
+    }
+    // Contract deployment writes code to an account that has none (EIP-684).
+    pub fn deploy_code(mut self, address: u256, code: ByteBuffer) -> i32 {
+        self.started = true
+        if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        core::assert(self.state.code_size(address) == 0)
+        let status = self.touch(address)
+        if status != OK { return status }
+        if !self.journal.append(Change { kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address) }) {
+            return ERR_HOST_ALLOCATION
+        }
+        let written = self.state.set_code(address, code)
+        if written != OK { let _ = self.journal.pop() }
+        written
     }
     pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
         if self.is_static { return ERR_STATIC_WRITE }
@@ -300,6 +378,39 @@ impl Transaction {
         self.write(kind: TRANSIENT, address, slot, value)
     }
 
+    // End-of-transaction deletions, after every frame has closed and fees are
+    // paid. Self-destructed accounts created by this transaction lose their
+    // account and this transaction's storage writes; touched accounts left
+    // empty are removed. These direct world updates are not journaled.
+    pub fn settle(mut self) {
+        core::assert(self.depth == 0)
+        var slot: usize = 0
+        while slot < self.doomed.capacity() {
+            let doomed = self.doomed.entry(slot)
+            if doomed.occupied {
+                var index: u64 = 0
+                while index < self.journal.count() {
+                    let change = self.journal.change(index)
+                    if change.kind == STORAGE && change.address == doomed.key {
+                        let original = self.original_storage(address: change.address, slot: change.slot)
+                        core::assert(self.state.storage_store(change.address, change.slot, original))
+                    }
+                    index += 1
+                }
+                self.state.remove_account(doomed.key)
+            }
+            slot += 1
+        }
+        slot = 0
+        while slot < self.touched.capacity() {
+            let touched = self.touched.entry(slot)
+            if touched.occupied && self.state.exists(touched.key) && self.state.is_empty(touched.key) {
+                self.state.remove_account(touched.key)
+            }
+            slot += 1
+        }
+    }
+
     // Commit/abort the transaction only after every frame has been closed.
     // Transient storage is dropped at this boundary, never at a frame boundary.
     pub fn finish(var own self, commit: bool, gas_spent: u64) -> TransactionResult {
@@ -308,11 +419,7 @@ impl Transaction {
             self.undo_to(0)
             self.logs.truncate(0)
         }
-        var gas_refunded: u64 = 0
-        if commit && self.refund > 0 {
-            let cap = (gas_spent / 5) as i128
-            gas_refunded = (if self.refund < cap { self.refund } else { cap }).downcast_unchecked()
-        }
+        let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
         self.journal.release()
         self.blob_hashes.release()
         TransactionResult { state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }

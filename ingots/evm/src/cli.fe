@@ -14,7 +14,6 @@ use ingot::constants::{
     ERR_STACK_UNDERFLOW,
     ERR_STATE_LIMIT,
     ERR_TODO_OPCODE,
-    ERR_UNSUPPORTED_OPCODE,
     ERR_USAGE,
     OK,
 }
@@ -64,13 +63,6 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
         ERR_REVERT => {
             write("revert ")
             write_hex_bytes(vm.output)
-        },
-        ERR_UNSUPPORTED_OPCODE => {
-            write("unsupported opcode 0x")
-            write_hex_byte(vm.unsupported_opcode)
-            write(" ")
-            write_opcode_name(vm.unsupported_opcode)
-            write_char(10)
         },
         _ => writeln("execution failed"),
     }

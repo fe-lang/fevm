@@ -7,6 +7,9 @@ use ingot::state::address_word
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{
+    ERR_BALANCE_OVERFLOW,
+    ERR_CODE_PREFIX,
+    ERR_PRECOMPILE,
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
     ERR_OUT_OF_GAS,
@@ -17,14 +20,14 @@ use ingot::constants::{
     ERR_STACK_UNDERFLOW,
     ERR_STATIC_WRITE,
     ERR_TODO_OPCODE,
-    ERR_UNSUPPORTED_OPCODE,
     I256_MIN,
     OK,
     STACK_LIMIT,
 }
-use ingot::opcodes::is_todo_opcode
+use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
-use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program}
+use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, empty_bytes}
+use fevm_precompiles::{FAILURE, HOST_ALLOCATION, SUCCESS, is_precompile}
 
 pub struct Vm {
     pub memory: ByteBuffer,
@@ -545,7 +548,7 @@ impl Vm {
                 self.push(rhs >> lhs)
             },
             0x1d => self.sar(shift: lhs, value: rhs),
-            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+            _ => self.invalid(op),
         }
     }
 
@@ -556,7 +559,7 @@ impl Vm {
         match op {
             0x15 => self.push_bool(value == 0),
             0x19 => self.push(!value),
-            _ => self.fault(ERR_UNSUPPORTED_OPCODE),
+            _ => self.invalid(op),
         }
     }
 
@@ -580,16 +583,6 @@ impl Vm {
         let tmp = self.stack[top]
         self.stack[top] = self.stack[other]
         self.stack[other] = tmp
-    }
-
-    fn unsupported(mut self, _ op: i32) {
-        self.unsupported_opcode = op
-        self.fault(ERR_UNSUPPORTED_OPCODE)
-    }
-
-    fn todo(mut self, _ op: i32) {
-        self.unsupported_opcode = op
-        self.fault(ERR_TODO_OPCODE)
     }
 
     fn invalid(mut self, _ op: i32) {
@@ -716,6 +709,10 @@ impl Vm {
     }
 
     fn step_state(mut self, _ op: i32, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) -> bool {
+        if op == 0xff {
+            self.selfdestruct(call, mut state)
+            return true
+        }
         if op >= 0xa0 && op <= 0xa4 {
             self.log((op - 0xa0).downcast_unchecked(), call, mut state)
             return true
@@ -985,13 +982,8 @@ impl Vm {
             return
         }
 
-        if is_todo_opcode(op) {
-            self.todo(op)
-        } else if op == 0xfe {
-            self.invalid(op)
-        } else {
-            self.unsupported(op)
-        }
+        // INVALID (0xfe) and every undefined byte are exceptional halts.
+        self.invalid(op)
     }
 }
 
@@ -1011,6 +1003,9 @@ fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
 
 // The root is depth zero; at most 1024 child frames may execute beneath it.
 pub const CALL_DEPTH_LIMIT: usize = 1024
+// EIP-170 deployed code and EIP-3860 initcode limits.
+const MAX_CODE_SIZE: u64 = 24576
+const MAX_INITCODE_SIZE: u256 = 49152
 
 struct Frame {
     vm: Vm,
@@ -1020,21 +1015,26 @@ struct Frame {
     checkpoint: Checkpoint,
     output_offset: u64,
     output_len: u64,
+    // CREATE frames deposit their output as code at `call.address`.
+    creates: bool,
 }
 
-struct ChildResult { result: ExecutionResult, offset: u64, len: u64 }
+struct ChildResult { result: ExecutionResult, offset: u64, len: u64, creates: bool, address: u256 }
 
 impl Frame {
     fn resume(mut self, _ block: BlockEnv, _ state: mut Transaction, depth: usize) -> Option<Frame> {
         self.vm.run_until_child(self.program, self.calldata, self.call, block, mut state, depth)
     }
 
-    fn finish(own self, _ state: mut Transaction) -> ChildResult {
+    fn finish(var own self, _ state: mut Transaction) -> ChildResult {
+        let creates = self.creates
+        let address = self.call.address
+        if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         if self.vm.status == OK { state.commit(self.checkpoint) }
         else { state.revert(self.checkpoint) }
         self.program.release()
         self.calldata.release()
-        ChildResult { result: self.vm.into_result(), offset: self.output_offset, len: self.output_len }
+        ChildResult { result: self.vm.into_result(), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
     fn abort(own self, _ state: mut Transaction) {
@@ -1049,15 +1049,92 @@ fn exceptional(_ status: i32) -> bool {
     status == ERR_STACK_UNDERFLOW || status == ERR_STACK_OVERFLOW
         || status == ERR_INVALID_JUMP || status == ERR_INVALID_OPCODE
         || status == ERR_RETURN_DATA_OOB || status == ERR_STATIC_WRITE
-        || status == ERR_OUT_OF_GAS
+        || status == ERR_OUT_OF_GAS || status == ERR_CODE_PREFIX || status == ERR_PRECOMPILE
+}
+
+/// Move ether as the specification's move_ether, writing (and touching) both
+/// accounts even for a self-transfer. The sender must hold `value`.
+pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
+    let available = state.balance(from)
+    core::assert(available >= value)
+    // A self-transfer changes no balance, so static frames may perform it.
+    if from == to { return state.touch(from) }
+    if value > !(0 as u256) - state.balance(to) { return ERR_BALANCE_OVERFLOW }
+    let status = state.set_balance(address: from, value: available - value)
+    if status != OK { return status }
+    state.set_balance(address: to, value: state.balance(to) + value)
+}
+
+/// Copy an account's code into an analyzed program.
+pub fn load_program(_ state: Transaction, address: u256) -> Program {
+    let len = state.code_size(address)
+    var code = ByteBuffer::new()
+    if !code.try_resize(len) { return Program::new(InputData::new(code, status: ERR_HOST_ALLOCATION)) }
+    var index: u64 = 0
+    while index < len {
+        code.set_byte(index, value: state.code_byte(address, index))
+        index += 1
+    }
+    Program::new(InputData::new(code, status: OK))
+}
+
+/// Open a contract creation's checkpoint and apply its prologue: the creation
+/// mark, the new account's first nonce and its endowment. Initcode failure or a
+/// rejected deposit reverts all of it.
+pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
+    let checkpoint = state.checkpoint(is_static: false)
+    var status = state.mark_created(address)
+    if status == OK { status = state.increment_nonce(address) }
+    if status == OK && value != 0 { status = transfer(mut state, from: sender, to: address, value) }
+    if status == OK { return Result::Ok(checkpoint) }
+    state.revert(checkpoint)
+    Result::Err(status)
+}
+
+/// Run a precompile and express its outcome as a frame result. Invalid input and
+/// insufficient gas are exceptional halts that consume all `gas`; unimplemented
+/// precompiles and allocation failures are host errors.
+pub fn run_precompile(address: u256, input: InputData, gas: u64, op: i32) -> ExecutionResult {
+    let outcome = fevm_precompiles::run(address, input, gas)
+    let status = if outcome.status == SUCCESS { OK }
+        else if outcome.status == FAILURE { ERR_PRECOMPILE }
+        else if outcome.status == HOST_ALLOCATION { ERR_HOST_ALLOCATION }
+        else { ERR_TODO_OPCODE }
+    let gas_remaining = if status == OK { gas - outcome.gas_used } else { 0 }
+    ExecutionResult {
+        status,
+        output: outcome.output,
+        gas_remaining,
+        refund_delta: 0,
+        output_valid: status == OK,
+        stack_top: 0,
+        stack_len: 0,
+        unsupported_opcode: if status == ERR_TODO_OPCODE { op } else { 0 },
+    }
+}
+
+/// Outcomes defined by the EVM: success, revert and exceptional halts. Every
+/// other status is a host failure that aborts the whole execution.
+pub fn is_evm_outcome(_ status: i32) -> bool {
+    status == OK || status == ERR_REVERT || exceptional(status)
+}
+
+/// A result without output or remaining gas, for messages that never run code.
+pub fn status_result(_ status: i32) -> ExecutionResult {
+    ExecutionResult {
+        status, output: ByteBuffer::new(), gas_remaining: 0, refund_delta: 0,
+        output_valid: false, stack_top: 0, stack_len: 0, unsupported_opcode: 0,
+    }
 }
 
 impl Vm {
     fn accept_child(mut self, _ child: own ChildResult) {
         let offset = child.offset
         let len = child.len
+        let creates = child.creates
+        let address = child.address
         let result = child.result
-        if result.status != OK && result.status != ERR_REVERT && !exceptional(result.status) {
+        if !is_evm_outcome(result.status) {
             // Host failures and unfinished VM features abort the execution. They
             // must never be reported to EVM code as an ordinary failed CALL.
             self.unsupported_opcode = result.unsupported_opcode
@@ -1067,17 +1144,44 @@ impl Vm {
         }
         if result.status == OK || result.status == ERR_REVERT {
             self.gas_remaining += result.gas_remaining
+        }
+        if creates {
+            // A successful creation leaves the return data empty; a failed one
+            // exposes its revert data.
+            self.push(if result.status == OK { address } else { 0 })
+            if result.status == OK {
+                result.release()
+                return
+            }
+        } else {
             let count = if len < result.output.len() { len } else { result.output.len() }
             var index: u64 = 0
             while index < count {
                 self.memory.set_byte(index: offset + index, value: result.output.byte_at(index))
                 index += 1
             }
+            self.push_bool(result.status == OK)
         }
-        self.push_bool(result.status == OK)
         let previous = self.return_data
         self.return_data = result.output
         previous.release()
+    }
+
+    // Deposit successful initcode output: EIP-3541 prefix, 200 gas per byte and
+    // the EIP-170 size limit. A rejected deposit is an exceptional halt.
+    fn deposit_code(mut self, address: u256, _ state: mut Transaction) {
+        let len = self.output.len()
+        if len > 0 && self.output.byte_at(0) == 0xef {
+            self.fault(ERR_CODE_PREFIX)
+        } else if len > MAX_CODE_SIZE || !self.charge(len as u128 * 200) {
+            self.fault(ERR_OUT_OF_GAS)
+        } else {
+            self.fault(state.deploy_code(address, code: self.output))
+        }
+        if !self.ok() {
+            self.output.clear()
+            self.output_valid = false
+        }
     }
 
     fn start_call(mut self, op: i32, _ call: CallEnv, _ state: mut Transaction, depth: usize) -> Option<Frame> {
@@ -1106,7 +1210,7 @@ impl Vm {
         let has_value = transfers && value != 0
         if !self.charge(100 + if has_value { 9000 } else { 0 }) { return Option::None }
         let cold = !state.account_is_warm(code_address)
-        let empty = state.balance(code_address) == 0 && state.nonce(code_address) == 0 && state.code_size(code_address) == 0
+        let empty = state.is_empty(code_address)
         let access_status = state.warm_account(address: code_address)
         if access_status != OK {
             self.fault(access_status)
@@ -1128,54 +1232,43 @@ impl Vm {
         let address = if op == 0xf2 || op == 0xf4 { sender } else { code_address }
         let is_static = state.is_static() || op == 0xfa
         let checkpoint = state.checkpoint(is_static)
-        if op == 0xf1 && has_value && sender != address {
-            let balance = state.balance(address)
-            if value > !(0 as u256) - balance {
-                state.revert(checkpoint)
-                self.push(0)
-                return Option::None
-            }
-            var status = state.set_balance(address: sender, value: state.balance(sender) - value)
-            if status == OK { status = state.set_balance(address, value: balance + value) }
+        if has_value {
+            let status = transfer(mut state, from: sender, to: address, value)
             if status != OK {
                 state.revert(checkpoint)
                 self.fault(status)
                 return Option::None
             }
         }
-        // Precompiles are a separate implementation milestone. Never execute
-        // them as empty accounts in the meantime.
-        if code_address >= 1 && code_address <= 10 {
+        let out_offset: u64 = if output_len == 0 { 0 } else { output_offset.downcast_unchecked() }
+        let out_len: u64 = output_len.downcast_unchecked()
+        let calldata = InputData::copy_from(self.memory,
+            offset: if input_len == 0 { 0 } else { input_offset.downcast_unchecked() },
+            len: input_len.downcast_unchecked())
+        if calldata.status != OK {
+            self.fault(calldata.status)
+            calldata.release()
             state.revert(checkpoint)
-            self.unsupported_opcode = op
-            self.fault(ERR_TODO_OPCODE)
+            return Option::None
+        }
+        if is_precompile(code_address) {
+            let result = run_precompile(address: code_address, input: calldata, gas: child_gas, op)
+            calldata.release()
+            if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
+            self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })
             return Option::None
         }
         let code_len = state.code_size(code_address)
         if code_len == 0 {
+            calldata.release()
             state.commit(checkpoint)
             self.gas_remaining += child_gas
             self.push(1)
             return Option::None
         }
-        var code = ByteBuffer::new()
-        if !code.try_resize(code_len) {
-            code.release()
-            state.revert(checkpoint)
-            self.fault(ERR_HOST_ALLOCATION)
-            return Option::None
-        }
-        var index: u64 = 0
-        while index < code_len {
-            code.set_byte(index, value: state.code_byte(address: code_address, index))
-            index += 1
-        }
-        let program = Program::new(InputData::new(code, status: OK))
-        let calldata = InputData::copy_from(self.memory,
-            offset: if input_len == 0 { 0 } else { input_offset.downcast_unchecked() },
-            len: input_len.downcast_unchecked())
-        if program.status != OK || calldata.status != OK {
-            self.fault(if program.status != OK { program.status } else { calldata.status })
+        let program = load_program(state, address: code_address)
+        if program.status != OK {
+            self.fault(program.status)
             program.release()
             calldata.release()
             state.revert(checkpoint)
@@ -1189,8 +1282,110 @@ impl Vm {
         var vm = Vm::new()
         vm.gas_remaining = child_gas
         Option::Some(Frame { vm, program, calldata, call: child_call, checkpoint,
-            output_offset: if output_len == 0 { 0 } else { output_offset.downcast_unchecked() },
-            output_len: output_len.downcast_unchecked() })
+            output_offset: out_offset, output_len: out_len, creates: false })
+    }
+
+    fn start_create(mut self, op: i32, _ call: CallEnv, _ state: mut Transaction, depth: usize) -> Option<Frame> {
+        let value = self.pop()
+        let offset = self.pop()
+        let len = self.pop()
+        let salt = if op == 0xf5 { self.pop() } else { 0 }
+        if !self.ok() { return Option::None }
+        let plan = match self.plan_memory(offset, len, copying: false) {
+            Option::Some(plan) => plan,
+            Option::None => return Option::None,
+        }
+        // A successful plan bounds a nonempty range below 2^42 bytes.
+        let words: u128 = ((len + 31) / 32).downcast_unchecked()
+        // 32,000 gas, two per initcode word (EIP-3860), and six per word hashed by CREATE2.
+        let cost = 32000 + words * if op == 0xf5 { 8 } else { 2 }
+        if !self.charge(cost) || !self.expand_memory(plan.size) { return Option::None }
+        if len > MAX_INITCODE_SIZE {
+            self.fault(ERR_OUT_OF_GAS)
+            return Option::None
+        }
+        let count: u64 = len.downcast_unchecked()
+        let start: u64 = if count == 0 { 0 } else { offset.downcast_unchecked() }
+        let sender = address_word(call.address)
+        let address = if op == 0xf0 {
+            create_address(sender, nonce: state.nonce(sender))
+        } else {
+            var hash = Keccak256::new()
+            hash.update(self.memory, offset: start, len: count)
+            var code_hash: u256 = 0
+            for byte in hash.finish() { code_hash = (code_hash << 8) | byte as u256 }
+            create2_address(sender, salt, code_hash)
+        }
+        let create_gas = self.gas_remaining - self.gas_remaining / 64
+        self.gas_remaining -= create_gas
+        if state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return Option::None
+        }
+        self.return_data.clear()
+        if state.balance(sender) < value || state.nonce(sender) == 0xffffffffffffffff || depth == CALL_DEPTH_LIMIT {
+            self.gas_remaining += create_gas
+            self.push(0)
+            return Option::None
+        }
+        self.fault(state.warm_account(address))
+        if !self.ok() { return Option::None }
+        // A collision with existing code or nonce consumes the forwarded gas.
+        if !state.deployable(address) {
+            self.fault(state.increment_nonce(sender))
+            self.push(0)
+            return Option::None
+        }
+        self.fault(state.increment_nonce(sender))
+        if !self.ok() { return Option::None }
+        let checkpoint = match begin_create(mut state, sender, address, value) {
+            Result::Ok(checkpoint) => checkpoint,
+            Result::Err(status) => {
+                self.fault(status)
+                return Option::None
+            },
+        }
+        let program = Program::new(InputData::copy_from(self.memory, offset: start, len: count))
+        if program.status != OK {
+            self.fault(program.status)
+            program.release()
+            state.revert(checkpoint)
+            return Option::None
+        }
+        let child_call = CallEnv {
+            address, caller: sender, callvalue: value, origin: call.origin,
+            gasprice: call.gasprice, gas_limit: create_gas, is_static: false,
+        }
+        var vm = Vm::new()
+        vm.gas_remaining = create_gas
+        Option::Some(Frame { vm, program, calldata: empty_bytes(), call: child_call, checkpoint,
+            output_offset: 0, output_len: 0, creates: true })
+    }
+
+    // EIP-6780: the balance moves to the beneficiary; only an account created by
+    // this transaction is deleted, at settlement, and loses ether sent to itself.
+    fn selfdestruct(mut self, _ call: CallEnv, _ state: mut Transaction) {
+        let beneficiary = address_word(self.pop())
+        if !self.ok() { return }
+        let me = address_word(call.address)
+        let balance = state.balance(me)
+        var gas: u128 = 5000
+        if !state.account_is_warm(beneficiary) { gas += 2600 }
+        if state.is_empty(beneficiary) && balance != 0 { gas += 25000 }
+        if !self.charge(gas) { return }
+        self.fault(state.warm_account(address: beneficiary))
+        if !self.ok() { return }
+        if state.is_static() {
+            self.fault(ERR_STATIC_WRITE)
+            return
+        }
+        var status = transfer(mut state, from: me, to: beneficiary, value: balance)
+        if status == OK && state.was_created(me) {
+            status = state.set_balance(address: me, value: 0)
+            if status == OK { status = state.doom(me) }
+        }
+        self.fault(status)
+        if self.ok() { self.halted = true }
     }
 
     fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
@@ -1208,8 +1403,13 @@ impl Vm {
                 let len: usize = (op - 0x5f).downcast_unchecked()
                 let value = read_push_value(mut self, program, len)
                 self.push(value)
-            } else if op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xfa {
-                match self.start_call(op, call, mut state, depth) {
+            } else if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 || op == 0xfa {
+                let child = if op == 0xf0 || op == 0xf5 {
+                    self.start_create(op, call, mut state, depth)
+                } else {
+                    self.start_call(op, call, mut state, depth)
+                }
+                match child {
                     Option::Some(frame) => return Option::Some(frame),
                     Option::None => {},
                 }
@@ -1260,6 +1460,20 @@ impl Vm {
 
     pub fn run(mut self, _ program: Program, _ calldata: InputData,
                _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
+        self.run_root(program, calldata, call, block, mut state, creates: false)
+    }
+
+    /// Run initcode at depth zero under its own checkpoint, then deposit its
+    /// output as code at `call.address`. Callers open the creation with
+    /// `begin_create`, whose checkpoint encloses this one.
+    pub fn create(mut self, _ program: Program, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
+        let calldata = empty_bytes()
+        self.run_root(program, calldata, call, block, mut state, creates: true)
+        calldata.release()
+    }
+
+    fn run_root(mut self, _ program: Program, _ calldata: InputData,
+                _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, creates: bool) {
         self.memory.clear()
         self.output.clear()
         self.return_data.clear()
@@ -1281,6 +1495,7 @@ impl Vm {
             Option::Some(first) => self.run_children(first, program, calldata, call, block, mut state),
             Option::None => {},
         }
+        if creates && self.status == OK { self.deposit_code(address: call.address, mut state) }
         if self.status == OK {
             state.commit(checkpoint)
             self.refund_delta = state.refund() - refund_before
