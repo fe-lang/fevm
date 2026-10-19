@@ -76,5 +76,17 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
         return copied(blake2f::compress(input), gas_used: rounds)
     }
+    if address == 10 {
+        if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }
+        var result: [u8; 64] = [0; 64]
+        var i: u64 = 0
+        while i < 32 {
+            let shift = ((31 - i) * 8) as u256
+            result[i as usize] = (kzg::FIELD_ELEMENTS_PER_BLOB >> shift).downcast_truncate()
+            result[(32 + i) as usize] = (kzg::BLS_MODULUS >> shift).downcast_truncate()
+            i += 1
+        }
+        return copied(result, gas_used: kzg::GAS)
+    }
     Output { status: UNIMPLEMENTED, gas_used: 0, output: ByteBuffer::new() }
 }
