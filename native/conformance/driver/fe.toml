@@ -4,4 +4,4 @@ version = "0.1.0"
 
 [dependencies]
 fevm = true
-keccak = { source = "https://github.com/fe-lang/keccak", rev = "0702d006a37efc85390726b933b2a275b215c2ae" }
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "2b80ec924f8e64eb1ed812e094a960f13fb644a4" }

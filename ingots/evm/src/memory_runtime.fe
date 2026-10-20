@@ -16,7 +16,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     let large = Program::copy_from(bytes, len: i)
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
-    vm.run_owned(
+    vm.run(
         large,
         empty_bytes(),
         default_call_env(),
@@ -27,7 +27,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         vm.status == OK && vm.gas_remaining == 998985,
     )
     core::assert(vm.memory.len() == 9024 && vm.output.len() == 9000)
-    core::assert(vm.output.byte_at(8999) == 0xab)
+    core::assert(vm.output[8999 as usize] == 0xab)
     let memory_capacity = vm.memory.capacity()
     let output_capacity = vm.output.capacity()
 
@@ -39,7 +39,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     let small = Program::copy_from(bytes, len: 4)
     var call = default_call_env()
     call.gas_limit = 20
-    vm.run_owned(small, empty_bytes(), call, default_block_env(), mut state)
+    vm.run(small, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.sp == 0)
     core::assert(vm.memory.len() == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
@@ -52,7 +52,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     bytes[3] = 0x5f
     bytes[4] = 0xf3
     let regrow = Program::copy_from(bytes, len: 5)
-    vm.run_owned(
+    vm.run(
         regrow,
         empty_bytes(),
         default_call_env(),
@@ -65,13 +65,10 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     )
     let result = vm.into_result()
     core::assert(result.output_valid && result.output.len() == 9000)
-    var index: u64 = 0
-    while index < result.output.len() {
-        core::assert(result.output.byte_at(index) == 0)
-        index += 1
+    for byte in result.output.span() {
+        core::assert(byte == 0)
     }
-    result.release()
-    state.finish(commit: true, gas_spent: 0).release()
+    state.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -86,7 +83,7 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     let huge = Program::copy_from(bytes, len: 36)
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
-    vm.run_owned(
+    vm.run(
         huge,
         empty_bytes(),
         default_call_env(),
@@ -100,9 +97,8 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     let stop = Program::copy_from([0 as u8], len: 1)
     var call = default_call_env()
     call.gas_limit = 0
-    vm.run_owned(stop, empty_bytes(), call, default_block_env(), mut state)
+    vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
-    vm.release()
-    state.finish(commit: true, gas_spent: 0).release()
+    state.finish(commit: true, gas_spent: 0)
 }

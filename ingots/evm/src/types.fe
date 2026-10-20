@@ -1,11 +1,11 @@
-use std::native::ByteBuffer
+use core::{MemBuffer, MemSpan, Option}
 use keccak::ByteSource
 use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 
 // Code and its instruction-boundary analysis stay immutable together.
 pub struct Program {
-    bytes: ByteBuffer,
-    jumpdests: ByteBuffer,
+    bytes: MemBuffer,
+    jumpdests: MemBuffer,
     pub status: i32,
 }
 
@@ -13,10 +13,9 @@ impl Program {
     pub fn new(_ input: own InputData) -> Self {
         var status = input.status
         let len = input.len()
-        var jumpdests = ByteBuffer::new()
+        var jumpdests = MemBuffer::empty()
         if status == OK {
-            // ByteBuffer extents fit PTRDIFF_MAX, including room for rounding.
-            if !jumpdests.try_resize((len + 7) / 8) {
+            if !jumpdests.try_resize(((len + 7) / 8) as usize) {
                 status = ERR_HOST_ALLOCATION
             } else {
                 var pc: u64 = 0
@@ -24,8 +23,7 @@ impl Program {
                     let op = input.byte_at(pc)
                     if op == 0x5b {
                         let bit: u8 = (pc % 8).downcast_unchecked()
-                        let old = jumpdests.byte_at(pc / 8)
-                        jumpdests.set_byte(index: pc / 8, value: old | (1 << bit))
+                        jumpdests[(pc / 8) as usize] |= 1 << bit
                     } else if op >= 0x60 && op <= 0x7f {
                         pc += (op as u64) - 0x5f
                     }
@@ -40,70 +38,58 @@ impl Program {
         Self::new(InputData::copy_from(source, offset: 0, len: len.downcast_unchecked()))
     }
     pub fn len(self) -> usize {
-        self.bytes.len().downcast_unchecked()
+        self.bytes.len()
     }
     pub fn byte_at(self, _ index: usize) -> u8 {
-        core::assert(index < self.len())
-        self.bytes.byte_at(index.downcast_unchecked())
+        self.bytes[index]
     }
-    // Copy code bytes `offset..offset + len` into `into` at `at`.
-    pub fn copy_into(self, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
-        into.copy_from(dest: at, source: self.bytes, offset, len)
+    pub fn bytes(self) -> ref MemSpan {
+        self.bytes.span()
     }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
         if self.status != OK || destination >= self.bytes.len() as u256 {
             return false
         }
-        let pc: u64 = destination.downcast_unchecked()
+        let pc: usize = destination.downcast_unchecked()
         let bit: u8 = (pc % 8).downcast_unchecked()
-        self.jumpdests.byte_at(pc / 8) & (1 << bit) != 0
-    }
-    pub fn release(own self) {
-        self.bytes.release()
-        self.jumpdests.release()
+        self.jumpdests[pc / 8] & (1 << bit) != 0
     }
 }
 
 // Inputs own immutable bytes; constructing a frame never borrows a mutable
 // account-code arena or the caller's expandable memory.
-pub struct InputData { bytes: ByteBuffer, pub status: i32 }
+pub struct InputData { bytes: MemBuffer, pub status: i32 }
 
 impl InputData {
-    pub fn new(_ bytes: own ByteBuffer, status: i32) -> Self { Self { bytes, status } }
+    pub fn new(_ bytes: own MemBuffer, status: i32) -> Self { Self { bytes, status } }
     pub fn copy_from<T: ByteSource>(_ source: T, offset: u64, len: u64) -> Self {
         core::assert(offset <= source.len() && len <= source.len() - offset)
-        var bytes = ByteBuffer::new()
-        var status = OK
-        if !bytes.try_resize(len) {
-            status = ERR_HOST_ALLOCATION
-        } else {
-            var index: u64 = 0
-            while index < len {
-                bytes.set_byte(index, value: source.byte_at(offset + index))
-                index += 1
-            }
+        var bytes = MemBuffer::empty()
+        if !bytes.try_resize(len as usize) {
+            return Self { bytes, status: ERR_HOST_ALLOCATION }
         }
-        Self { bytes, status }
-    }
-    // One bulk copy of a buffer range, such as call input from frame memory.
-    pub fn copy_bytes(_ source: ByteBuffer, offset: u64, len: u64) -> Self {
-        var bytes = ByteBuffer::new()
-        if !bytes.try_resize(len) { return Self { bytes, status: ERR_HOST_ALLOCATION } }
-        bytes.copy_from(dest: 0, source, offset, len)
+        var index: u64 = 0
+        while index < len {
+            bytes[index as usize] = source.byte_at(offset + index)
+            index += 1
+        }
         Self { bytes, status: OK }
     }
-    // Copy bytes `offset..offset + len` into `into` at `at`.
-    pub fn copy_into(self, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
-        into.copy_from(dest: at, source: self.bytes, offset, len)
+    // One bulk copy, such as call input from frame memory.
+    pub fn copy_bytes(_ source: MemSpan) -> Self {
+        match MemBuffer::try_from_span(source) {
+            Option::Some(bytes) => Self { bytes, status: OK }
+            Option::None => Self { bytes: MemBuffer::empty(), status: ERR_HOST_ALLOCATION }
+        }
     }
-    pub fn len(self) -> u64 { self.bytes.len() }
-    pub fn byte_at(self, _ index: u64) -> u8 { self.bytes.byte_at(index) }
-    pub fn release(own self) { self.bytes.release() }
+    pub fn bytes(self) -> ref MemSpan { self.bytes.span() }
+    pub fn len(self) -> u64 { self.bytes.len().downcast_unchecked() }
+    pub fn byte_at(self, _ index: u64) -> u8 { self.bytes[index as usize] }
 }
 
 impl ByteSource for InputData {
-    fn len(self) -> u64 { self.bytes.len() }
-    fn byte_at(self, _ index: u64) -> u8 { self.bytes.byte_at(index) }
+    fn len(self) -> u64 { InputData::len(self) }
+    fn byte_at(self, _ index: u64) -> u8 { InputData::byte_at(self, index) }
 }
 
 pub struct CallEnv {
@@ -131,7 +117,7 @@ pub struct BlockEnv {
 
 pub struct ExecutionResult {
     pub status: i32,
-    pub output: ByteBuffer,
+    pub output: MemBuffer,
     pub gas_remaining: u64,
     pub refund_delta: i128,
     pub output_valid: bool,
@@ -141,7 +127,7 @@ pub struct ExecutionResult {
 }
 
 pub fn empty_bytes() -> InputData {
-    InputData::new(ByteBuffer::new(), status: OK)
+    InputData::new(MemBuffer::empty(), status: OK)
 }
 
 pub fn default_call_env() -> CallEnv {
@@ -158,11 +144,5 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
-    }
-}
-
-impl ExecutionResult {
-    pub fn release(own self) {
-        self.output.release()
     }
 }

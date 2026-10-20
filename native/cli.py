@@ -107,7 +107,7 @@ def main():
         journal.joinpath('build.log').write_bytes(log)
         artifacts(journal / 'fevm_journal', journal_archive, journal, object_name='fevm_journal.o')
         controlled = journal / 'allocation-failure'
-        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1',
+        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1', '-DWATCH_SIZE=100352',
                  ROOT / 'native/fixtures/vm_allocator.c', journal / 'fevm_journal.o',
                  '-o', controlled])
         result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
@@ -149,12 +149,12 @@ def main():
                        '--report', '--report-out', calls_archive], timeout=args.build_timeout)
         calls.joinpath('build.log').write_bytes(log)
         artifacts(calls / 'fevm_calls', calls_archive, calls, object_name='fevm_calls.o')
-        # A depth-two CALL chain allocates the frame box slots, then one box per
-        # child. Fail each of the three in turn; every success must be released.
-        for failure_at in [0, 1, 2, 3]:
+        # A depth-two CALL chain allocates one box per child. Fail each in
+        # turn; every success must be released.
+        for failure_at in [0, 1, 2]:
             controlled = calls / f'allocator-{failure_at}'
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
-                     '-DWATCH_MIN=32769', '-DSUCCESS_ALLOCS=3',
+                     '-DWATCH_MIN=32769', '-DSUCCESS_ALLOCS=2',
                      ROOT / 'native/fixtures/vm_allocator.c', calls / 'fevm_calls.o', '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
             passed = result.returncode == 0 and not result.stdout and not result.stderr
@@ -188,7 +188,7 @@ def main():
                        '--report', '--report-out', log_archive], timeout=args.build_timeout)
         logs.joinpath('build.log').write_bytes(log)
         artifacts(logs / 'fevm_logs', log_archive, logs, object_name='fevm_logs.o')
-        for mode, size in [('h', 131072), ('b', 32), ('b', 64)]:
+        for mode, size in [('h', 94208), ('b', 128), ('b', 256)]:
             for failure_at in [0, 1]:
                 name = f'log-headers-{failure_at}' if mode == 'h' else f'blob-hashes-{size}-{failure_at}'
                 controlled = logs / name

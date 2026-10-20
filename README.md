@@ -53,14 +53,13 @@ var transaction = fevm::Transaction::new(
 let result = fevm::execute(program, calldata, call, block, mut transaction)
 let commit = result.status == fevm::OK
 let gas_spent = call.gas_limit - result.gas_remaining
-// Consume the result after using it to release its owned output buffer.
-result.release()
 let settled = transaction.finish(commit, gas_spent)
-// Read settled.logs before consuming the receipt.
-let world = settled.into_state()
-// After the final transaction, release the world's owned code arena.
-world.release()
+// Read settled.logs, then take the world for the next transaction.
+let world = settled.state
 ```
+
+Every owner, from results and logs to the world, frees its memory when it goes
+out of scope or is overwritten; nothing is released by hand.
 
 Complete Cancun transactions go through `fevm::transact(world, request, block)`.
 A `TxRequest` holds a `TxEnv` (envelope kind, sender, recipient or creation flag,
@@ -74,21 +73,20 @@ precompiles and access list, and runs the call or creation. It then refunds unus
 gas and the capped refund to the sender, pays the priority fee to the coinbase,
 deletes self-destructed new accounts and touched accounts left empty, together
 with their storage, and returns the receipt's status, gas used, output and logs.
-Host failures (allocation or table capacity), including during fee payment,
-return the pre-state with that status.
+Host failures (allocation), including during fee payment, return the pre-state
+with that status.
 The [Ethereum state-test runner](native/conformance/README.md) drives `transact`.
 
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.
 
-`execute` and `execute_vm` consume and release their code and calldata. `Vm::run`
-borrows reusable inputs, which their caller must eventually `release()`;
-`Vm::run_owned` consumes one-shot inputs. `InputData::copy_from(source, offset, len)`
-copies a byte-source range; `InputData::new(bytes, status)` takes a `ByteBuffer`.
-Inputs expose `len()` and `byte_at(index)`. Failed inputs are rejected before
-opening a transaction checkpoint. `vm::Vm` retains memory capacity across runs;
-each run clears the logical extent and zeroes newly exposed bytes. Release the
-VM after its final run, or consume it with `into_result()` to transfer its output.
-Execution results own their output and require explicit `release()`.
+`execute`, `execute_vm` and `Vm::run` borrow their code and calldata, so a caller
+can reuse them or pass temporaries. `InputData::copy_from(source, offset, len)`
+copies a byte-source range, `InputData::copy_bytes(span)` copies a memory span, and
+`InputData::new(bytes, status)` takes a `core::MemBuffer`. Inputs expose `len()`,
+`byte_at(index)` and `bytes()`. Failed inputs are rejected before opening a
+transaction checkpoint. `vm::Vm` retains memory capacity across runs; each run
+clears the logical extent and zeroes newly exposed bytes. `into_result()` consumes
+the VM and transfers its output to the `ExecutionResult`.
 
 A `Transaction` owns the world state while execution is active. Each `Vm::run`
 opens a frame checkpoint: success commits it, while REVERT and every exceptional
@@ -125,19 +123,17 @@ ingot: ECRECOVER (secp256k1), SHA-256, RIPEMD-160, IDENTITY, MODEXP (EIP-198 wit
 EIP-2565 gas), BN254 ECADD/ECMUL/ECPAIRING (EIP-196/197 with EIP-1108 gas),
 BLAKE2F (EIP-152) and KZG point evaluation (EIP-4844, BLS12-381 with the mainnet
 trusted setup's `[τ]G2`). Each charges its gas before doing work; invalid input
-or insufficient gas is an exceptional halt. MODEXP moduli wider than 8,192
-significant bytes stop with a host `unsupported precompile input` status, because
-its limbs use fixed arrays until `std::native` offers typed heap arrays.
+or insufficient gas is an exceptional halt. MODEXP works on limb arrays sized for
+each call's modulus, so any affordable modulus is evaluated; failing to allocate
+them is a host error.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
 owned logs, capped `gas_refunded`, and net `gas_used`. Aborting first undoes all
-writes and discards logs and refunds. Both paths discard transient storage and
-blob hashes and release the journal; every frame must already be closed. Call
-`TransactionResult.release()` to release both state and logs, or `into_state()`
-to release logs and reuse the world. The public fields can also be moved out
-separately when the receipt must outlive subsequent transactions. Each owner
-still requires release. Journal and log growth are fallible: allocation failure
-leaves the operation unapplied, and rollback uses existing storage.
+writes and discards logs and refunds. Both paths discard transient storage, blob
+hashes and the journal; every frame must already be closed. Move the public
+`state` and `logs` fields out to keep them, for example the world for the next
+transaction. Journal and log growth are fallible: allocation failure leaves the
+operation unapplied, and rollback only pops the journal.
 
 LOG0 through LOG4 copy frame memory and ordered topics into transaction-owned
 storage. `transaction.logs()` and `receipt.logs` expose `entry(index)`, which
@@ -153,7 +149,7 @@ index outside that transaction's list. Blob hashes survive checkpoint rollback.
 The transaction warms its sender, destination, coinbase, and Cancun precompiles
 upfront. Add access-list entries with `access_list_account(address)` and
 `access_list_slot(address, slot)` before opening any checkpoint or changing runtime
-state. These calls return false on host table exhaustion. Runtime warming follows
+state. These calls return false on allocation failure. Runtime warming follows
 checkpoint rollback; original storage values remain fixed for the transaction.
 Account keys use their low 160 bits.
 
@@ -169,12 +165,11 @@ intrinsic-gas processing remain outside this frame API.
 Initialize accounts before opening a transaction with `ensure_account(address)`,
 `set_balance(address, value)`, `set_nonce(address, value)` and
 `set_code(address, code)`. Code accepts the Keccak library's `ByteSource` trait
-(including arrays and native `ByteBuffer`) and is copied into world-owned storage;
-its caller retains ownership of the input. `set_code` returns an operational
-status and preserves the account on allocation or table failure. Replacing or
-clearing code compacts the arena; its capacity tracks the peak live code extent.
-Code storage has no frame-input size limit. Release the world with `release()`
-after its final transaction.
+(including arrays, `core::MemBuffer` and `core::MemSpan`) and is copied into
+world-owned storage; its caller retains ownership of the input. `set_code` returns
+an operational status and preserves the account on allocation failure. Replacing
+or clearing code compacts the arena; its capacity tracks the peak live code extent.
+Code storage has no frame-input size limit.
 
 `exists(address)` distinguishes an explicitly present empty account from absence.
 Zero balance/nonce writes preserve an existing account and do not create an absent
@@ -188,8 +183,9 @@ transaction; it is journaled and undone with its frame.
 The [account-code checkpoint](native/reports/account-code.md) passes all seven
 native acceptance stages at O0/O1/O2 on x86_64 Linux using local Fe `4c03313f1`.
 
-The world and transaction caches currently use 256-entry tables. Exhaustion and
-allocation failures are explicit host resource errors, distinct from EVM halts.
+The world and transaction caches are growable
+[SwissTables](https://github.com/fe-lang/swisstable). Allocation failures are
+explicit host resource errors, distinct from EVM halts.
 The [state-gas checkpoint](native/reports/state-gas.md) passes full native
 acceptance at O0/O1/O2 on x86_64 Linux. It builds on the separately recorded
 [transaction journal](native/reports/transaction-journal.md).
@@ -238,13 +234,10 @@ Smoke samples:
 ./out/fevm 0x0c             # undefined opcode: invalid
 ```
 
-Near-term expansion:
-
-- Growable state tables in place of the 256-entry SwissTables.
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
-results against pinned revm. On the execution-spec-tests v5.4.0 Cancun state
-tests, FeVM passes 16,800 of 16,847 cases; the other 47 exceed the 256-entry state
-tables ([report](native/reports/cancun-conformance-20261019/README.md)).
+results against pinned revm. FeVM passes all 16,847 Cancun state tests of
+execution-spec-tests v5.4.0
+([report](native/reports/owned-memory-20261020/README.md)).
 Performance comparisons with other EVMs remain future work.
 
 Native compiler arithmetic checks, performance measurements, and reproducible

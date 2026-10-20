@@ -1,7 +1,8 @@
 // Relinked into the CLI for RETURN of 65,537 bytes. Its memory and output
 // buffers each request 131,072 bytes, larger than the frame/state descriptors.
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
-// The journal fixture uses FAIL_AT=1 to check atomic growth failure and undo.
+// The journal fixture uses FAIL_AT=1 and WATCH_SIZE=100352 to check atomic
+// growth failure and undo; the logs fixture watches entry and blob-hash growth.
 // The accounts fixture uses all three settings for code replacement and release.
 // WATCH_MIN additionally watches every allocation of at least that many bytes;
 // the calls fixture uses it to count child frame boxes.

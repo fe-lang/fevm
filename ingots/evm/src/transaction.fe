@@ -1,8 +1,7 @@
-use std::native::ByteBuffer
-use ingot::buffer::{read_word, write_word}
+use core::{MemSpan, MemVec}
 use ingot::logs::LogBuffer
 use swisstable::SwissTable
-use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
+use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::gas::{StorageCharge, storage_charge}
@@ -29,17 +28,6 @@ pub struct TransactionResult {
     pub gas_refunded: u64,
 }
 
-impl TransactionResult {
-    pub fn into_state(own self) -> WorldState {
-        self.logs.release()
-        self.state
-    }
-    pub fn release(own self) {
-        self.logs.release()
-        self.state.release()
-    }
-}
-
 // The persistent database is unavailable to callers until finish consumes the
 // transaction. Every write during execution must therefore pass the journal.
 pub struct Transaction {
@@ -47,7 +35,7 @@ pub struct Transaction {
     transient: SwissTable<StorageKey, u256>,
     journal: Journal,
     logs: LogBuffer,
-    blob_hashes: ByteBuffer,
+    blob_hashes: MemVec<u256>,
     warm_accounts: SwissTable<u256, bool>,
     warm_storage: SwissTable<StorageKey, bool>,
     originals: SwissTable<StorageKey, u256>,
@@ -69,14 +57,14 @@ impl Transaction {
     pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
         var warm_accounts = SwissTable<u256, bool>::empty()
         for address in [sender, destination, coinbase, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
-            core::assert(warm_accounts.insert(address_word(address), true))
+            warm_accounts.insert(address_word(address), true)
         }
         Self {
             state,
             transient: SwissTable<StorageKey, u256>::empty(),
             journal: Journal::new(),
             logs: LogBuffer::new(),
-            blob_hashes: ByteBuffer::new(),
+            blob_hashes: MemVec::new(),
             warm_accounts,
             warm_storage: SwissTable<StorageKey, bool>::empty(),
             originals: SwissTable<StorageKey, u256>::empty(),
@@ -92,25 +80,20 @@ impl Transaction {
 
     pub fn logs(self) -> ref LogBuffer { ref self.logs }
 
-    pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64,
-                    data: ByteBuffer, offset: u64, len: u64) -> i32 {
+    pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> i32 {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
-        if self.logs.append(address, topics, topic_count, data, offset, len) { OK }
+        if self.logs.append(address, topics, topic_count, data) { OK }
         else { ERR_HOST_ALLOCATION }
     }
 
     pub fn add_blob_hash(mut self, _ hash: u256) -> bool {
         core::assert(!self.started)
-        let offset = self.blob_hashes.len()
-        if !self.blob_hashes.try_resize(offset + 32) { return false }
-        write_word(mut self.blob_hashes, offset, value: hash)
-        true
+        self.blob_hashes.try_push(hash).is_ok()
     }
     pub fn blob_hash(self, _ index: u256) -> u256 {
-        if index >= (self.blob_hashes.len() / 32) as u256 { return 0 }
-        let index: u64 = index.downcast_unchecked()
-        read_word(self.blob_hashes, offset: index * 32)
+        if index >= self.blob_hashes.len() as u256 { return 0 }
+        self.blob_hashes[index.downcast_unchecked()]
     }
 
     pub fn refund(self) -> i128 { self.refund }
@@ -125,15 +108,15 @@ impl Transaction {
     // Access-list initialization precedes all frames and is never rolled back.
     pub fn access_list_account(mut self, address: u256) -> bool {
         core::assert(!self.started)
-        self.warm_accounts.insert(address_word(address), true)
+        self.warm_accounts.try_insert(address_word(address), true)
     }
 
     pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
         core::assert(!self.started)
         let address = address_word(address)
         let was_warm = self.account_is_warm(address)
-        if !self.warm_accounts.insert(address, true) { return false }
-        if !self.warm_storage.insert(StorageKey { address, slot }, true) {
+        if !self.warm_accounts.try_insert(address, true) { return false }
+        if !self.warm_storage.try_insert(StorageKey { address, slot }, true) {
             if !was_warm { let _ = self.warm_accounts.remove(address) }
             return false
         }
@@ -166,14 +149,14 @@ impl Transaction {
             return ERR_HOST_ALLOCATION
         }
         let inserted = match kind {
-            WARM_ACCOUNT => self.warm_accounts.insert(address, true),
-            WARM_STORAGE => self.warm_storage.insert(StorageKey { address, slot }, true),
-            TOUCHED => self.touched.insert(address, true),
-            _ => self.doomed.insert(address, true),
+            WARM_ACCOUNT => self.warm_accounts.try_insert(address, true),
+            WARM_STORAGE => self.warm_storage.try_insert(StorageKey { address, slot }, true),
+            TOUCHED => self.touched.try_insert(address, true),
+            _ => self.doomed.try_insert(address, true),
         }
         if !inserted {
             let _ = self.journal.pop()
-            return ERR_STATE_LIMIT
+            return ERR_HOST_ALLOCATION
         }
         OK
     }
@@ -196,7 +179,7 @@ impl Transaction {
     }
 
     pub fn mark_created(mut self, _ address: u256) -> i32 {
-        if self.created.insert(address_word(address), true) { OK } else { ERR_STATE_LIMIT }
+        if self.created.try_insert(address_word(address), true) { OK } else { ERR_HOST_ALLOCATION }
     }
 
     pub fn was_created(self, _ address: u256) -> bool {
@@ -263,8 +246,8 @@ impl Transaction {
                 DOOMED => self.doomed.remove(change.address),
                 _ => core::panic(),
             }
-            // Reverse replay never increases a table beyond an earlier valid
-            // occupancy, including deletion followed by insertion at capacity.
+            // Reverse replay restores entries the tables held before. A table
+            // that cannot allocate to hold one again is a fatal host failure.
             core::assert(restored)
             if !change.existed && (change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE || change.kind == CODE) {
                 core::assert(self.state.remove_empty_account(change.address))
@@ -281,9 +264,7 @@ impl Transaction {
     pub fn code_size(self, _ address: u256) -> u64 { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
     pub fn code_byte(self, address: u256, index: u64) -> u8 { self.state.code_byte(address, index) }
-    pub fn copy_code(self, address: u256, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
-        self.state.copy_code(address, mut into, at, offset, len)
-    }
+    pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
     pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
     pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {
@@ -300,7 +281,7 @@ impl Transaction {
             let _ = self.transient.remove(key)
             return true
         }
-        self.transient.insert(key, value)
+        self.transient.try_insert(key, value)
     }
 
     fn write(mut self, kind: u8, address: u256, slot: u256, value: u256) -> i32 {
@@ -328,7 +309,7 @@ impl Transaction {
         }
         if !written {
             let _ = self.journal.pop()
-            return ERR_STATE_LIMIT
+            return ERR_HOST_ALLOCATION
         }
         OK
     }
@@ -348,7 +329,7 @@ impl Transaction {
         self.set_nonce(address, value: self.nonce(address) + 1)
     }
     // Contract deployment writes code to an account that has none (EIP-684).
-    pub fn deploy_code(mut self, address: u256, code: ByteBuffer) -> i32 {
+    pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
@@ -370,8 +351,8 @@ impl Transaction {
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
         if !self.originals.contains(key)
-            && !self.originals.insert(key, self.storage_load(address, slot)) {
-            return ERR_STATE_LIMIT
+            && !self.originals.try_insert(key, self.storage_load(address, slot)) {
+            return ERR_HOST_ALLOCATION
         }
         let status = self.write(kind: STORAGE, address, slot, value)
         if status == OK { self.refund += charge.refund }
@@ -412,8 +393,6 @@ impl Transaction {
             self.logs.truncate(0)
         }
         let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
-        self.journal.release()
-        self.blob_hashes.release()
         TransactionResult { state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }
     }
 }

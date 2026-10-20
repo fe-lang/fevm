@@ -24,8 +24,8 @@ non-zero storage equals the fixture's post-state. Outcomes are:
 
 - `passed`
 - `failed`: a validity, logs or state mismatch, listed in `cases.jsonl`
-- `host_error`: FeVM stopped with a host status (unimplemented precompile,
-  state table capacity, allocation failure) instead of an EVM outcome
+- `host_error`: FeVM stopped with a host status (allocation failure, balance
+  overflow) instead of an EVM outcome
 - `crash` and `timeout`
 
 The runner encodes the environment, pre-state and the transaction selected by
@@ -36,4 +36,6 @@ hash of `n`'s decimal digits. The driver checks the post-state directly instead
 of recomputing the state root.
 
 The [first complete run](../reports/cancun-conformance-20261019/README.md) passes
-16,800 of 16,847 Cancun cases; the rest exceed FeVM's 256-entry state tables.
+16,800 of 16,847 Cancun cases; the rest exceed FeVM's former 256-entry state
+tables. With growable tables, the
+[owned-memory run](../reports/owned-memory-20261020/README.md) passes all 16,847.

@@ -1,12 +1,11 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 pub fn main() -> i32 {
-    var memory = ByteBuffer::new()
+    var memory = MemBuffer::empty()
     core::assert(memory.try_resize(32))
     var i: u64 = 0
     while i < 32 {
-        memory.set_byte(index: i, value: 7)
+        memory[i as usize] = 7
         i += 1
     }
-    memory.release()
     0
 }

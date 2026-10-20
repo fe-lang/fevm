@@ -1,0 +1,42 @@
+use std::native::Args
+use fevm::{OK, WorldState, default_block_env, empty_bytes}
+use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, VALID, transact}
+
+// Runs the given number of transactions against one world in one process.
+// Contract A expands its memory to 32 KiB, logs a word, sets and clears a slot,
+// calls B for 64 bytes of return data, and returns a word. B expands its own
+// memory to 16 KiB before returning.
+const CALLER: [u8; 42] = [
+    0x60, 0x01, 0x61, 0x80, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xa0, 0x60, 0x01, 0x60, 0x00,
+    0x55, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x40, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60,
+    0x00, 0x61, 0xbb, 0xbb, 0x5a, 0xf1, 0x50, 0x60, 0x20, 0x60, 0x00, 0xf3,
+]
+const CALLEE: [u8; 11] = [0x60, 0x07, 0x61, 0x40, 0x00, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3]
+
+pub fn main(argc: i32, argv: **u8) -> i32 {
+    let args = unsafe { Args::new(argc, argv) }
+    var count: u256 = 0
+    let digits = args.get(1)
+    for i in 0..digits.len() {
+        count = count * 10 + (digits.byte_at(i) - 48) as u256
+    }
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1 << 200))
+    core::assert(world.set_code(address: 0xaa, code: CALLER) == OK)
+    core::assert(world.set_code(address: 0xbbbb, code: CALLEE) == OK)
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    var nonce: u256 = 0
+    while nonce < count {
+        let env = TxEnv {
+            kind: TX_LEGACY, sender: 0x1000, to: 0xaa, creates: false, nonce, gas_limit: 1_000_000,
+            gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+        }
+        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block)
+        core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+        core::assert(applied.receipt.logs.len() == 1)
+        world = applied.state
+        nonce += 1
+    }
+    0
+}

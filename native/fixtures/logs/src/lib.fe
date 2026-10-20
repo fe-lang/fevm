@@ -1,4 +1,5 @@
-use std::native::{Args, ByteBuffer}
+use core::MemBuffer
+use std::native::Args
 use fevm::{Checkpoint, Transaction, WorldState, OK}
 use fevm::constants::ERR_HOST_ALLOCATION
 
@@ -6,42 +7,43 @@ fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
     tx.checkpoint(is_static: false)
 }
 
-// WATCH_SIZE=131072 tests log-header growth after a retained first record.
+// WATCH_SIZE=94208 tests log-entry growth to 512 entries of 184 bytes after a
+// retained first entry.
 fn headers() {
-    let data = ByteBuffer::new()
+    let data = MemBuffer::empty()
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    core::assert(tx.emit_log(address: 1, topics: [7; 4], topic_count: 1, data, offset: 0, len: 0) == OK)
+    core::assert(tx.emit_log(address: 1, topics: [7; 4], topic_count: 1, data: data.slice(offset: 0, len: 0)) == OK)
     let point = checkpoint(mut tx)
     var count: u64 = 1
     var status = OK
     while count < 350 && status == OK {
-        status = tx.emit_log(address: count as u256, topics: [0; 4], topic_count: 0, data, offset: 0, len: 0)
+        status = tx.emit_log(address: count as u256, topics: [0; 4], topic_count: 0, data: data.slice(offset: 0, len: 0))
         if status == OK { count += 1 }
     }
     core::assert(tx.logs().len() == count)
-    core::assert((status == OK && count == 350) || (status == ERR_HOST_ALLOCATION && count == 341))
+    core::assert((status == OK && count == 350) || (status == ERR_HOST_ALLOCATION && count == 256))
     tx.revert(point)
     core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topics[0] == 7)
-    core::assert(tx.emit_log(address: 2, topics: [9; 4], topic_count: 4, data, offset: 0, len: 0) == OK)
+    core::assert(tx.emit_log(address: 2, topics: [9; 4], topic_count: 4, data: data.slice(offset: 0, len: 0)) == OK)
     let receipt = tx.finish(commit: true, gas_spent: 0)
     core::assert(receipt.logs.len() == 2 && receipt.logs.entry(1).topics[3] == 9)
-    receipt.release()
-    data.release()
 }
 
-// WATCH_SIZE=32 or 64 tests first allocation and subsequent atomic growth.
+// WATCH_SIZE=128 or 256 tests the first allocation of four hashes and the
+// atomic growth to eight.
 fn blobs() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    if tx.add_blob_hash(7) {
-        if tx.add_blob_hash(9) {
-            core::assert(tx.blob_hash(0) == 7 && tx.blob_hash(1) == 9)
-        } else {
-            core::assert(tx.blob_hash(0) == 7 && tx.blob_hash(1) == 0)
-        }
-    } else {
-        core::assert(tx.blob_hash(0) == 0)
+    var count: u256 = 0
+    while count < 5 && tx.add_blob_hash(count + 7) {
+        count += 1
     }
-    tx.finish(commit: true, gas_spent: 0).release()
+    core::assert(count == 0 || count == 4 || count == 5)
+    var index: u256 = 0
+    while index < 5 {
+        core::assert(tx.blob_hash(index) == if index < count { index + 7 } else { 0 })
+        index += 1
+    }
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 pub fn main(argc: i32, argv: **u8) -> i32 {

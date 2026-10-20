@@ -1,29 +1,23 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 
-struct Frame { memory: ByteBuffer, output: ByteBuffer }
+struct Frame { memory: MemBuffer, output: MemBuffer }
 
 impl Frame {
-    fn new() -> Self { Self { memory: ByteBuffer::new(), output: ByteBuffer::new() } }
+    fn new() -> Self { Self { memory: MemBuffer::empty(), output: MemBuffer::empty() } }
 
     fn run(mut self, len: u64) {
-        core::assert(self.memory.try_resize(len))
-        core::assert(self.output.try_resize(len))
+        core::assert(self.memory.try_resize(len as usize))
+        core::assert(self.output.try_resize(len as usize))
         var i: u64 = 0
         while i < len {
-            self.output.set_byte(index: i, value: self.memory.byte_at(i))
+            self.output[i as usize] = self.memory[i as usize]
             i += 1
         }
-    }
-
-    fn release(own self) {
-        self.memory.release()
-        self.output.release()
     }
 }
 
 pub fn main() -> i32 {
     var frame = Frame::new()
     frame.run(len: 32)
-    frame.release()
     0
 }

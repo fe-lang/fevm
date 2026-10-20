@@ -1,15 +1,15 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 
 struct Frame {
-    memory: ByteBuffer,
-    output: ByteBuffer,
+    memory: MemBuffer,
+    output: MemBuffer,
     stack: [u256; 1024],
     sp: usize,
 }
 
 impl Frame {
     fn new() -> Self {
-        Self { memory: ByteBuffer::new(), output: ByteBuffer::new(), stack: [0; 1024], sp: 0 }
+        Self { memory: MemBuffer::empty(), output: MemBuffer::empty(), stack: [0; 1024], sp: 0 }
     }
 
     fn reset(mut self) {
@@ -20,22 +20,21 @@ impl Frame {
 
     fn run(mut self, size: u64, value: u8) {
         self.reset()
-        core::assert(self.memory.try_resize(size))
-        core::assert(self.memory.byte_at(size - 1) == 0)
-        self.memory.set_byte(index: size - 1, value)
+        core::assert(self.memory.try_resize(size as usize))
+        core::assert(self.memory[(size - 1) as usize] == 0)
+        self.memory[(size - 1) as usize] = value
         core::assert(self.output.try_resize(1))
-        self.output.set_byte(index: 0, value: self.memory.byte_at(size - 1))
+        self.output[0] = self.memory[(size - 1) as usize]
         self.stack[0] = value as u256
         self.sp = 1
     }
 
-    fn into_output(own self) -> ByteBuffer {
-        self.memory.release()
+    fn into_output(own self) -> MemBuffer {
         self.output
     }
 }
 
-fn run() -> ByteBuffer {
+fn run() -> MemBuffer {
     var frame = Frame::new()
     frame.run(size: 9000, value: 42)
     let capacity = frame.memory.capacity()
@@ -48,7 +47,6 @@ fn run() -> ByteBuffer {
 
 pub fn main() -> i32 {
     let output = run()
-    core::assert(output.len() == 1 && output.byte_at(0) == 91)
-    output.release()
+    core::assert(output.len() == 1 && output[0] == 91)
     0
 }

@@ -10,7 +10,7 @@ impl ByteSource for LargeCode {
 
 // Relinked with the controlled allocator: the first or second world's arena
 // growth fails once. Failed replacement preserves code, hash and account data;
-// successful growth and both failure paths must release their owners exactly.
+// successful growth and both failure paths must free each allocation exactly once.
 fn initialize(_ world: mut WorldState) -> i32 {
     core::assert(world.set_balance(1, 9))
     core::assert(world.set_code(address: 1, code: [97 as u8, 98, 99]) == OK)
@@ -35,8 +35,6 @@ pub fn main() -> i32 {
     if status == OK {
         var second = WorldState::empty()
         let _ = initialize(mut second)
-        second.release()
     }
-    first.release()
     0
 }

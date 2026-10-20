@@ -37,28 +37,28 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current compiler is upstream Fe master
-[`fa06c6cd5ba19cbf15da718fad80b84d79a569b9`](https://github.com/argotorg/fe/tree/fa06c6cd5ba19cbf15da718fad80b84d79a569b9).
-Its Cargo.lock pins Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`. Master
-stores whole aggregate values and constants into objects; building and running
-the evm ingot's tests peaks at 1.0-1.3 GB at each level. It also includes
-`ByteBuffer::copy_from`, which FeVM uses for every bulk byte copy, as well
-as MVS, native `FixedStack` and the FeVM compile-time work previously pinned
-from forks (enum-proof indexes, borrowed native layouts and one shared native test
-runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchain.json)
-records the exact revisions and lock hash, and bootstrap fetches both from their
-upstream repositories.
+The current compiler is Fe
+[`999ff9562353ab381f7cafe389f7e86499ade918`](https://github.com/sbillig/fe/tree/999ff9562353ab381f7cafe389f7e86499ade918),
+branch `feat/owned-value-destruction` of `sbillig/fe` on Fe master `c33d070d6`.
+Its Cargo.lock pins Sonatina `30e45b25b981a78cf0fb5a55aa401a81ce79dc89`. The
+branch destroys owned values where their lifetime ends and replaces
+`std::native::ByteBuffer` and `FixedStack` with core's memory owners (`MemBuffer`,
+`MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap memory. It uses
+Rust 1.99.0; the default [`toolchain.json`](toolchain.json) records the exact
+revisions and lock hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 80
-workspace tests, 39 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
-comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
-three declared simultaneous-fault reason differences per level. The Python
-harness's 13 tests and the Rust reference's nine tests pass. See the
-[Fe master report](reports/fe-master-20261024/README.md); the earlier
-[bulk-copy](reports/bulk-copy-20261019/README.md) report keeps its compiler
-`21db8bc23`, and the [Fe master](reports/fe-master-20261019/README.md) (47
-workspace tests, before the CALL and transaction work) and
-[macOS](reports/macos-arm64-20261019/README.md) reports keep `f69b911ce`. The
+All seven native acceptance stages pass on x86_64 Linux: 76 workspace tests, 35
+CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at each
+of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
+simultaneous-fault reason differences per level. The Python harness's 13 tests
+and the Rust reference's nine tests pass. See the
+[owned-memory report](reports/owned-memory-20261020/README.md); this compiler has
+not run on AArch64 macOS. The [Fe master report](reports/fe-master-20261024/README.md)
+covers both hosts on Fe master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
+on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)
+(47 workspace tests, before the CALL and transaction work) and
+[macOS](reports/macos-arm64-20261019/README.md) reports keep their compiler
+`f69b911ce`. The
 [Cancun state-test runner](conformance/README.md) is separate from acceptance.
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
@@ -136,6 +136,18 @@ one-thread O1 build wall/CPU time, peak RSS and checked execution output. The
 default build deadline is 180 seconds (`--build-timeout` overrides it). Use CPU
 time for shared-host comparisons and compare identical source hashes. This probe
 does not establish full interpreter conformance or an end-to-end speedup.
+
+## Resident memory
+
+`native/soak` runs repeated Cancun transactions against one world in one
+process. Each expands a caller's and a callee's memory, emits a log, sets and
+clears a storage slot and returns data. Every owner frees its memory when it is
+destroyed, so peak RSS stays flat: the runner fails if it grows by more than
+1 MiB between 1,000 and 40,000 transactions.
+
+```sh
+python3 native/soak/run.py --fe native/out/toolchain/bin/fe --out native/out/soak
+```
 
 The input probe compiles only the real code/input types and hex parser. It checks
 50,000-byte inputs, copy ownership, PUSH/jump boundaries, malformed hex, and

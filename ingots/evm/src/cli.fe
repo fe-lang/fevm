@@ -12,8 +12,6 @@ use ingot::constants::{
     ERR_REVERT,
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
-    ERR_STATE_LIMIT,
-    ERR_UNSUPPORTED_PRECOMPILE,
     ERR_USAGE,
     OK,
 }
@@ -45,13 +43,11 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
     match vm.status {
         ERR_STACK_UNDERFLOW => writeln("stack underflow"),
         ERR_STACK_OVERFLOW => writeln("stack overflow"),
-        ERR_UNSUPPORTED_PRECOMPILE => writeln("unsupported precompile input"),
         ERR_HOST_ALLOCATION => writeln("host allocation failed"),
         ERR_OUT_OF_GAS => writeln("out of gas"),
         ERR_INVALID_JUMP => writeln("invalid jump destination"),
         ERR_INVALID_OPCODE => writeln("invalid opcode"),
         ERR_RETURN_DATA_OOB => writeln("return data out of bounds"),
-        ERR_STATE_LIMIT => writeln("state table capacity exceeded"),
         ERR_REVERT => {
             write("revert ")
             write_hex_bytes(vm.output)
@@ -80,7 +76,6 @@ pub fn run(_ args: Args) -> i32 {
         if program.status != OK {
             write_parse_error(program.status)
             let status = program.status
-            program.release()
             return status
         }
 
@@ -88,8 +83,6 @@ pub fn run(_ args: Args) -> i32 {
         if calldata.status != OK {
             write_parse_error(calldata.status)
             let status = calldata.status
-            calldata.release()
-            program.release()
             return status
         }
 
@@ -101,16 +94,14 @@ pub fn run(_ args: Args) -> i32 {
             default_block_env(),
             mut state,
         )
-        state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining).release()
+        state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining)
         if vm.status != OK {
             write_vm_error(vm)
             let status = vm.status
-            vm.release()
             return status
         }
 
         write_result(vm)
-        vm.release()
         OK
     }
 }

@@ -1,29 +1,23 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 use ingot::{FAILURE, SUCCESS, run}
 
-fn append<const N: usize>(_ buffer: mut ByteBuffer, _ bytes: [u8; N]) {
-    var i: usize = 0
-    while i < N {
-        let len = buffer.len()
-        core::assert(buffer.try_resize(len + 1))
-        buffer.set_byte(index: len, value: bytes[i])
-        i += 1
+fn append<const N: usize>(_ buffer: mut MemBuffer, _ bytes: [u8; N]) {
+    let start = buffer.len()
+    buffer.resize(start + N)
+    for i in 0..N {
+        buffer[start + i] = bytes[i]
     }
 }
 
-fn append_word(_ buffer: mut ByteBuffer, _ value: u256) {
-    var bytes: [u8; 32] = [0; 32]
-    var i: usize = 0
-    while i < 32 {
-        bytes[i] = (value >> ((31 - i) * 8) as u256).downcast_truncate()
-        i += 1
-    }
-    append(mut buffer, bytes)
+fn append_word(_ buffer: mut MemBuffer, _ value: u256) {
+    let start = buffer.len()
+    buffer.resize(start + 32)
+    buffer.span().write_word(offset: start, value)
 }
 
 // EIP-198 layout: three length words, then base, exponent and modulus.
-fn input<const B: usize, const E: usize, const M: usize>(_ base: [u8; B], _ exponent: [u8; E], _ modulus: [u8; M]) -> ByteBuffer {
-    var buffer = ByteBuffer::new()
+fn input<const B: usize, const E: usize, const M: usize>(_ base: [u8; B], _ exponent: [u8; E], _ modulus: [u8; M]) -> MemBuffer {
+    var buffer = MemBuffer::empty()
     append_word(mut buffer, B as u256)
     append_word(mut buffer, E as u256)
     append_word(mut buffer, M as u256)
@@ -33,12 +27,10 @@ fn input<const B: usize, const E: usize, const M: usize>(_ base: [u8; B], _ expo
     buffer
 }
 
-fn equals<const N: usize>(_ buffer: ByteBuffer, _ expected: [u8; N]) -> bool {
-    if buffer.len() as usize != N { return false }
-    var i: usize = 0
-    while i < N {
-        if buffer.byte_at(i.downcast_unchecked()) != expected[i] { return false }
-        i += 1
+fn equals<const N: usize>(_ buffer: MemBuffer, _ expected: [u8; N]) -> bool {
+    if buffer.len() != N { return false }
+    for i in 0..N {
+        if buffer[i] != expected[i] { return false }
     }
     true
 }
@@ -60,19 +52,14 @@ fn modexp_eip198_examples() {
     var one: [u8; 32] = [0; 32]
     one[31] = 1
     core::assert(result.status == SUCCESS && result.gas_used == 1360 && equals(result.output, one))
-    result.release()
     let short = run(address: 5, input: fermat, gas: 1359)
     core::assert(short.status == FAILURE && short.gas_used == 1359)
-    short.release()
-    fermat.release()
     // An empty base is zero.
     let empty: [u8; 0] = []
     let zero_base = input(empty, FIELD_PRIME_MINUS_ONE, FIELD_PRIME)
     let result = run(address: 5, input: zero_base, gas: 1360)
     let zeros: [u8; 32] = [0; 32]
     core::assert(result.status == SUCCESS && equals(result.output, zeros))
-    result.release()
-    zero_base.release()
 }
 
 #[test]
@@ -105,8 +92,6 @@ fn modexp_multi_limb_even_modulus_and_long_base() {
     // 13 words squared, 32 iterations, divided by 3.
     let result = run(address: 5, input: data, gas: 1802)
     core::assert(result.status == SUCCESS && result.gas_used == 1802 && equals(result.output, expected))
-    result.release()
-    data.release()
 }
 
 #[test]
@@ -116,35 +101,25 @@ fn modexp_edge_cases() {
     let nothing = input(empty, [5 as u8], empty)
     let result = run(address: 5, input: nothing, gas: 200)
     core::assert(result.status == SUCCESS && result.gas_used == 200 && result.output.len() == 0)
-    result.release()
-    nothing.release()
     // A zero modulus returns zeros; modulus 1 reduces everything to zero.
     let zero = input([7 as u8], [3 as u8], [0 as u8, 0])
     let result = run(address: 5, input: zero, gas: 200)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
-    result.release()
-    zero.release()
     let unit = input([7 as u8], empty, [0 as u8, 1])
     let result = run(address: 5, input: unit, gas: 200)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
-    result.release()
-    unit.release()
     // A zero exponent gives 1; 0x1234567890abcdef^65537 mod (2^64 - 5) per pow().
     let identity = input([2 as u8], [0 as u8], [0 as u8, 9])
     let result = run(address: 5, input: identity, gas: 200)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 1]))
-    result.release()
-    identity.release()
     let single = input([0x12 as u8, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef], [1 as u8, 0, 1],
                        [0xff as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb])
     let result = run(address: 5, input: single, gas: 200)
     // 6202122992327880755 = 0x56125e0052fc7033.
     core::assert(result.status == SUCCESS
         && equals(result.output, [0x56 as u8, 0x12, 0x5e, 0x00, 0x52, 0xfc, 0x70, 0x33]))
-    result.release()
-    single.release()
     // Truncated input: the modulus 0x0100 is cut to its first byte; missing bytes read as zero.
-    var truncated = ByteBuffer::new()
+    var truncated = MemBuffer::empty()
     append_word(mut truncated, 1)
     append_word(mut truncated, 1)
     append_word(mut truncated, 2)
@@ -152,15 +127,11 @@ fn modexp_edge_cases() {
     let result = run(address: 5, input: truncated, gas: 200)
     // 3^2 mod 0x0100 = 9.
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 9]))
-    result.release()
-    truncated.release()
     // An absurd base length saturates the charge instead of allocating.
-    var huge = ByteBuffer::new()
+    var huge = MemBuffer::empty()
     append_word(mut huge, 1 << 255)
     append_word(mut huge, 1)
     append_word(mut huge, 1)
     let result = run(address: 5, input: huge, gas: 0xffffffffffffffff)
     core::assert(result.status == FAILURE && result.gas_used == 0xffffffffffffffff)
-    result.release()
-    huge.release()
 }

@@ -1,4 +1,4 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 use std::io::{Write, write, write_char}
 use std::native::Arg
 use ingot::constants::{ERR_BAD_HEX, ERR_HOST_ALLOCATION, ERR_ODD_HEX, OK}
@@ -35,12 +35,10 @@ pub fn write_hex_byte(_ value: i32) uses (w: mut Write) {
     write_char(hex_digit(lo))
 }
 
-pub fn write_hex_bytes(_ bytes: ByteBuffer) uses (w: mut Write) {
+pub fn write_hex_bytes(_ bytes: MemBuffer) uses (w: mut Write) {
     write("0x")
-    var i: u64 = 0
-    while i < bytes.len() {
-        write_hex_byte(bytes.byte_at(i) as i32)
-        i += 1
+    for byte in bytes.span() {
+        write_hex_byte(byte as i32)
     }
     write_char(10)
 }
@@ -67,7 +65,7 @@ pub fn parse_hex_program(_ arg: Arg) -> Program {
 }
 
 pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
-    var bytes = ByteBuffer::new()
+    var bytes = MemBuffer::empty()
     let len = arg.len()
     var i: usize = 0
     if is_prefixed_hex(arg) {
@@ -88,7 +86,7 @@ pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
             return InputData::new(bytes, status: ERR_BAD_HEX)
         }
 
-        bytes.set_byte(index: out_len, value: ((hi * 16) + lo).downcast_unchecked())
+        bytes[out_len as usize] = ((hi * 16) + lo).downcast_unchecked()
         out_len += 1
         i += 2
     }

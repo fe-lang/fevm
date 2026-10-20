@@ -1,7 +1,7 @@
-use std::native::ByteBuffer
+use core::MemBuffer
 use keccak::keccak256
 use ingot::address::{create_address, create2_address}
-use ingot::constants::{ERR_PRECOMPILE, ERR_STATE_LIMIT, OK}
+use ingot::constants::{ERR_PRECOMPILE, OK}
 use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
@@ -20,20 +20,20 @@ fn word(_ bytes: [u8; 32]) -> u256 {
 // PUSH10 initcode; MSTORE at 0 (bytes 22..32); then `tail` creates from it.
 fn creator<const N: usize>(_ init: [u8; 10], _ tail: [u8; N]) -> Program {
     let len: u64 = N.downcast_unchecked()
-    var bytes = ByteBuffer::new()
-    core::assert(bytes.try_resize(14 + len))
-    bytes.set_byte(index: 0, value: 0x69)
+    var bytes = MemBuffer::empty()
+    core::assert(bytes.try_resize((14 + len) as usize))
+    bytes[0] = 0x69
     var i: u64 = 0
     while i < 10 {
-        bytes.set_byte(index: 1 + i, value: init[i as usize])
+        bytes[(1 + i) as usize] = init[i as usize]
         i += 1
     }
-    bytes.set_byte(index: 11, value: 0x60)
-    bytes.set_byte(index: 12, value: 0)
-    bytes.set_byte(index: 13, value: 0x52)
+    bytes[11] = 0x60
+    bytes[12] = 0
+    bytes[13] = 0x52
     i = 0
     while i < len {
-        bytes.set_byte(index: 14 + i, value: tail[i as usize])
+        bytes[(14 + i) as usize] = tail[i as usize]
         i += 1
     }
     Program::new(InputData::new(bytes, status: OK))
@@ -44,7 +44,7 @@ fn run_at(_ program: own Program, address: u256, _ tx: mut Transaction) -> Vm {
     call.address = address
     call.gas_limit = 10_000_000
     var vm = Vm::new()
-    vm.run_owned(program, empty_bytes(), call, default_block_env(), mut tx)
+    vm.run(program, empty_bytes(), call, default_block_env(), mut tx)
     vm
 }
 
@@ -64,8 +64,7 @@ fn create_and_create2_deploy_code_endow_and_bump_nonces() {
     core::assert(tx.nonce(first) == 1 && tx.balance(first) == 7 && tx.code_size(first) == 1)
     core::assert(tx.nonce(second) == 1 && tx.code_size(second) == 1 && tx.code_byte(address: second, index: 0) == 0)
     core::assert(tx.was_created(first) && tx.account_is_warm(second))
-    vm.release()
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -81,8 +80,7 @@ fn create_rejects_code_prefix_and_collisions() {
     // Each failure consumed the 63/64 of the remaining gas it forwarded.
     core::assert(vm.stack[2] < 5000)
     core::assert(tx.nonce(0xaa) == 2 && !tx.exists(target) && tx.nonce(target) == 0)
-    vm.release()
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -94,17 +92,15 @@ fn selfdestruct_moves_balance_and_deletes_only_new_accounts() {
     var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
     let vm = run_at(Program::copy_from([0x60 as u8, 0xcc, 0xff], len: 3), address: 0xbb, mut tx)
     core::assert(vm.status == OK && tx.balance(0xcc) == 50 && tx.balance(0xbb) == 0)
-    vm.release()
     // Initcode PUSH1 0xdd SELFDESTRUCT, endowed with 7: the new account is doomed.
     let init: [u8; 10] = [0x60, 0xdd, 0xff, 0, 0, 0, 0, 0, 0, 0]
     let vm = run_at(creator(init, [0x60, 3, 0x60, 22, 0x60, 7, 0xf0]), address: 0xaa, mut tx)
     let created = create_address(sender: 0xaa, nonce: 0)
     core::assert(vm.status == OK && vm.stack[0] == created)
     core::assert(tx.balance(0xdd) == 7 && tx.balance(created) == 0 && tx.exists(created))
-    vm.release()
     tx.settle()
     core::assert(!tx.exists(created) && tx.code_size(0xbb) == 3 && tx.exists(0xbb))
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -123,7 +119,6 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     }
     let request = TxRequest::new(env, data: empty_bytes())
     let applied = transact(world, request, block)
-    request.release()
     // 21,000 intrinsic plus PUSH1, PUSH0 and a cold zero-to-nonzero SSTORE.
     let used: u64 = 21000 + 3 + 2 + 22100
     let receipt = applied.receipt
@@ -133,14 +128,10 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     // The effective price is the base fee 7 plus the full priority fee 2.
     core::assert(state.balance(0x1000) == 1_000_000_000_000 - used as u256 * 9 - 5)
     core::assert(state.balance(0xc0) == used as u256 * 2)
-    receipt.release()
     env.nonce = 0
     let replay = TxRequest::new(env, data: empty_bytes())
     let rejected = transact(state, replay, block)
-    replay.release()
     core::assert(rejected.receipt.invalid == INVALID_NONCE && rejected.state.nonce(0x1000) == 1)
-    rejected.receipt.release()
-    rejected.state.release()
 }
 
 #[test]
@@ -156,19 +147,13 @@ fn transact_calls_accounts_without_code_in_a_world_without_code() {
     }
     let request = TxRequest::new(env, data: empty_bytes())
     let applied = transact(world, request, block)
-    request.release()
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
     core::assert(applied.receipt.gas_used == 21000 && applied.state.balance(0xdd) == 5)
     core::assert(applied.state.balance(0x1000) == 1_000_000 - 21000 - 5)
-    applied.receipt.release()
-    applied.state.release()
 }
 
 fn send(_ world: own WorldState, _ env: TxEnv, _ block: BlockEnv) -> Applied {
-    let request = TxRequest::new(env, data: empty_bytes())
-    let applied = transact(world, request, block)
-    request.release()
-    applied
+    transact(world, TxRequest::new(env, data: empty_bytes()), block)
 }
 
 #[test]
@@ -184,11 +169,8 @@ fn transact_rejects_blob_hashes_outside_blob_transactions() {
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_blob_hash((1 as u256) << 248))
     let rejected = transact(world, request, block)
-    request.release()
     core::assert(rejected.receipt.invalid == INVALID_TX_TYPE)
     core::assert(rejected.state.balance(0x1000) == 1_000_000_000_000 && rejected.state.nonce(0x1000) == 0)
-    rejected.receipt.release()
-    rejected.state.release()
 }
 
 #[test]
@@ -208,14 +190,12 @@ fn transact_deletes_empty_call_targets_unless_the_call_fails() {
     }
     let called = send(world, env, block)
     core::assert(called.receipt.invalid == VALID && called.receipt.status == OK)
-    called.receipt.release()
     let world = called.state
     core::assert(!world.exists(0xcc) && !world.exists(0xdd) && world.exists(0xaa))
     env.nonce = 1
     env.to = 0xee
     let reached = send(world, env, block)
     core::assert(reached.receipt.invalid == VALID && reached.receipt.status == OK)
-    reached.receipt.release()
     let world = reached.state
     core::assert(!world.exists(0xee))
     // SHA-256 needs 60 gas; its failure undoes the touch.
@@ -225,8 +205,6 @@ fn transact_deletes_empty_call_targets_unless_the_call_fails() {
     let failed = send(world, env, block)
     core::assert(failed.receipt.invalid == VALID && failed.receipt.status == ERR_PRECOMPILE)
     core::assert(failed.state.exists(2) && failed.state.nonce(0x1000) == 3)
-    failed.receipt.release()
-    failed.state.release()
 }
 
 #[test]
@@ -245,18 +223,16 @@ fn transact_deletes_the_storage_of_empty_touched_accounts() {
     }
     let applied = send(world, env, block)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-    applied.receipt.release()
     var world = applied.state
     core::assert(!world.exists(0xc0) && !world.has_storage(0xc0))
     core::assert(world.set_balance(0xc0, 1) && world.storage_load(0xc0, 0) == 0)
-    world.release()
 }
 
 #[test]
-fn transact_returns_the_pre_state_when_fee_settlement_fails() {
+fn transact_grows_the_account_table_to_pay_the_coinbase() {
     var world = WorldState::empty()
     core::assert(world.set_balance(0x1000, 1_000_000_000_000))
-    // Fill the account table so the absent coinbase cannot receive its fee.
+    // Fill what was the fixed account table; the absent coinbase still receives its fee.
     var address: u256 = 0
     while address < 255 {
         core::assert(world.ensure_account(address))
@@ -270,11 +246,10 @@ fn transact_returns_the_pre_state_when_fee_settlement_fails() {
         kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
         gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
     }
-    let failed = send(world, env, block)
-    core::assert(failed.receipt.invalid == VALID && failed.receipt.status == ERR_STATE_LIMIT)
-    let world = failed.state
-    core::assert(world.balance(0x1000) == 1_000_000_000_000 && world.nonce(0x1000) == 0)
-    core::assert(!world.exists(0x2000) && world.exists(0xbb))
-    failed.receipt.release()
-    world.release()
+    let applied = send(world, env, block)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK && applied.receipt.gas_used == 21000)
+    // The effective price is the base fee 7 plus the full priority fee 2.
+    let world = applied.state
+    core::assert(world.balance(0x1000) == 1_000_000_000_000 - 21000 * 9 && world.nonce(0x1000) == 1)
+    core::assert(world.balance(0x2000) == 21000 * 2)
 }
