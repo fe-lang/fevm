@@ -24,14 +24,14 @@ native/out/toolchain/bin/fe build . --backend native --ingot fevm --out-dir out
 ./out/fevm 0x600260030100
 ```
 
-The compiler target is upstream [Fe master](https://github.com/argotorg/fe/tree/f69b911ce544c4fe72b2481adcafabf1d967a278)
-at `f69b911ce544c4fe72b2481adcafabf1d967a278`, pinned with its Sonatina revision,
+The compiler target is upstream [Fe master](https://github.com/argotorg/fe/tree/21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda)
+at `21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda`, pinned with its Sonatina revision,
 Rust version and Cargo lock hash in [`native/toolchain.json`](native/toolchain.json).
 Sources use MVS mutable value bindings and explicit unsafe boundaries. See
 [native build instructions](native/README.md) for reproducible compiler builds and
 the acceptance matrix. All seven native acceptance stages pass at O0/O1/O2 on
-x86_64 Linux ([evidence](native/reports/fe-master-20261019/README.md)) and AArch64
-macOS ([evidence](native/reports/macos-arm64-20261019/README.md)). Earlier
+x86_64 Linux and AArch64 macOS ([evidence](native/reports/bulk-copy-20261019/README.md)).
+Earlier
 reports describe their historical compilers; the
 [fork performance work](native/reports/mvs-next3-20261015/README.md) they measured
 is now part of Fe master.

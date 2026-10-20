@@ -38,22 +38,24 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler is upstream Fe master
-[`f69b911ce544c4fe72b2481adcafabf1d967a278`](https://github.com/argotorg/fe/tree/f69b911ce544c4fe72b2481adcafabf1d967a278).
+[`21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda`](https://github.com/argotorg/fe/tree/21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda).
 Its Cargo.lock pins Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`. Master
-includes MVS, native `FixedStack` and the FeVM compile-time work previously pinned
+includes `ByteBuffer::copy_from`, which FeVM uses for every bulk byte copy, as well
+as MVS, native `FixedStack` and the FeVM compile-time work previously pinned
 from forks (enum-proof indexes, borrowed native layouts and one shared native test
 runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchain.json)
 records the exact revisions and lock hash, and bootstrap fetches both from their
 upstream repositories.
 
-All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 75
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 76
 workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
 comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
 three declared simultaneous-fault reason differences per level. The Python
 harness's 13 tests and the Rust reference's nine tests pass. See the
-[Fe master report](reports/fe-master-20261019/README.md) (47 workspace tests
-before the CALL and transaction work) and the
-[macOS report](reports/macos-arm64-20261019/README.md). The
+[bulk-copy report](reports/bulk-copy-20261019/README.md); the earlier
+[Fe master](reports/fe-master-20261019/README.md) (47 workspace tests, before the
+CALL and transaction work) and [macOS](reports/macos-arm64-20261019/README.md)
+reports keep their compiler `f69b911ce`. The
 [Cancun state-test runner](conformance/README.md) is separate from acceptance.
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
