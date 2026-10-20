@@ -52,9 +52,11 @@ CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at eac
 of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
 simultaneous-fault reason differences per level. The Python harness's 13 tests
 and the Rust reference's nine tests pass. See the
-[owned-memory report](reports/owned-memory-20261020/README.md); this compiler has
-not run on AArch64 macOS. The [Fe master report](reports/fe-master-20261024/README.md)
-covers both hosts on Fe master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
+[rebased owned-memory report](reports/owned-memory-rebase-20261020/README.md),
+and the [owned-memory report](reports/owned-memory-20261020/README.md) for the
+port itself; this compiler has not run on AArch64 macOS. The
+[Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe
+master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
 on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)
 (47 workspace tests, before the CALL and transaction work) and
 [macOS](reports/macos-arm64-20261019/README.md) reports keep their compiler

@@ -1,0 +1,17 @@
+{
+  "level": "2",
+  "runs": [
+    {
+      "transactions": 1000,
+      "peak_rss_bytes": 13778944
+    },
+    {
+      "transactions": 10000,
+      "peak_rss_bytes": 14041088
+    },
+    {
+      "transactions": 40000,
+      "peak_rss_bytes": 14041088
+    }
+  ]
+}
