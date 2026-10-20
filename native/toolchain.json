@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/sbillig/fe",
-  "fe_revision": "999ff9562353ab381f7cafe389f7e86499ade918",
+  "fe_revision": "a353e3cb1b68e42c7fc3cc80c3de60691be1e72d",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "30e45b25b981a78cf0fb5a55aa401a81ce79dc89",
-  "cargo_lock_sha256": "6c68595f48531f9439ff92255157d2779da9329c3010d52b7fad6399d21b5b7a",
+  "sonatina_revision": "73c7e0e267bd1f6fbcb65958883191d5fc3b138f",
+  "cargo_lock_sha256": "08275e898440b05eeea6607ba1a698b0eee84a8af0f69489468e672c8222e691",
   "rust_version": "1.99.0",
   "features": [
     "cranelift"
