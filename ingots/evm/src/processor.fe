@@ -1,10 +1,8 @@
-use core::{Option, Result}
-use std::native::ByteBuffer
+use core::{MemBuffer, MemVec, Option, Result}
 use ingot::address::create_address
-use ingot::buffer::{read_word, write_word}
-use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, ERR_STATE_LIMIT, OK}
+use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, OK}
 use ingot::logs::LogBuffer
-use ingot::state::{WorldState, address_word}
+use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program}
 use ingot::vm::{Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
@@ -56,42 +54,27 @@ pub struct TxEnv {
 impl Copy for TxEnv {}
 
 /// A transaction with its owned calldata (initcode for creations), access list
-/// and versioned blob hashes. Release it after use.
+/// and versioned blob hashes.
 pub struct TxRequest {
     pub env: TxEnv,
     data: InputData,
-    access_accounts: ByteBuffer,
-    access_keys: ByteBuffer,
-    blob_hashes: ByteBuffer,
-}
-
-fn push_word(_ list: mut ByteBuffer, _ word: u256) -> bool {
-    let offset = list.len()
-    if !list.try_resize(offset + 32) { return false }
-    write_word(mut list, offset, value: word)
-    true
+    access_accounts: MemVec<u256>,
+    access_keys: MemVec<StorageKey>,
+    blob_hashes: MemVec<u256>,
 }
 
 impl TxRequest {
     pub fn new(_ env: TxEnv, data: own InputData) -> Self {
-        Self { env, data, access_accounts: ByteBuffer::new(), access_keys: ByteBuffer::new(), blob_hashes: ByteBuffer::new() }
+        Self { env, data, access_accounts: MemVec::new(), access_keys: MemVec::new(), blob_hashes: MemVec::new() }
     }
     /// One access-list entry; each of its storage keys is added with `add_access_key`.
-    pub fn add_access_account(mut self, _ address: u256) -> bool { push_word(mut self.access_accounts, address) }
+    pub fn add_access_account(mut self, _ address: u256) -> bool { self.access_accounts.try_push(address).is_ok() }
     pub fn add_access_key(mut self, address: u256, slot: u256) -> bool {
-        push_word(mut self.access_keys, address) && push_word(mut self.access_keys, slot)
+        self.access_keys.try_push(StorageKey { address, slot }).is_ok()
     }
-    pub fn add_blob_hash(mut self, _ hash: u256) -> bool { push_word(mut self.blob_hashes, hash) }
+    pub fn add_blob_hash(mut self, _ hash: u256) -> bool { self.blob_hashes.try_push(hash).is_ok() }
     pub fn data(self) -> ref InputData { ref self.data }
-    fn access_account_count(self) -> u64 { self.access_accounts.len() / 32 }
-    fn access_key_count(self) -> u64 { self.access_keys.len() / 64 }
-    fn blob_count(self) -> u64 { self.blob_hashes.len() / 32 }
-    pub fn release(own self) {
-        self.data.release()
-        self.access_accounts.release()
-        self.access_keys.release()
-        self.blob_hashes.release()
-    }
+    fn blob_count(self) -> u64 { self.blob_hashes.len().downcast_unchecked() }
 }
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
@@ -101,15 +84,8 @@ pub struct Receipt {
     pub invalid: i32,
     pub status: i32,
     pub gas_used: u64,
-    pub output: ByteBuffer,
+    pub output: MemBuffer,
     pub logs: LogBuffer,
-}
-
-impl Receipt {
-    pub fn release(own self) {
-        self.output.release()
-        self.logs.release()
-    }
 }
 
 pub struct Applied { pub state: WorldState, pub receipt: Receipt }
@@ -134,7 +110,9 @@ pub fn intrinsic_gas(_ request: TxRequest) -> u128 {
         index += 1
     }
     if request.env.creates { gas += 32000 + 2 * words(data.len()) }
-    gas + 2400 * request.access_account_count() as u128 + 1900 * request.access_key_count() as u128
+    let accounts: u128 = request.access_accounts.len().downcast_unchecked()
+    let keys: u128 = request.access_keys.len().downcast_unchecked()
+    gas + 2400 * accounts + 1900 * keys
 }
 
 fn fee_market(_ env: TxEnv) -> bool { env.kind == TX_FEE_MARKET || env.kind == TX_BLOB }
@@ -166,10 +144,8 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     if env.kind == TX_BLOB {
         if env.creates { return INVALID_BLOB_CREATE }
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
-        var index: u64 = 0
-        while index < request.blob_count() {
-            if read_word(request.blob_hashes, offset: index * 32) >> 248 != 0x01 { return INVALID_BLOB_VERSION }
-            index += 1
+        for hash in request.blob_hashes {
+            if hash >> 248 != 0x01 { return INVALID_BLOB_VERSION }
         }
         if env.max_fee_per_blob_gas < block.blobbasefee { return INVALID_BLOB_FEE_CAP }
         max_fee = match (max_fee, blob_fee(request, price: env.max_fee_per_blob_gas)) {
@@ -192,27 +168,19 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
 }
 
 fn empty_receipt(invalid: i32, status: i32) -> Receipt {
-    Receipt { invalid, status, gas_used: 0, output: ByteBuffer::new(), logs: LogBuffer::new() }
+    Receipt { invalid, status, gas_used: 0, output: MemBuffer::empty(), logs: LogBuffer::new() }
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
 fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
-    var index: u64 = 0
-    while index < request.access_account_count() {
-        if !tx.access_list_account(address: read_word(request.access_accounts, offset: index * 32)) { return ERR_STATE_LIMIT }
-        index += 1
+    for address in request.access_accounts {
+        if !tx.access_list_account(address) { return ERR_HOST_ALLOCATION }
     }
-    index = 0
-    while index < request.access_key_count() {
-        let address = read_word(request.access_keys, offset: index * 64)
-        let slot = read_word(request.access_keys, offset: index * 64 + 32)
-        if !tx.access_list_slot(address, slot) { return ERR_STATE_LIMIT }
-        index += 1
+    for key in request.access_keys {
+        if !tx.access_list_slot(address: key.address, slot: key.slot) { return ERR_HOST_ALLOCATION }
     }
-    index = 0
-    while index < request.blob_count() {
-        if !tx.add_blob_hash(read_word(request.blob_hashes, offset: index * 32)) { return ERR_HOST_ALLOCATION }
-        index += 1
+    for hash in request.blob_hashes {
+        if !tx.add_blob_hash(hash) { return ERR_HOST_ALLOCATION }
     }
     let sender = address_word(request.env.sender)
     let fee = request.env.gas_limit as u256 * price + request.blob_count() as u256 * GAS_PER_BLOB * blob_price
@@ -235,7 +203,6 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         let program = Program::copy_from(request.data(), len: request.data().len() as usize)
         var vm = Vm::new()
         vm.create(program, call, block, mut tx)
-        program.release()
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return vm.into_result()
     }
@@ -253,7 +220,6 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
     let program = load_program(tx, address: target)
     var vm = Vm::new()
     vm.run(program, request.data(), call, block, mut tx)
-    program.release()
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     vm.into_result()
 }
@@ -277,10 +243,8 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     }
     let result = if prepared == OK { execute_message(mut tx, request, call, block) } else { status_result(prepared) }
     if !is_evm_outcome(result.status) && result.status != ERR_ADDRESS_COLLISION {
-        let status = result.status
-        result.release()
-        let state = tx.finish(commit: false, gas_spent: 0).into_state()
-        return Applied { state, receipt: empty_receipt(invalid: VALID, status) }
+        let state = tx.finish(commit: false, gas_spent: 0).state
+        return Applied { state, receipt: empty_receipt(invalid: VALID, status: result.status) }
     }
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }

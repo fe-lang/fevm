@@ -49,23 +49,18 @@ fn hash_precompiles_charge_per_word_and_return_padded_digests() {
     let input = [0x61 as u8, 0x62, 0x63]
     let sha = run(address: 2, input, gas: 72)
     core::assert(sha.status == SUCCESS && sha.gas_used == 72 && sha.output.len() == 32)
-    core::assert(sha.output.byte_at(0) == 0xba && sha.output.byte_at(31) == 0xad)
-    sha.release()
+    core::assert(sha.output[0 as usize] == 0xba && sha.output[31 as usize] == 0xad)
     let short = run(address: 2, input, gas: 71)
     core::assert(short.status == FAILURE && short.gas_used == 71)
-    short.release()
     let ripemd = run(address: 3, input, gas: 720)
     core::assert(ripemd.status == SUCCESS && ripemd.output.len() == 32)
-    core::assert(ripemd.output.byte_at(11) == 0 && ripemd.output.byte_at(12) == 0x8e)
-    ripemd.release()
+    core::assert(ripemd.output[11 as usize] == 0 && ripemd.output[12 as usize] == 0x8e)
     let identity = run(address: 4, input, gas: 18)
     core::assert(identity.status == SUCCESS && identity.gas_used == 18)
-    core::assert(identity.output.len() == 3 && identity.output.byte_at(2) == 0x63)
-    identity.release()
+    core::assert(identity.output.len() == 3 && identity.output[2 as usize] == 0x63)
     let empty: [u8; 0] = []
     let none = run(address: 4, input: empty, gas: 15)
     core::assert(none.status == SUCCESS && none.gas_used == 15 && none.output.len() == 0)
-    none.release()
 }
 
 // EIP-152 test vectors 4 and 5 (12 rounds, final and non-final block).
@@ -103,10 +98,9 @@ fn blake2f_known_answers_and_validation() {
     ]
     var i: u64 = 0
     while i < 64 {
-        core::assert(result.output.byte_at(i) == expected[i as usize])
+        core::assert(result.output[i as usize] == expected[i as usize])
         i += 1
     }
-    result.release()
     let non_final = run(address: 9, input: blake2f_input(0), gas: 12)
     expected = [
         0x75, 0xab, 0x69, 0xd3, 0x19, 0x0a, 0x56, 0x2c, 0x51, 0xae, 0xf8, 0xd8, 0x8f, 0x1c, 0x27, 0x75,
@@ -116,16 +110,13 @@ fn blake2f_known_answers_and_validation() {
     ]
     i = 0
     while i < 64 {
-        core::assert(non_final.output.byte_at(i) == expected[i as usize])
+        core::assert(non_final.output[i as usize] == expected[i as usize])
         i += 1
     }
-    non_final.release()
     let short_gas = run(address: 9, input: blake2f_input(1), gas: 11)
     core::assert(short_gas.status == FAILURE && short_gas.gas_used == 11)
-    short_gas.release()
     let bad_flag = run(address: 9, input: blake2f_input(2), gas: 12)
     core::assert(bad_flag.status == FAILURE)
-    bad_flag.release()
 }
 
 fn signature(hash: u256, v: u256, r: u256, s: u256) -> [u8; 128] {
@@ -148,17 +139,15 @@ fn recovered_address(_ input: [u8; 128], gas: u64) -> u256 {
     var value: u256 = 0
     var i: u64 = 0
     while i < 32 {
-        value = (value << 8) | result.output.byte_at(i) as u256
+        value = (value << 8) | result.output[i as usize] as u256
         i += 1
     }
-    result.release()
     value
 }
 
 fn recovers_nothing(_ input: [u8; 128]) -> bool {
     let result = run(address: 1, input, gas: 3000)
     let empty = result.status == SUCCESS && result.gas_used == 3000 && result.output.len() == 0
-    result.release()
     empty
 }
 
@@ -179,7 +168,6 @@ fn ecrecover_known_signatures_and_rejections() {
     core::assert(recovered_address(signed, gas: 100000) == 0x2c7536e3605d9c16a7a3d7b1898e529396a65c23)
     let short = run(address: 1, input: signed, gas: 2999)
     core::assert(short.status == FAILURE && short.gas_used == 2999)
-    short.release()
     // Wrong v, zero or oversized r and s, and an r with no curve point recover nothing.
     let n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
     core::assert(recovers_nothing(signature(hash: 1, v: 29, r: 1, s: 1)))
@@ -191,5 +179,4 @@ fn ecrecover_known_signatures_and_rejections() {
     let truncated: [u8; 40] = [1; 40]
     let padded = run(address: 1, input: truncated, gas: 3000)
     core::assert(padded.status == SUCCESS && padded.output.len() == 0)
-    padded.release()
 }

@@ -21,8 +21,7 @@ BLOB_BASE_FEE_UPDATE_FRACTION = 3338477
 EVM_STATUSES = {0: 'success', 19: 'revert', 10: 'stack_underflow', 11: 'stack_overflow',
                 15: 'out_of_gas', 16: 'invalid_jump', 17: 'invalid_opcode', 18: 'return_data_oob',
                 23: 'static_write', 24: 'code_prefix', 25: 'precompile_failure', 27: 'address_collision'}
-HOST_STATUSES = {14: 'unsupported_precompile_input', 20: 'state_table_limit', 21: 'host_allocation',
-                 26: 'balance_overflow'}
+HOST_STATUSES = {21: 'host_allocation', 26: 'balance_overflow'}
 
 
 def digest(path):

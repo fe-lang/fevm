@@ -1,4 +1,4 @@
-use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
+use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK}
 use ingot::state::WorldState
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
@@ -34,9 +34,8 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(tx.balance(7) == 10 && tx.nonce(7) == 2)
     core::assert(tx.storage_load(address: 7, slot: 8) == 11)
     core::assert(tx.transient_load(address: 7, slot: 8) == 0)
-    let world = tx.finish(commit: true, gas_spent: 0).into_state()
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 8) == 11)
-    world.release()
 }
 
 #[test]
@@ -52,9 +51,8 @@ fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
     core::assert(tx.storage_load(address: 1, slot: 2) == 3)
     core::assert(tx.transient_load(address: 1, slot: 2) == 4)
     tx.commit(parent)
-    let world = tx.finish(commit: false, gas_spent: 0).into_state()
+    let world = tx.finish(commit: false, gas_spent: 0).state
     core::assert(world.storage_load(1, 2) == 0)
-    world.release()
 }
 
 #[test]
@@ -72,13 +70,12 @@ fn transaction_static_mode_is_inherited_and_restored() {
     tx.revert(parent)
     core::assert(!tx.is_static())
     core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
-    let world = tx.finish(commit: true, gas_spent: 0).into_state()
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(1, 2) == 3)
-    world.release()
 }
 
 #[test]
-fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
+fn transaction_undo_restores_tables_grown_past_their_first_capacity() {
     var world = WorldState::empty()
     var slot: u256 = 0
     while slot < 256 {
@@ -88,22 +85,24 @@ fn transaction_undo_survives_full_tables_and_grows_past_prototype_capacity() {
     var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 1, slot: 0, value: 0) == OK)
-    core::assert(tx.storage_store(address: 1, slot: 256, value: 2) == OK)
-    core::assert(tx.storage_store(address: 1, slot: 257, value: 2) == ERR_STATE_LIMIT)
+    slot = 256
+    while slot < 1000 {
+        core::assert(tx.storage_store(address: 1, slot, value: 2) == OK)
+        slot += 1
+    }
     // Hundreds of updates to one slot must grow the journal, not impose a new
-    // consensus instruction-count limit. Failed insertion must not poison undo.
+    // consensus instruction-count limit.
     var value: u256 = 3
     while value < 600 {
         core::assert(tx.storage_store(address: 1, slot: 256, value) == OK)
         value += 1
     }
     tx.revert(point)
-    let world = tx.finish(commit: true, gas_spent: 0).into_state()
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(1, 0) == 1)
     core::assert(world.storage_load(1, 255) == 256)
     core::assert(world.storage_load(1, 256) == 0)
-    core::assert(world.storage_load(1, 257) == 0)
-    world.release()
+    core::assert(world.storage_load(1, 999) == 0)
 }
 
 #[test]
@@ -111,42 +110,33 @@ fn transaction_checkpoints_do_not_consume_evm_call_depth() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     var vm = Vm::new()
-    vm.run_owned(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(vm.status == OK && tx.depth() == 1)
-    vm.release()
     tx.commit(parent)
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
 fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
-    // Both persistent and transient writes precede each exit. Exhausting the
-    // transient table is an operational failure, but it must still roll back
-    // the frame's writes.
-    for exit in [0xfd, 0xfe, 0x01, 0x5d] {
+    // Both persistent and transient writes precede each exit.
+    for exit in [0xfd, 0xfe, 0x01] {
         var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         // ADD has two operands here; use a second ADD to trigger underflow.
         let selected = if exit == 0x01 {
             program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
-        } else if exit == 0x5d {
-            // Store 1 under keys 257 down to 1; the 256-entry table fills first.
-            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x61, 1, 1, 0x5b, 0x60, 1, 0x81, 0x5d,
-                     0x60, 1, 0x90, 0x03, 0x80, 0x60, 11, 0x57, 0x00])
         } else {
             program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
         }
         let expected = match exit {
             0xfd => ERR_REVERT,
             0xfe => ERR_INVALID_OPCODE,
-            0x01 => ERR_STACK_UNDERFLOW,
-            _ => ERR_STATE_LIMIT,
+            _ => ERR_STACK_UNDERFLOW,
         }
         let result = execute(selected, empty_bytes(), default_call_env(), default_block_env(), mut tx)
         core::assert(result.status == expected && tx.depth() == 0)
         core::assert(tx.storage_load(address: 0, slot: 0) == 0)
         core::assert(tx.transient_load(address: 0, slot: 0) == 0)
-        result.release()
-        tx.finish(commit: true, gas_spent: 0).release()
+        tx.finish(commit: true, gas_spent: 0)
     }
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var call = default_call_env()
@@ -157,8 +147,7 @@ fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     )
     core::assert(result.status == ERR_OUT_OF_GAS && result.gas_remaining == 0)
     core::assert(tx.transient_load(address: 0, slot: 0) == 0)
-    result.release()
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -168,17 +157,14 @@ fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
     let read = program([0x5f, 0x5c])
     let result = execute(write, empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(result.status == OK)
-    result.release()
     let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(result.status == OK && result.stack_top == 9)
-    result.release()
-    let world = tx.finish(commit: true, gas_spent: 0).into_state()
+    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(0, 0) == 7)
     var next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let result = execute(program([0x5f, 0x5c]), empty_bytes(), default_call_env(), default_block_env(), mut next)
     core::assert(result.status == OK && result.stack_top == 0)
-    result.release()
-    next.finish(commit: true, gas_spent: 0).release()
+    next.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
@@ -190,10 +176,8 @@ fn vm_static_storage_writes_fault_but_reads_are_allowed() {
         let result = execute(program([0x60, 9, 0x5f, op]), empty_bytes(), call, default_block_env(), mut tx)
         core::assert(result.status == ERR_STATIC_WRITE && result.gas_remaining == 0)
         core::assert(!tx.is_static() && tx.depth() == 0)
-        result.release()
     }
     let result = execute(program([0x5f, 0x54, 0x5f, 0x5c]), empty_bytes(), call, default_block_env(), mut tx)
     core::assert(result.status == OK && result.stack_top == 0)
-    result.release()
-    tx.finish(commit: true, gas_spent: 0).release()
+    tx.finish(commit: true, gas_spent: 0)
 }

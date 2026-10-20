@@ -30,7 +30,6 @@ fn blockhash_limits_history_without_truncating_the_stack_operand() {
         let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, block, mut transaction)
         core::assert(result.status == OK && result.gas_remaining == 0)
         core::assert(result.stack_top == if valid { 0x1234 } else { 0 })
-        result.release()
-        transaction.finish(commit: true, gas_spent: 23).release()
+        transaction.finish(commit: true, gas_spent: 23)
     }
 }

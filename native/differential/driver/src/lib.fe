@@ -84,21 +84,13 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
     write(",\"memory\":")
     if completed {
         write("\"0x")
-        var i: u64 = 0
-        while i < vm.memory.len() {
-            write_hex_byte(vm.memory.byte_at(i) as i32)
-            i += 1
-        }
+        for byte in vm.memory.span() { write_hex_byte(byte as i32) }
         write("\"")
     } else {
         write("null")
     }
     write(",\"output\":\"0x")
-    var i: u64 = 0
-    while i < vm.output.len() {
-        write_hex_byte(vm.output.byte_at(i) as i32)
-        i += 1
-    }
+    for byte in vm.output.span() { write_hex_byte(byte as i32) }
     writeln("\"}")
 }
 
@@ -111,34 +103,28 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     let program = parse_hex_program(args.get(1))
     let calldata = parse_hex_bytes(args.get(2))
     if program.status != 0 || calldata.status != 0 {
-        program.release()
-        calldata.release()
         return 2
     }
     var call = default_call_env()
     match parse_gas(args.get(3)) {
         Option::Some(gas,) => call.gas_limit = gas,
         Option::None => {
-            program.release()
-            calldata.release()
             return 2
         },
     }
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
-    state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining).release()
+    state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining)
     let supported = vm.status == 0
         || (vm.status >= 15 && vm.status <= 19)
         || vm.status == 10
         || vm.status == 11
         || vm.status == 23
     if !supported {
-        vm.release()
         return 3
     }
     with (Write = host()) {
         write_frame(vm)
     }
-    vm.release()
     0
 }

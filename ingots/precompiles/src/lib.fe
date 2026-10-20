@@ -1,5 +1,4 @@
-use core::Option
-use std::native::ByteBuffer
+use core::{MemBuffer, Option}
 use keccak::{ByteSource, keccak256}
 pub use hashes::{ripemd160, sha256}
 
@@ -7,17 +6,11 @@ pub use hashes::{ripemd160, sha256}
 pub const SUCCESS: u8 = 0
 /// An exceptional halt: invalid input or insufficient gas consumes all forwarded gas.
 pub const FAILURE: u8 = 1
-/// The host could not allocate the output; this is not an EVM outcome.
+/// The host could not allocate the output or its working memory; this is
+/// not an EVM outcome.
 pub const HOST_ALLOCATION: u8 = 2
-/// The host cannot evaluate this input (a MODEXP modulus beyond its limb
-/// capacity); this is not an EVM outcome.
-pub const UNSUPPORTED: u8 = 3
 
-pub struct Output { pub status: u8, pub gas_used: u64, pub output: ByteBuffer }
-
-impl Output {
-    pub fn release(own self) { self.output.release() }
-}
+pub struct Output { pub status: u8, pub gas_used: u64, pub output: MemBuffer }
 
 /// Cancun precompiles occupy addresses 0x01 through 0x0a.
 pub fn is_precompile(_ address: u256) -> bool { address >= 1 && address <= 10 }
@@ -25,33 +18,23 @@ pub fn is_precompile(_ address: u256) -> bool { address >= 1 && address <= 10 }
 fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
 
 fn failure(_ gas: u64) -> Output {
-    Output { status: FAILURE, gas_used: gas, output: ByteBuffer::new() }
+    Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() }
 }
 
 fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
-    var output = ByteBuffer::new()
-    let len = source.len()
-    if !output.try_resize(len) {
-        return Output { status: HOST_ALLOCATION, gas_used, output }
-    }
-    var i: u64 = 0
-    while i < len {
-        output.set_byte(index: i, value: source.byte_at(i))
-        i += 1
-    }
-    Output { status: SUCCESS, gas_used, output }
+    right_aligned(source, len: source.len(), gas_used)
 }
 
 // Copy `source` into a zero-filled output of `len` bytes, ending at its last byte.
 fn right_aligned<T: ByteSource>(_ source: T, len: u64, gas_used: u64) -> Output {
-    var output = ByteBuffer::new()
-    if !output.try_resize(len) {
+    var output = MemBuffer::empty()
+    if !output.try_resize(len as usize) {
         return Output { status: HOST_ALLOCATION, gas_used, output }
     }
     let offset = len - source.len()
     var i: u64 = 0
     while i < source.len() {
-        output.set_byte(index: offset + i, value: source.byte_at(i))
+        output[(offset + i) as usize] = source.byte_at(i)
         i += 1
     }
     Output { status: SUCCESS, gas_used, output }
@@ -97,7 +80,7 @@ fn ecrecover<T: ByteSource>(_ input: T) -> Output {
             }
             copied(address, gas_used: 3000)
         },
-        Option::None => Output { status: SUCCESS, gas_used: 3000, output: ByteBuffer::new() },
+        Option::None => Output { status: SUCCESS, gas_used: 3000, output: MemBuffer::empty() },
     }
 }
 

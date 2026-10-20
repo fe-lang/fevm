@@ -1,5 +1,4 @@
-use core::{Option, Result}
-use std::native::{ByteBuffer, FixedStack}
+use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::memory::{MemoryExpansion, memory_expansion, copy_expansion, copy_gas}
 use ingot::gas::base_cost
@@ -19,7 +18,6 @@ use ingot::constants::{
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
     ERR_STATIC_WRITE,
-    ERR_UNSUPPORTED_PRECOMPILE,
     I256_MIN,
     OK,
     STACK_LIMIT,
@@ -27,12 +25,12 @@ use ingot::constants::{
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, empty_bytes}
-use fevm_precompiles::{FAILURE, HOST_ALLOCATION, SUCCESS, is_precompile}
+use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 
 pub struct Vm {
-    pub memory: ByteBuffer,
-    pub output: ByteBuffer,
-    pub return_data: ByteBuffer,
+    pub memory: MemBuffer,
+    pub output: MemBuffer,
+    pub return_data: MemBuffer,
     pub gas_remaining: u64,
     pub refund_delta: i128,
     pub output_valid: bool,
@@ -47,9 +45,9 @@ pub struct Vm {
 impl Vm {
     pub fn new() -> Self {
         Vm {
-            memory: ByteBuffer::new(),
-            output: ByteBuffer::new(),
-            return_data: ByteBuffer::new(),
+            memory: MemBuffer::empty(),
+            output: MemBuffer::empty(),
+            return_data: MemBuffer::empty(),
             gas_remaining: 0,
             refund_delta: 0,
             output_valid: false,
@@ -108,7 +106,7 @@ impl Vm {
 
     // Plan and charge before converting EVM words or touching host allocation.
     fn plan_memory(mut self, offset: u256, len: u256, copying: bool) -> Option<MemoryExpansion> {
-        match memory_expansion(current: self.memory.len(), offset, len) {
+        match memory_expansion(current: self.memory_size(), offset, len) {
             Option::Some(plan,) => if self.charge_expansion(plan, len, copying) {
                 Option::Some(plan)
             } else {
@@ -137,15 +135,16 @@ impl Vm {
 
     // Copies pad past their source with zeros.
     fn zero_memory(mut self, from: u64, to: u64) {
-        var index = from
-        while index < to {
-            self.memory.set_byte(index, value: 0)
-            index += 1
-        }
+        self.memory.slice(offset: from as usize, len: (to - from) as usize).zero()
+    }
+
+    // Gas bounds EVM memory far below 2**64 bytes.
+    fn memory_size(self) -> u64 {
+        self.memory.len().downcast_unchecked()
     }
 
     fn expand_memory(mut self, _ size: u64) -> bool {
-        if !self.memory.try_resize(size) {
+        if !self.memory.try_resize(size as usize) {
             self.fault(ERR_HOST_ALLOCATION)
             return false
         }
@@ -156,7 +155,7 @@ impl Vm {
         let offset = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        match memory_expansion(current: self.memory.len(), offset, len) {
+        match memory_expansion(current: self.memory_size(), offset, len) {
             Option::Some(plan,) => {
                 // A successful plan bounds every nonempty range below 2^42.
                 // Charge the whole operation before allocating or narrowing offsets.
@@ -190,13 +189,7 @@ impl Vm {
                 return
             },
         }
-        let start: u64 = offset.downcast_unchecked()
-        var value: u256 = 0
-        var i: u64 = 0
-        while i < 32 {
-            value = (value << 8) | (self.memory.byte_at(start + i) as u256)
-            i += 1
-        }
+        let value = self.memory.read_word(offset.downcast_unchecked())
         self.push(value)
     }
 
@@ -213,16 +206,11 @@ impl Vm {
                 return
             },
         }
-        let start: u64 = offset.downcast_unchecked()
-        var i: u64 = 0
-        while i < len {
-            let shift = ((len - 1 - i) as u256) * 8
-            self.memory
-                .set_byte(
-                    index: start + i,
-                    value: ((value >> shift) & 255).downcast_unchecked(),
-                )
-            i += 1
+        let start: usize = offset.downcast_unchecked()
+        if byte_only {
+            self.memory[start] = (value & 255).downcast_unchecked()
+        } else {
+            self.memory.span().write_word(offset: start, value)
         }
     }
 
@@ -249,7 +237,10 @@ impl Vm {
             0
         }
         let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
-        if copied != 0 { program.copy_into(mut self.memory, at: dest, offset: source.downcast_unchecked(), len: copied) }
+        if copied != 0 {
+            self.memory.slice(offset: dest as usize, len: copied as usize)
+                .copy_from(program.bytes().slice(offset: source.downcast_unchecked(), len: copied as usize))
+        }
         self.zero_memory(from: dest + copied, to: dest + count)
     }
 
@@ -258,7 +249,7 @@ impl Vm {
         let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        match copy_expansion(current: self.memory.len(), dest, source, len) {
+        match copy_expansion(current: self.memory_size(), dest, source, len) {
             Option::Some(plan,) => {
                 if !self.charge_expansion(plan, len, copying: true)
                     || !self.expand_memory(plan.size) {
@@ -271,12 +262,11 @@ impl Vm {
             },
         }
         if len != 0 {
-            self.memory
-                .copy_within(
-                    dest: dest.downcast_unchecked(),
-                    source: source.downcast_unchecked(),
-                    len: len.downcast_unchecked(),
-                )
+            self.memory.span().copy_within(
+                source: source.downcast_unchecked(),
+                dest: dest.downcast_unchecked(),
+                len: len.downcast_unchecked(),
+            )
         }
     }
 
@@ -323,7 +313,10 @@ impl Vm {
             0
         }
         let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
-        if copied != 0 { calldata.copy_into(mut self.memory, at: dest, offset: source.downcast_unchecked(), len: copied) }
+        if copied != 0 {
+            self.memory.slice(offset: dest as usize, len: copied as usize)
+                .copy_from(calldata.bytes().slice(offset: source.downcast_unchecked(), len: copied as usize))
+        }
         self.zero_memory(from: dest + copied, to: dest + count)
     }
 
@@ -339,8 +332,9 @@ impl Vm {
                 if source > available || len > available - source {
                     self.fault(ERR_RETURN_DATA_OOB)
                 } else if self.expand_memory(plan.size) && len != 0 {
-                    self.memory.copy_from(dest: offset.downcast_unchecked(), source: self.return_data,
-                                          offset: source.downcast_unchecked(), len: len.downcast_unchecked())
+                    let len: usize = len.downcast_unchecked()
+                    self.memory.slice(offset: offset.downcast_unchecked(), len)
+                        .copy_from(self.return_data.slice(offset: source.downcast_unchecked(), len))
                 }
             },
             Option::None => {},
@@ -359,13 +353,13 @@ impl Vm {
                 return
             },
         }
-        let count: u64 = len.downcast_unchecked()
+        let count: usize = len.downcast_unchecked()
         if !self.output.try_resize(count) {
             self.fault(ERR_HOST_ALLOCATION)
             return
         }
         if count != 0 {
-            self.output.copy_from(dest: 0, source: self.memory, offset: offset.downcast_unchecked(), len: count)
+            self.output.span().copy_from(self.memory.slice(offset: offset.downcast_unchecked(), len: count))
         }
         self.output_valid = true
         self.status = status
@@ -648,9 +642,11 @@ impl Vm {
         let size = state.code_size(address) as u256
         let available = if source < size { size - source } else { 0 }
         let copied: u64 = (if len < available { len } else { available }).downcast_unchecked()
-        let source: u64 = if copied == 0 { 0 } else { source.downcast_unchecked() }
         let dest: u64 = dest.downcast_unchecked()
-        if copied != 0 { state.copy_code(address, mut self.memory, at: dest, offset: source, len: copied) }
+        if copied != 0 {
+            self.memory.slice(offset: dest as usize, len: copied as usize)
+                .copy_from(state.code(address).slice(offset: source.downcast_unchecked(), len: copied as usize))
+        }
         self.zero_memory(from: dest + copied, to: dest + len.downcast_unchecked())
     }
 
@@ -662,7 +658,7 @@ impl Vm {
         let offset = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        let plan = match memory_expansion(current: self.memory.len(), offset, len) {
+        let plan = match memory_expansion(current: self.memory_size(), offset, len) {
             Option::Some(plan) => plan,
             Option::None => {
                 self.fault(ERR_OUT_OF_GAS)
@@ -678,9 +674,9 @@ impl Vm {
             topic += 1
         }
         if !self.ok() || !self.expand_memory(plan.size) { return }
-        let start: u64 = if length == 0 { 0 } else { offset.downcast_unchecked() }
+        let start: usize = if length == 0 { 0 } else { offset.downcast_unchecked() }
         self.fault(state.emit_log(address: call.address, topics, topic_count: topics_count,
-                                  data: self.memory, offset: start, len: length))
+                                  data: self.memory.slice(offset: start, len: length as usize)))
     }
 
     fn step_state(mut self, _ op: i32, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) -> bool {
@@ -1007,16 +1003,11 @@ impl Frame {
         if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         if self.vm.status == OK { state.commit(self.checkpoint) }
         else { state.revert(self.checkpoint) }
-        self.program.release()
-        self.calldata.release()
         ChildResult { result: self.vm.into_result(), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
     fn abort(own self, _ state: mut Transaction) {
         state.revert(self.checkpoint)
-        self.program.release()
-        self.calldata.release()
-        self.vm.release()
     }
 }
 
@@ -1042,11 +1033,7 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
 
 /// Copy an account's code into an analyzed program.
 pub fn load_program(_ state: Transaction, address: u256) -> Program {
-    let len = state.code_size(address)
-    var code = ByteBuffer::new()
-    if !code.try_resize(len) { return Program::new(InputData::new(code, status: ERR_HOST_ALLOCATION)) }
-    state.copy_code(address, mut code, at: 0, offset: 0, len)
-    Program::new(InputData::new(code, status: OK))
+    Program::new(InputData::copy_bytes(state.code(address)))
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation
@@ -1069,8 +1056,7 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
     let outcome = fevm_precompiles::run(address, input, gas)
     let status = if outcome.status == SUCCESS { OK }
         else if outcome.status == FAILURE { ERR_PRECOMPILE }
-        else if outcome.status == HOST_ALLOCATION { ERR_HOST_ALLOCATION }
-        else { ERR_UNSUPPORTED_PRECOMPILE }
+        else { ERR_HOST_ALLOCATION }
     let gas_remaining = if status == OK { gas - outcome.gas_used } else { 0 }
     ExecutionResult {
         status,
@@ -1093,57 +1079,48 @@ pub fn is_evm_outcome(_ status: i32) -> bool {
 /// A result without output or remaining gas, for messages that never run code.
 pub fn status_result(_ status: i32) -> ExecutionResult {
     ExecutionResult {
-        status, output: ByteBuffer::new(), gas_remaining: 0, refund_delta: 0,
+        status, output: MemBuffer::empty(), gas_remaining: 0, refund_delta: 0,
         output_valid: false, stack_top: 0, stack_len: 0, unsupported_opcode: 0,
     }
 }
 
 impl Vm {
     fn accept_child(mut self, _ child: own ChildResult) {
-        let offset = child.offset
-        let len = child.len
-        let creates = child.creates
-        let address = child.address
         let result = child.result
         if !is_evm_outcome(result.status) {
             // Host failures and unfinished VM features abort the execution. They
             // must never be reported to EVM code as an ordinary failed CALL.
             self.unsupported_opcode = result.unsupported_opcode
             self.fault(result.status)
-            result.release()
             return
         }
         if result.status == OK || result.status == ERR_REVERT {
             self.gas_remaining += result.gas_remaining
         }
-        if creates {
+        if child.creates {
             // A successful creation leaves the return data empty; a failed one
             // exposes its revert data.
-            self.push(if result.status == OK { address } else { 0 })
-            if result.status == OK {
-                result.release()
-                return
-            }
+            self.push(if result.status == OK { child.address } else { 0 })
+            if result.status == OK { return }
         } else {
-            let count = if len < result.output.len() { len } else { result.output.len() }
-            self.memory.copy_from(dest: offset, source: result.output, offset: 0, len: count)
+            let available = result.output.len()
+            let count = if (child.len as usize) < available { child.len as usize } else { available }
+            self.memory.slice(offset: child.offset as usize, len: count).copy_from(result.output.slice(offset: 0, len: count))
             self.push_bool(result.status == OK)
         }
-        let previous = self.return_data
         self.return_data = result.output
-        previous.release()
     }
 
     // Deposit successful initcode output: EIP-3541 prefix, 200 gas per byte and
     // the EIP-170 size limit. A rejected deposit is an exceptional halt.
     fn deposit_code(mut self, address: u256, _ state: mut Transaction) {
-        let len = self.output.len()
-        if len > 0 && self.output.byte_at(0) == 0xef {
+        let len: u64 = self.output.len().downcast_unchecked()
+        if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
         } else if len > MAX_CODE_SIZE || !self.charge(len as u128 * 200) {
             self.fault(ERR_OUT_OF_GAS)
         } else {
-            self.fault(state.deploy_code(address, code: self.output))
+            self.fault(state.deploy_code(address, code: self.output.span()))
         }
         if !self.ok() {
             self.output.clear()
@@ -1209,25 +1186,23 @@ impl Vm {
         }
         let out_offset: u64 = if output_len == 0 { 0 } else { output_offset.downcast_unchecked() }
         let out_len: u64 = output_len.downcast_unchecked()
-        let calldata = InputData::copy_bytes(self.memory,
+        let calldata = InputData::copy_bytes(self.memory.slice(
             offset: if input_len == 0 { 0 } else { input_offset.downcast_unchecked() },
-            len: input_len.downcast_unchecked())
+            len: input_len.downcast_unchecked(),
+        ))
         if calldata.status != OK {
             self.fault(calldata.status)
-            calldata.release()
             state.revert(checkpoint)
             return Option::None
         }
         if is_precompile(code_address) {
             let result = run_precompile(address: code_address, input: calldata, gas: child_gas)
-            calldata.release()
             if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
             self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })
             return Option::None
         }
         let code_len = state.code_size(code_address)
         if code_len == 0 {
-            calldata.release()
             state.commit(checkpoint)
             self.gas_remaining += child_gas
             self.push(1)
@@ -1236,8 +1211,6 @@ impl Vm {
         let program = load_program(state, address: code_address)
         if program.status != OK {
             self.fault(program.status)
-            program.release()
-            calldata.release()
             state.revert(checkpoint)
             return Option::None
         }
@@ -1312,10 +1285,9 @@ impl Vm {
                 return Option::None
             },
         }
-        let program = Program::new(InputData::copy_bytes(self.memory, offset: start, len: count))
+        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start as usize, len: count as usize)))
         if program.status != OK {
             self.fault(program.status)
-            program.release()
             state.revert(checkpoint)
             return Option::None
         }
@@ -1389,40 +1361,41 @@ impl Vm {
 
     fn run_children(mut self, _ first: own Frame, _ program: Program, _ calldata: InputData,
                     _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
-        // Allocate frame slots only if code actually starts executing in a child.
-        var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
-            Option::Some(frames) => frames,
-            Option::None => {
+        // The executing children, innermost last. A child that cannot be
+        // pushed is aborted, and fails its parent as a host failure.
+        var frames: MemVec<Frame> = MemVec::new()
+        match frames.try_push(first) {
+            Result::Ok(()) => {},
+            Result::Err(first) => {
                 first.abort(mut state)
                 self.fault(ERR_HOST_ALLOCATION)
                 return
             },
-        }
-        match frames.try_push(first) {
-            Result::Ok(()) => {},
-            Result::Err(_) => core::panic(),
         }
         while true {
             let depth = frames.len()
             let next = if depth == 0 {
                 self.run_until_child(program, calldata, call, block, mut state, depth: 0)
             } else {
-                frames.top().resume(block, mut state, depth)
+                frames[depth - 1].resume(block, mut state, depth)
             }
             match next {
                 Option::Some(frame) => match frames.try_push(frame) {
                     Result::Ok(()) => {},
-                    Result::Err(_) => core::panic(),
+                    Result::Err(frame) => {
+                        frame.abort(mut state)
+                        if depth == 0 { self.fault(ERR_HOST_ALLOCATION) }
+                        else { frames[depth - 1].vm.fault(ERR_HOST_ALLOCATION) }
+                    },
                 },
                 Option::None => {
                     if depth == 0 { break }
-                    let result = frames.pop().finish(mut state)
-                    if frames.len() == 0 { self.accept_child(result) }
-                    else { frames.top().vm.accept_child(result) }
+                    let result = frames.pop().unwrap().finish(mut state)
+                    if depth == 1 { self.accept_child(result) }
+                    else { frames[depth - 2].vm.accept_child(result) }
                 },
             }
         }
-        frames.release()
     }
 
     pub fn run(mut self, _ program: Program, _ calldata: InputData,
@@ -1434,9 +1407,7 @@ impl Vm {
     /// output as code at `call.address`. Callers open the creation with
     /// `begin_create`, whose checkpoint encloses this one.
     pub fn create(mut self, _ program: Program, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
-        let calldata = empty_bytes()
-        self.run_root(program, calldata, call, block, mut state, creates: true)
-        calldata.release()
+        self.run_root(program, empty_bytes(), call, block, mut state, creates: true)
     }
 
     fn run_root(mut self, _ program: Program, _ calldata: InputData,
@@ -1470,29 +1441,12 @@ impl Vm {
             state.revert(checkpoint)
         }
     }
-    // One-shot inputs are consumed here; run() borrows reusable analyzed code
-    // and input buffers when their caller needs to retain them.
-    pub fn run_owned(
-        mut self, _ program: own Program, _ calldata: own InputData,
-        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
-    ) {
-        self.run(program, calldata, call, block, mut state)
-        program.release()
-        calldata.release()
-    }
-    pub fn release(own self) {
-        self.memory.release()
-        self.output.release()
-        self.return_data.release()
-    }
     pub fn into_result(own self) -> ExecutionResult {
         let stack_top: u256 = if self.sp == 0 {
             0
         } else {
             self.stack[self.sp - 1]
         }
-        self.memory.release()
-        self.return_data.release()
         ExecutionResult {
             status: self.status,
             output: self.output,
@@ -1507,20 +1461,20 @@ impl Vm {
 }
 
 pub fn execute_vm(
-    _ program: own Program,
-    _ calldata: own InputData,
+    _ program: Program,
+    _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> Vm {
     var vm = Vm::new()
-    vm.run_owned(program, calldata, call, block, mut state)
+    vm.run(program, calldata, call, block, mut state)
     vm
 }
 
 pub fn execute(
-    _ program: own Program,
-    _ calldata: own InputData,
+    _ program: Program,
+    _ calldata: InputData,
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,

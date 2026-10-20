@@ -18,11 +18,11 @@ sys.path.insert(0, str(ROOT / 'native'))
 from arith.run import artifacts as collect_artifacts
 
 MODULES = {
-    'checkpoints': ('buffer', 'constants', 'gas', 'journal', 'logs', 'state', 'transaction'),
+    'checkpoints': ('constants', 'gas', 'journal', 'logs', 'state', 'transaction'),
     'inputs': ('constants', 'hex', 'types'),
-    'calls': ('address', 'buffer', 'calls_runtime', 'constants', 'gas', 'journal', 'logs',
+    'calls': ('address', 'calls_runtime', 'constants', 'gas', 'journal', 'logs',
               'memory', 'state', 'transaction', 'types', 'vm'),
-    'vm_inputs': ('address', 'buffer', 'constants', 'gas', 'inputs_runtime', 'journal', 'logs',
+    'vm_inputs': ('address', 'constants', 'gas', 'inputs_runtime', 'journal', 'logs',
                   'memory', 'state', 'transaction', 'types', 'vm'),
 }
 

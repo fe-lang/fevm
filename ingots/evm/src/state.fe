@@ -1,8 +1,8 @@
+use core::{MemBuffer, MemSpan}
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
-use std::native::ByteBuffer
 use keccak::{ByteSource, keccak256}
-use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, OK}
+use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
@@ -57,7 +57,7 @@ pub struct WorldState {
     accounts: SwissTable<u256, Account>,
     // Packed [address:32, length:32, code:length] records. Replacements compact
     // the arena, so retained storage is bounded by the peak live code extent.
-    code: ByteBuffer,
+    code: MemBuffer,
     storage: SwissTable<StorageKey, u256>,
     block_hashes: SwissTable<u256, u256>,
 }
@@ -66,7 +66,7 @@ impl WorldState {
     pub fn empty() -> Self {
         WorldState {
             accounts: SwissTable<u256, Account>::empty(),
-            code: ByteBuffer::new(),
+            code: MemBuffer::empty(),
             storage: SwissTable<StorageKey, u256>::empty(),
             block_hashes: SwissTable<u256, u256>::empty(),
         }
@@ -111,7 +111,7 @@ impl WorldState {
     }
     pub fn ensure_account(mut self, _ address: u256) -> bool {
         let address = address_word(address)
-        self.accounts.contains(address) || self.accounts.insert(address, Account::default())
+        self.accounts.contains(address) || self.accounts.try_insert(address, Account::default())
     }
     // Used only by undo after restoring every write that created this account.
     pub fn remove_empty_account(mut self, _ address: u256) -> bool {
@@ -129,7 +129,7 @@ impl WorldState {
         if !previous.found && value == 0 { return true }
         var account = previous.value
         account.balance = value
-        self.accounts.insert(address, account)
+        self.accounts.try_insert(address, account)
     }
     pub fn nonce(self, _ address: u256) -> u256 {
         self.accounts.get(address_word(address)).value.nonce
@@ -140,7 +140,7 @@ impl WorldState {
         if !previous.found && value == 0 { return true }
         var account = previous.value
         account.nonce = value
-        self.accounts.insert(address, account)
+        self.accounts.try_insert(address, account)
     }
     pub fn code_size(self, _ address: u256) -> u64 {
         self.accounts.get(address_word(address)).value.code_len
@@ -156,31 +156,13 @@ impl WorldState {
     pub fn code_byte(self, address: u256, index: u64) -> u8 {
         let account = self.accounts.get(address_word(address)).value
         core::assert(index < account.code_len)
-        self.code.byte_at(account.code_offset + 64 + index)
+        self.code[(account.code_offset + 64 + index) as usize]
     }
-    // Copy an account's code bytes `offset..offset + len` into `into` at `at`.
-    pub fn copy_code(self, address: u256, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+    // An account's code. One without code has no arena record to address.
+    pub fn code(self, _ address: u256) -> ref MemSpan {
         let account = self.accounts.get(address_word(address)).value
-        core::assert(offset <= account.code_len && len <= account.code_len - offset)
-        // An account without code has no arena record to address.
-        if len == 0 { return }
-        into.copy_from(dest: at, source: self.code, offset: account.code_offset + 64 + offset, len)
-    }
-    fn code_word(self, offset: u64) -> u256 {
-        var value: u256 = 0
-        var i: u64 = 0
-        while i < 32 {
-            value = (value << 8) | self.code.byte_at(offset + i) as u256
-            i += 1
-        }
-        value
-    }
-    fn write_code_word(mut self, offset: u64, value: u256) {
-        var i: u64 = 0
-        while i < 32 {
-            self.code.set_byte(index: offset + i, value: (value >> ((31 - i) * 8) as u256).downcast_truncate())
-            i += 1
-        }
+        let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 }
+        self.code.slice(offset: offset as usize, len: account.code_len as usize)
     }
     // Host-side database initialization. Execution cannot mutate code until
     // CREATE's account lifecycle and code-deposit rules are implemented.
@@ -189,9 +171,10 @@ impl WorldState {
         let previous = self.accounts.get(address)
         let len = code.len()
         if !previous.found && len == 0 { return OK }
-        if !previous.found && self.accounts.len() == self.accounts.capacity() { return ERR_STATE_LIMIT }
+        // With room for the account, the final insertion cannot fail.
+        if !previous.found && !self.accounts.try_reserve(1) { return ERR_HOST_ALLOCATION }
         var account = previous.value
-        let old_size = self.code.len()
+        let old_size: u64 = self.code.len().downcast_unchecked()
         let removed = if account.code_len == 0 { 0 } else { 64 + account.code_len }
         let retained = old_size - removed
         // Bound before addition and before ByteSource traversal/allocation.
@@ -199,18 +182,18 @@ impl WorldState {
             return ERR_HOST_ALLOCATION
         }
         let new_size = retained + if len == 0 { 0 } else { 64 + len }
-        if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
+        if new_size > old_size && !self.code.try_resize(new_size as usize) { return ERR_HOST_ALLOCATION }
         if removed != 0 {
             let start = account.code_offset
             let end = start + removed
-            self.code.copy_within(dest: start, source: end, len: old_size - end)
+            self.code.span().copy_within(source: end as usize, dest: start as usize, len: (old_size - end) as usize)
             var cursor = start
             while cursor < retained {
-                let key = self.code_word(offset: cursor)
-                let size: u64 = self.code_word(offset: cursor + 32).downcast_unchecked()
+                let key = self.code.read_word(cursor as usize)
+                let size: u64 = self.code.read_word((cursor + 32) as usize).downcast_unchecked()
                 var moved = self.accounts.get(key).value
                 moved.code_offset = cursor
-                core::assert(self.accounts.insert(key, moved))
+                self.accounts.insert(key, moved)
                 cursor += 64 + size
             }
         }
@@ -218,22 +201,21 @@ impl WorldState {
         account.code_len = len
         account.code_hash = EMPTY_CODE_HASH
         if len != 0 {
-            self.write_code_word(offset: retained, value: address)
-            self.write_code_word(offset: retained + 32, value: len as u256)
+            self.code.span().write_word(offset: retained as usize, value: address)
+            self.code.span().write_word(offset: (retained + 32) as usize, value: len as u256)
             var i: u64 = 0
             while i < len {
-                self.code.set_byte(index: retained + 64 + i, value: code.byte_at(i))
+                self.code[(retained + 64 + i) as usize] = code.byte_at(i)
                 i += 1
             }
             let digest = keccak256(code)
             account.code_hash = 0
             for byte in digest { account.code_hash = (account.code_hash << 8) | byte as u256 }
         }
-        core::assert(self.code.try_resize(new_size))
-        core::assert(self.accounts.insert(address, account))
+        self.code.truncate(new_size as usize)
+        self.accounts.insert(address, account)
         OK
     }
-    pub fn release(own self) { self.code.release() }
     pub fn storage_load(self, _ address: u256, _ slot: u256) -> u256 {
         let address = address_word(address)
         self.storage.get(StorageKey { address: address, slot: slot }).value
@@ -247,7 +229,7 @@ impl WorldState {
         }
         let existed = self.exists(address)
         if !self.ensure_account(address) { return false }
-        if !self.storage.insert(key, value) {
+        if !self.storage.try_insert(key, value) {
             if !existed { core::assert(self.remove_empty_account(address)) }
             return false
         }
@@ -261,7 +243,7 @@ impl WorldState {
             let _ = self.block_hashes.remove(number)
             return true
         }
-        self.block_hashes.insert(number, hash)
+        self.block_hashes.try_insert(number, hash)
     }
 }
 
@@ -278,7 +260,6 @@ fn world_state_defaults_to_zero() {
     core::assert(state.nonce(1) == 0)
     core::assert(state.storage_load(1, 2) == 0)
     core::assert(state.block_hash(3) == 0)
-    state.release()
 }
 
 #[test]
@@ -293,7 +274,6 @@ fn world_state_roundtrips_account_storage() {
     core::assert(state.nonce(0xaa) == 7)
     core::assert(state.storage_load(0xaa, 3) == 44)
     core::assert(state.block_hash(8) == 0x1234)
-    state.release()
 }
 
 #[test]
@@ -306,5 +286,4 @@ fn world_state_zero_balance_preserves_account() {
 
     core::assert(state.balance(0xaa) == 0 && state.exists(0xaa))
     core::assert(state.storage_load(0xaa, 3) == 0)
-    state.release()
 }

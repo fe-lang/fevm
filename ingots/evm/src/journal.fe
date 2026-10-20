@@ -1,9 +1,4 @@
-use std::native::ByteBuffer
-use ingot::buffer::{read_word, write_word}
-
-// Fixed-width records in a growable owner. Undo only reads/truncates initialized
-// bytes and therefore cannot fail to allocate while unwinding a failed frame.
-const RECORD_SIZE: u64 = 98
+use core::MemVec
 
 pub struct Change {
     pub kind: u8,
@@ -13,45 +8,22 @@ pub struct Change {
     pub existed: bool,
 }
 
-pub struct Journal { bytes: ByteBuffer }
+impl Copy for Change {}
+
+// A growable list of changes. Undo only reads and pops changes, so it cannot
+// fail to allocate while unwinding a failed frame.
+pub struct Journal { changes: MemVec<Change> }
 
 impl Journal {
-    pub fn new() -> Self { Self { bytes: ByteBuffer::new() } }
-    pub fn len(self) -> u64 { self.bytes.len() }
+    pub fn new() -> Self { Self { changes: MemVec::new() } }
+
+    pub fn len(self) -> u64 { self.changes.len().downcast_unchecked() }
 
     pub fn append(mut self, _ change: Change) -> bool {
-        let offset = self.len()
-        // ByteBuffer bounds its extent to PTRDIFF_MAX, so this addition fits.
-        if !self.bytes.try_resize(offset + RECORD_SIZE) { return false }
-        self.bytes.set_byte(index: offset, value: change.kind)
-        write_word(mut self.bytes, offset: offset + 1, value: change.address)
-        write_word(mut self.bytes, offset: offset + 33, value: change.slot)
-        write_word(mut self.bytes, offset: offset + 65, value: change.previous)
-        self.bytes.set_byte(index: offset + 97, value: if change.existed { 1 } else { 0 })
-        true
+        self.changes.try_push(change).is_ok()
     }
 
-    pub fn count(self) -> u64 { self.len() / RECORD_SIZE }
+    pub fn change(self, _ index: u64) -> Change { self.changes[index as usize] }
 
-    pub fn change(self, _ index: u64) -> Change {
-        core::assert(index < self.count())
-        let offset = index * RECORD_SIZE
-        Change {
-            kind: self.bytes.byte_at(offset),
-            address: read_word(self.bytes, offset: offset + 1),
-            slot: read_word(self.bytes, offset: offset + 33),
-            previous: read_word(self.bytes, offset: offset + 65),
-            existed: self.bytes.byte_at(offset + 97) != 0,
-        }
-    }
-
-    pub fn pop(mut self) -> Change {
-        let index = self.count()
-        core::assert(index > 0)
-        let change = self.change(index - 1)
-        core::assert(self.bytes.try_resize((index - 1) * RECORD_SIZE))
-        change
-    }
-
-    pub fn release(own self) { self.bytes.release() }
+    pub fn pop(mut self) -> Change { self.changes.pop().unwrap() }
 }

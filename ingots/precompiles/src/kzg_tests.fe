@@ -131,12 +131,11 @@ fn assert_output(_ result: own Output) {
     var modulus: u256 = 0
     var i: u64 = 0
     while i < 32 {
-        value = (value << 8) | result.output.byte_at(i) as u256
-        modulus = (modulus << 8) | result.output.byte_at(32 + i) as u256
+        value = (value << 8) | result.output[i as usize] as u256
+        modulus = (modulus << 8) | result.output[(32 + i) as usize] as u256
         i += 1
     }
     core::assert(value == 4096 && modulus == BLS_MODULUS)
-    result.release()
 }
 
 #[test]
@@ -146,19 +145,15 @@ fn point_evaluation_verifies_c_kzg_vectors() {
     assert_output(run(address: 10, input: VALID_INFINITY, gas: 50000))
     let incorrect = run(address: 10, input: INCORRECT, gas: 60000)
     core::assert(incorrect.status == FAILURE && incorrect.gas_used == 60000)
-    incorrect.release()
     let short_gas = run(address: 10, input: VALID, gas: 49999)
     core::assert(short_gas.status == FAILURE)
-    short_gas.release()
     var tampered = VALID
     tampered[31] ^= 1
     let hash_mismatch = run(address: 10, input: tampered, gas: 60000)
     core::assert(hash_mismatch.status == FAILURE)
-    hash_mismatch.release()
     let empty: [u8; 0] = []
     let wrong_length = run(address: 10, input: empty, gas: 60000)
     core::assert(wrong_length.status == FAILURE)
-    wrong_length.release()
 }
 
 // c-kzg-4844 verify_kzg_proof_case_correct_proof_1ce8e4f69d5df899.

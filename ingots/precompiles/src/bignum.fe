@@ -1,15 +1,9 @@
-// Little-endian u64 limb arithmetic modulo a fixed-capacity modulus.
-//
-// std::native offers no typed growable array, and ByteBuffer limbs would cost
-// eight byte accesses per limb, so operands live in fixed arrays. MAX_LIMBS
-// covers an 8,192-byte significant modulus; the base and exponent are streamed
-// from their source and have no size limit.
-pub const MAX_LIMBS: u64 = 1024
-const WIDE_LIMBS: u64 = 2 * MAX_LIMBS + 1
-const LIMB_BASE: u128 = 0x10000000000000000
+// Little-endian u64 limb arithmetic modulo a modulus of any size. Operands
+// are arrays of as many limbs as the modulus; a product takes twice as many,
+// and one more.
+use core::{MemArray, Option}
 
-pub type Limbs = [u64; 1024]
-pub type Wide = [u64; 2049]
+const LIMB_BASE: u128 = 0x10000000000000000
 
 fn leading_zeros(_ value: u64) -> u64 {
     var count: u64 = 0
@@ -19,27 +13,27 @@ fn leading_zeros(_ value: u64) -> u64 {
 
 /// A modulus normalized for Knuth division: shifted left until its top limb's
 /// high bit is set. `len` is its significant limb count, at least one.
-pub struct Modulus { pub limbs: Limbs, pub len: u64, pub shift: u64 }
+pub struct Modulus { pub limbs: MemArray<u64>, pub len: u64, pub shift: u64 }
 
 impl Modulus {
-    pub fn new(_ value: Limbs, len: u64) -> Self {
-        core::assert(len > 0 && len <= MAX_LIMBS && value[(len - 1) as usize] != 0)
+    /// The first `len` limbs of `value`, normalized, or `None` when their
+    /// limbs cannot be allocated.
+    pub fn try_new(_ value: MemArray<u64>, len: u64) -> Option<Self> {
+        core::assert(len > 0 && (len as usize) <= value.len() && value[(len - 1) as usize] != 0)
         let shift = leading_zeros(value[(len - 1) as usize])
-        var limbs: Limbs = [0; 1024]
-        var i: u64 = 0
-        while i < len {
-            let high = value[i as usize] << shift
-            let low = if shift == 0 || i == 0 { 0 } else { value[(i - 1) as usize] >> (64 - shift) }
-            limbs[i as usize] = high | low
-            i += 1
+        var limbs = MemArray<u64>::try_new_zeroed(len as usize)?
+        for i in 0..(len as usize) {
+            let high = value[i] << shift
+            let low = if shift == 0 || i == 0 { 0 } else { value[i - 1] >> (64 - shift) }
+            limbs[i] = high | low
         }
-        Self { limbs, len, shift }
+        Option::Some(Self { limbs, len, shift })
     }
 
     /// Reduce the `len`-limb value in `work` (with room for one more limb) in
     /// place; the remainder occupies limbs `0..self.len`, the rest are cleared.
-    pub fn reduce(self, _ work: mut Wide, len: u64) {
-        core::assert(len < WIDE_LIMBS)
+    pub fn reduce(self, _ work: mut MemArray<u64>, len: u64) {
+        core::assert((len as usize) < work.len())
         let n = self.len
         if len < n {
             // Fewer limbs than the modulus: already reduced.
@@ -129,8 +123,9 @@ impl Modulus {
         }
     }
 
-    /// `a * b mod self` for reduced `a` and `b`, left in limbs `0..self.len` of `work`.
-    pub fn mul_mod(self, _ a: Limbs, _ b: Limbs, _ work: mut Wide) {
+    /// `a * b mod self` for reduced `a` and `b`, left in limbs `0..self.len` of
+    /// `work`, which holds `2 * self.len + 1` limbs.
+    pub fn mul_mod(self, _ a: MemArray<u64>, _ b: MemArray<u64>, _ work: mut MemArray<u64>) {
         let n = self.len
         var i: u64 = 0
         while i < 2 * n {
