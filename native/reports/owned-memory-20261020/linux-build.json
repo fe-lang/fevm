@@ -1,0 +1,14 @@
+{
+  "complete": true,
+  "compiler": "/home/sean/code/fevm/native/out/owned-memory-20261020/fe",
+  "compiler_sha256": "f6e4513157f7ff64553727ce6d61db681346841990d70c7d2cf28b98e0c412a9",
+  "compiler_version": "fe 26.4.0 (999ff9562)",
+  "fe_branch": "feat/owned-value-destruction",
+  "fe_commit": "999ff9562353ab381f7cafe389f7e86499ade918",
+  "sonatina_revision": "30e45b25b981a78cf0fb5a55aa401a81ce79dc89",
+  "cargo_lock_sha256": "6c68595f48531f9439ff92255157d2779da9329c3010d52b7fad6399d21b5b7a",
+  "command": "cargo build --release -p fe --features cranelift",
+  "manifest": {
+    "rust_version": "1.99.0"
+  }
+}
