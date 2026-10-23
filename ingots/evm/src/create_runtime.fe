@@ -1,7 +1,7 @@
 use std::native::ByteBuffer
 use keccak::keccak256
 use ingot::address::{create_address, create2_address}
-use ingot::constants::{ERR_PRECOMPILE, OK}
+use ingot::constants::{ERR_PRECOMPILE, ERR_STATE_LIMIT, OK}
 use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
@@ -228,5 +228,32 @@ fn transact_deletes_the_storage_of_empty_touched_accounts() {
     var world = applied.state
     core::assert(!world.exists(0xc0) && !world.has_storage(0xc0))
     core::assert(world.set_balance(0xc0, 1) && world.storage_load(0xc0, 0) == 0)
+    world.release()
+}
+
+#[test]
+fn transact_returns_the_pre_state_when_fee_settlement_fails() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000_000))
+    // Fill the account table so the absent coinbase cannot receive its fee.
+    var address: u256 = 0
+    while address < 255 {
+        core::assert(world.ensure_account(address))
+        address += 1
+    }
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    block.basefee = 7
+    block.coinbase = 0x2000
+    let env = TxEnv {
+        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
+        gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let failed = send(world, env, block)
+    core::assert(failed.receipt.invalid == VALID && failed.receipt.status == ERR_STATE_LIMIT)
+    let world = failed.state
+    core::assert(world.balance(0x1000) == 1_000_000_000_000 && world.nonce(0x1000) == 0)
+    core::assert(!world.exists(0x2000) && world.exists(0xbb))
+    failed.receipt.release()
     world.release()
 }
