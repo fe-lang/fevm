@@ -2,7 +2,7 @@ use std::native::ByteBuffer
 use keccak::keccak256
 use ingot::address::{create_address, create2_address}
 use ingot::constants::OK
-use ingot::processor::{INVALID_NONCE, TX_FEE_MARKET, TxEnv, TxRequest, VALID, transact}
+use ingot::processor::{INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TxEnv, TxRequest, VALID, transact}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{InputData, Program, default_block_env, default_call_env, empty_bytes}
@@ -139,6 +139,26 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     let rejected = transact(state, replay, block)
     replay.release()
     core::assert(rejected.receipt.invalid == INVALID_NONCE && rejected.state.nonce(0x1000) == 1)
+    rejected.receipt.release()
+    rejected.state.release()
+}
+
+#[test]
+fn transact_rejects_blob_hashes_outside_blob_transactions() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000_000))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    let env = TxEnv {
+        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
+        gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var request = TxRequest::new(env, data: empty_bytes())
+    core::assert(request.add_blob_hash((1 as u256) << 248))
+    let rejected = transact(world, request, block)
+    request.release()
+    core::assert(rejected.receipt.invalid == INVALID_TX_TYPE)
+    core::assert(rejected.state.balance(0x1000) == 1_000_000_000_000 && rejected.state.nonce(0x1000) == 0)
     rejected.receipt.release()
     rejected.state.release()
 }

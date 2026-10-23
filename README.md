@@ -65,7 +65,8 @@ world.release()
 Complete Cancun transactions go through `fevm::transact(world, request, block)`.
 A `TxRequest` holds a `TxEnv` (envelope kind, sender, recipient or creation flag,
 nonce, gas limit and fee fields, value) together with owned calldata or initcode,
-access-list entries and versioned blob hashes. `transact` applies the
+access-list entries and versioned blob hashes. Only blob transactions may carry
+blob hashes. `transact` applies the
 specification's includability checks; an invalid transaction returns the
 untouched state and a receipt whose `invalid` field names the reason. A valid one
 buys its gas, increments the sender nonce, warms the sender, recipient, coinbase,
