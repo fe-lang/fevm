@@ -1,11 +1,11 @@
 use std::native::ByteBuffer
 use keccak::keccak256
 use ingot::address::{create_address, create2_address}
-use ingot::constants::OK
-use ingot::processor::{INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TxEnv, TxRequest, VALID, transact}
+use ingot::constants::{ERR_PRECOMPILE, OK}
+use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
-use ingot::types::{InputData, Program, default_block_env, default_call_env, empty_bytes}
+use ingot::types::{BlockEnv, InputData, Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::Vm
 
 // MSTORE8(0, first); RETURN(0, 1): deploys the one-byte code `first`.
@@ -143,6 +143,13 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     rejected.state.release()
 }
 
+fn send(_ world: own WorldState, _ env: TxEnv, _ block: BlockEnv) -> Applied {
+    let request = TxRequest::new(env, data: empty_bytes())
+    let applied = transact(world, request, block)
+    request.release()
+    applied
+}
+
 #[test]
 fn transact_rejects_blob_hashes_outside_blob_transactions() {
     var world = WorldState::empty()
@@ -161,4 +168,42 @@ fn transact_rejects_blob_hashes_outside_blob_transactions() {
     core::assert(rejected.state.balance(0x1000) == 1_000_000_000_000 && rejected.state.nonce(0x1000) == 0)
     rejected.receipt.release()
     rejected.state.release()
+}
+
+#[test]
+fn transact_deletes_empty_call_targets_unless_the_call_fails() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000_000))
+    // Explicitly present empty accounts: two child call targets, a destination and a precompile.
+    for address in [0xcc as u256, 0xdd, 0xee, 2] { core::assert(world.ensure_account(address)) }
+    // CALL(gas, 0xcc, 0, 0, 0, 0, 0); STATICCALL(gas, 0xdd, 0, 0, 0, 0).
+    let code = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xcc, 0x5a, 0xf1, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xdd, 0x5a, 0xfa]
+    core::assert(world.set_code(address: 0xaa, code) == OK)
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    var env = TxEnv {
+        kind: TX_LEGACY, sender: 0x1000, to: 0xaa, creates: false, nonce: 0, gas_limit: 100_000,
+        gas_price: 10, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let called = send(world, env, block)
+    core::assert(called.receipt.invalid == VALID && called.receipt.status == OK)
+    called.receipt.release()
+    let world = called.state
+    core::assert(!world.exists(0xcc) && !world.exists(0xdd) && world.exists(0xaa))
+    env.nonce = 1
+    env.to = 0xee
+    let reached = send(world, env, block)
+    core::assert(reached.receipt.invalid == VALID && reached.receipt.status == OK)
+    reached.receipt.release()
+    let world = reached.state
+    core::assert(!world.exists(0xee))
+    // SHA-256 needs 60 gas; its failure undoes the touch.
+    env.nonce = 2
+    env.to = 2
+    env.gas_limit = 21_059
+    let failed = send(world, env, block)
+    core::assert(failed.receipt.invalid == VALID && failed.receipt.status == ERR_PRECOMPILE)
+    core::assert(failed.state.exists(2) && failed.state.nonce(0x1000) == 3)
+    failed.receipt.release()
+    failed.state.release()
 }
