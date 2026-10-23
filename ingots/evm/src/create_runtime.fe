@@ -207,3 +207,26 @@ fn transact_deletes_empty_call_targets_unless_the_call_fails() {
     failed.receipt.release()
     failed.state.release()
 }
+
+#[test]
+fn transact_deletes_the_storage_of_empty_touched_accounts() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000_000))
+    // A storage-only coinbase is empty; a zero priority fee still touches it.
+    core::assert(world.storage_store(0xc0, 0, 9))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    block.basefee = 7
+    block.coinbase = 0xc0
+    let env = TxEnv {
+        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
+        gas_price: 7, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let applied = send(world, env, block)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    applied.receipt.release()
+    var world = applied.state
+    core::assert(!world.exists(0xc0) && !world.has_storage(0xc0))
+    core::assert(world.set_balance(0xc0, 1) && world.storage_load(0xc0, 0) == 0)
+    world.release()
+}
