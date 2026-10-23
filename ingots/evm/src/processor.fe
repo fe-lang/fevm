@@ -242,7 +242,8 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         return vm.into_result()
     }
     let checkpoint = tx.checkpoint(is_static: false)
-    let moved = if value == 0 { OK } else { transfer(mut tx, from: sender, to: target, value) }
+    // The call touches its target even without value; a failed call undoes the touch.
+    let moved = if value == 0 { tx.touch(target) } else { transfer(mut tx, from: sender, to: target, value) }
     if moved != OK {
         tx.revert(checkpoint)
         return status_result(moved)

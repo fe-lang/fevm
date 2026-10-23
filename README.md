@@ -72,9 +72,9 @@ untouched state and a receipt whose `invalid` field names the reason. A valid on
 buys its gas, increments the sender nonce, warms the sender, recipient, coinbase,
 precompiles and access list, and runs the call or creation. It then refunds unused
 gas and the capped refund to the sender, pays the priority fee to the coinbase,
-deletes self-destructed new accounts and accounts left empty by a balance, nonce
-or code write, and returns the receipt's status, gas used, output and logs. Host
-failures (allocation or table capacity) return the pre-state with that status.
+deletes self-destructed new accounts and touched accounts left empty, and returns
+the receipt's status, gas used, output and logs. Host failures (allocation or
+table capacity) return the pre-state with that status.
 The [Ethereum state-test runner](native/conformance/README.md) drives `transact`.
 
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.
@@ -100,7 +100,8 @@ Checkpoints are journal scopes only; they do not count toward EVM call depth.
 explicit frame stack rather than native recursion, so the 1,024-frame depth limit
 does not depend on native stack size. Each child frame is allocated separately,
 so frame storage grows with the actual call depth. Each child runs under its own
-checkpoint.
+checkpoint. Every call touches its target, even without value; a failed call
+undoes the touch.
 Calls charge Cancun warm/cold access, value-transfer and new-account costs,
 forward at most all but one 64th of the remaining gas plus the 2,300-gas stipend,
 and fail without executing on insufficient balance or at the depth limit.

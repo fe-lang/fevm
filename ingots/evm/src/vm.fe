@@ -1232,13 +1232,12 @@ impl Vm {
         let address = if op == 0xf2 || op == 0xf4 { sender } else { code_address }
         let is_static = state.is_static() || op == 0xfa
         let checkpoint = state.checkpoint(is_static)
-        if has_value {
-            let status = transfer(mut state, from: sender, to: address, value)
-            if status != OK {
-                state.revert(checkpoint)
-                self.fault(status)
-                return Option::None
-            }
+        // The call touches its target even without value; a failed call undoes the touch.
+        let moved = if has_value { transfer(mut state, from: sender, to: address, value) } else { state.touch(address) }
+        if moved != OK {
+            state.revert(checkpoint)
+            self.fault(moved)
+            return Option::None
         }
         let out_offset: u64 = if output_len == 0 { 0 } else { output_offset.downcast_unchecked() }
         let out_len: u64 = output_len.downcast_unchecked()
