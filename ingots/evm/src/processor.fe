@@ -155,6 +155,8 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_BLOB { return INVALID_TX_TYPE }
+    // Only the blob envelope has versioned hashes.
+    if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
     if intrinsic_gas(request) > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
