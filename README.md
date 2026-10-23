@@ -74,7 +74,8 @@ precompiles and access list, and runs the call or creation. It then refunds unus
 gas and the capped refund to the sender, pays the priority fee to the coinbase,
 deletes self-destructed new accounts and touched accounts left empty, together
 with their storage, and returns the receipt's status, gas used, output and logs.
-Host failures (allocation or table capacity) return the pre-state with that status.
+Host failures (allocation or table capacity), including during fee payment,
+return the pre-state with that status.
 The [Ethereum state-test runner](native/conformance/README.md) drives `transact`.
 
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.

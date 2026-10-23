@@ -197,6 +197,11 @@ fn empty_receipt(invalid: i32, status: i32) -> Receipt {
     Receipt { invalid, status, gas_used: 0, output: ByteBuffer::new(), logs: LogBuffer::new() }
 }
 
+// A host failure during a valid transaction returns the pre-state.
+fn host_failure(_ tx: own Transaction, status: i32) -> Applied {
+    Applied { state: tx.finish(commit: false, gas_spent: 0).into_state(), receipt: empty_receipt(invalid: VALID, status) }
+}
+
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
 fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
     var index: u64 = 0
@@ -282,17 +287,21 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     if !is_evm_outcome(result.status) && result.status != ERR_ADDRESS_COLLISION {
         let status = result.status
         result.release()
-        let state = tx.finish(commit: false, gas_spent: 0).into_state()
-        return Applied { state, receipt: empty_receipt(invalid: VALID, status) }
+        return host_failure(tx, status)
     }
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
     let gas_spent = env.gas_limit - gas_left
     let gas_used = gas_spent - tx.capped_refund(gas_spent)
-    let refunded = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
+    var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
     let coinbase = address_word(block.coinbase)
-    let paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
-    core::assert(refunded == OK && paid == OK)
+    if paid == OK {
+        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
+    }
+    if paid != OK {
+        result.release()
+        return host_failure(tx, status: paid)
+    }
     tx.settle()
     let settled = tx.finish(commit: true, gas_spent)
     Applied {
