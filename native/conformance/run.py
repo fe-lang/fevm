@@ -112,10 +112,9 @@ def expected_state(alloc):
 def observed_state(result):
     accounts = {int(a, 16): (int(b, 16), int(n, 16), code[2:], {}) for a, b, n, code in result['accounts']}
     for address, slot, value in result['storage']:
-        address = int(address, 16)
-        # Storage of deleted accounts is not part of the state.
-        if address in accounts and int(value, 16):
-            accounts[address][3][int(slot, 16)] = int(value, 16)
+        # Storage without an account record is stale and shows up as a difference.
+        if int(value, 16):
+            accounts.setdefault(int(address, 16), (0, 0, '', {}))[3][int(slot, 16)] = int(value, 16)
     return accounts
 
 
