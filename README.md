@@ -9,7 +9,7 @@ The repo is a Fe workspace:
 - `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
 - `native/conformance/driver`: runs one Ethereum state test transaction through `transact`
-- `native/fixtures/journal`, `native/fixtures/accounts`, and `native/fixtures/logs`: allocation-failure fixtures run by the native harness
+- `native/fixtures/journal`, `native/fixtures/accounts`, `native/fixtures/logs`, and `native/fixtures/calls`: allocation-failure fixtures run by the native harness
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for fixed-capacity hash tables and [keccak](https://github.com/fe-lang/keccak)
@@ -99,8 +99,10 @@ Checkpoints are journal scopes only; they do not count toward EVM call depth.
 
 `CALL`, `CALLCODE`, `DELEGATECALL` and `STATICCALL` run child frames on an
 explicit frame stack rather than native recursion, so the 1,024-frame depth limit
-does not depend on native stack size. Each child runs under its own checkpoint.
-Every call touches its target, even without value; a failed call undoes the touch.
+does not depend on native stack size. Each child frame is allocated separately,
+so frame storage grows with the actual call depth. Each child runs under its own
+checkpoint. Every call touches its target, even without value; a failed call
+undoes the touch.
 Calls charge Cancun warm/cold access, value-transfer and new-account costs,
 forward at most all but one 64th of the remaining gas plus the 2,300-gas stipend,
 and fail without executing on insufficient balance or at the depth limit.

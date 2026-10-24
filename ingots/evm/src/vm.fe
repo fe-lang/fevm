@@ -1421,8 +1421,9 @@ impl Vm {
 
     fn run_children(mut self, _ first: own Frame, _ program: Program, _ calldata: InputData,
                     _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) {
-        // Allocate frame slots only if code actually starts executing in a child.
-        var frames = match FixedStack<Frame, CALL_DEPTH_LIMIT>::try_new() {
+        // Box each child in a one-slot stack so frame storage grows with the
+        // actual call depth. Only the box slots are reserved once a child starts.
+        var frames = match FixedStack<FixedStack<Frame, 1>, CALL_DEPTH_LIMIT>::try_new() {
             Option::Some(frames) => frames,
             Option::None => {
                 first.abort(mut state)
@@ -1430,28 +1431,41 @@ impl Vm {
                 return
             },
         }
-        match frames.try_push(first) {
-            Result::Ok(()) => {},
-            Result::Err(_) => core::panic(),
-        }
+        var next = Option::Some(first)
         while true {
-            let depth = frames.len()
-            let next = if depth == 0 {
-                self.run_until_child(program, calldata, call, block, mut state, depth: 0)
-            } else {
-                frames.top().resume(block, mut state, depth)
-            }
             match next {
-                Option::Some(frame) => match frames.try_push(frame) {
-                    Result::Ok(()) => {},
-                    Result::Err(_) => core::panic(),
+                Option::Some(frame) => match FixedStack<Frame, 1>::try_new() {
+                    Option::Some(var boxed) => {
+                        match boxed.try_push(frame) {
+                            Result::Ok(()) => {},
+                            Result::Err(_) => core::panic(),
+                        }
+                        match frames.try_push(boxed) {
+                            Result::Ok(()) => {},
+                            Result::Err(_) => core::panic(),
+                        }
+                    },
+                    // Like other host failures while starting a child, this fails the parent.
+                    Option::None => {
+                        frame.abort(mut state)
+                        if frames.len() == 0 { self.fault(ERR_HOST_ALLOCATION) }
+                        else { frames.top().top().vm.fault(ERR_HOST_ALLOCATION) }
+                    },
                 },
                 Option::None => {
-                    if depth == 0 { break }
-                    let result = frames.pop().finish(mut state)
+                    if frames.len() == 0 { break }
+                    var boxed = frames.pop()
+                    let result = boxed.pop().finish(mut state)
+                    boxed.release()
                     if frames.len() == 0 { self.accept_child(result) }
-                    else { frames.top().vm.accept_child(result) }
+                    else { frames.top().top().vm.accept_child(result) }
                 },
+            }
+            let depth = frames.len()
+            next = if depth == 0 {
+                self.run_until_child(program, calldata, call, block, mut state, depth: 0)
+            } else {
+                frames.top().top().resume(block, mut state, depth)
             }
         }
         frames.release()

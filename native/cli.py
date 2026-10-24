@@ -141,6 +141,30 @@ def main():
             report.write_text(json.dumps(record, indent=2) + '\n')
             if not passed:
                 raise AssertionError(f'O{level} account code allocation {failure_at}: {result!r}')
+        calls = folder / 'calls'
+        calls.mkdir()
+        calls_archive = calls / 'build.tar.gz'
+        log = command([compiler, 'build', ROOT, '--ingot', 'fevm_calls', '--backend', 'native',
+                       '-O', level, '--emit', 'ir,executable', '--out-dir', calls,
+                       '--report', '--report-out', calls_archive], timeout=args.build_timeout)
+        calls.joinpath('build.log').write_bytes(log)
+        artifacts(calls / 'fevm_calls', calls_archive, calls, object_name='fevm_calls.o')
+        # A depth-two CALL chain allocates the frame box slots, then one box per
+        # child. Fail each of the three in turn; every success must be released.
+        for failure_at in [0, 1, 2, 3]:
+            controlled = calls / f'allocator-{failure_at}'
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+                     '-DWATCH_MIN=32769', '-DSUCCESS_ALLOCS=3',
+                     ROOT / 'native/fixtures/vm_allocator.c', calls / 'fevm_calls.o', '-o', controlled])
+            result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
+            passed = result.returncode == 0 and not result.stdout and not result.stderr
+            row['checks'].append({'name': f'call-frame-allocator-{failure_at}', 'passed': passed,
+                                  'status': result.returncode,
+                                  'stdout': result.stdout.decode(errors='replace'),
+                                  'stderr': result.stderr.decode(errors='replace')})
+            report.write_text(json.dumps(record, indent=2) + '\n')
+            if not passed:
+                raise AssertionError(f'O{level} call frame allocation {failure_at}: {result!r}')
         # LOG0 owns a separate copy of its frame memory. Check both allocation
         # failures using the already compiled interpreter object.
         for failure_at in [0, 1, 2]:
