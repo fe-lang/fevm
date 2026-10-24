@@ -38,24 +38,27 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler is upstream Fe master
-[`21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda`](https://github.com/argotorg/fe/tree/21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda).
-Its Cargo.lock pins Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`. Master
-includes `ByteBuffer::copy_from`, which FeVM uses for every bulk byte copy, as well
+[`fa06c6cd5ba19cbf15da718fad80b84d79a569b9`](https://github.com/argotorg/fe/tree/fa06c6cd5ba19cbf15da718fad80b84d79a569b9).
+Its Cargo.lock pins Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`. Master
+stores whole aggregate values and constants into objects; building and running
+the evm ingot's tests peaks at 1.0-1.3 GB at each level. It also includes
+`ByteBuffer::copy_from`, which FeVM uses for every bulk byte copy, as well
 as MVS, native `FixedStack` and the FeVM compile-time work previously pinned
 from forks (enum-proof indexes, borrowed native layouts and one shared native test
 runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchain.json)
 records the exact revisions and lock hash, and bootstrap fetches both from their
 upstream repositories.
 
-All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 76
-workspace tests, 35 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 80
+workspace tests, 39 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
 comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
 three declared simultaneous-fault reason differences per level. The Python
 harness's 13 tests and the Rust reference's nine tests pass. See the
-[bulk-copy report](reports/bulk-copy-20261019/README.md); the earlier
-[Fe master](reports/fe-master-20261019/README.md) (47 workspace tests, before the
-CALL and transaction work) and [macOS](reports/macos-arm64-20261019/README.md)
-reports keep their compiler `f69b911ce`. The
+[Fe master report](reports/fe-master-20261024/README.md); the earlier
+[bulk-copy](reports/bulk-copy-20261019/README.md) report keeps its compiler
+`21db8bc23`, and the [Fe master](reports/fe-master-20261019/README.md) (47
+workspace tests, before the CALL and transaction work) and
+[macOS](reports/macos-arm64-20261019/README.md) reports keep `f69b911ce`. The
 [Cancun state-test runner](conformance/README.md) is separate from acceptance.
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),

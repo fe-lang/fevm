@@ -1,0 +1,109 @@
+running `fe test` for 9 inputs (jobs=1)
+
+COMPILING        evm          /private/tmp/fevm-macos-20261024/fevm/ingots/evm
+READY [25.617s]  evm          running 62 tests
+PASS  [0.9154s]  evm          account_code_replacement_compacts_and_preserves_other_accounts
+PASS  [0.0197s]  evm          account_empty_hash_predicate_and_code_extent_are_independent_of_frame_limits
+PASS  [0.0304s]  evm          account_creation_undo_distinguishes_empty_existing_and_absent_accounts
+PASS  [0.0140s]  evm          account_capacity_failures_are_atomic_and_undo_restores_capacity
+PASS  [0.0067s]  evm          contract_addresses_match_known_derivations
+PASS  [0.0228s]  evm          call_variants_preserve_environment_and_value
+PASS  [0.0281s]  evm          call_revert_restores_state_and_keeps_output_prefix
+PASS  [0.0094s]  evm          call_empty_and_insufficient_funds_charge_exact_gas
+PASS  [0.0113s]  evm          call_static_rules_and_return_data_bounds
+PASS  [0.2391s]  evm          call_protocol_depth_is_iterative_and_independent_of_checkpoints
+PASS  [0.0112s]  evm          create_and_create2_deploy_code_endow_and_bump_nonces
+PASS  [0.0084s]  evm          create_rejects_code_prefix_and_collisions
+PASS  [0.0092s]  evm          selfdestruct_moves_balance_and_deletes_only_new_accounts
+PASS  [0.0090s]  evm          transact_charges_fees_and_rejects_bad_nonces
+PASS  [0.0067s]  evm          transact_calls_accounts_without_code_in_a_world_without_code
+PASS  [0.0051s]  evm          transact_rejects_blob_hashes_outside_blob_transactions
+PASS  [0.0116s]  evm          transact_deletes_empty_call_targets_unless_the_call_fails
+PASS  [0.0079s]  evm          transact_deletes_the_storage_of_empty_touched_accounts
+PASS  [0.0077s]  evm          transact_returns_the_pre_state_when_fee_settlement_fails
+PASS  [0.0103s]  evm          blockhash_limits_history_without_truncating_the_stack_operand
+PASS  [0.0071s]  evm          vm_reuses_owned_inputs_beyond_the_old_frame_bound
+PASS  [0.0059s]  evm          vm_input_failure_preserves_the_transaction_setup_phase
+PASS  [0.0060s]  evm          vm_owned_inputs_execute_large_code_and_jump_boundaries
+PASS  [0.0063s]  evm          sha3_empty_ignores_full_width_offset_and_obeys_exact_gas
+PASS  [0.0058s]  evm          sha3_hashes_a_borrowed_memory_subrange_without_changing_it
+PASS  [0.0081s]  evm          sha3_checks_stack_and_charges_before_allocation
+PASS  [0.0071s]  evm          evm_sload_sstore_roundtrip
+PASS  [0.0068s]  evm          evm_balance_selfbalance_and_blockhash_use_state
+PASS  [0.0061s]  evm          evm_tload_tstore_roundtrip
+PASS  [0.0072s]  evm          evm_interleaves_state_and_owned_memory
+PASS  [0.0047s]  evm          logs_copy_data_grow_and_reuse_truncated_storage
+PASS  [0.0075s]  evm          logs_follow_nested_checkpoints_and_receipts_own_their_data
+PASS  [0.0089s]  evm          log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count
+PASS  [0.0068s]  evm          log_copies_frame_memory_and_preserves_topic_stack_order
+PASS  [0.0065s]  evm          blob_hashes_use_full_width_indices_and_transaction_lifetime
+PASS  [0.0048s]  evm          memory_rounding_and_quadratic_cost
+PASS  [0.0037s]  evm          memory_empty_and_unpayable_ranges
+PASS  [0.0048s]  evm          memory_copy_combines_extents_and_word_costs
+PASS  [0.0045s]  evm          memory_cost_preserves_the_full_u64_gas_domain
+PASS  [0.0070s]  evm          vm_reuses_zeroed_memory_and_transfers_owned_output
+PASS  [0.0062s]  evm          vm_exhausts_gas_before_allocating_and_can_reset_after_fault
+PASS  [0.0054s]  evm          world_state_defaults_to_zero
+PASS  [0.0049s]  evm          world_state_roundtrips_account_storage
+PASS  [0.0057s]  evm          world_state_zero_balance_preserves_account
+PASS  [0.0070s]  evm          upfront_warming_and_access_lists_survive_revert
+PASS  [0.0065s]  evm          balance_masks_high_address_bits_and_charges_one_cold_access
+PASS  [0.0076s]  evm          storage_reads_warm_once_and_reverted_reads_become_cold
+PASS  [0.0072s]  evm          storage_refunds_are_signed_and_follow_nested_checkpoints
+PASS  [0.0068s]  evm          original_zero_survives_revert_and_refunds_are_capped_at_transaction_end
+PASS  [0.0123s]  evm          sstore_sentry_and_exact_cold_cost_boundaries
+PASS  [0.0080s]  evm          refunds_never_pay_for_execution_and_failed_frames_discard_them
+PASS  [0.0086s]  evm          transaction_boundaries_reset_original_storage_and_access_state
+PASS  [0.0076s]  evm          access_cache_capacity_failure_preserves_rollback
+PASS  [0.0241s]  evm          original_cache_limit_is_operational_and_does_not_apply_the_failed_write
+PASS  [0.0076s]  evm          transaction_reverts_committed_children_and_restores_all_state_kinds
+PASS  [0.0072s]  evm          transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it
+PASS  [0.0061s]  evm          transaction_static_mode_is_inherited_and_restored
+PASS  [0.0321s]  evm          transaction_undo_survives_full_tables_and_grows_past_prototype_capacity
+PASS  [0.0069s]  evm          transaction_checkpoints_do_not_consume_evm_call_depth
+PASS  [0.0112s]  evm          vm_rollback_covers_revert_exceptional_and_operational_exits
+PASS  [0.0075s]  evm          vm_transient_state_is_shared_by_frames_and_cleared_between_transactions
+PASS  [0.0062s]  evm          vm_static_storage_writes_fault_but_reads_are_allowed
+COMPILING        precompiles  /private/tmp/fevm-macos-20261024/fevm/ingots/precompiles
+READY [3.2412s]  precompiles  running 18 tests
+PASS  [0.2093s]  precompiles  sha256_known_answers
+PASS  [0.0235s]  precompiles  ripemd160_known_answers
+PASS  [0.0226s]  precompiles  hash_precompiles_charge_per_word_and_return_padded_digests
+PASS  [0.0217s]  precompiles  blake2f_known_answers_and_validation
+PASS  [0.0472s]  precompiles  ecrecover_known_signatures_and_rejections
+PASS  [0.0083s]  precompiles  bn254_field_arithmetic_round_trips
+PASS  [0.0101s]  precompiles  bn254_add_and_mul_match_known_points
+PASS  [0.0048s]  precompiles  bn254_invalid_points_and_gas_fail
+PASS  [0.2286s]  precompiles  bn254_pairing_checks_bilinearity_and_subgroups
+PASS  [0.0045s]  precompiles  bls_base_field_matches_reference_arithmetic
+PASS  [0.0157s]  precompiles  bls_tower_frobenius_inverse_and_sparse_products_agree
+PASS  [0.0306s]  precompiles  bls_pairing_is_bilinear_and_nondegenerate
+PASS  [0.0042s]  precompiles  bls_compressed_g1_points_follow_zcash_encoding
+PASS  [0.0366s]  precompiles  point_evaluation_verifies_c_kzg_vectors
+PASS  [0.0121s]  precompiles  modexp_eip198_examples
+PASS  [0.0039s]  precompiles  modexp_multi_limb_even_modulus_and_long_base
+PASS  [0.0029s]  precompiles  modexp_edge_cases
+PASS  [0.0100s]  precompiles  secp256k1_field_arithmetic_edges
+COMPILING        driver       /private/tmp/fevm-macos-20261024/fevm/native/conformance/driver
+READY [0.4980s]  driver       running 0 tests
+COMPILING        driver-2     /private/tmp/fevm-macos-20261024/fevm/native/differential/driver
+READY [0.4646s]  driver-2     running 0 tests
+COMPILING        state_driver /private/tmp/fevm-macos-20261024/fevm/native/differential/state_driver
+READY [0.6382s]  state_driver running 0 tests
+COMPILING        accounts     /private/tmp/fevm-macos-20261024/fevm/native/fixtures/accounts
+READY [0.0742s]  accounts     running 0 tests
+COMPILING        calls        /private/tmp/fevm-macos-20261024/fevm/native/fixtures/calls
+READY [0.3757s]  calls        running 0 tests
+COMPILING        journal      /private/tmp/fevm-macos-20261024/fevm/native/fixtures/journal
+READY [0.0905s]  journal      running 0 tests
+COMPILING        logs         /private/tmp/fevm-macos-20261024/fevm/native/fixtures/logs
+READY [0.0891s]  logs         running 0 tests
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/conformance/driver
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/differential/driver
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/differential/state_driver
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/fixtures/accounts
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/fixtures/calls
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/fixtures/journal
+Warning: No tests found in /private/tmp/fevm-macos-20261024/fevm/native/fixtures/logs
+
+test result: ok. 80 passed; 0 failed
