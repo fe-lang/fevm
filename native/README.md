@@ -38,9 +38,9 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler is Fe
-[`a353e3cb1b68e42c7fc3cc80c3de60691be1e72d`](https://github.com/sbillig/fe/tree/a353e3cb1b68e42c7fc3cc80c3de60691be1e72d),
-branch `feat/owned-value-destruction` of `sbillig/fe` on Fe master `b89180311`.
-Its Cargo.lock pins Sonatina `73c7e0e267bd1f6fbcb65958883191d5fc3b138f`. The
+[`0f2218d38091eefc9034e7bb91bb76ecda122252`](https://github.com/sbillig/fe/tree/0f2218d38091eefc9034e7bb91bb76ecda122252),
+branch `feat/owned-value-destruction` of `sbillig/fe` on Fe master `fa06c6cd5`.
+Its Cargo.lock pins Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`. The
 branch destroys owned values where their lifetime ends and replaces
 `std::native::ByteBuffer` and `FixedStack` with core's memory owners (`MemBuffer`,
 `MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap memory. It uses
