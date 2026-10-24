@@ -3,8 +3,12 @@ name = "fevm"
 version = "0.1.0"
 members = [
   { path = "ingots/evm", name = "fevm" },
-  { path = "ingots/swisstable", name = "swisstable" },
+  { path = "ingots/precompiles", name = "fevm_precompiles" },
   { path = "native/differential/driver", name = "fevm_frame" },
   { path = "native/differential/state_driver", name = "fevm_state" },
+  { path = "native/conformance/driver", name = "fevm_conformance" },
   { path = "native/fixtures/journal", name = "fevm_journal" },
+  { path = "native/fixtures/accounts", name = "fevm_accounts" },
+  { path = "native/fixtures/logs", name = "fevm_logs" },
+  { path = "native/fixtures/calls", name = "fevm_calls" },
 ]

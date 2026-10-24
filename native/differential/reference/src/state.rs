@@ -5,7 +5,9 @@ use revm_context::{BlockEnv, CfgEnv, Context, Host, JournalTr, TxEnv};
 use revm_database::{DatabaseCommit, InMemoryDB};
 use revm_interpreter::interpreter::{EthInterpreter, ExtBytecode};
 use revm_interpreter::{CallInput, InputsImpl, Interpreter, SharedMemory, instruction_table};
-use revm_primitives::{Address, Bytes, HashMap, HashSet, U256, hardfork::SpecId, hex};
+use revm_primitives::{
+    Address, B256, Bytes, HashMap, HashSet, Log, TxKind, U256, hardfork::SpecId, hex,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{Frame, frame_from_result};
@@ -15,7 +17,8 @@ type StateHost = Context<BlockEnv, TxEnv, CfgEnv, InMemoryDB>;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Case {
-    balances: Vec<Balance>,
+    block_hashes: Vec<BlockHash>,
+    accounts: Vec<Account>,
     storage: Vec<Storage>,
     watch_accounts: Vec<Address>,
     watch_slots: Vec<Slot>,
@@ -24,9 +27,18 @@ pub struct Case {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Balance {
+struct BlockHash {
+    number: U256,
+    hash: U256,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Account {
     address: Address,
-    value: U256,
+    balance: U256,
+    nonce: u64,
+    code: String,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +59,8 @@ struct Storage {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Transaction {
+    block_number: U256,
+    blob_hashes: Vec<B256>,
     sender: Address,
     destination: Address,
     coinbase: Address,
@@ -87,12 +101,35 @@ struct SlotObservation {
 }
 
 #[derive(Serialize)]
+struct LogObservation {
+    address: String,
+    topics: Vec<String>,
+    data: String,
+}
+
+impl From<&Log> for LogObservation {
+    fn from(log: &Log) -> Self {
+        Self {
+            address: format!("{:#x}", log.address),
+            topics: log
+                .data
+                .topics()
+                .iter()
+                .map(|topic| format!("{topic:#x}"))
+                .collect(),
+            data: format!("0x{}", hex::encode(&log.data.data)),
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct Step {
     frame: Option<Frame>,
     refund_delta: i128,
     refund_counter: i128,
     accounts: Vec<AccountObservation>,
     storage: Vec<SlotObservation>,
+    logs: Vec<LogObservation>,
 }
 
 #[derive(Serialize)]
@@ -103,6 +140,7 @@ pub struct TransactionResult {
     gas_used: u64,
     balances: Vec<String>,
     storage: Vec<String>,
+    logs: Vec<LogObservation>,
 }
 
 struct Runner<'a> {
@@ -190,6 +228,7 @@ impl Runner<'_> {
             refund_counter: self.refund,
             accounts,
             storage,
+            logs: journal.logs().iter().map(LogObservation::from).collect(),
         });
     }
 
@@ -271,10 +310,20 @@ impl Runner<'_> {
 
 pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
     let mut database = InMemoryDB::default();
-    for balance in case.balances {
-        let mut info = database.load_account(balance.address)?.info.clone();
-        info.balance = balance.value;
-        database.insert_account_info(balance.address, info);
+    for block in case.block_hashes {
+        database
+            .cache
+            .block_hashes
+            .insert(block.number, block.hash.into());
+    }
+    for account in case.accounts {
+        let code = Bytecode::new_legacy(Bytes::from(hex::decode(&account.code)?));
+        let mut info = database.load_account(account.address)?.info.clone();
+        info.balance = account.balance;
+        info.nonce = account.nonce;
+        info.code_hash = code.hash_slow();
+        info.code = Some(code);
+        database.insert_account_info(account.address, info);
     }
     for storage in case.storage {
         database.insert_account_storage(storage.address, storage.slot, storage.value)?;
@@ -283,7 +332,13 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
     for transaction in &case.transactions {
         let mut host = StateHost::new(database, SpecId::CANCUN);
         host.block.beneficiary = transaction.coinbase;
+        host.block.number = transaction.block_number;
         host.tx.caller = transaction.sender;
+        host.tx.blob_hashes = transaction.blob_hashes.clone();
+        host.tx.kind = TxKind::Call(transaction.destination);
+        host.tx
+            .derive_tx_type()
+            .map_err(|error| format!("invalid reference transaction environment: {error:?}"))?;
         let mut access_list: HashMap<Address, HashSet<U256>> = HashMap::default();
         for address in &transaction.access_accounts {
             access_list.entry(*address).or_default();
@@ -327,6 +382,13 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
         }
         let gas_refunded =
             u64::try_from(runner.refund.max(0).min(i128::from(runner.gas_spent / 5)))?;
+        let logs = runner
+            .host
+            .journaled_state
+            .logs()
+            .iter()
+            .map(LogObservation::from)
+            .collect();
         let state = runner.host.journaled_state.finalize();
         database = runner.host.journaled_state.database;
         database.commit(state);
@@ -358,6 +420,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
             gas_used: runner.gas_spent - gas_refunded,
             balances,
             storage,
+            logs,
         });
     }
     Ok(results)
@@ -366,11 +429,13 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{Case, execute};
+    use revm_primitives::{B256, U256};
     use serde_json::{Value, json};
 
     fn case(original: u64, transactions: Value) -> Case {
         serde_json::from_value(json!({
-            "balances": [{"address": "0x0000000000000000000000000000000000000044", "value": "0x63"}],
+            "block_hashes": [],
+            "accounts": [{"address": "0x0000000000000000000000000000000000000044", "balance": "0x63", "nonce": 0, "code": ""}],
             "storage": [{"address": "0x0000000000000000000000000000000000000000", "slot": "0x0", "value": format!("0x{original:x}")}],
             "watch_accounts": ["0x0000000000000000000000000000000000000044"],
             "watch_slots": [{"address": "0x0000000000000000000000000000000000000000", "slot": "0x0"}],
@@ -380,6 +445,7 @@ mod tests {
 
     fn transaction(actions: Value) -> Value {
         json!({
+            "block_number": "0x0", "blob_hashes": [],
             "sender": "0x0000000000000000000000000000000000000000",
             "destination": "0x0000000000000000000000000000000000000000",
             "coinbase": "0x0000000000000000000000000000000000000000",
@@ -389,6 +455,67 @@ mod tests {
 
     fn frame(code: &str) -> Value {
         json!({"kind": "frame", "code": code, "calldata": "", "gas_limit": 1_000_000, "is_static": false})
+    }
+
+    #[test]
+    fn blob_hashes_use_the_blob_transaction_host_path() {
+        let mut input = case(0, json!([transaction(json!([frame("5f49600149")]))]));
+        let hash = B256::from([1; 32]);
+        input.transactions[0].blob_hashes = vec![hash];
+        let results = execute(input).unwrap();
+        assert_eq!(
+            results[0].steps[0]
+                .frame
+                .as_ref()
+                .unwrap()
+                .stack
+                .as_ref()
+                .unwrap(),
+            &[format!("{hash:#x}"), format!("0x{:064x}", 0)]
+        );
+    }
+
+    #[test]
+    fn log_observations_follow_real_journal_rollback_and_finalization() {
+        let input = case(
+            0,
+            json!([transaction(json!([
+                frame("60aa5f53600560015fa1"),
+                {"kind": "scope", "is_static": false, "commit": false, "actions": [frame("5f5fa0")]},
+                frame("5f5fa0fe"),
+            ]))]),
+        );
+        let results = execute(input).unwrap();
+        assert_eq!(results[0].steps[1].logs.len(), 2);
+        assert_eq!(results[0].steps[2].logs.len(), 1);
+        assert_eq!(results[0].steps[3].logs.len(), 1);
+        assert_eq!(results[0].logs.len(), 1);
+        assert_eq!(results[0].logs[0].data, "0xaa");
+        assert_eq!(results[0].logs[0].topics, [format!("0x{:064x}", 5)]);
+    }
+
+    #[test]
+    fn account_code_hash_distinguishes_empty_accounts_and_empty_code() {
+        let empty = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
+        let abc = "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45";
+        for (balance, nonce, code, expected) in [
+            (0_u64, 0, "", format!("0x{:064x}", 0)),
+            (1, 0, "", empty.to_string()),
+            (0, 1, "", empty.to_string()),
+            (0, 0, "616263", abc.to_string()),
+        ] {
+            let mut input = case(0, json!([transaction(json!([frame("60443b60443f")]))]));
+            input.accounts[0].balance = U256::from(balance);
+            input.accounts[0].nonce = nonce;
+            input.accounts[0].code = code.to_string();
+            let results = execute(input).unwrap();
+            let frame = results[0].steps[0].frame.as_ref().unwrap();
+            assert_eq!(
+                frame.stack.as_ref().unwrap(),
+                &[format!("0x{:064x}", code.len() / 2), expected,]
+            );
+            assert_eq!(frame.gas_remaining, 997294);
+        }
     }
 
     #[test]

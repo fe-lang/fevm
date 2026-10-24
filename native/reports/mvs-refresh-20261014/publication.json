@@ -1,0 +1,14 @@
+{
+  "published": false,
+  "requires_explicit_push_authorization": false,
+  "repository": "https://github.com/sbillig/fe.git",
+  "branch": "fevm-mvs-refresh-20261014",
+  "revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+  "base_revision": "1b4e287c65a0981b385a18c9d49195c92f8f2197",
+  "source_directory": "/tmp/fevm-mvs-refresh-20261014-r1/apply-probe",
+  "patch": "compiler-prerequisite.patch",
+  "patch_sha256": "ff0e4460612cdcf8a2d36d6f726459b0e2db6dcf67f3a00ca6df0ddf73ff4a85",
+  "scope": "baseline provenance; this branch is not part of the final publication request",
+  "status": "baseline-only local ref; final descendant publication is reviewed separately",
+  "superseded_by": "../mvs-compile-perf-20261014/publication.json"
+}

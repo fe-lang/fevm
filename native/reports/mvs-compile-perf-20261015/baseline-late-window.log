@@ -1,0 +1,2 @@
+[ perf record: Woken up 1 times to write data ]
+[ perf record: Captured and wrote 0.058 MB /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-late-window.data (1438 samples) ]

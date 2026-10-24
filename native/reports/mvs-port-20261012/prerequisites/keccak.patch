@@ -1,0 +1,218 @@
+From 0702d006a37efc85390726b933b2a275b215c2ae Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Mon, 12 Oct 2026 12:06:34 -0700
+Subject: [PATCH] Port Keccak sources to Fe mutable value semantics
+
+---
+ README.md                |  7 ++++---
+ native/driver/src/lib.fe | 24 ++++++++++++------------
+ src/lib.fe               | 10 +++++-----
+ src/permutation.fe       |  2 +-
+ src/tests.fe             | 14 +++++++-------
+ 5 files changed, 29 insertions(+), 28 deletions(-)
+
+diff --git a/README.md b/README.md
+index 7d11292..fca907e 100644
+--- a/README.md
++++ b/README.md
+@@ -8,7 +8,7 @@ This implements Keccak padding (suffix `0x01`), not SHA3-256 (`0x06`).
+ use keccak::{Keccak256, keccak256}
+ 
+ let digest = keccak256([97 as u8, 98, 99])
+-let mut state = Keccak256::new()
++var state = Keccak256::new()
+ state.update([97 as u8, 98, 99], offset: 0, len: 2)
+ state.update([97 as u8, 98, 99], offset: 2, len: 1)
+ let streamed = state.finish()
+@@ -26,8 +26,9 @@ and its tests.
+ 
+ ## Tests
+ 
+-Verified on Linux x86_64 with Fe master
+-`04d34410582e4ddac3f516c6ded1a0fdb4a31b3c`, built with `--features cranelift`.
++The MVS port passes all three library tests at O0/O1/O2 on Linux x86_64 with
++`sbillig/fe:mvs` at `fe5c32c1b9913a259667be9123a9090beb16ed1a`, built with
++`--features cranelift`. It uses `var` mutable values and `var own self` receivers.
+ Run the library's native tests at all optimization levels:
+ 
+ ```sh
+diff --git a/native/driver/src/lib.fe b/native/driver/src/lib.fe
+index f843b96..2a93f6f 100644
+--- a/native/driver/src/lib.fe
++++ b/native/driver/src/lib.fe
+@@ -5,8 +5,8 @@ use std::native::{ByteBuffer, black_box_u64, cpu_clock_ticks}
+ use keccak::Keccak256
+ 
+ fn read64() -> u64 uses (input: mut Read) {
+-    let mut value: u64 = 0
+-    let mut index: u64 = 0
++    var value: u64 = 0
++    var index: u64 = 0
+     while index < 8 {
+         let byte = read_char()
+         core::assert(byte >= 0)
+@@ -23,7 +23,7 @@ fn write_byte(_ value: u8) uses (output: mut HostIo) {
+ }
+ 
+ fn write64(_ value: u64) uses (output: mut HostIo) {
+-    let mut index: u64 = 0
++    var index: u64 = 0
+     while index < 8 {
+         write_byte((value >> (index * 8)).downcast_truncate())
+         index += 1
+@@ -32,11 +32,11 @@ fn write64(_ value: u64) uses (output: mut HostIo) {
+ 
+ #[inline(never)]
+ fn hash_runtime(_ input: ByteBuffer, len: u64, chunk: u64) -> [u8; 32] {
+-    let mut state = Keccak256::new()
++    var state = Keccak256::new()
+     if chunk == 0 {
+         state.update(input, offset: 0, len)
+     } else {
+-        let mut offset: u64 = 0
++        var offset: u64 = 0
+         while offset < len {
+             let take = if chunk < len - offset { chunk } else { len - offset }
+             state.update(input, offset, len: take)
+@@ -48,29 +48,29 @@ fn hash_runtime(_ input: ByteBuffer, len: u64, chunk: u64) -> [u8; 32] {
+ 
+ pub fn main() -> i32 {
+     with (Read = host(), HostIo = host()) {
+-        let mut marker = read_char()
++        var marker = read_char()
+         while marker != -1 {
+             core::assert(marker == 64)
+             let rounds = read64()
+             let chunk = read64()
+             let len = read64()
+             core::assert(rounds > 0 && rounds <= 1_000_000_000 && len <= 64 * 1024 * 1024)
+-            let mut input = ByteBuffer::new()
++            var input = ByteBuffer::new()
+             core::assert(input.try_resize(len))
+-            let mut index: u64 = 0
++            var index: u64 = 0
+             while index < len {
+                 let byte = read_char()
+                 core::assert(byte >= 0)
+                 input.set_byte(index, value: byte.downcast_unchecked())
+                 index += 1
+             }
+-            let mut result: [u8; 32] = [0; 32]
+-            let mut checksum: u64 = 0
+-            let mut iteration: u64 = 0
++            var result: [u8; 32] = [0; 32]
++            var checksum: u64 = 0
++            var iteration: u64 = 0
+             let started = cpu_clock_ticks()
+             while iteration < rounds {
+                 result = hash_runtime(input, len: black_box_u64(len), chunk)
+-                let mut word: u64 = 0
++                var word: u64 = 0
+                 index = 0
+                 while index < 8 {
+                     word |= (result[index as usize] as u64) << (index * 8)
+diff --git a/src/lib.fe b/src/lib.fe
+index f12be07..ff39409 100644
+--- a/src/lib.fe
++++ b/src/lib.fe
+@@ -25,7 +25,7 @@ impl Keccak256 {
+     /// Absorb a source range. Empty updates do not change the hash state.
+     pub fn update<T: ByteSource>(mut self, _ input: T, offset: u64, len: u64) {
+         core::assert(offset <= input.len() && len <= input.len() - offset)
+-        let mut index: u64 = 0
++        var index: u64 = 0
+         while index < len {
+             let lane = (self.position / 8) as usize
+             let shift = (self.position % 8) * 8
+@@ -40,12 +40,12 @@ impl Keccak256 {
+     }
+ 
+     /// Apply Keccak padding, return the digest, and consume the state.
+-    pub fn finish(mut own self) -> [u8; 32] {
++    pub fn finish(var own self) -> [u8; 32] {
+         self.lanes[(self.position / 8) as usize] ^= 1 << ((self.position % 8) * 8)
+         self.lanes[16] ^= 0x8000000000000000
+         permute(mut self.lanes)
+-        let mut digest: [u8; 32] = [0; 32]
+-        let mut index: u64 = 0
++        var digest: [u8; 32] = [0; 32]
++        var index: u64 = 0
+         while index < 32 {
+             let shift = (index % 8) * 8
+             digest[index as usize] = (self.lanes[(index / 8) as usize] >> shift).downcast_truncate()
+@@ -56,7 +56,7 @@ impl Keccak256 {
+ }
+ 
+ pub fn keccak256<T: ByteSource>(_ input: T) -> [u8; 32] {
+-    let mut state = Keccak256::new()
++    var state = Keccak256::new()
+     state.update(input, offset: 0, len: input.len())
+     state.finish()
+ }
+diff --git a/src/permutation.fe b/src/permutation.fe
+index 919ed4a..52f2b60 100644
+--- a/src/permutation.fe
++++ b/src/permutation.fe
+@@ -18,7 +18,7 @@ fn rotate(_ value: u64, by: u64) -> u64 {
+ // The fixed 5x5 round exposes constant lane indices and rotation amounts.
+ // Keep only the 24-round loop; no run-time modulo or temporary lane arrays.
+ pub fn permute(_ state: mut [u64; 25]) {
+-    let mut round: u64 = 0
++    var round: u64 = 0
+     while round < 24 {
+         // Theta: column parities and their neighboring deltas.
+         let c0 = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20]
+diff --git a/src/tests.fe b/src/tests.fe
+index 8df7bbe..277b6fa 100644
+--- a/src/tests.fe
++++ b/src/tests.fe
+@@ -2,7 +2,7 @@ use std::native::ByteBuffer
+ use ingot::{Keccak256, keccak256}
+ 
+ fn digest_word(_ digest: [u8; 32]) -> u256 {
+-    let mut value: u256 = 0
++    var value: u256 = 0
+     for byte in digest { value = (value << 8) | byte as u256 }
+     value
+ }
+@@ -16,16 +16,16 @@ fn keccak_known_answers() {
+ 
+ #[test]
+ fn keccak_updates_cross_rate_boundaries_and_preserve_the_input() {
+-    let mut input: [u8; 409] = [0; 409]
+-    let mut index: usize = 0
++    var input: [u8; 409] = [0; 409]
++    var index: usize = 0
+     while index < 409 {
+         input[index] = index.downcast_truncate()
+         index += 1
+     }
+     let expected = digest_word(keccak256(input))
+     for chunk in [1 as u64, 7, 8, 31, 32, 135, 136, 137, 271, 272, 409] {
+-        let mut state = Keccak256::new()
+-        let mut offset: u64 = 0
++        var state = Keccak256::new()
++        var offset: u64 = 0
+         while offset < 409 {
+             state.update(input, offset, len: 0)
+             let len = if chunk < 409 - offset { chunk } else { 409 - offset }
+@@ -40,14 +40,14 @@ fn keccak_updates_cross_rate_boundaries_and_preserve_the_input() {
+ 
+ #[test]
+ fn keccak_borrows_native_buffer_ranges() {
+-    let mut bytes = ByteBuffer::new()
++    var bytes = ByteBuffer::new()
+     core::assert(bytes.try_resize(5))
+     bytes.set_byte(index: 0, value: 255)
+     bytes.set_byte(index: 1, value: 97)
+     bytes.set_byte(index: 2, value: 98)
+     bytes.set_byte(index: 3, value: 99)
+     bytes.set_byte(index: 4, value: 255)
+-    let mut state = Keccak256::new()
++    var state = Keccak256::new()
+     state.update(bytes, offset: 1, len: 3)
+     core::assert(digest_word(state.finish()) == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45)
+     core::assert(bytes.len() == 5 && bytes.byte_at(0) == 255 && bytes.byte_at(4) == 255)
+-- 
+2.43.0
+

@@ -1,0 +1,36 @@
+use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+
+#[test]
+fn blockhash_limits_history_without_truncating_the_stack_operand() {
+    let max = !(0 as u256)
+    for (current, requested, valid) in [
+        (0, 0, false), (1, 0, true), (255, 0, true), (256, 0, true),
+        (257, 0, false), (300, 43, false), (300, 44, true), (300, 45, true),
+        (300, 299, true), (300, 300, false), (300, 301, false),
+        (300, (1 << 64) + 44, false), (300, max, false),
+        (max, max - 256, true), (max, max - 257, false), (max, max, false),
+    ] {
+        var world = WorldState::empty()
+        // Invalid history entries must remain invisible even when supplied by
+        // the host. The VM checks the window before consulting the database.
+        core::assert(world.set_block_hash(requested, 0x1234))
+        var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+        var bytes: [u8; 4096] = [0; 4096]
+        bytes[0] = 0x7f
+        var index: usize = 0
+        while index < 32 {
+            bytes[index + 1] = (requested >> ((31 - index) * 8) as u256).downcast_truncate()
+            index += 1
+        }
+        bytes[33] = 0x40
+        var block = default_block_env()
+        block.number = current
+        var call = default_call_env()
+        call.gas_limit = 23
+        let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, block, mut transaction)
+        core::assert(result.status == OK && result.gas_remaining == 0)
+        core::assert(result.stack_top == if valid { 0x1234 } else { 0 })
+        result.release()
+        transaction.finish(commit: true, gas_spent: 23).release()
+    }
+}

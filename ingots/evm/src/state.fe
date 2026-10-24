@@ -1,10 +1,39 @@
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
+use std::native::ByteBuffer
+use keccak::{ByteSource, keccak256}
+use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATE_LIMIT, OK}
+
+pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+
+struct Account {
+    balance: u256,
+    nonce: u256,
+    code_offset: u64,
+    code_len: u64,
+    code_hash: u256,
+}
+impl Copy for Account {}
+impl Default for Account {
+    fn default() -> Self {
+        Self { balance: 0, nonce: 0, code_offset: 0, code_len: 0, code_hash: EMPTY_CODE_HASH }
+    }
+}
 
 // EVM account operands use only their low 160 bits.
 pub fn address_word(_ word: u256) -> u256 { word & 0xffffffffffffffffffffffffffffffffffffffff }
 
 pub struct StorageKey { pub address: u256, pub slot: u256 }
+
+// Physical table slots for iterating the world; `occupied` is false for free slots.
+pub struct AccountEntry {
+    pub occupied: bool,
+    pub address: u256,
+    pub balance: u256,
+    pub nonce: u256,
+    pub code_len: u64,
+}
+pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
 
 impl Copy for StorageKey {}
 
@@ -25,8 +54,10 @@ impl SwissKey for StorageKey {
 }
 
 pub struct WorldState {
-    balances: SwissTable<u256, u256>,
-    nonces: SwissTable<u256, u256>,
+    accounts: SwissTable<u256, Account>,
+    // Packed [address:32, length:32, code:length] records. Replacements compact
+    // the arena, so retained storage is bounded by the peak live code extent.
+    code: ByteBuffer,
     storage: SwissTable<StorageKey, u256>,
     block_hashes: SwissTable<u256, u256>,
 }
@@ -34,36 +65,181 @@ pub struct WorldState {
 impl WorldState {
     pub fn empty() -> Self {
         WorldState {
-            balances: SwissTable<u256, u256>::empty(),
-            nonces: SwissTable<u256, u256>::empty(),
+            accounts: SwissTable<u256, Account>::empty(),
+            code: ByteBuffer::new(),
             storage: SwissTable<StorageKey, u256>::empty(),
             block_hashes: SwissTable<u256, u256>::empty(),
         }
     }
-    pub fn balance(self, _ address: u256) -> u256 {
+    pub fn exists(self, _ address: u256) -> bool {
+        self.accounts.contains(address_word(address))
+    }
+    // EIP-161 emptiness: zero balance and nonce, and no code. Absent accounts are empty.
+    pub fn is_empty(self, _ address: u256) -> bool {
+        let account = self.accounts.get(address_word(address)).value
+        account.balance == 0 && account.nonce == 0 && account.code_len == 0
+    }
+    // Delete an account record with its code and storage.
+    pub fn remove_account(mut self, _ address: u256) {
         let address = address_word(address)
-        self.balances.get(address).value
+        let empty: [u8; 0] = []
+        core::assert(self.set_code(address, code: empty) == OK)
+        let _ = self.accounts.remove(address)
+        var slot: usize = 0
+        while slot < self.storage.capacity() {
+            let entry = self.storage.entry(slot)
+            if entry.occupied && entry.key.address == address { let _ = self.storage.remove(entry.key) }
+            slot += 1
+        }
+    }
+    pub fn has_storage(self, _ address: u256) -> bool {
+        let address = address_word(address)
+        var slot: usize = 0
+        while slot < self.storage.capacity() {
+            let entry = self.storage.entry(slot)
+            if entry.occupied && entry.key.address == address { return true }
+            slot += 1
+        }
+        false
+    }
+    pub fn table_slots(self) -> usize { self.accounts.capacity() }
+    pub fn account_at(self, _ slot: usize) -> AccountEntry {
+        let entry = self.accounts.entry(slot)
+        AccountEntry {
+            occupied: entry.occupied, address: entry.key, balance: entry.value.balance,
+            nonce: entry.value.nonce, code_len: entry.value.code_len,
+        }
+    }
+    pub fn storage_slots(self) -> usize { self.storage.capacity() }
+    pub fn storage_at(self, _ slot: usize) -> StorageEntry {
+        let entry = self.storage.entry(slot)
+        StorageEntry { occupied: entry.occupied, address: entry.key.address, slot: entry.key.slot, value: entry.value }
+    }
+    pub fn ensure_account(mut self, _ address: u256) -> bool {
+        let address = address_word(address)
+        self.accounts.contains(address) || self.accounts.insert(address, Account::default())
+    }
+    // Used only by undo after restoring every write that created this account.
+    pub fn remove_empty_account(mut self, _ address: u256) -> bool {
+        let address = address_word(address)
+        let account = self.accounts.get(address).value
+        core::assert(account.balance == 0 && account.nonce == 0 && account.code_len == 0)
+        self.accounts.remove(address)
+    }
+    pub fn balance(self, _ address: u256) -> u256 {
+        self.accounts.get(address_word(address)).value.balance
     }
     pub fn set_balance(mut self, _ address: u256, _ value: u256) -> bool {
         let address = address_word(address)
-        if value == 0 {
-            let _ = self.balances.remove(address)
-            return true
-        }
-        self.balances.insert(address, value)
+        let previous = self.accounts.get(address)
+        if !previous.found && value == 0 { return true }
+        var account = previous.value
+        account.balance = value
+        self.accounts.insert(address, account)
     }
     pub fn nonce(self, _ address: u256) -> u256 {
-        let address = address_word(address)
-        self.nonces.get(address).value
+        self.accounts.get(address_word(address)).value.nonce
     }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
         let address = address_word(address)
-        if value == 0 {
-            let _ = self.nonces.remove(address)
-            return true
-        }
-        self.nonces.insert(address, value)
+        let previous = self.accounts.get(address)
+        if !previous.found && value == 0 { return true }
+        var account = previous.value
+        account.nonce = value
+        self.accounts.insert(address, account)
     }
+    pub fn code_size(self, _ address: u256) -> u64 {
+        self.accounts.get(address_word(address)).value.code_len
+    }
+    // EIP-1052: even an explicitly present account hashes to zero if its
+    // balance, nonce and code are empty. Storage is not part of that predicate.
+    pub fn code_hash(self, _ address: u256) -> u256 {
+        let account = self.accounts.get(address_word(address)).value
+        if account.balance == 0 && account.nonce == 0 && account.code_len == 0 {
+            0
+        } else { account.code_hash }
+    }
+    pub fn code_byte(self, address: u256, index: u64) -> u8 {
+        let account = self.accounts.get(address_word(address)).value
+        core::assert(index < account.code_len)
+        self.code.byte_at(account.code_offset + 64 + index)
+    }
+    // Copy an account's code bytes `offset..offset + len` into `into` at `at`.
+    pub fn copy_code(self, address: u256, _ into: mut ByteBuffer, at: u64, offset: u64, len: u64) {
+        let account = self.accounts.get(address_word(address)).value
+        core::assert(offset <= account.code_len && len <= account.code_len - offset)
+        // An account without code has no arena record to address.
+        if len == 0 { return }
+        into.copy_from(dest: at, source: self.code, offset: account.code_offset + 64 + offset, len)
+    }
+    fn code_word(self, offset: u64) -> u256 {
+        var value: u256 = 0
+        var i: u64 = 0
+        while i < 32 {
+            value = (value << 8) | self.code.byte_at(offset + i) as u256
+            i += 1
+        }
+        value
+    }
+    fn write_code_word(mut self, offset: u64, value: u256) {
+        var i: u64 = 0
+        while i < 32 {
+            self.code.set_byte(index: offset + i, value: (value >> ((31 - i) * 8) as u256).downcast_truncate())
+            i += 1
+        }
+    }
+    // Host-side database initialization. Execution cannot mutate code until
+    // CREATE's account lifecycle and code-deposit rules are implemented.
+    pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
+        let address = address_word(address)
+        let previous = self.accounts.get(address)
+        let len = code.len()
+        if !previous.found && len == 0 { return OK }
+        if !previous.found && self.accounts.len() == self.accounts.capacity() { return ERR_STATE_LIMIT }
+        var account = previous.value
+        let old_size = self.code.len()
+        let removed = if account.code_len == 0 { 0 } else { 64 + account.code_len }
+        let retained = old_size - removed
+        // Bound before addition and before ByteSource traversal/allocation.
+        if len != 0 && (retained > 0x7fffffffffffffff - 64 || len > 0x7fffffffffffffff - 64 - retained) {
+            return ERR_HOST_ALLOCATION
+        }
+        let new_size = retained + if len == 0 { 0 } else { 64 + len }
+        if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
+        if removed != 0 {
+            let start = account.code_offset
+            let end = start + removed
+            self.code.copy_within(dest: start, source: end, len: old_size - end)
+            var cursor = start
+            while cursor < retained {
+                let key = self.code_word(offset: cursor)
+                let size: u64 = self.code_word(offset: cursor + 32).downcast_unchecked()
+                var moved = self.accounts.get(key).value
+                moved.code_offset = cursor
+                core::assert(self.accounts.insert(key, moved))
+                cursor += 64 + size
+            }
+        }
+        account.code_offset = retained
+        account.code_len = len
+        account.code_hash = EMPTY_CODE_HASH
+        if len != 0 {
+            self.write_code_word(offset: retained, value: address)
+            self.write_code_word(offset: retained + 32, value: len as u256)
+            var i: u64 = 0
+            while i < len {
+                self.code.set_byte(index: retained + 64 + i, value: code.byte_at(i))
+                i += 1
+            }
+            let digest = keccak256(code)
+            account.code_hash = 0
+            for byte in digest { account.code_hash = (account.code_hash << 8) | byte as u256 }
+        }
+        core::assert(self.code.try_resize(new_size))
+        core::assert(self.accounts.insert(address, account))
+        OK
+    }
+    pub fn release(own self) { self.code.release() }
     pub fn storage_load(self, _ address: u256, _ slot: u256) -> u256 {
         let address = address_word(address)
         self.storage.get(StorageKey { address: address, slot: slot }).value
@@ -75,7 +251,13 @@ impl WorldState {
             let _ = self.storage.remove(key)
             return true
         }
-        self.storage.insert(key, value)
+        let existed = self.exists(address)
+        if !self.ensure_account(address) { return false }
+        if !self.storage.insert(key, value) {
+            if !existed { core::assert(self.remove_empty_account(address)) }
+            return false
+        }
+        true
     }
     pub fn block_hash(self, _ number: u256) -> u256 {
         self.block_hashes.get(number).value
@@ -102,11 +284,12 @@ fn world_state_defaults_to_zero() {
     core::assert(state.nonce(1) == 0)
     core::assert(state.storage_load(1, 2) == 0)
     core::assert(state.block_hash(3) == 0)
+    state.release()
 }
 
 #[test]
 fn world_state_roundtrips_account_storage() {
-    let mut state = WorldState::empty()
+    var state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
     core::assert(state.set_nonce(0xaa, 7))
     core::assert(state.storage_store(0xaa, 3, 44))
@@ -116,16 +299,18 @@ fn world_state_roundtrips_account_storage() {
     core::assert(state.nonce(0xaa) == 7)
     core::assert(state.storage_load(0xaa, 3) == 44)
     core::assert(state.block_hash(8) == 0x1234)
+    state.release()
 }
 
 #[test]
-fn world_state_zero_values_clear_entries() {
-    let mut state = WorldState::empty()
+fn world_state_zero_balance_preserves_account() {
+    var state = WorldState::empty()
     core::assert(state.set_balance(0xaa, 100))
     core::assert(state.storage_store(0xaa, 3, 44))
     core::assert(state.set_balance(0xaa, 0))
     core::assert(state.storage_store(0xaa, 3, 0))
 
-    core::assert(state.balance(0xaa) == 0)
+    core::assert(state.balance(0xaa) == 0 && state.exists(0xaa))
     core::assert(state.storage_load(0xaa, 3) == 0)
+    state.release()
 }

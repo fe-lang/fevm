@@ -1,0 +1,18 @@
+BASELINE O0
+PASS  [0.0017s] swisstable_basic_operations
+PASS  [0.0027s] swisstable_many_entries_roundtrip
+PASS  [0.0031s] swisstable_tombstones_reuse_full_table_slots
+
+test result: ok. 3 passed; 0 failed
+BASELINE O1
+PASS  [0.0018s] swisstable_basic_operations
+PASS  [0.0023s] swisstable_many_entries_roundtrip
+PASS  [0.0029s] swisstable_tombstones_reuse_full_table_slots
+
+test result: ok. 3 passed; 0 failed
+BASELINE O2
+PASS  [0.0019s] swisstable_basic_operations
+PASS  [0.0023s] swisstable_many_entries_roundtrip
+PASS  [0.0028s] swisstable_tombstones_reuse_full_table_slots
+
+test result: ok. 3 passed; 0 failed

@@ -1,0 +1,32 @@
+    Checking thiserror v2.0.17
+    Checking byteorder v1.5.0
+    Checking num-traits v0.2.19
+    Checking uint v0.10.0
+    Checking primitive-types v0.14.0
+    Checking vec-collections v0.4.3
+    Checking sonatina-triple v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/triple)
+   Compiling sonatina-macros v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/macros)
+    Checking dot2 v1.0.0 (https://github.com/sanpii/dot2.rs.git#893e577c)
+    Checking tracing v0.1.44
+    Checking derive_more v2.0.1
+    Checking thiserror v1.0.69
+    Checking tracing-subscriber v0.3.22
+    Checking sonatina-ir v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/ir)
+    Checking clap v4.5.53
+    Checking syn v2.0.106
+    Checking filecheck v0.5.0
+ Documenting sonatina-macros v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/macros)
+ Documenting sonatina-ir v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/ir)
+    Checking sonatina-parser v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/parser)
+ Documenting sonatina-parser v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/parser)
+ Documenting sonatina-interpreter v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/interpreter)
+    Checking sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/verifier)
+ Documenting sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/verifier)
+ Documenting sonatina-sp1 v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/sp1)
+ Documenting sonatina-triple v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/triple)
+    Checking sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/codegen)
+ Documenting sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/codegen)
+ Documenting sonatina-filecheck v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/filecheck)
+ Documenting sonatina-cli v0.0.3-alpha (/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina/crates/cli)
+    Finished `release` profile [optimized] target(s) in 7.90s
+   Generated /tmp/fevm-mvs-target-preserved-on-disk/doc/sonatina/index.html and 10 other files

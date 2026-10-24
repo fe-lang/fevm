@@ -1,0 +1,4 @@
+    Blocking waiting for file lock on build directory
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/fe)
+    Checking fe-codegen v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/codegen)
+    Finished `release` profile [optimized] target(s) in 1m 16s

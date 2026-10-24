@@ -1,0 +1,8 @@
+{
+  "frozen_inputs_matched_before_adoption": 68,
+  "runtime_harness_inputs_unchanged": 67,
+  "adopted_manifest_matches_tested_build": true,
+  "manifest_before_sha256": "3c76fdfd8d2b925dbe9e4715ff4b5bbe66e8bfddb827e86b2cf0f14096bd2b58",
+  "manifest_after_sha256": "8b87a309ce42ca7439eb0c0f9ec76efa4af2567996aa23d3eead8ab718af575b",
+  "original_user_files_unchanged": 14
+}

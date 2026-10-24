@@ -1,0 +1,24 @@
+
+running 19 tests
+test verify::function::enum_proofs::objects::tests::benchmark_state_index_joins ... ignored
+test verify::function::enum_proofs::objects::tests::joins_retain_only_common_views_and_update_reference_candidates ... ok
+test verify::function::enum_proofs::tests::assertion_reachability_is_monotone ... ok
+test verify::function::enum_proofs::tests::may_targets_do_not_establish_view_equality ... ok
+test verify::function::enum_proofs::tests::rebinding_a_reference_does_not_retarget_a_stored_alias ... ok
+test verify::function::enum_proofs::tests::retiring_a_binding_preserves_unrelated_roots_and_invalidates_each_proof_position ... ok
+test verify::function::enum_proofs::tests::sparse_array_joins_and_writes_are_monotone ... ok
+test verify::function::enum_proofs::tests::value_joins_obey_lattice_laws_and_tag_transfers_are_monotone ... ok
+test verify::function::enum_proofs::tests::worklist_order_does_not_change_the_solution ... ok
+test verify::function::enum_proofs::value_state::tests::aggregate_insert_snapshots_share_unchanged_map_entries ... ok
+test verify::function::enum_proofs::value_state::tests::array_writes_preserve_disjoint_cells_and_weaken_symbolic_views ... ok
+test verify::function::enum_proofs::value_state::tests::captured_arrays_preserve_reference_unions_and_implicit_cells ... ok
+test verify::function::enum_proofs::value_state::tests::reference_summaries_preserve_implicit_and_inactive_uninitialized_cells ... ok
+test verify::function::enum_proofs::value_state::tests::self_join_reuse_preserves_enum_materialization_and_invalidates_on_mutation ... ok
+test verify::function::enum_proofs::value_state::tests::snapshots_isolate_nested_writes_and_share_unchanged_subtrees ... ok
+test verify::function::enum_proofs::value_state::tests::symbolic_index_summaries_follow_nested_changes_and_preserve_snapshots ... ok
+test verify::function::enum_proofs::view_index::tests::candidates_include_alias_roots_guards_and_correlated_anchors ... ok
+test verify::function::enum_proofs::view_index::tests::path_candidates_cover_all_overlaps_and_skip_disjoint_array_cells ... ok
+test verify::function::enum_proofs::view_index::tests::snapshots_keep_paths_guards_anchors_and_bindings_independent ... ok
+
+test result: ok. 18 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.07s
+

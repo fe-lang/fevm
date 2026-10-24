@@ -1,20 +1,21 @@
-use core::Option
 use std::io::{Write, host, write, writeln}
-use std::native::Args
-use fevm::{CallEnv, InputData, Program, StorageKey, Transaction, WorldState, default_block_env, default_call_env}
-use fevm::hex::{parse_hex_bytes, write_hex_word}
+use std::native::{Args, ByteBuffer}
+use fevm::{LogBuffer, BlockEnv, CallEnv, InputData, Program, StorageKey, Transaction, WorldState, default_block_env, default_call_env}
+use fevm::hex::{parse_hex_bytes, write_hex_byte, write_hex_word}
 use fevm::vm::execute_vm
 use fevm_frame::{write_frame, write_gas}
 
-struct Reader { data: InputData, position: usize }
+struct Reader { data: InputData, position: u64 }
 
 impl Reader {
     fn word(mut self, bytes: usize) -> u256 {
-        core::assert(bytes <= 32 && bytes <= self.data.len - self.position)
-        let mut value: u256 = 0
-        let end = self.position + bytes
+        core::assert(bytes <= 32 && self.position <= self.data.len()
+                     && (bytes as u256) <= (self.data.len() - self.position) as u256)
+        var value: u256 = 0
+        let width: u64 = bytes.downcast_unchecked()
+        let end = self.position + width
         while self.position < end {
-            value = (value << 8) | self.data.bytes[self.position] as u256
+            value = (value << 8) | self.data.byte_at(self.position) as u256
             self.position += 1
         }
         value
@@ -26,15 +27,11 @@ impl Reader {
         flag == 1
     }
     fn input(mut self) -> InputData {
-        let len = self.count()
-        core::assert(len <= 4096)
-        let mut bytes: [u8; 4096] = [0; 4096]
-        let mut index: usize = 0
-        while index < len {
-            bytes[index] = self.word(bytes: 1).downcast_unchecked()
-            index += 1
-        }
-        InputData { bytes, len, status: 0 }
+        let len: u64 = self.count().downcast_unchecked()
+        let input = InputData::copy_from(self.data, offset: self.position, len)
+        core::assert(input.status == 0)
+        self.position += len
+        input
     }
 }
 
@@ -46,15 +43,15 @@ struct Watch {
 }
 
 fn read_watch(_ reader: mut Reader) -> Watch {
-    let mut accounts: [u256; 256] = [0; 256]
+    var accounts: [u256; 256] = [0; 256]
     let account_count = reader.count()
     core::assert(account_count <= 256)
-    let mut index: usize = 0
+    var index: usize = 0
     while index < account_count {
         accounts[index] = reader.word(bytes: 20)
         index += 1
     }
-    let mut slots: [StorageKey; 256] = [StorageKey { address: 0, slot: 0 }; 256]
+    var slots: [StorageKey; 256] = [StorageKey { address: 0, slot: 0 }; 256]
     let slot_count = reader.count()
     core::assert(slot_count <= 256)
     index = 0
@@ -78,13 +75,46 @@ fn write_signed(_ value: i128) uses (w: mut Write) {
     write_gas(magnitude.downcast_unchecked())
 }
 
+fn write_logs(_ logs: LogBuffer) uses (w: mut Write) {
+    write("[")
+    var index: u64 = 0
+    while index < logs.len() {
+        if index != 0 { write(",") }
+        let entry = logs.entry(index)
+        write("{\"address\":\"0x")
+        var byte: u64 = 0
+        while byte < 20 {
+            write_hex_byte(((entry.address >> ((19 - byte) * 8) as u256) & 255).downcast_unchecked())
+            byte += 1
+        }
+        write("\",\"topics\":[")
+        var topic: u64 = 0
+        while topic < entry.topic_count {
+            if topic != 0 { write(",") }
+            write("\"")
+            write_hex_word(entry.topics[topic as usize])
+            write("\"")
+            topic += 1
+        }
+        write("],\"data\":\"0x")
+        byte = 0
+        while byte < entry.len() {
+            write_hex_byte(logs.byte_at(entry: index, index: byte) as i32)
+            byte += 1
+        }
+        write("\"}")
+        index += 1
+    }
+    write("]")
+}
+
 fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (w: mut Write) {
     write(",\"refund_delta\":")
     write_signed(refund_delta)
     write(",\"refund_counter\":")
     write_signed(tx.refund())
     write(",\"accounts\":[")
-    let mut index: usize = 0
+    var index: usize = 0
     while index < watch.account_count {
         if index != 0 { write(",") }
         let address = watch.accounts[index]
@@ -111,19 +141,19 @@ fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (w
         write("}")
         index += 1
     }
-    write("]}")
+    write("],\"logs\":")
+    write_logs(tx.logs())
+    write("}")
 }
 
 #[inline(never)]
-fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, coinbase: u256) -> u64 uses (w: mut Write) {
-    let mut call = call
+fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv) -> u64 uses (w: mut Write) {
+    var call = call
     call.is_static = reader.flag()
     call.gas_limit = reader.word(bytes: 8).downcast_unchecked()
     let code = reader.input()
     let calldata = reader.input()
-    let mut block = default_block_env()
-    block.coinbase = coinbase
-    let vm = execute_vm(Program::new(code.bytes, len: code.len, status: 0), calldata, call, block, mut tx)
+    let vm = execute_vm(Program::new(code), calldata, call, block, mut tx)
     let supported = vm.status == 0 || (vm.status >= 15 && vm.status <= 19)
         || vm.status == 10 || vm.status == 11 || vm.status == 23
     core::assert(supported)
@@ -135,25 +165,22 @@ fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call
     gas_spent
 }
 
-fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, coinbase: u256, _ emitted: mut bool) -> u64 uses (w: mut Write) {
+fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv, _ emitted: mut bool) -> u64 uses (w: mut Write) {
     let count = reader.count()
-    let mut index: usize = 0
-    let mut gas_spent: u64 = 0
+    var index: usize = 0
+    var gas_spent: u64 = 0
     while index < count {
         let kind = reader.word(bytes: 1)
         if kind == 0 {
             if emitted { write(",") }
             emitted = true
-            gas_spent += run_frame(mut tx, mut reader, watch, call, coinbase)
+            gas_spent += run_frame(mut tx, mut reader, watch, call, block)
         } else {
             core::assert(kind == 1)
             let is_static = reader.flag()
             let commit = reader.flag()
-            let point = match tx.checkpoint(is_static) {
-                Option::Some(point) => point,
-                Option::None => core::panic(),
-            }
-            gas_spent += run_actions(mut tx, mut reader, watch, call, coinbase, mut emitted)
+            let point = tx.checkpoint(is_static)
+            gas_spent += run_actions(mut tx, mut reader, watch, call, block, mut emitted)
             if commit { tx.commit(point) } else { tx.revert(point) }
             if emitted { write(",") }
             emitted = true
@@ -166,19 +193,44 @@ fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ ca
 }
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
-    let args = Args::new(argc, argv)
+    // Native main supplies live NUL-terminated arguments for this process.
+    let args = unsafe { Args::new(argc, argv) }
     if args.len() != 2 { return 2 }
     let data = parse_hex_bytes(args.get(1))
-    if data.status != 0 { return 2 }
-    let mut reader = Reader { data, position: 0 }
-    core::assert(reader.word(bytes: 1) == 1)
-    let mut world = WorldState::empty()
-    let balances = reader.count()
-    let mut index: usize = 0
-    while index < balances {
+    if data.status != 0 {
+        data.release()
+        return 2
+    }
+    var reader = Reader { data, position: 0 }
+    core::assert(reader.word(bytes: 1) == 4)
+    var world = WorldState::empty()
+    let hashes = reader.count()
+    var index: usize = 0
+    while index < hashes {
+        let number = reader.word(bytes: 32)
+        let hash = reader.word(bytes: 32)
+        core::assert(world.set_block_hash(number, hash))
+        index += 1
+    }
+    let accounts = reader.count()
+    index = 0
+    while index < accounts {
         let address = reader.word(bytes: 20)
-        let value = reader.word(bytes: 32)
-        core::assert(world.set_balance(address, value))
+        let balance = reader.word(bytes: 32)
+        let nonce = reader.word(bytes: 8)
+        core::assert(world.ensure_account(address))
+        core::assert(world.set_balance(address, balance))
+        core::assert(world.set_nonce(address, nonce))
+        let len: u64 = reader.count().downcast_unchecked()
+        var code = ByteBuffer::new()
+        core::assert(code.try_resize(len))
+        var byte: u64 = 0
+        while byte < len {
+            code.set_byte(index: byte, value: reader.word(bytes: 1).downcast_unchecked())
+            byte += 1
+        }
+        core::assert(world.set_code(address, code) == 0)
+        code.release()
         index += 1
     }
     let storage = reader.count()
@@ -200,10 +252,17 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
             let sender = reader.word(bytes: 20)
             let destination = reader.word(bytes: 20)
             let coinbase = reader.word(bytes: 20)
+            let block_number = reader.word(bytes: 32)
+            var tx = Transaction::new(world, sender, destination, coinbase)
+            let blobs = reader.count()
+            var blob: usize = 0
+            while blob < blobs {
+                core::assert(tx.add_blob_hash(reader.word(bytes: 32)))
+                blob += 1
+            }
             let commit = reader.flag()
-            let mut tx = Transaction::new(world, sender, destination, coinbase)
             let accounts = reader.count()
-            let mut entry: usize = 0
+            var entry: usize = 0
             while entry < accounts {
                 core::assert(tx.access_list_account(address: reader.word(bytes: 20)))
                 entry += 1
@@ -216,13 +275,16 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
                 core::assert(tx.access_list_slot(address, slot))
                 entry += 1
             }
-            let mut call = default_call_env()
+            var call = default_call_env()
             call.address = destination
             call.caller = sender
             call.origin = sender
-            let mut emitted = false
+            var block = default_block_env()
+            block.coinbase = coinbase
+            block.number = block_number
+            var emitted = false
             write("{\"steps\":[")
-            let gas_spent = run_actions(mut tx, mut reader, watch, call, coinbase, mut emitted)
+            let gas_spent = run_actions(mut tx, mut reader, watch, call, block, mut emitted)
             write("],\"refund_counter\":")
             write_signed(if commit { tx.refund() } else { 0 })
             let settled = tx.finish(commit, gas_spent)
@@ -249,12 +311,16 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
                 write("\"")
                 entry += 1
             }
-            write("]}")
-            world = settled.state
+            write("],\"logs\":")
+            write_logs(settled.logs)
+            write("}")
+            world = settled.into_state()
             index += 1
         }
         writeln("]")
     }
-    core::assert(reader.position == reader.data.len)
+    world.release()
+    core::assert(reader.position == reader.data.len())
+    reader.data.release()
     0
 }

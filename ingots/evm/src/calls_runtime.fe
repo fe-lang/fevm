@@ -1,0 +1,361 @@
+use std::native::ByteBuffer
+use ingot::constants::{ERR_RETURN_DATA_OOB, ERR_STATE_LIMIT, ERR_STATIC_WRITE, OK}
+use ingot::state::WorldState
+use ingot::transaction::Transaction
+use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
+use ingot::vm::Vm
+
+fn append(_ bytes: mut ByteBuffer, _ value: u8) {
+    let index = bytes.len()
+    core::assert(bytes.try_resize(index + 1))
+    bytes.set_byte(index, value)
+}
+
+// One input byte and enough output space for four environment words.
+fn env_call(op: u8) -> Program {
+    var bytes = ByteBuffer::new()
+    for byte in [0x60 as u8, 42, 0x60, 31, 0x53, 0x60, 128, 0x5f, 0x60, 1, 0x60, 31] {
+        append(mut bytes, byte)
+    }
+    if op == 0xf1 || op == 0xf2 {
+        append(mut bytes, 0x60)
+        append(mut bytes, 7)
+    }
+    for byte in [0x60 as u8, 0xbb, 0x61, 0xff, 0xff, op] {
+        append(mut bytes, byte)
+    }
+    let program = Program::copy_from(bytes, len: bytes.len().downcast_unchecked())
+    bytes.release()
+    program
+}
+
+#[test]
+pub fn call_variants_preserve_environment_and_value() {
+    for op in [0xf1 as u8, 0xf2, 0xf4, 0xfa] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(0xaa, 100))
+        core::assert(
+            world
+                    .set_code(
+                        address: 0xbb,
+                        code: [
+                            0x30 as u8,
+                            0x5f,
+                            0x52,
+                            0x33,
+                            0x60,
+                            32,
+                            0x52,
+                            0x34,
+                            0x60,
+                            64,
+                            0x52,
+                            0x60,
+                            1,
+                            0x5f,
+                            0x60,
+                            96,
+                            0x37,
+                            0x60,
+                            128,
+                            0x5f,
+                            0xf3,
+                        ],
+                    )
+                == OK,
+        )
+        var tx = Transaction::new(world, sender: 0xcc, destination: 0xaa, coinbase: 0)
+        var call = default_call_env()
+        call.address = 0xaa
+        call.caller = 0xcc
+        call.origin = 0xcc
+        call.callvalue = 9
+        var vm = Vm::new()
+        vm.run_owned(
+            env_call(op),
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut tx,
+        )
+        core::assert(vm.status == OK && vm.sp == 1 && vm.stack[0] == 1)
+        core::assert(vm.return_data.len() == 128 && vm.memory.len() == 128)
+        core::assert(
+            vm.memory.byte_at(31) == if op == 0xf2 || op == 0xf4 {
+                    0xaa
+                } else {
+                    0xbb
+                },
+        )
+        core::assert(
+            vm.memory.byte_at(63) == if op == 0xf4 { 0xcc } else { 0xaa },
+        )
+        core::assert(
+            vm.memory.byte_at(95) == if op == 0xf4 {
+                    9
+                } else if op == 0xfa { 0 } else { 7 },
+        )
+        core::assert(vm.memory.byte_at(96) == 42)
+        core::assert(tx.balance(0xaa) == if op == 0xf1 { 93 } else { 100 })
+        core::assert(tx.balance(0xbb) == if op == 0xf1 { 7 } else { 0 })
+        core::assert(tx.depth() == 0 && !tx.is_static())
+        vm.release()
+        tx.finish(commit: true, gas_spent: 0).release()
+    }
+}
+
+#[test]
+pub fn call_revert_restores_state_and_keeps_output_prefix() {
+    // 0x5d marks an operational failure: the child exhausts the transient table.
+    for exit in [0xf3 as u8, 0xfd, 0xfe, 0x5d] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(0xaa, 100))
+        // BALANCE(0xcc), SSTORE(0, 9), TSTORE(0, 8), MSTORE(0, 0x1122), then exit.
+        let prefix = [
+            0x60 as u8, 0xcc, 0x31, 0x50, 0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d,
+            0x61, 0x11, 0x22, 0x5f, 0x52,
+        ]
+        var code = ByteBuffer::new()
+        for byte in prefix { append(mut code, byte) }
+        if exit == 0x5d {
+            // TSTORE 1 under keys 257 down to 1, looping at offset 20.
+            for byte in [0x61 as u8, 1, 1, 0x5b, 0x60, 1, 0x81, 0x5d, 0x60, 1, 0x90, 0x03, 0x80,
+                         0x60, 20, 0x57, 0x00] {
+                append(mut code, byte)
+            }
+        } else {
+            for byte in [0x60 as u8, 2, 0x60, 30, exit] { append(mut code, byte) }
+        }
+        core::assert(world.set_code(address: 0xbb, code) == OK)
+        code.release()
+        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+        var call = default_call_env()
+        call.address = 0xaa
+        let ops = [
+            0x61 as u8,
+            0xaa,
+            0xbb,
+            0x5f,
+            0x52,
+            0x60,
+            1,
+            0x60,
+            30,
+            0x5f,
+            0x5f,
+            0x60,
+            7,
+            0x60,
+            0xbb,
+            0x62,
+            1,
+            0x86,
+            0xa0,
+            0xf1,
+        ]
+        var vm = Vm::new()
+        vm.run_owned(
+            Program::copy_from(ops, len: 20),
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut tx,
+        )
+        core::assert(
+            vm.status == if exit == 0x5d { ERR_STATE_LIMIT } else { OK },
+        )
+        if exit != 0x5d {
+            core::assert(
+                vm.sp == 1 && vm.stack[0] == if exit == 0xf3 { 1 } else { 0 },
+            )
+        }
+        let returned = exit == 0xf3 || exit == 0xfd
+        core::assert(vm.return_data.len() == if returned { 2 } else { 0 })
+        core::assert(
+            vm.memory.byte_at(30) == if returned { 0x11 } else { 0xaa },
+        )
+        core::assert(vm.memory.byte_at(31) == 0xbb)
+        core::assert(tx.balance(0xaa) == if exit == 0xf3 { 93 } else { 100 })
+        core::assert(
+            tx.storage_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 9 } else { 0 },
+        )
+        core::assert(
+            tx.transient_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 8 } else { 0 },
+        )
+        core::assert(tx.account_is_warm(0xbb) == (exit != 0x5d))
+        core::assert(tx.account_is_warm(0xcc) == (exit == 0xf3))
+        core::assert(tx.depth() == 0)
+        vm.release()
+        tx.finish(commit: true, gas_spent: 0).release()
+    }
+}
+
+#[test]
+pub fn call_empty_and_insufficient_funds_charge_exact_gas() {
+    // First access is cold, second is warm; zero requested gas returns the stipend.
+    for (value, balance, expected_gas, success) in [
+        (0 as u8, 0 as u256, 997384 as u64, 1 as u256),
+        (7, 100, 965684, 1),
+        (7, 0, 965684, 0),
+    ] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(0xaa, balance))
+        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+        var call = default_call_env()
+        call.address = 0xaa
+        let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x60, value, 0x60, 0xbb, 0x5f, 0xf1]
+        let program = Program::copy_from(ops, len: 10)
+        var vm = Vm::new()
+        vm.run(program, empty_bytes(), call, default_block_env(), mut tx)
+        core::assert(
+            vm.status == OK && vm.stack[0] == success && vm.gas_remaining == expected_gas,
+        )
+        core::assert(vm.return_data.len() == 0 && tx.account_is_warm(0xbb))
+        if value == 0 {
+            vm.run(program, empty_bytes(), call, default_block_env(), mut tx)
+            core::assert(vm.gas_remaining == 999884)
+        }
+        program.release()
+        vm.release()
+        tx.finish(commit: true, gas_spent: 0).release()
+    }
+}
+
+#[test]
+pub fn call_static_rules_and_return_data_bounds() {
+    for op in [0xf1 as u8, 0xf2] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(0xaa, 100))
+        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+        var call = default_call_env()
+        call.address = 0xaa
+        call.is_static = true
+        var vm = Vm::new()
+        vm.run_owned(
+            env_call(op),
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut tx,
+        )
+        core::assert(
+            vm.status == if op == 0xf1 { ERR_STATIC_WRITE } else { OK },
+        )
+        core::assert(
+            tx.balance(0xaa) == 100 && tx.depth() == 0 && !tx.is_static(),
+        )
+        vm.release()
+        tx.finish(commit: true, gas_spent: 0).release()
+    }
+    for source in [2 as u8, 3] {
+        var world = WorldState::empty()
+        core::assert(
+            world
+                    .set_code(
+                        address: 0xbb,
+                        code: [0x61 as u8, 0x11, 0x22, 0x5f, 0x52, 0x60, 2, 0x60, 30, 0xf3],
+                    )
+                == OK,
+        )
+        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+        let ops = [
+            0x5f as u8,
+            0x5f,
+            0x5f,
+            0x5f,
+            0x5f,
+            0x60,
+            0xbb,
+            0x61,
+            0xff,
+            0xff,
+            0xf1,
+            0x60,
+            2,
+            0x5f,
+            0x5f,
+            0x3e,
+            0x3d,
+            0x5f,
+            0x60,
+            source,
+            0x5f,
+            0x3e,
+        ]
+        var vm = Vm::new()
+        vm.run_owned(
+            Program::copy_from(ops, len: 22),
+            empty_bytes(),
+            default_call_env(),
+            default_block_env(),
+            mut tx,
+        )
+        core::assert(
+            vm.status == if source == 2 {
+                    OK
+                } else {
+                    ERR_RETURN_DATA_OOB
+                },
+        )
+        core::assert(
+            vm.memory.byte_at(0) == 0x11 && vm.memory.byte_at(1) == 0x22,
+        )
+        core::assert(vm.return_data.len() == 2 && vm.stack[1] == 2)
+        vm.release()
+        tx.finish(commit: true, gas_spent: 0).release()
+    }
+}
+
+#[test]
+pub fn call_protocol_depth_is_iterative_and_independent_of_checkpoints() {
+    // Count entries in shared transient state, then recursively CALL ourselves.
+    // On unwind accumulate failed calls. Exactly the attempted 1025th child fails.
+    let ops = [
+        0x5f as u8,
+        0x5c,
+        0x60,
+        1,
+        0x01,
+        0x5f,
+        0x5d,
+        0x5f,
+        0x5f,
+        0x5f,
+        0x5f,
+        0x5f,
+        0x60,
+        0xaa,
+        0x5a,
+        0xf1,
+        0x15,
+        0x60,
+        1,
+        0x5c,
+        0x01,
+        0x60,
+        1,
+        0x5d,
+    ]
+    var world = WorldState::empty()
+    core::assert(world.set_code(address: 0xaa, code: ops) == OK)
+    var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+    let outer = tx.checkpoint(is_static: false)
+    var call = default_call_env()
+    call.address = 0xaa
+    call.gas_limit = 0xffffffffffffffff
+    var vm = Vm::new()
+    vm.run_owned(
+        Program::copy_from(ops, len: 24),
+        empty_bytes(),
+        call,
+        default_block_env(),
+        mut tx,
+    )
+    core::assert(vm.status == OK && tx.depth() == 1)
+    core::assert(tx.transient_load(address: 0xaa, slot: 0) == 1025)
+    core::assert(tx.transient_load(address: 0xaa, slot: 1) == 1)
+    vm.release()
+    tx.revert(outer)
+    core::assert(tx.transient_load(address: 0xaa, slot: 0) == 0)
+    tx.finish(commit: true, gas_spent: 0).release()
+}

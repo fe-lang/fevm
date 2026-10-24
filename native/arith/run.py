@@ -28,8 +28,8 @@ OPERATIONS = {
 }
 
 
-def command(args, **kwargs):
-    result = subprocess.run([str(x) for x in args], capture_output=True, timeout=600, **kwargs)
+def command(args, *, timeout=600, **kwargs):
+    result = subprocess.run([str(x) for x in args], capture_output=True, timeout=timeout, **kwargs)
     if result.returncode:
         raise RuntimeError(f'command failed ({result.returncode}): {args}\n'
                            + result.stdout.decode(errors='replace')
@@ -86,9 +86,9 @@ def source(op, representation):
 #[arithmetic(unchecked)]
 fn kernel(lhs: Word, rhs: Word, rounds: u64) -> Word {{
     {setup}
-    let mut a = seed
-    let mut result = seed
-    let mut i: u64 = 0
+    var a = seed
+    var result = seed
+    var i: u64 = 0
     while i < rounds {{
         result = {body}
         a = {next_a}

@@ -1,0 +1,31 @@
+   Compiling sonatina-codegen v0.0.3-alpha (/run/user/1000/fevm-mvs-sonatina/crates/codegen)
+    Finished `release` profile [optimized] target(s) in 34.97s
+────────────
+ Nextest run ID 6387f387-6934-42b1-a250-44e84168b8a3 with nextest profile: default
+    Starting 1 test across 1 binary (51 tests skipped)
+        FAIL [   0.006s] (1/1) sonatina-codegen::opt_pipeline loop_enum_extract_keeps_its_variant_proof
+  stdout ───
+
+    running 1 test
+    test loop_enum_extract_keeps_its_variant_proof ... FAILED
+
+    failures:
+
+    failures:
+        loop_enum_extract_keeps_its_variant_proof
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s
+
+  stderr ───
+    SONATINA_IR_VERIFY_FAILURE: module
+    error [IR0600] enum.extract requires a proven active variant at the use site @ func0:block0:inst8 (%sum, enum.extract)
+
+
+    thread 'loop_enum_extract_keeps_its_variant_proof' (2300045) panicked at crates/verifier/src/verify.rs:94:9:
+    SONATINA_IR_VERIFY_FAILURE
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.006s] 1 test run: 0 passed, 1 failed, 51 skipped
+        FAIL [   0.006s] (1/1) sonatina-codegen::opt_pipeline loop_enum_extract_keeps_its_variant_proof
+error: test run failed

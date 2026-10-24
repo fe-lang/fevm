@@ -1,0 +1,15 @@
+SwissTable ingot O0: passed
+baseline-O0-timing: 167 scenarios passed; text=725086; build=0.45s
+baseline-O0-probes: 167 scenarios passed; text=960494; build=0.41s
+candidate-O0-timing: 167 scenarios passed; text=721774; build=0.37s
+candidate-O0-probes: 167 scenarios passed; text=956878; build=0.42s
+SwissTable ingot O1: passed
+baseline-O1-timing: 167 scenarios passed; text=540360; build=0.98s
+baseline-O1-probes: 167 scenarios passed; text=798120; build=1.40s
+candidate-O1-timing: 167 scenarios passed; text=527624; build=0.99s
+candidate-O1-probes: 167 scenarios passed; text=781360; build=1.46s
+SwissTable ingot O2: passed
+baseline-O2-timing: 167 scenarios passed; text=540360; build=0.97s
+baseline-O2-probes: 167 scenarios passed; text=798120; build=1.39s
+candidate-O2-timing: 167 scenarios passed; text=527624; build=0.97s
+candidate-O2-probes: 167 scenarios passed; text=781360; build=1.40s

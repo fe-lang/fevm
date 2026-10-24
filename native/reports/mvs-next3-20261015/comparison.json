@@ -1,0 +1,65 @@
+{
+  "complete": true,
+  "fork_mvs": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "baseline_fe": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "final_backend": "325114276de157cde38f5833ed8413166ef9741a",
+  "matched_source_inputs": 68,
+  "scope": "One report-enabled O1 complete workspace observation per configuration; one suite/Rayon worker; no task builds/tests overlap these native measurements. Full verification retained.",
+  "measurements": [
+    {
+      "name": "baseline-O1",
+      "seconds": 636.9030882401858,
+      "status": 0,
+      "compiler_sha256": "c9ffe9ef6d74f3acd62ba76dc19db17769f66c58eadb26d124a21aa1fb1435ff",
+      "user_seconds": 620.78,
+      "system_seconds": 15.11,
+      "peak_rss_kib": 7240176.0
+    },
+    {
+      "name": "index-O1",
+      "seconds": 685.5956314019859,
+      "status": 0,
+      "compiler_sha256": "aa516b3c7e8036073dee6092ac29807e4b8bbb121a0359582147ed3da5f16d55",
+      "user_seconds": 671.5,
+      "system_seconds": 14.23,
+      "peak_rss_kib": 7390940.0
+    },
+    {
+      "name": "layout-O1",
+      "seconds": 678.3414670510683,
+      "status": 0,
+      "compiler_sha256": "afaecee3515803341bc916ccf7565e8c65d5e36829b6a290b8915e27a59163db",
+      "user_seconds": 665.72,
+      "system_seconds": 13.05,
+      "peak_rss_kib": 7376064.0
+    },
+    {
+      "name": "join-O1",
+      "seconds": 534.8358867899515,
+      "status": 0,
+      "compiler_sha256": "72a666a07d2a4330d57c3971a9e759cfba4e889d67d944493d4ba4e356c765d8",
+      "user_seconds": 525.24,
+      "system_seconds": 10.02,
+      "peak_rss_kib": 4440956.0
+    },
+    {
+      "name": "suite-O1",
+      "seconds": 401.405444992939,
+      "status": 0,
+      "compiler_sha256": "f927d5fbc7acbed2499f5d511323b8281fc512e74b7c124f553fdbd3c77c71d8",
+      "user_seconds": 393.72,
+      "system_seconds": 7.85,
+      "peak_rss_kib": 4648812.0
+    }
+  ],
+  "backend_wall_reduction_percent": 16.025546638854294,
+  "backend_peak_rss_reduction_percent": 38.662319811010114,
+  "rejected_initial_index_only": true,
+  "combined_wall_reduction_percent": 36.97542806676375,
+  "suite_incremental_wall_reduction_percent": 24.947922361353292,
+  "combined_peak_rss_reduction_percent": 35.79145037358208,
+  "runtime_function_entries_before": 3382,
+  "runtime_function_entries_after": 653,
+  "native_objects_before": 12,
+  "native_objects_after": 1
+}

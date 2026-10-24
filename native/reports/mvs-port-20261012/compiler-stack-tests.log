@@ -1,0 +1,11 @@
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/fe)
+    Finished `release` profile [optimized] target(s) in 1.01s
+────────────
+ Nextest run ID dcfde0ee-34aa-4292-9ebb-a67b8adbecbe with nextest profile: default
+    Starting 4 tests across 1 binary (22 tests skipped)
+        PASS [   0.661s] (1/4) fe::native_runtime native_byte_buffer_preserves_contents_and_reuses_zeroed_storage
+        PASS [   0.783s] (2/4) fe::native_runtime native_byte_buffer_allocation_failure_is_atomic_and_storage_is_released
+        PASS [   0.233s] (3/4) fe::native_runtime native_fixed_stack_reserves_its_owner_while_top_is_used
+        PASS [   1.668s] (4/4) fe::native_runtime native_fixed_stack_owns_slots_and_reclaims_allocations
+────────────
+     Summary [   2.329s] 4 tests run: 4 passed, 22 skipped

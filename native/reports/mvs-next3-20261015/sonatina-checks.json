@@ -1,0 +1,107 @@
+{
+  "complete": true,
+  "checks": [
+    {
+      "name": "format-write",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all"
+      ],
+      "status": 0,
+      "seconds": 1.209375058999285
+    },
+    {
+      "name": "nextest",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "nextest",
+        "r",
+        "--release",
+        "--no-fail-fast",
+        "--locked",
+        "--workspace",
+        "--all-features"
+      ],
+      "status": 0,
+      "seconds": 139.75664252997376
+    },
+    {
+      "name": "doctests",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "test",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--doc"
+      ],
+      "status": 0,
+      "seconds": 1.6983106101397425
+    },
+    {
+      "name": "docs",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "doc",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--no-deps"
+      ],
+      "status": 0,
+      "seconds": 7.521584009053186
+    },
+    {
+      "name": "filecheck",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "run",
+        "--release",
+        "--locked",
+        "-p",
+        "sonatina-filecheck"
+      ],
+      "status": 0,
+      "seconds": 47.337832272052765
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "+1.99.0",
+        "clippy",
+        "--release",
+        "--locked",
+        "--workspace",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "status": 0,
+      "seconds": 11.279318939894438
+    },
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "status": 0,
+      "seconds": 1.1463691149838269
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+use std::io::{Write, host, write}
+
+pub use state::WorldState
+pub use transaction::Transaction
+pub use types::{InputData, Program, default_block_env, default_call_env, empty_bytes}
+
+pub fn main() -> i32 {
+    inputs_runtime::vm_reuses_owned_inputs_beyond_the_old_frame_bound()
+    inputs_runtime::vm_input_failure_preserves_the_transaction_setup_phase()
+    inputs_runtime::vm_owned_inputs_execute_large_code_and_jump_boundaries()
+    with (Write = host()) { write("VM inputs passed\n") }
+    0
+}

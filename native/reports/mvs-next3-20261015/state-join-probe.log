@@ -1,0 +1,78 @@
+
+running 1 test
+test verify::function::enum_proofs::objects::tests::benchmark_state_index_joins ... JOIN_PROBE count=128 changed=false pair=0 compiler=baseline iterations=64 seconds=0.004640800
+JOIN_PROBE count=128 changed=false pair=0 compiler=candidate iterations=64 seconds=0.000944800
+JOIN_PROBE count=128 changed=false pair=1 compiler=candidate iterations=64 seconds=0.000939400
+JOIN_PROBE count=128 changed=false pair=1 compiler=baseline iterations=64 seconds=0.004715800
+JOIN_PROBE count=128 changed=false pair=2 compiler=baseline iterations=64 seconds=0.004616500
+JOIN_PROBE count=128 changed=false pair=2 compiler=candidate iterations=64 seconds=0.000925500
+JOIN_PROBE count=128 changed=false pair=3 compiler=candidate iterations=64 seconds=0.000930000
+JOIN_PROBE count=128 changed=false pair=3 compiler=baseline iterations=64 seconds=0.004675600
+JOIN_PROBE count=128 changed=false pair=4 compiler=baseline iterations=64 seconds=0.004605600
+JOIN_PROBE count=128 changed=false pair=4 compiler=candidate iterations=64 seconds=0.000940101
+JOIN_PROBE count=128 changed=false pair=5 compiler=candidate iterations=64 seconds=0.000919400
+JOIN_PROBE count=128 changed=false pair=5 compiler=baseline iterations=64 seconds=0.004618300
+JOIN_PROBE count=128 changed=true pair=0 compiler=baseline iterations=64 seconds=0.004610700
+JOIN_PROBE count=128 changed=true pair=0 compiler=candidate iterations=64 seconds=0.001104300
+JOIN_PROBE count=128 changed=true pair=1 compiler=candidate iterations=64 seconds=0.001092200
+JOIN_PROBE count=128 changed=true pair=1 compiler=baseline iterations=64 seconds=0.004586800
+JOIN_PROBE count=128 changed=true pair=2 compiler=baseline iterations=64 seconds=0.004533200
+JOIN_PROBE count=128 changed=true pair=2 compiler=candidate iterations=64 seconds=0.001083100
+JOIN_PROBE count=128 changed=true pair=3 compiler=candidate iterations=64 seconds=0.001073400
+JOIN_PROBE count=128 changed=true pair=3 compiler=baseline iterations=64 seconds=0.004562900
+JOIN_PROBE count=128 changed=true pair=4 compiler=baseline iterations=64 seconds=0.004554500
+JOIN_PROBE count=128 changed=true pair=4 compiler=candidate iterations=64 seconds=0.001086200
+JOIN_PROBE count=128 changed=true pair=5 compiler=candidate iterations=64 seconds=0.001091100
+JOIN_PROBE count=128 changed=true pair=5 compiler=baseline iterations=64 seconds=0.004550900
+JOIN_PROBE count=512 changed=false pair=0 compiler=baseline iterations=64 seconds=0.027933700
+JOIN_PROBE count=512 changed=false pair=0 compiler=candidate iterations=64 seconds=0.004566000
+JOIN_PROBE count=512 changed=false pair=1 compiler=candidate iterations=64 seconds=0.004373000
+JOIN_PROBE count=512 changed=false pair=1 compiler=baseline iterations=64 seconds=0.027874400
+JOIN_PROBE count=512 changed=false pair=2 compiler=baseline iterations=64 seconds=0.027791500
+JOIN_PROBE count=512 changed=false pair=2 compiler=candidate iterations=64 seconds=0.004518000
+JOIN_PROBE count=512 changed=false pair=3 compiler=candidate iterations=64 seconds=0.004376500
+JOIN_PROBE count=512 changed=false pair=3 compiler=baseline iterations=64 seconds=0.027764000
+JOIN_PROBE count=512 changed=false pair=4 compiler=baseline iterations=64 seconds=0.027932300
+JOIN_PROBE count=512 changed=false pair=4 compiler=candidate iterations=64 seconds=0.004559900
+JOIN_PROBE count=512 changed=false pair=5 compiler=candidate iterations=64 seconds=0.004372400
+JOIN_PROBE count=512 changed=false pair=5 compiler=baseline iterations=64 seconds=0.027753700
+JOIN_PROBE count=512 changed=true pair=0 compiler=baseline iterations=64 seconds=0.028550300
+JOIN_PROBE count=512 changed=true pair=0 compiler=candidate iterations=64 seconds=0.004888100
+JOIN_PROBE count=512 changed=true pair=1 compiler=candidate iterations=64 seconds=0.004666400
+JOIN_PROBE count=512 changed=true pair=1 compiler=baseline iterations=64 seconds=0.028322400
+JOIN_PROBE count=512 changed=true pair=2 compiler=baseline iterations=64 seconds=0.028569000
+JOIN_PROBE count=512 changed=true pair=2 compiler=candidate iterations=64 seconds=0.004870500
+JOIN_PROBE count=512 changed=true pair=3 compiler=candidate iterations=64 seconds=0.004773700
+JOIN_PROBE count=512 changed=true pair=3 compiler=baseline iterations=64 seconds=0.028211200
+JOIN_PROBE count=512 changed=true pair=4 compiler=baseline iterations=64 seconds=0.028408200
+JOIN_PROBE count=512 changed=true pair=4 compiler=candidate iterations=64 seconds=0.004863800
+JOIN_PROBE count=512 changed=true pair=5 compiler=candidate iterations=64 seconds=0.004723200
+JOIN_PROBE count=512 changed=true pair=5 compiler=baseline iterations=64 seconds=0.028128300
+JOIN_PROBE count=2048 changed=false pair=0 compiler=baseline iterations=64 seconds=0.116710700
+JOIN_PROBE count=2048 changed=false pair=0 compiler=candidate iterations=64 seconds=0.021082200
+JOIN_PROBE count=2048 changed=false pair=1 compiler=candidate iterations=64 seconds=0.020401700
+JOIN_PROBE count=2048 changed=false pair=1 compiler=baseline iterations=64 seconds=0.116191500
+JOIN_PROBE count=2048 changed=false pair=2 compiler=baseline iterations=64 seconds=0.116348300
+JOIN_PROBE count=2048 changed=false pair=2 compiler=candidate iterations=64 seconds=0.021314800
+JOIN_PROBE count=2048 changed=false pair=3 compiler=candidate iterations=64 seconds=0.020842000
+JOIN_PROBE count=2048 changed=false pair=3 compiler=baseline iterations=64 seconds=0.116245000
+JOIN_PROBE count=2048 changed=false pair=4 compiler=baseline iterations=64 seconds=0.116172200
+JOIN_PROBE count=2048 changed=false pair=4 compiler=candidate iterations=64 seconds=0.020936999
+JOIN_PROBE count=2048 changed=false pair=5 compiler=candidate iterations=64 seconds=0.020886500
+JOIN_PROBE count=2048 changed=false pair=5 compiler=baseline iterations=64 seconds=0.116156800
+JOIN_PROBE count=2048 changed=true pair=0 compiler=baseline iterations=64 seconds=0.117652600
+JOIN_PROBE count=2048 changed=true pair=0 compiler=candidate iterations=64 seconds=0.021848700
+JOIN_PROBE count=2048 changed=true pair=1 compiler=candidate iterations=64 seconds=0.021536800
+JOIN_PROBE count=2048 changed=true pair=1 compiler=baseline iterations=64 seconds=0.117523800
+JOIN_PROBE count=2048 changed=true pair=2 compiler=baseline iterations=64 seconds=0.117234900
+JOIN_PROBE count=2048 changed=true pair=2 compiler=candidate iterations=64 seconds=0.021921000
+JOIN_PROBE count=2048 changed=true pair=3 compiler=candidate iterations=64 seconds=0.021712500
+JOIN_PROBE count=2048 changed=true pair=3 compiler=baseline iterations=64 seconds=0.117700400
+JOIN_PROBE count=2048 changed=true pair=4 compiler=baseline iterations=64 seconds=0.117220800
+JOIN_PROBE count=2048 changed=true pair=4 compiler=candidate iterations=64 seconds=0.021939600
+JOIN_PROBE count=2048 changed=true pair=5 compiler=candidate iterations=64 seconds=0.021333800
+JOIN_PROBE count=2048 changed=true pair=5 compiler=baseline iterations=64 seconds=0.117424400
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 2.14s
+

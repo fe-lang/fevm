@@ -1,0 +1,35 @@
++ git init /tmp/fevm-mvs-published-20261013-r1/bootstrap/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-published-20261013-r1/bootstrap/fe/.git/
++ git -C /tmp/fevm-mvs-published-20261013-r1/bootstrap/fe fetch https://github.com/sbillig/fe 1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47
+From https://github.com/sbillig/fe
+ * branch                1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-published-20261013-r1/bootstrap/fe checkout --detach FETCH_HEAD
+HEAD is now at 1c8e2c20d Pin Sonatina enum extraction speculation fix
++ git init /tmp/fevm-mvs-published-20261013-r1/bootstrap/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-published-20261013-r1/bootstrap/sonatina/.git/
++ git -C /tmp/fevm-mvs-published-20261013-r1/bootstrap/sonatina fetch https://github.com/fe-lang/sonatina 6f4b0397cfa77165a0ff4fafadc0a003fb72dc59
+From https://github.com/fe-lang/sonatina
+ * branch              6f4b0397cfa77165a0ff4fafadc0a003fb72dc59 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-published-20261013-r1/bootstrap/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 6f4b0397 Keep enum payload extraction under its variant proof
+Pinned clean sources prepared in /tmp/fevm-mvs-published-20261013-r1/bootstrap; compiler build not performed.

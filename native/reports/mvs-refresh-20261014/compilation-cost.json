@@ -1,0 +1,231 @@
+{
+  "compiler_revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+  "test_modules": 12,
+  "workspace_tests": 52,
+  "test_objects_per_module": 1,
+  "module_preparation_serial": true,
+  "optimization_levels": [
+    "0",
+    "1",
+    "2"
+  ],
+  "phase_profile_available": true,
+  "explanation": "Each test source module builds its own runtime package and repeats Sonatina lowering, optimization, Full verification and Cranelift object generation. Tests within a module share one executable; acceptance launches a separate Fe process for each optimization level. Live O1 sampling identifies enum-proof verification as the current CPU bottleneck; its whole-run share and savings from any change are unmeasured.",
+  "source_references": [
+    "crates/fe/src/test/native.rs:276",
+    "crates/codegen/src/sonatina/native_tests.rs:31",
+    "crates/mir/src/runtime/package.rs:453"
+  ],
+  "completed_sample_measurements": {
+    "0": {
+      "sampled_wall_seconds": 1200.359,
+      "sampled_cpu_seconds": 1199.69,
+      "peak_sampled_rss_bytes": 4761505792,
+      "sampling_interval_seconds": 10
+    }
+  },
+  "profile_scope": "Two 30-second live O1 windows plus a 1,185-second O2 profile, covering about 93% of that stage. The O2 attachment excludes initial compiler startup. Leaf symbols attribute direct CPU time; generic allocation/type handling cannot be assigned to a caller.",
+  "profile_windows": [
+    {
+      "window_seconds": 30,
+      "sampling_frequency_hz": 99,
+      "samples": 2969,
+      "total_lost_samples": 0,
+      "enum_proof_named_symbols_percent": 77.93,
+      "cranelift_named_symbols_percent": 0,
+      "top_symbols": [
+        {
+          "percent": 16.27,
+          "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+        },
+        {
+          "percent": 11.86,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured"
+        },
+        {
+          "percent": 8.22,
+          "symbol": "[.] <&mut <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update_children<<sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update<sonatina_verifier::verify::function::enum_proofs::transfer::instruction::{closure#2}>::{closure#0}>::{closure#0} as core::ops::function::FnMut<((&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState),)>>::call_mut"
+        },
+        {
+          "percent": 8.08,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join"
+        },
+        {
+          "percent": 3.37,
+          "symbol": "[.] mi_free"
+        },
+        {
+          "percent": 3.03,
+          "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+        },
+        {
+          "percent": 2.69,
+          "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+        },
+        {
+          "percent": 2.59,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::child"
+        },
+        {
+          "percent": 2.56,
+          "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Anchor, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+        },
+        {
+          "percent": 2.22,
+          "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST> as core::ops::drop::Drop>::drop"
+        },
+        {
+          "percent": 1.89,
+          "symbol": "[.] _mi_page_malloc_zero"
+        },
+        {
+          "percent": 1.65,
+          "symbol": "[.] <core::iter::adapters::map::Map<core::iter::adapters::map::Map<rpds::map::red_black_tree_map::IterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>, fn(&archery::shared_pointer::SharedPointer<rpds::map::entry::Entry<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>, archery::shared_pointer::kind::arct::ArcTK>) -> (&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)>, for<'a> fn((&sonatina_verifier::verify::function::enum_proofs::views::Step, &'a sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)) -> &sonatina_verifier::verify::function::enum_proofs::views::Step> as core::iter::traits::iterator::Iterator>::fold::<usize, core::iter::adapters::map::map_fold<&sonatina_verifier::verify::function::enum_proofs::views::Step, usize, usize, <core::iter::adapters::filter::Filter<_, _> as core::iter::traits::iterator::Iterator>::count::to_usize<&sonatina_verifier::verify::function::enum_proofs::views::Step, <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured::{closure#0}>::{closure#0}, <usize as core::iter::traits::accum::Sum>::sum<core::iter::adapters::map::Map<core::iter::adapters::map::Map<core::iter::adapters::map::Map<rpds::map::red_black_tree_map::IterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>, fn(&archery::shared_pointer::SharedPointer<rpds::map::entry::Entry<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>, archery::shared_pointer::kind::arct::ArcTK>) -> (&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)>, for<'a> fn((&sonatina_verifier::verify::function::enum_proofs::views::Step, &'a sonatina_verifier::verify::function::enum_proofs::value_state::ValueState)) -> &sonatina_verifier::verify::function::enum_proofs::views::Step>, <core::iter::adapters::filter::Filter<_, _> as core::iter::traits::iterator::Iterator>::count::to_usize<&sonatina_verifier::verify::function::enum_proofs::views::Step, <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured::{closure#0}>::{closure#0}>>::{closure#0}>::{closure#0}>"
+        }
+      ]
+    },
+    {
+      "window_seconds": 30,
+      "sampling_frequency_hz": 99,
+      "samples": 2935,
+      "total_lost_samples": 0,
+      "enum_proof_named_symbols_percent": 69.48,
+      "cranelift_named_symbols_percent": 0,
+      "top_symbols": [
+        {
+          "percent": 10.6,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured"
+        },
+        {
+          "percent": 9.2,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join"
+        },
+        {
+          "percent": 8.96,
+          "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+        },
+        {
+          "percent": 5.32,
+          "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+        },
+        {
+          "percent": 4.91,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::child"
+        },
+        {
+          "percent": 4.4,
+          "symbol": "[.] mi_free"
+        },
+        {
+          "percent": 3.34,
+          "symbol": "[.] _mi_page_malloc_zero"
+        },
+        {
+          "percent": 2.28,
+          "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Anchor, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+        },
+        {
+          "percent": 2.18,
+          "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+        },
+        {
+          "percent": 1.84,
+          "symbol": "[.] <sonatina_ir::types::CompoundType as core::clone::Clone>::clone"
+        },
+        {
+          "percent": 1.53,
+          "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST> as core::ops::drop::Drop>::drop"
+        },
+        {
+          "percent": 1.5,
+          "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join_with"
+        }
+      ]
+    }
+  ],
+  "observed_hotspot": "Sonatina Full enum-proof verification: 55.37% of extended O2 sampled CPU is in named enum-proof functions and typed containers; Cranelift-named functions account for 3.46%. Short O1 windows show 77.93% and 69.48% enum-proof costs. Recursive value-state traversal, captured-reference collection and reference-set joins dominate named leaf costs.",
+  "extended_O2_profile": {
+    "capture": {
+      "pid": 2463956,
+      "compiler": "/tmp/fevm-mvs-refresh-20261014-r1/bootstrap/bin/fe",
+      "started_unix": 1792000893.9532523,
+      "finished_unix": 1792002079.1878502,
+      "frequency_hz": 49,
+      "event": "task-clock:u",
+      "call_graph": false,
+      "status": 0,
+      "scope": "O2 acceptance compiler from attachment until process exit; earlier startup before attachment excluded"
+    },
+    "captured_wall_seconds": 1185.2345979213715,
+    "profile_header": [
+      "# Total Lost Samples: 0",
+      "# Samples: 57K of event 'task-clock:u'",
+      "# Event count (approx.): 1163734678749"
+    ],
+    "enum_proof_named_symbols_percent": 55.37,
+    "cranelift_named_symbols_percent": 3.46,
+    "top_symbols": [
+      {
+        "percent": 8.82,
+        "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::captured"
+      },
+      {
+        "percent": 7.64,
+        "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+      },
+      {
+        "percent": 6.31,
+        "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join"
+      },
+      {
+        "percent": 3.92,
+        "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+      },
+      {
+        "percent": 3.8,
+        "symbol": "[.] mi_free"
+      },
+      {
+        "percent": 3.31,
+        "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::child"
+      },
+      {
+        "percent": 2.68,
+        "symbol": "[.] <&mut <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update_children<<sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::update<sonatina_verifier::verify::function::enum_proofs::transfer::instruction::{closure#2}>::{closure#0}>::{closure#0} as core::ops::function::FnMut<((&sonatina_verifier::verify::function::enum_proofs::views::Step, &sonatina_verifier::verify::function::enum_proofs::value_state::ValueState),)>>::call_mut"
+      },
+      {
+        "percent": 2.65,
+        "symbol": "[.] _mi_page_malloc_zero"
+      },
+      {
+        "percent": 1.84,
+        "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::Anchor, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+      },
+      {
+        "percent": 1.8,
+        "symbol": "[.] <alloc::collections::btree::map::IntoIter<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST>>::dying_next"
+      },
+      {
+        "percent": 1.52,
+        "symbol": "[.] <sonatina_ir::types::CompoundType as core::clone::Clone>::clone"
+      },
+      {
+        "percent": 1.36,
+        "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST> as core::ops::drop::Drop>::drop"
+      },
+      {
+        "percent": 1.27,
+        "symbol": "[.] <sonatina_ir::types::Type>::resolve_compound"
+      },
+      {
+        "percent": 1.08,
+        "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::References>::join_with"
+      },
+      {
+        "percent": 1.03,
+        "symbol": "[.] <rpds::map::red_black_tree_map::iter_utils::IterStack<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>>::clear_if_finished::<sonatina_verifier::verify::function::enum_proofs::views::Step>"
+      }
+    ],
+    "scope": "Approximately 19.75 minutes of the 21.3-minute O2 stage; initial compiler startup before attachment excluded. Leaf symbols are self CPU costs, including typed containers; generic allocator/type-layout costs are not attributed to callers."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "base_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+  "patch": "/tmp/fevm-mvs-compile-perf-20261014-r1/candidate-v2.patch",
+  "patch_sha256": "365e105ad8d5c577e95b029a781324750e8c512441c119f6989f5276f56a10b0",
+  "compiler": "/tmp/fevm-mvs-compile-perf-20261014-r1/sonatina-candidate-v2",
+  "compiler_sha256": "1d2b58e6b3a065967e36c730b1132bfbc96df4933ea331e4fd94a168bd187233",
+  "rust": "1.99.0",
+  "features": "default",
+  "verifier_tests": 169,
+  "committed": false
+}

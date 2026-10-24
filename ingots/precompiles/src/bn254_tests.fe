@@ -1,0 +1,160 @@
+use std::native::ByteBuffer
+use ingot::{FAILURE, SUCCESS, run}
+use ingot::bn254_field::{Field, Fp2, fp, fp_value}
+
+const G1_DOUBLE_X: u256 = 0x030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd3
+const G1_DOUBLE_Y: u256 = 0x15ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4
+const P_MINUS_TWO: u256 = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd45
+const CURVE_ORDER: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+// The G2 generator as EIP-197 words: x imaginary, x real, y imaginary, y real.
+const G2: [u256; 4] = [
+    0x198e9393920d483a7260bfb731fb5d25f1aa493335a9e71297e485b7aef312c2,
+    0x1800deef121f1e76426a00665e5c4479674322d4f75edadd46debd5cd992f6ed,
+    0x090689d0585ff075ec9e99ad690c3395bc4b313370b38ef355acdadcd122975b,
+    0x12c85ea5db8c6deb4aab71808dcb408fe3d1e7690c43d37b4ce6cc0166fa7daa,
+]
+
+fn put<const N: usize>(_ bytes: mut [u8; N], offset: u64, value: u256) {
+    var i: u64 = 0
+    while i < 32 {
+        bytes[(offset + i) as usize] = (value >> ((31 - i) * 8) as u256).downcast_truncate()
+        i += 1
+    }
+}
+
+fn output_word(_ output: ByteBuffer, offset: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        value = (value << 8) | output.byte_at(offset + i) as u256
+        i += 1
+    }
+    value
+}
+
+// A 192-byte pairing input of G1 (x, y) with G2 words g2.
+fn pair(_ bytes: mut [u8; 384], index: u64, x: u256, y: u256, g2: [u256; 4]) {
+    let base = index * 192
+    put(mut bytes, offset: base, value: x)
+    put(mut bytes, offset: base + 32, value: y)
+    var i: u64 = 0
+    while i < 4 {
+        put(mut bytes, offset: base + 64 + i * 32, value: g2[i as usize])
+        i += 1
+    }
+}
+
+#[test]
+fn bn254_field_arithmetic_round_trips() {
+    let a = fp(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
+    let b = fp(P_MINUS_TWO)
+    core::assert(fp_value(a) == 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
+    // (p - 2) * a = -2a and a * a^-1 = 1.
+    core::assert(b.mul(a).equals(a.double().neg()))
+    core::assert(a.mul(a.inverse()).equals(fp(1)))
+    core::assert(fp_value(b.add(fp(5))) == 3 && fp_value(fp(3).sub(fp(5))) == P_MINUS_TWO)
+    let x = Fp2 { c0: fp(3), c1: fp(4) }
+    core::assert(x.mul(x.inverse()).equals(Fp2::one()))
+    // (3 + 4u)^2 = -7 + 24u.
+    core::assert(x.square().equals(Fp2 { c0: fp(7).neg(), c1: fp(24) }))
+}
+
+#[test]
+fn bn254_add_and_mul_match_known_points() {
+    var input: [u8; 128] = [0; 128]
+    put(mut input, offset: 0, value: 1)
+    put(mut input, offset: 32, value: 2)
+    put(mut input, offset: 64, value: 1)
+    put(mut input, offset: 96, value: 2)
+    let sum = run(address: 6, input, gas: 150)
+    core::assert(sum.status == SUCCESS && sum.gas_used == 150 && sum.output.len() == 64)
+    core::assert(output_word(sum.output, offset: 0) == G1_DOUBLE_X && output_word(sum.output, offset: 32) == G1_DOUBLE_Y)
+    sum.release()
+    // G1 + (-G1) is the point at infinity, encoded as zeros.
+    put(mut input, offset: 96, value: P_MINUS_TWO)
+    let zero = run(address: 6, input, gas: 150)
+    core::assert(zero.status == SUCCESS && output_word(zero.output, offset: 0) == 0 && output_word(zero.output, offset: 32) == 0)
+    zero.release()
+    var scaled: [u8; 96] = [0; 96]
+    put(mut scaled, offset: 0, value: 1)
+    put(mut scaled, offset: 32, value: 2)
+    put(mut scaled, offset: 64, value: 2)
+    let double = run(address: 7, input: scaled, gas: 6000)
+    core::assert(double.status == SUCCESS && double.gas_used == 6000)
+    core::assert(output_word(double.output, offset: 0) == G1_DOUBLE_X && output_word(double.output, offset: 32) == G1_DOUBLE_Y)
+    double.release()
+    put(mut scaled, offset: 64, value: 9)
+    let nine = run(address: 7, input: scaled, gas: 6000)
+    core::assert(output_word(nine.output, offset: 0) == 0x039730ea8dff1254c0fee9c0ea777d29a9c710b7e616683f194f18c43b43b869)
+    core::assert(output_word(nine.output, offset: 32) == 0x073a5ffcc6fc7a28c30723d6e58ce577356982d65b833a5a5c15bf9024b43d98)
+    nine.release()
+    put(mut scaled, offset: 64, value: CURVE_ORDER)
+    let order = run(address: 7, input: scaled, gas: 6000)
+    core::assert(order.status == SUCCESS && output_word(order.output, offset: 0) == 0)
+    order.release()
+    // Short input is zero padded: infinity times zero.
+    let short = run(address: 7, input: [0 as u8; 63], gas: 6000)
+    core::assert(short.status == SUCCESS && output_word(short.output, offset: 32) == 0)
+    short.release()
+}
+
+#[test]
+fn bn254_invalid_points_and_gas_fail() {
+    var input: [u8; 128] = [0; 128]
+    put(mut input, offset: 0, value: 1)
+    put(mut input, offset: 32, value: 3)
+    let off_curve = run(address: 6, input, gas: 1000)
+    core::assert(off_curve.status == FAILURE && off_curve.gas_used == 1000)
+    off_curve.release()
+    put(mut input, offset: 0, value: P_MINUS_TWO + 2)
+    put(mut input, offset: 32, value: 0)
+    let unreduced = run(address: 7, input, gas: 6000)
+    core::assert(unreduced.status == FAILURE)
+    unreduced.release()
+    let empty: [u8; 0] = []
+    let short_gas = run(address: 6, input: empty, gas: 149)
+    core::assert(short_gas.status == FAILURE && short_gas.gas_used == 149)
+    short_gas.release()
+    let ragged = run(address: 8, input: [0 as u8; 191], gas: 1000000)
+    core::assert(ragged.status == FAILURE)
+    ragged.release()
+}
+
+#[test]
+fn bn254_pairing_checks_bilinearity_and_subgroups() {
+    let empty: [u8; 0] = []
+    let none = run(address: 8, input: empty, gas: 45000)
+    core::assert(none.status == SUCCESS && output_word(none.output, offset: 0) == 1)
+    none.release()
+    // e(11 G1, 13 G2) * e(-143 G1, G2) = 1.
+    var input: [u8; 384] = [0; 384]
+    pair(mut input, index: 0,
+         x: 0x2a14705537b009189da8808651eecdb82482477fe92ac12ca8b71f80fc3d49ef,
+         y: 0x2df7ee7f243ea8b38e1ddf14029258877a618c779fd4717db6177e19ea67ec38,
+         g2: [0x009edaf0698a8c56f51139588acc094cee3c37d427bb6d2eab830aae529097d1,
+              0x23ad66f3a7cca9dc75049635faebd124316244b91de5fb2764cd151572a905f7,
+              0x2700e8a29b7bb45f3022a18a07bdc66d0254559e17cce64e3b4ad21578fcf410,
+              0x1ad4f87d3b4375a39988ac099b042b1e7c0c715678e4c2bea8905f607cf950f8])
+    let negated_y: u256 = P_MINUS_TWO + 2 - 0x1ddbca74766a83f6ac6bc16eed3eaa1780c37e7637c606e120c28258c8fce6c5
+    pair(mut input, index: 1, x: 0x2f1e1f6824ed8b754a5575916fbe4f485222c2d2e4a524c8ad236e8805f72d0e,
+         y: negated_y, g2: G2)
+    let holds = run(address: 8, input, gas: 113000)
+    core::assert(holds.status == SUCCESS && holds.gas_used == 113000 && output_word(holds.output, offset: 0) == 1)
+    holds.release()
+    // e(G1, G2) * e(G1, G2) is not one.
+    pair(mut input, index: 0, x: 1, y: 2, g2: G2)
+    pair(mut input, index: 1, x: 1, y: 2, g2: G2)
+    let fails = run(address: 8, input, gas: 113000)
+    core::assert(fails.status == SUCCESS && output_word(fails.output, offset: 0) == 0)
+    fails.release()
+    // A twist point outside the order-r subgroup is invalid.
+    pair(mut input, index: 1, x: 1, y: 2,
+         g2: [1, 5, 0x237844edbccd623aa254f432320c2e7bae38e90e3287cade3214e4a4a041de6b,
+              0x031d14917c0ef54369ffd8eaec5cd0e2197651b9e62887359568223266784540])
+    let outside = run(address: 8, input, gas: 113000)
+    core::assert(outside.status == FAILURE)
+    outside.release()
+    let short_gas = run(address: 8, input, gas: 112999)
+    core::assert(short_gas.status == FAILURE && short_gas.gas_used == 112999)
+    short_gas.release()
+}

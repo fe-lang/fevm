@@ -1,0 +1,14 @@
+error[3-0058]: `ref` and `mut` are not types
+  ┌─ effect_place.fe:1:24
+  │
+1 │ struct Handle { value: mut i32, calls: i32 }
+  │                        ^^^^^^^ modes are only allowed on parameters and in projection returns
+
+error[8-0070]: an access is not a value
+  ┌─ effect_place.fe:5:34
+  │
+5 │     var handle = Handle { value: mut value, calls: 0 }
+  │                                  ^^^^^^^^^ this access is used as a value
+  │
+  = bind an access with `let`, pass it to a `mut` or view parameter, or yield it from a projection
+

@@ -8,7 +8,7 @@ impl Frame {
     fn run(mut self, len: u64) {
         core::assert(self.memory.try_resize(len))
         core::assert(self.output.try_resize(len))
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < len {
             self.output.set_byte(index: i, value: self.memory.byte_at(i))
             i += 1
@@ -22,7 +22,7 @@ impl Frame {
 }
 
 pub fn main() -> i32 {
-    let mut frame = Frame::new()
+    var frame = Frame::new()
     frame.run(len: 32)
     frame.release()
     0

@@ -1,0 +1,311 @@
+use core::{Option, Result}
+use std::native::ByteBuffer
+use ingot::address::create_address
+use ingot::buffer::{read_word, write_word}
+use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, ERR_STATE_LIMIT, OK}
+use ingot::logs::LogBuffer
+use ingot::state::{WorldState, address_word}
+use ingot::transaction::Transaction
+use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program}
+use ingot::vm::{Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
+use fevm_precompiles::is_precompile
+
+// Transaction envelope kinds.
+pub const TX_LEGACY: u8 = 0
+pub const TX_ACCESS_LIST: u8 = 1
+pub const TX_FEE_MARKET: u8 = 2
+pub const TX_BLOB: u8 = 3
+
+// Reasons a transaction is not includable. Invalid transactions leave the state untouched.
+pub const VALID: i32 = 0
+pub const INVALID_INTRINSIC_GAS: i32 = 1
+pub const INVALID_INITCODE_SIZE: i32 = 2
+pub const INVALID_NONCE_LIMIT: i32 = 3
+pub const INVALID_PRIORITY_FEE: i32 = 4
+pub const INVALID_GAS_LIMIT: i32 = 5
+pub const INVALID_BLOB_GAS_LIMIT: i32 = 6
+pub const INVALID_FEE_CAP: i32 = 7
+pub const INVALID_BLOB_CREATE: i32 = 8
+pub const INVALID_NO_BLOBS: i32 = 9
+pub const INVALID_BLOB_VERSION: i32 = 10
+pub const INVALID_BLOB_FEE_CAP: i32 = 11
+pub const INVALID_NONCE: i32 = 12
+pub const INVALID_BALANCE: i32 = 13
+pub const INVALID_SENDER_CODE: i32 = 14
+pub const INVALID_TX_TYPE: i32 = 15
+
+const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+const MAX_INITCODE_SIZE: u64 = 49152
+const GAS_PER_BLOB: u256 = 131072
+const MAX_BLOBS_PER_BLOCK: u64 = 6
+
+pub struct TxEnv {
+    pub kind: u8,
+    pub sender: u256,
+    pub to: u256,
+    pub creates: bool,
+    pub nonce: u256,
+    pub gas_limit: u64,
+    // The legacy/EIP-2930 gas price, or the EIP-1559 maximum fee per gas.
+    pub gas_price: u256,
+    pub max_priority_fee_per_gas: u256,
+    pub max_fee_per_blob_gas: u256,
+    pub value: u256,
+}
+
+impl Copy for TxEnv {}
+
+/// A transaction with its owned calldata (initcode for creations), access list
+/// and versioned blob hashes. Release it after use.
+pub struct TxRequest {
+    pub env: TxEnv,
+    data: InputData,
+    access_accounts: ByteBuffer,
+    access_keys: ByteBuffer,
+    blob_hashes: ByteBuffer,
+}
+
+fn push_word(_ list: mut ByteBuffer, _ word: u256) -> bool {
+    let offset = list.len()
+    if !list.try_resize(offset + 32) { return false }
+    write_word(mut list, offset, value: word)
+    true
+}
+
+impl TxRequest {
+    pub fn new(_ env: TxEnv, data: own InputData) -> Self {
+        Self { env, data, access_accounts: ByteBuffer::new(), access_keys: ByteBuffer::new(), blob_hashes: ByteBuffer::new() }
+    }
+    /// One access-list entry; each of its storage keys is added with `add_access_key`.
+    pub fn add_access_account(mut self, _ address: u256) -> bool { push_word(mut self.access_accounts, address) }
+    pub fn add_access_key(mut self, address: u256, slot: u256) -> bool {
+        push_word(mut self.access_keys, address) && push_word(mut self.access_keys, slot)
+    }
+    pub fn add_blob_hash(mut self, _ hash: u256) -> bool { push_word(mut self.blob_hashes, hash) }
+    pub fn data(self) -> ref InputData { ref self.data }
+    fn access_account_count(self) -> u64 { self.access_accounts.len() / 32 }
+    fn access_key_count(self) -> u64 { self.access_keys.len() / 64 }
+    fn blob_count(self) -> u64 { self.blob_hashes.len() / 32 }
+    pub fn release(own self) {
+        self.data.release()
+        self.access_accounts.release()
+        self.access_keys.release()
+        self.blob_hashes.release()
+    }
+}
+
+/// `invalid` is VALID for an executed transaction. `status` is the message's
+/// outcome (OK, ERR_REVERT, an exceptional halt or ERR_ADDRESS_COLLISION); any
+/// other status is a host failure, after which the pre-state is returned.
+pub struct Receipt {
+    pub invalid: i32,
+    pub status: i32,
+    pub gas_used: u64,
+    pub output: ByteBuffer,
+    pub logs: LogBuffer,
+}
+
+impl Receipt {
+    pub fn release(own self) {
+        self.output.release()
+        self.logs.release()
+    }
+}
+
+pub struct Applied { pub state: WorldState, pub receipt: Receipt }
+
+fn checked_mul(_ a: u256, _ b: u256) -> Option<u256> {
+    if a != 0 && b > MAX_U256 / a { Option::None } else { Option::Some(a * b) }
+}
+
+fn checked_add(_ a: u256, _ b: u256) -> Option<u256> {
+    if b > MAX_U256 - a { Option::None } else { Option::Some(a + b) }
+}
+
+fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
+
+/// Calldata, creation, and access-list charges paid before execution.
+pub fn intrinsic_gas(_ request: TxRequest) -> u128 {
+    let data = ref request.data()
+    var gas: u128 = 21000
+    var index: u64 = 0
+    while index < data.len() {
+        gas += if data.byte_at(index) == 0 { 4 } else { 16 }
+        index += 1
+    }
+    if request.env.creates { gas += 32000 + 2 * words(data.len()) }
+    gas + 2400 * request.access_account_count() as u128 + 1900 * request.access_key_count() as u128
+}
+
+fn fee_market(_ env: TxEnv) -> bool { env.kind == TX_FEE_MARKET || env.kind == TX_BLOB }
+
+// EIP-1559: the base fee plus the priority fee the fee cap leaves room for.
+fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
+    if !fee_market(env) { return env.gas_price }
+    let headroom = env.gas_price - base_fee
+    base_fee + if env.max_priority_fee_per_gas < headroom { env.max_priority_fee_per_gas } else { headroom }
+}
+
+fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
+    checked_mul(request.blob_count() as u256 * GAS_PER_BLOB, price)
+}
+
+/// The Cancun includability checks, in specification order.
+pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) -> i32 {
+    let env = request.env
+    let sender = address_word(env.sender)
+    if env.kind > TX_BLOB { return INVALID_TX_TYPE }
+    // Only the blob envelope has versioned hashes.
+    if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
+    if intrinsic_gas(request) > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
+    if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
+    if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
+    if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
+    if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
+    if request.blob_count() > MAX_BLOBS_PER_BLOCK { return INVALID_BLOB_GAS_LIMIT }
+    if env.gas_price < block.basefee { return INVALID_FEE_CAP }
+    var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
+    if env.kind == TX_BLOB {
+        if env.creates { return INVALID_BLOB_CREATE }
+        if request.blob_count() == 0 { return INVALID_NO_BLOBS }
+        var index: u64 = 0
+        while index < request.blob_count() {
+            if read_word(request.blob_hashes, offset: index * 32) >> 248 != 0x01 { return INVALID_BLOB_VERSION }
+            index += 1
+        }
+        if env.max_fee_per_blob_gas < block.blobbasefee { return INVALID_BLOB_FEE_CAP }
+        max_fee = match (max_fee, blob_fee(request, price: env.max_fee_per_blob_gas)) {
+            (Option::Some(gas), Option::Some(blobs)) => checked_add(gas, blobs),
+            _ => Option::None,
+        }
+    }
+    let nonce = world.nonce(sender)
+    if nonce != env.nonce { return INVALID_NONCE }
+    let required = match max_fee {
+        Option::Some(fee) => checked_add(fee, env.value),
+        Option::None => Option::None,
+    }
+    match required {
+        Option::Some(required) => if world.balance(sender) < required { return INVALID_BALANCE },
+        Option::None => return INVALID_BALANCE,
+    }
+    if world.code_size(sender) != 0 { return INVALID_SENDER_CODE }
+    VALID
+}
+
+fn empty_receipt(invalid: i32, status: i32) -> Receipt {
+    Receipt { invalid, status, gas_used: 0, output: ByteBuffer::new(), logs: LogBuffer::new() }
+}
+
+// A host failure during a valid transaction returns the pre-state.
+fn host_failure(_ tx: own Transaction, status: i32) -> Applied {
+    Applied { state: tx.finish(commit: false, gas_spent: 0).into_state(), receipt: empty_receipt(invalid: VALID, status) }
+}
+
+// Warm the access list and blob hashes, then buy gas and increment the nonce.
+fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
+    var index: u64 = 0
+    while index < request.access_account_count() {
+        if !tx.access_list_account(address: read_word(request.access_accounts, offset: index * 32)) { return ERR_STATE_LIMIT }
+        index += 1
+    }
+    index = 0
+    while index < request.access_key_count() {
+        let address = read_word(request.access_keys, offset: index * 64)
+        let slot = read_word(request.access_keys, offset: index * 64 + 32)
+        if !tx.access_list_slot(address, slot) { return ERR_STATE_LIMIT }
+        index += 1
+    }
+    index = 0
+    while index < request.blob_count() {
+        if !tx.add_blob_hash(read_word(request.blob_hashes, offset: index * 32)) { return ERR_HOST_ALLOCATION }
+        index += 1
+    }
+    let sender = address_word(request.env.sender)
+    let fee = request.env.gas_limit as u256 * price + request.blob_count() as u256 * GAS_PER_BLOB * blob_price
+    let status = tx.increment_nonce(sender)
+    if status != OK { return status }
+    tx.set_balance(address: sender, value: tx.balance(sender) - fee)
+}
+
+// The top-level message: a creation or a call, each under its own checkpoint.
+fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv) -> ExecutionResult {
+    let sender = call.caller
+    let target = call.address
+    let value = call.callvalue
+    if request.env.creates {
+        if !tx.deployable(target) { return status_result(ERR_ADDRESS_COLLISION) }
+        let checkpoint = match begin_create(mut tx, sender, address: target, value) {
+            Result::Ok(checkpoint) => checkpoint,
+            Result::Err(status) => return status_result(status),
+        }
+        let program = Program::copy_from(request.data(), len: request.data().len() as usize)
+        var vm = Vm::new()
+        vm.create(program, call, block, mut tx)
+        program.release()
+        if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
+        return vm.into_result()
+    }
+    let checkpoint = tx.checkpoint(is_static: false)
+    // The call touches its target even without value; a failed call undoes the touch.
+    let moved = if value == 0 { tx.touch(target) } else { transfer(mut tx, from: sender, to: target, value) }
+    if moved != OK {
+        tx.revert(checkpoint)
+        return status_result(moved)
+    }
+    if is_precompile(target) {
+        let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
+        if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
+        return result
+    }
+    let program = load_program(tx, address: target)
+    var vm = Vm::new()
+    vm.run(program, request.data(), call, block, mut tx)
+    program.release()
+    if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
+    vm.into_result()
+}
+
+/// Validate and execute one Cancun transaction against `world`. Valid
+/// transactions pay for gas, run their message, refund unused and refunded gas
+/// to the sender, pay the priority fee to the coinbase, and settle deletions.
+pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv) -> Applied {
+    let env = request.env
+    let invalid = validate(world, request, block)
+    if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
+    let sender = address_word(env.sender)
+    let price = effective_gas_price(env, base_fee: block.basefee)
+    let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
+    let intrinsic: u64 = intrinsic_gas(request).downcast_unchecked()
+    var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
+    let prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
+    let call = CallEnv {
+        address: target, caller: sender, origin: sender, callvalue: env.value,
+        gasprice: price, gas_limit: env.gas_limit - intrinsic, is_static: false,
+    }
+    let result = if prepared == OK { execute_message(mut tx, request, call, block) } else { status_result(prepared) }
+    if !is_evm_outcome(result.status) && result.status != ERR_ADDRESS_COLLISION {
+        let status = result.status
+        result.release()
+        return host_failure(tx, status)
+    }
+    // Exceptional halts and collisions consume all gas.
+    let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
+    let gas_spent = env.gas_limit - gas_left
+    let gas_used = gas_spent - tx.capped_refund(gas_spent)
+    var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
+    let coinbase = address_word(block.coinbase)
+    if paid == OK {
+        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
+    }
+    if paid != OK {
+        result.release()
+        return host_failure(tx, status: paid)
+    }
+    tx.settle()
+    let settled = tx.finish(commit: true, gas_spent)
+    Applied {
+        state: settled.state,
+        receipt: Receipt { invalid: VALID, status: result.status, gas_used, output: result.output, logs: settled.logs },
+    }
+}

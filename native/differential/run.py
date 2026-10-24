@@ -73,7 +73,11 @@ def main():
     parser.add_argument('--toolchain', default=json.loads((ROOT / 'native/toolchain.json').read_text())['rust_version'],
                         help='installed rustup toolchain for the reference (default: pinned Rust version)')
     parser.add_argument('--levels', nargs='+', choices=['0', '1', '2'], default=['0', '1', '2'])
+    parser.add_argument('--build-timeout', type=int, default=1800,
+                        help='seconds allowed per Fe build (default: 1800)')
     args = parser.parse_args()
+    if args.build_timeout < 1:
+        parser.error('--build-timeout must be positive')
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     compiler = args.fe.resolve()
@@ -81,7 +85,7 @@ def main():
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
     report = {'schema': 2, 'fork': 'Cancun', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '
               'simultaneous-fault reasons retained separately; external state is not compared', 'complete': False,
-              'host': platform.platform(), 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
+              'host': platform.platform(), 'build_timeout_seconds': args.build_timeout, 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
               'compiler_version': subprocess.check_output([compiler, '--version'], text=True).strip(),
               'revision': subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip(),
               'dirty': bool(subprocess.check_output(['git', '-C', ROOT, 'status', '--porcelain'])),
@@ -123,7 +127,8 @@ def main():
             started = time.perf_counter()
             command([compiler, 'build', ROOT, '--ingot', 'fevm_frame', '--backend', 'native', '-O', level,
                      '--emit', 'ir,executable', '--out-dir', folder,
-                     '--report', '--report-out', folder / 'build.tar.gz'], folder / 'build.log')
+                     '--report', '--report-out', folder / 'build.tar.gz'], folder / 'build.log',
+                    timeout=args.build_timeout)
             executable = folder / 'fevm_frame'
             row |= {'build_seconds': time.perf_counter() - started, 'executable_sha256': digest(executable)}
             for case in corpus:

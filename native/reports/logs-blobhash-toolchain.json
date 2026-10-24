@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "fe_repository": "https://github.com/argotorg/fe",
+  "fe_revision": "c5dd6603d2a3991bb3c1a1979980a2995f06ab39",
+  "sonatina_repository": "https://github.com/fe-lang/sonatina",
+  "sonatina_revision": "8d822fc38bbed86c5b5646eba6d713521e2ff2c9",
+  "cargo_lock_sha256": "75dee51170e48b797ea21b3eca22e4313cbd09f1a5e0494abe10ccaa8ea5e1c5",
+  "rust_version": "1.98.1",
+  "features": [
+    "cranelift",
+    "borrowck-profile"
+  ],
+  "publication": "local final PR1718 integration, native reference layout, buffer ownership, recursive summary and analysis-reuse repairs, and indexed Sonatina object-store invalidation; provide local Fe and Sonatina repositories",
+  "hosts": [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ]
+}

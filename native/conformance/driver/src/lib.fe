@@ -1,0 +1,317 @@
+use std::io::{Read, Write, host, read_char, write, write_char}
+use std::native::ByteBuffer
+use keccak::Keccak256
+use fevm::{BlockEnv, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::hex::{write_hex_byte, write_hex_word}
+
+// Reads one case: a version byte, the block, the pre-state accounts and the
+// transaction. Integers and lengths are big endian; see native/conformance/run.py.
+struct Reader { data: ByteBuffer, position: u64 }
+
+impl Reader {
+    fn word(mut self, bytes: u64) -> u256 {
+        core::assert(bytes <= 32 && self.position <= self.data.len() && bytes <= self.data.len() - self.position)
+        var value: u256 = 0
+        let end = self.position + bytes
+        while self.position < end {
+            value = (value << 8) | self.data.byte_at(self.position) as u256
+            self.position += 1
+        }
+        value
+    }
+    fn count(mut self) -> u64 { self.word(bytes: 4).downcast_unchecked() }
+    fn input(mut self, len: u64) -> InputData {
+        let input = InputData::copy_from(self.data, offset: self.position, len)
+        self.position += len
+        input
+    }
+}
+
+fn read_all() -> ByteBuffer uses (r: mut Read) {
+    var bytes = ByteBuffer::new()
+    while true {
+        let c = read_char()
+        if c < 0 { break }
+        let len = bytes.len()
+        core::assert(bytes.try_resize(len + 1))
+        bytes.set_byte(index: len, value: c.downcast_unchecked())
+    }
+    bytes
+}
+
+fn digest_word(_ hash: own Keccak256) -> u256 {
+    var value: u256 = 0
+    for byte in hash.finish() { value = (value << 8) | byte as u256 }
+    value
+}
+
+// State tests define BLOCKHASH(n) as keccak256 of n's decimal digits.
+fn test_block_hash(_ number: u256) -> u256 {
+    var digits: [u8; 80] = [0; 80]
+    var len: u64 = 0
+    var rest = number
+    while true {
+        digits[len as usize] = (48 + rest % 10).downcast_unchecked()
+        len += 1
+        rest /= 10
+        if rest == 0 { break }
+    }
+    var ordered: [u8; 80] = [0; 80]
+    var i: u64 = 0
+    while i < len {
+        ordered[i as usize] = digits[(len - 1 - i) as usize]
+        i += 1
+    }
+    var hash = Keccak256::new()
+    hash.update(ordered, offset: 0, len)
+    digest_word(hash)
+}
+
+fn append(_ out: mut ByteBuffer, _ byte: u8) {
+    let len = out.len()
+    core::assert(out.try_resize(len + 1))
+    out.set_byte(index: len, value: byte)
+}
+
+fn length_of_length(_ len: u64) -> u64 {
+    var bytes: u64 = 0
+    while bytes < 8 && len >> (bytes * 8) != 0 { bytes += 1 }
+    bytes
+}
+
+fn header_len(_ payload: u64) -> u64 { if payload <= 55 { 1 } else { 1 + length_of_length(payload) } }
+
+fn put_header(_ out: mut ByteBuffer, payload: u64, base: u8) {
+    if payload <= 55 {
+        append(mut out, base + payload.downcast_unchecked())
+        return
+    }
+    let bytes = length_of_length(payload)
+    append(mut out, base + 55 + bytes.downcast_unchecked())
+    var i: u64 = 0
+    while i < bytes {
+        append(mut out, (payload >> ((bytes - 1 - i) * 8)).downcast_truncate())
+        i += 1
+    }
+}
+
+fn put_word(_ out: mut ByteBuffer, _ value: u256, width: u64) {
+    var i: u64 = 0
+    while i < width {
+        append(mut out, (value >> ((width - 1 - i) * 8) as u256).downcast_truncate())
+        i += 1
+    }
+}
+
+fn data_len(_ logs: LogBuffer, entry: u64) -> u64 {
+    let len = logs.entry(entry).len()
+    if len == 1 && logs.byte_at(entry, index: 0) < 0x80 { 1 } else { header_len(len) + len }
+}
+
+fn log_payload(_ logs: LogBuffer, entry: u64) -> u64 {
+    let topics = logs.entry(entry).topic_count * 33
+    21 + header_len(topics) + topics + data_len(logs, entry)
+}
+
+// keccak256(rlp([[address, [topics...], data], ...])), the receipt logs hash.
+fn logs_hash(_ logs: LogBuffer) -> u256 {
+    var payload: u64 = 0
+    var entry: u64 = 0
+    while entry < logs.len() {
+        let item = log_payload(logs, entry)
+        payload += header_len(item) + item
+        entry += 1
+    }
+    var out = ByteBuffer::new()
+    put_header(mut out, payload, base: 0xc0)
+    entry = 0
+    while entry < logs.len() {
+        let log = logs.entry(entry)
+        put_header(mut out, payload: log_payload(logs, entry), base: 0xc0)
+        append(mut out, 0x94)
+        put_word(mut out, log.address, width: 20)
+        put_header(mut out, payload: log.topic_count * 33, base: 0xc0)
+        var topic: u64 = 0
+        while topic < log.topic_count {
+            append(mut out, 0xa0)
+            put_word(mut out, log.topics[topic as usize], width: 32)
+            topic += 1
+        }
+        let len = log.len()
+        if !(len == 1 && logs.byte_at(entry, index: 0) < 0x80) { put_header(mut out, payload: len, base: 0x80) }
+        var i: u64 = 0
+        while i < len {
+            append(mut out, logs.byte_at(entry, index: i))
+            i += 1
+        }
+        entry += 1
+    }
+    var hash = Keccak256::new()
+    hash.update(out, offset: 0, len: out.len())
+    out.release()
+    digest_word(hash)
+}
+
+fn write_world(_ world: WorldState) uses (w: mut Write) {
+    write(",\"accounts\":[")
+    var first = true
+    var slot: usize = 0
+    while slot < world.table_slots() {
+        let account = world.account_at(slot)
+        if account.occupied {
+            if !first { write(",") }
+            first = false
+            write("[\"")
+            write_hex_word(account.address)
+            write("\",\"")
+            write_hex_word(account.balance)
+            write("\",\"")
+            write_hex_word(account.nonce)
+            write("\",\"0x")
+            var i: u64 = 0
+            while i < account.code_len {
+                write_hex_byte(world.code_byte(address: account.address, index: i) as i32)
+                i += 1
+            }
+            write("\"]")
+        }
+        slot += 1
+    }
+    write("],\"storage\":[")
+    first = true
+    slot = 0
+    while slot < world.storage_slots() {
+        let entry = world.storage_at(slot)
+        if entry.occupied {
+            if !first { write(",") }
+            first = false
+            write("[\"")
+            write_hex_word(entry.address)
+            write("\",\"")
+            write_hex_word(entry.slot)
+            write("\",\"")
+            write_hex_word(entry.value)
+            write("\"]")
+        }
+        slot += 1
+    }
+    write("]")
+}
+
+fn write_number(_ value: u64) uses (w: mut Write) {
+    var divisor: u64 = 1
+    while value / divisor >= 10 { divisor *= 10 }
+    while divisor != 0 {
+        write_char((48 + (value / divisor) % 10).downcast_unchecked())
+        divisor /= 10
+    }
+}
+
+fn capacity_failure() -> i32 {
+    with (Write = host()) { write("{\"host_error\":\"pre-state exceeds table capacity\"}\n") }
+    3
+}
+
+pub fn main() -> i32 {
+    var data = ByteBuffer::new()
+    with (Read = host()) { data = read_all() }
+    var reader = Reader { data, position: 0 }
+    core::assert(reader.word(bytes: 1) == 1)
+    let block = BlockEnv {
+        coinbase: reader.word(bytes: 20),
+        number: reader.word(bytes: 32),
+        timestamp: reader.word(bytes: 32),
+        prevrandao: reader.word(bytes: 32),
+        gaslimit: reader.word(bytes: 32),
+        basefee: reader.word(bytes: 32),
+        blobbasefee: reader.word(bytes: 32),
+        chainid: reader.word(bytes: 32),
+    }
+    var world = WorldState::empty()
+    var number = if block.number > 256 { block.number - 256 } else { 0 }
+    while number < block.number {
+        core::assert(world.set_block_hash(number, test_block_hash(number)))
+        number += 1
+    }
+    var accounts = reader.count()
+    while accounts > 0 {
+        let address = reader.word(bytes: 20)
+        let balance = reader.word(bytes: 32)
+        let nonce = reader.word(bytes: 32)
+        let code = reader.input(len: reader.count())
+        let loaded = world.ensure_account(address) && world.set_balance(address, balance)
+            && world.set_nonce(address, nonce) && world.set_code(address, code) == OK
+        code.release()
+        if !loaded {
+            world.release()
+            reader.data.release()
+            return capacity_failure()
+        }
+        var slots = reader.count()
+        while slots > 0 {
+            let slot = reader.word(bytes: 32)
+            let value = reader.word(bytes: 32)
+            if !world.storage_store(address, slot, value) {
+                world.release()
+                reader.data.release()
+                return capacity_failure()
+            }
+            slots -= 1
+        }
+        accounts -= 1
+    }
+    let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
+    let sender = reader.word(bytes: 20)
+    let creates = reader.word(bytes: 1) == 1
+    let env = TxEnv {
+        kind,
+        sender,
+        creates,
+        to: reader.word(bytes: 20),
+        nonce: reader.word(bytes: 32),
+        gas_limit: reader.word(bytes: 8).downcast_unchecked(),
+        gas_price: reader.word(bytes: 32),
+        max_priority_fee_per_gas: reader.word(bytes: 32),
+        max_fee_per_blob_gas: reader.word(bytes: 32),
+        value: reader.word(bytes: 32),
+    }
+    var request = TxRequest::new(env, data: reader.input(len: reader.count()))
+    var entries = reader.count()
+    while entries > 0 {
+        let address = reader.word(bytes: 20)
+        core::assert(request.add_access_account(address))
+        var keys = reader.count()
+        while keys > 0 {
+            core::assert(request.add_access_key(address, slot: reader.word(bytes: 32)))
+            keys -= 1
+        }
+        entries -= 1
+    }
+    var blobs = reader.count()
+    while blobs > 0 {
+        core::assert(request.add_blob_hash(reader.word(bytes: 32)))
+        blobs -= 1
+    }
+    core::assert(reader.position == reader.data.len())
+    reader.data.release()
+    let applied = transact(world, request, block)
+    request.release()
+    let receipt = applied.receipt
+    with (Write = host()) {
+        write("{\"invalid\":")
+        write_number(receipt.invalid.downcast_unchecked())
+        write(",\"status\":")
+        write_number(receipt.status.downcast_unchecked())
+        write(",\"gas_used\":")
+        write_number(receipt.gas_used)
+        write(",\"logs_hash\":\"")
+        write_hex_word(logs_hash(receipt.logs))
+        write("\"")
+        write_world(applied.state)
+        write("}")
+        write_char(10)
+    }
+    applied.state.release()
+    receipt.release()
+    0
+}

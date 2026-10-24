@@ -1,0 +1,295 @@
+From 7e275c449c26d892a6d66243f2ddec0fc6cf660c Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Mon, 12 Oct 2026 12:06:34 -0700
+Subject: [PATCH 1/2] Port SwissTable sources to Fe mutable value semantics
+
+---
+ README.md        |  6 +++++-
+ native/driver.fe | 22 +++++++++++-----------
+ native/run.py    |  6 +++---
+ src/lib.fe       | 40 ++++++++++++++++++++--------------------
+ 4 files changed, 39 insertions(+), 35 deletions(-)
+
+diff --git a/README.md b/README.md
+index fed4f2d..334edfd 100644
+--- a/README.md
++++ b/README.md
+@@ -24,7 +24,7 @@ swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "<full co
+ ```fe
+ use swisstable::SwissTable
+ 
+-let mut table = SwissTable<u256, u256>::empty()
++var table = SwissTable<u256, u256>::empty()
+ core::assert(table.insert(17, 99))
+ let lookup = table.get(17)
+ core::assert(lookup.found && lookup.value == 99)
+@@ -51,3 +51,7 @@ python3 native/run.py --fe /path/to/pinned/fe --out /tmp/swisstable-check --chec
+ Use a fresh output directory. Correctness checks run at O0/O1/O2 by default;
+ omit `--check-only` to run lookup timing trials. The historical baseline is
+ preserved in this repository's git history, so a full clone is required.
++
++The MVS port passes all six library tests at O0/O1/O2 on Linux x86_64 with
++`sbillig/fe:mvs` at `fe5c32c1b9913a259667be9123a9090beb16ed1a` and native support.
++Mutable values and generated native drivers use `var` bindings.
+diff --git a/native/driver.fe b/native/driver.fe
+index 7dade7f..8e47131 100644
+--- a/native/driver.fe
++++ b/native/driver.fe
+@@ -4,8 +4,8 @@ use std::io::{HostIo, Read, Write, host, read_char}
+ use std::native::cpu_clock_ticks
+ 
+ fn read64() -> u64 uses (input: mut Read) {
+-    let mut value: u64 = 0
+-    let mut i: u64 = 0
++    var value: u64 = 0
++    var i: u64 = 0
+     while i < 8 {
+         let byte = read_char()
+         core::assert(byte >= 0)
+@@ -17,7 +17,7 @@ fn read64() -> u64 uses (input: mut Read) {
+ }
+ 
+ fn write64(_ value: u64) uses (output: mut HostIo) {
+-    let mut i: u64 = 0
++    var i: u64 = 0
+     while i < 8 {
+         output.write_char(c: ((value >> (i * 8)) & 255).downcast_unchecked())
+         core::assert(!output.failed())
+@@ -47,9 +47,9 @@ fn lookup_batch(
+     count: usize,
+     rounds: u64,
+ ) -> u64 {
+-    let mut index: usize = 0
+-    let mut checksum: u64 = 0
+-    let mut i: u64 = 0
++    var index: usize = 0
++    var checksum: u64 = 0
++    var i: u64 = 0
+     while i < rounds {
+         let lookup = table.get(keys[index])
+         let value: u64 = lookup.value.downcast_truncate()
+@@ -64,12 +64,12 @@ fn lookup_batch(
+ 
+ pub fn main() -> i32 {
+     with (Read = host(), HostIo = host()) {
+-        let mut marker = read_char()
++        var marker = read_char()
+         while marker != -1 {
+             core::assert(marker == 64)
+-            let mut table = SwissTable<u256, u256>::empty()
++            var table = SwissTable<u256, u256>::empty()
+             let operations = read64()
+-            let mut operation: u64 = 0
++            var operation: u64 = 0
+             while operation < operations {
+                 let kind = read64()
+                 let key = read256()
+@@ -88,8 +88,8 @@ pub fn main() -> i32 {
+             write64(table.deleted.downcast_unchecked())
+             let count: usize = read64().downcast_unchecked()
+             core::assert(count > 0 && count <= 256)
+-            let mut keys: [u256; 256] = [0; 256]
+-            let mut i: usize = 0
++            var keys: [u256; 256] = [0; 256]
++            var i: usize = 0
+             while i < count {
+                 let key = read256()
+                 keys[i] = key
+diff --git a/native/run.py b/native/run.py
+index be88bc8..0b141d2 100644
+--- a/native/run.py
++++ b/native/run.py
+@@ -95,9 +95,9 @@ def instrument(source):
+     """Count the real search loop in a separate generated diagnostic executable."""
+     substitutions = [
+         ('struct TableSearch {', 'struct TableSearch { groups: u64, slots: u64, comparisons: u64,', 1),
+-        ('let mut first_deleted: usize = 0',
+-         'let mut groups: u64 = 0\nlet mut slots: u64 = 0\nlet mut comparisons: u64 = 0\n'
+-         'let mut first_deleted: usize = 0', 1),
++        ('var first_deleted: usize = 0',
++         'var groups: u64 = 0\nvar slots: u64 = 0\nvar comparisons: u64 = 0\n'
++         'var first_deleted: usize = 0', 1),
+         ('while probe < TABLE_GROUPS {', 'while probe < TABLE_GROUPS { groups += 1', 1),
+         ('let ctrl = self.ctrl[slot]', 'let ctrl = self.ctrl[slot]\nslots += 1\n'
+          'if ctrl == fingerprint { comparisons += 1 }', 1),
+diff --git a/src/lib.fe b/src/lib.fe
+index dfe34e9..bbbfbc4 100644
+--- a/src/lib.fe
++++ b/src/lib.fe
+@@ -64,7 +64,7 @@ pub fn hash_u256(_ key: u256) -> u64 {
+         accumulator: (0 as u64).wrapping_sub(HASH_PRIME1),
+         lane: (key >> 192).downcast_truncate(),
+     )
+-    let mut hash = rotate_left(a, by: 1)
++    var hash = rotate_left(a, by: 1)
+         .wrapping_add(rotate_left(b, by: 7))
+         .wrapping_add(rotate_left(c, by: 12))
+         .wrapping_add(rotate_left(d, by: 18))
+@@ -122,13 +122,13 @@ impl<K, V> SwissTable<K, V> where K: SwissKey + Default + Copy, V: Default + Cop
+     }
+ 
+     fn search(self, _ key: K, _ hash: u64, _ fingerprint: u8) -> TableSearch {
+-        let mut first_deleted: usize = 0
+-        let mut saw_deleted = false
+-        let mut group = group_start(hash)
+-        let mut probe: usize = 0
++        var first_deleted: usize = 0
++        var saw_deleted = false
++        var group = group_start(hash)
++        var probe: usize = 0
+ 
+         while probe < TABLE_GROUPS {
+-            let mut i: usize = 0
++            var i: usize = 0
+             while i < TABLE_GROUP_WIDTH {
+                 let slot = group + i
+                 let ctrl = self.ctrl[slot]
+@@ -237,12 +237,12 @@ fn swisstable_hash_reference_vectors() {
+ 
+ #[test]
+ fn swisstable_hash_distributes_each_limb() {
+-    let mut shift: u256 = 0
++    var shift: u256 = 0
+     while shift < 256 {
+-        let mut groups: [usize; TABLE_GROUPS] = [0; TABLE_GROUPS]
+-        let mut fingerprints: [bool; 128] = [false; 128]
+-        let mut distinct: usize = 0
+-        let mut i: u256 = 0
++        var groups: [usize; TABLE_GROUPS] = [0; TABLE_GROUPS]
++        var fingerprints: [bool; 128] = [false; 128]
++        var distinct: usize = 0
++        var i: u256 = 0
+         while i < 256 {
+             let hash = hash_u256(i << shift)
+             let group = group_start(hash) / TABLE_GROUP_WIDTH
+@@ -254,7 +254,7 @@ fn swisstable_hash_distributes_each_limb() {
+             }
+             i += 1
+         }
+-        let mut group: usize = 0
++        var group: usize = 0
+         while group < TABLE_GROUPS {
+             core::assert(groups[group] >= 4 && groups[group] <= 32)
+             group += 1
+@@ -283,8 +283,8 @@ impl SwissKey for CollidingKey {
+ 
+ #[test]
+ fn swisstable_collisions_updates_and_churn() {
+-    let mut table = SwissTable<CollidingKey, u256>::empty()
+-    let mut i: usize = 0
++    var table = SwissTable<CollidingKey, u256>::empty()
++    var i: usize = 0
+     while i < TABLE_CAP {
+         core::assert(
+             table.insert(CollidingKey { value: i as u256 }, (i as u256) + 1),
+@@ -300,7 +300,7 @@ fn swisstable_collisions_updates_and_churn() {
+     core::assert(table.insert(CollidingKey { value: 0 }, 1))
+     core::assert(table.insert(CollidingKey { value: 255 }, 256))
+ 
+-    let mut generation: usize = 0
++    var generation: usize = 0
+     while generation < 4 {
+         i = 0
+         while i < TABLE_CAP {
+@@ -331,7 +331,7 @@ fn swisstable_collisions_updates_and_churn() {
+ 
+ #[test]
+ fn swisstable_basic_operations() {
+-    let mut table = SwissTable<u256, u256>::empty()
++    var table = SwissTable<u256, u256>::empty()
+     core::assert(table.is_empty())
+     core::assert(table.capacity() == TABLE_CAP)
+     core::assert(table.len() == 0)
+@@ -357,8 +357,8 @@ fn swisstable_basic_operations() {
+ 
+ #[test]
+ fn swisstable_many_entries_roundtrip() {
+-    let mut table = SwissTable<u256, u256>::empty()
+-    let mut i: usize = 0
++    var table = SwissTable<u256, u256>::empty()
++    var i: usize = 0
+     while i < 128 {
+         let key = (i as u256).wrapping_mul(257) + 11
+         core::assert(table.insert(key, key + 1000))
+@@ -378,8 +378,8 @@ fn swisstable_many_entries_roundtrip() {
+ 
+ #[test]
+ fn swisstable_tombstones_reuse_full_table_slots() {
+-    let mut table = SwissTable<u256, u256>::empty()
+-    let mut i: usize = 0
++    var table = SwissTable<u256, u256>::empty()
++    var i: usize = 0
+     while i < TABLE_CAP {
+         core::assert(table.insert(i as u256, (i as u256) + 1))
+         i += 1
+-- 
+2.43.0
+
+
+From 770372e54571d0905167bc0d79b9b9b303e6d379 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Mon, 12 Oct 2026 15:10:34 -0700
+Subject: [PATCH 2/2] Pin the MVS historical benchmark baseline
+
+---
+ README.md        |  5 +++++
+ native/README.md | 12 +++++++++++-
+ native/run.py    |  2 +-
+ 3 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 334edfd..3446c16 100644
+--- a/README.md
++++ b/README.md
+@@ -55,3 +55,8 @@ preserved in this repository's git history, so a full clone is required.
+ The MVS port passes all six library tests at O0/O1/O2 on Linux x86_64 with
+ `sbillig/fe:mvs` at `fe5c32c1b9913a259667be9123a9090beb16ed1a` and native support.
+ Mutable values and generated native drivers use `var` bindings.
++
++The historical comparison baseline is separately ported to MVS at
++`60017e7f2f033e971bdb2a5f5d4af097115f3be8`. The complete native check runner
++passes 2,004 scenario checks across 12 builds at O0/O1/O2, preserving both
++algorithms and their dictionary/probe oracles.
+diff --git a/native/README.md b/native/README.md
+index efa4b9a..c871039 100644
+--- a/native/README.md
++++ b/native/README.md
+@@ -27,7 +27,10 @@ explicit threat model before this table can be considered production ready.
+ Use a native-capable Fe compiler (see the repository README). Install Python
+ 3.10+, Git, a C compiler, and binutils on x86_64 Linux, or Xcode command-line
+ tools on AArch64 macOS. No third-party Python packages are required. The baseline Git object must be
+-available locally (default `ab4cf7dfd7242870364ababff04e2e4524bd2cf8`).
++available locally (default `60017e7f2f033e971bdb2a5f5d4af097115f3be8`).
++This MVS baseline preserves the historical `ab4cf7df` hash and table algorithms;
++its only source changes are eleven mutable binding spellings. Both comparison
++variants now use MVS syntax.
+ 
+ ```sh
+ python3 native/run.py --fe /path/to/pinned/fe \
+@@ -76,3 +79,10 @@ including hashing and loop overhead, not whole-EVM throughput or insertion timin
+ Run on an idle machine: CPU clocks exclude descheduling, but frequency, thermal
+ state, and other workloads still affect results. Linux execution requires a Linux
+ runner; a macOS result does not establish cross-platform acceptance.
++
++
++The MVS runner passes all 2,004 scenario checks across 12 O0/O1/O2 builds,
++including dictionary behavior and physical probe counts for both hash algorithms.
++All six current library tests and all three historical baseline tests also pass
++at every level. This check used Fe `2c114c8ae9d931aacef495b3e18042a8bc266944`
++on x86_64 Linux; timing trials were omitted.
+diff --git a/native/run.py b/native/run.py
+index 0b141d2..0e8cf21 100644
+--- a/native/run.py
++++ b/native/run.py
+@@ -16,7 +16,7 @@ from support import artifacts, command, host_info
+ ROOT = Path(__file__).resolve().parents[1]
+ HERE = Path(__file__).resolve().parent
+ TABLE = 'src/lib.fe'
+-BASELINE = 'ab4cf7dfd7242870364ababff04e2e4524bd2cf8'
++BASELINE = '60017e7f2f033e971bdb2a5f5d4af097115f3be8'
+ MASK64 = (1 << 64) - 1
+ MASK256 = (1 << 256) - 1
+ PRIMES = (0x9E3779B185EBCA87, 0xC2B2AE3D27D4EB4F,
+-- 
+2.43.0
+

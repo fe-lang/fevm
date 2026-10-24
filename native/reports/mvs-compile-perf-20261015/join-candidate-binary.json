@@ -1,0 +1,8 @@
+{
+  "binary": "/tmp/fevm-mvs-compile-perf-20261015-r1/join-candidate-tests",
+  "binary_sha256": "d1867bdcaf3e2fd7b092e1121495b98862796e0ed8722a824e47a17034746022",
+  "source_base": "1544e570257cbb1e453283b8a81b25b828ec3ca0",
+  "production_source_sha256": "29a31a7c3101e6a100cc3d470310248e2a11da0a064d65b3281f7765f3abc2e1",
+  "probe_source_sha256": "18a27aaf372406d2922575b4e3dfeb0740dcac63d8d07bfd2eac4f7f7599e4c9",
+  "probe_temporary_and_excluded_from_production_commit": true
+}

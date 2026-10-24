@@ -1,0 +1,15 @@
+    Finished `release` profile [optimized] target(s) in 0.11s
+────────────
+ Nextest run ID fcb211b5-a1d3-4801-96e2-1adb13be97e3 with nextest profile: default
+    Starting 9 tests across 1 binary
+        PASS [   0.004s] (1/9) fevm-reference::bin/fevm-reference state::tests::transaction_boundaries_commit_storage_and_reset_original_and_transient
+        PASS [   0.004s] (2/9) fevm-reference::bin/fevm-reference state::tests::blob_hashes_use_the_blob_transaction_host_path
+        PASS [   0.004s] (3/9) fevm-reference::bin/fevm-reference tests::retains_bounds_reason_when_memory_is_also_unpayable
+        PASS [   0.004s] (4/9) fevm-reference::bin/fevm-reference tests::accepts_code_and_calldata_beyond_the_old_frame_bound
+        PASS [   0.004s] (5/9) fevm-reference::bin/fevm-reference state::tests::log_observations_follow_real_journal_rollback_and_finalization
+        PASS [   0.004s] (6/9) fevm-reference::bin/fevm-reference state::tests::account_code_hash_distinguishes_empty_accounts_and_empty_code
+        PASS [   0.004s] (7/9) fevm-reference::bin/fevm-reference tests::reports_exact_gas_and_exceptional_frame_consumption
+        PASS [   0.004s] (8/9) fevm-reference::bin/fevm-reference state::tests::cancun_net_storage_metering_vectors
+        PASS [   0.004s] (9/9) fevm-reference::bin/fevm-reference state::tests::real_journal_reverts_warmness_storage_and_refunds
+────────────
+     Summary [   0.005s] 9 tests run: 9 passed, 0 skipped

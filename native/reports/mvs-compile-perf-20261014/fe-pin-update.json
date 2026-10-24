@@ -1,0 +1,10 @@
+{
+  "sonatina_revision": "159c00d6576757adc48c816d501a14386b12a902",
+  "old_sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+  "cargo_lock_sha256": "46dd83f0fc0dd37766450d42bd09e3608c16266abdf27d528211217484391bd3",
+  "lock_changes_only_sonatina_revision": true,
+  "locked_metadata_passed": true,
+  "fe_parent_revision": "6f496843b0d4192670e1f2a19bf4ae75c51a6499",
+  "compiler_base_mvs": "1b4e287c65a0981b385a18c9d49195c92f8f2197",
+  "resolution_note": "Retained dot2 at its original Git revision through precise Cargo update and kept the original gix-imara-diff -> hashbrown 0.16.1 edge. Locked metadata validates the graph; all third-party inputs remain unchanged."
+}

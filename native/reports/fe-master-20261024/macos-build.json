@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "fa06c6cd5ba19cbf15da718fad80b84d79a569b9",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "fcdbdc4d8706f7b93415d605ed8e9aa277179f98",
+    "cargo_lock_sha256": "ef577f29c5f582e986cd0dfe89932b5c26ecffa5d2fbdad5f3a5b020f1e666f3",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "upstream argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "aarch64-apple-darwin",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/private/tmp/fevm-macos-20261024/toolchain/fe",
+  "sonatina_source_directory": "/private/tmp/fevm-macos-20261024/toolchain/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v26.5.0",
+  "npm": "11.17.0",
+  "cc": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+  "target_directory": "/private/tmp/fevm-macos-20261024/toolchain/target",
+  "complete": true,
+  "compiler_build_seconds": 142.5691373750451,
+  "compiler": "/private/tmp/fevm-macos-20261024/toolchain/bin/fe",
+  "compiler_sha256": "a6f159eac82dc5aafd63813c0f8fd2a851871228e9b655fb475bb1ae301ad4a0",
+  "compiler_version": "fe 26.4.0 (fa06c6cd5)"
+}

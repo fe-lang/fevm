@@ -1,0 +1,25 @@
+running `fe test` for 6 inputs (jobs=1)
+
+COMPILING        evm          /home/sean/code/fevm/ingots/evm
+                 evm          Failed to emit test native: failed to write native test object: No space left on device (os error 28)
+ERROR [754.14s]  evm          Failed to emit test native: failed to write native test object: No space left on device (os error 28)
+COMPILING        driver       /home/sean/code/fevm/native/differential/driver
+READY [2.4975s]  driver       running 0 tests
+COMPILING        state_driver /home/sean/code/fevm/native/differential/state_driver
+READY [0.5643s]  state_driver running 0 tests
+COMPILING        accounts     /home/sean/code/fevm/native/fixtures/accounts
+READY [0.0799s]  accounts     running 0 tests
+COMPILING        journal      /home/sean/code/fevm/native/fixtures/journal
+READY [0.0768s]  journal      running 0 tests
+COMPILING        logs         /home/sean/code/fevm/native/fixtures/logs
+READY [0.1005s]  logs         running 0 tests
+Warning: No tests found in /home/sean/code/fevm/native/differential/driver
+Warning: No tests found in /home/sean/code/fevm/native/differential/state_driver
+Warning: No tests found in /home/sean/code/fevm/native/fixtures/accounts
+Warning: No tests found in /home/sean/code/fevm/native/fixtures/journal
+Warning: No tests found in /home/sean/code/fevm/native/fixtures/logs
+
+test result: FAILED. 0 passed; 1 failed
+
+failures:
+    evm::codegen

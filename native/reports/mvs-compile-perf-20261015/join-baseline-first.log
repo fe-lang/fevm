@@ -1,0 +1,15 @@
+
+running 1 test
+test transform::aggregate::object_initialization::tests::compilation_join_probe ... 
+thread 'transform::aggregate::object_initialization::tests::compilation_join_probe' (2585485) panicked at crates/codegen/src/transform/aggregate/object_initialization.rs:530:48:
+called `Result::unwrap()` on an `Err` value: [SyntaxError(Error { variant: ParsingError { positives: [COMMENT], negatives: [] }, location: Pos(97), line_col: Pos((4, 27)), path: None, line: "func private %f(v0.@L1) { block0: return; }", continued_line: None, parse_attempts: None })]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    transform::aggregate::object_initialization::tests::compilation_join_probe
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1067 filtered out; finished in 0.00s
+

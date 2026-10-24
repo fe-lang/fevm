@@ -1,0 +1,108 @@
+{
+  "capture": {
+    "compiler": "/tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/bin/fe",
+    "pid": 2521303,
+    "started_unix": 1792007644.8971214,
+    "finished_unix": 1792008323.0464764,
+    "frequency_hz": 49,
+    "event": "task-clock:u",
+    "initial_sample_cpu_seconds": 6.99,
+    "status": 0,
+    "scope": "Fixed O2 acceptance compiler from first resource-sample detection until process exit; earlier startup excluded."
+  },
+  "stage_seconds": 686.0350360519951,
+  "capture_wall_seconds": 678.1493549346924,
+  "profile_header": [
+    "# Total Lost Samples: 0",
+    "# Samples: 32K of event 'task-clock:u'",
+    "# Event count (approx.): 663816317901"
+  ],
+  "enum_proof_named_symbols_percent": 34.69,
+  "captured_leaf_percent": 0.07,
+  "cranelift_named_symbols_percent": 6.42,
+  "top_symbols": [
+    {
+      "percent": 2.89,
+      "symbol": "[.] _mi_page_malloc_zero"
+    },
+    {
+      "percent": 2.43,
+      "symbol": "[.] mi_free"
+    },
+    {
+      "percent": 1.91,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::types::Type>::is_obj_ref::{closure#0}, bool>"
+    },
+    {
+      "percent": 1.88,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::view_index::Paths> as core::ops::drop::Drop>::drop"
+    },
+    {
+      "percent": 1.76,
+      "symbol": "[.] <rpds::map::red_black_tree_map::RedBlackTreeMap<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, archery::shared_pointer::kind::arct::ArcTK>>::get::<sonatina_verifier::verify::function::enum_proofs::views::Step>"
+    },
+    {
+      "percent": 1.72,
+      "symbol": "[.] <rpds::map::red_black_tree_map::RangeIterPtr<sonatina_verifier::verify::function::enum_proofs::views::Step, sonatina_verifier::verify::function::enum_proofs::value_state::ValueState, core::ops::range::RangeFull, sonatina_verifier::verify::function::enum_proofs::views::Step, archery::shared_pointer::kind::arct::ArcTK> as core::iter::traits::iterator::Iterator>::next"
+    },
+    {
+      "percent": 1.65,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<<sonatina_ir::isa::native::NativeTypeLayout as sonatina_ir::isa::TypeLayout>::align_of::{closure#0}, sonatina_ir::types::CompoundType>"
+    },
+    {
+      "percent": 1.62,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_ir::value::ValueId, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.62,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::value_state::ValueState>::join"
+    },
+    {
+      "percent": 1.54,
+      "symbol": "[.] <sonatina_codegen::transform::aggregate::object_initialization::InitializedValue>::join"
+    },
+    {
+      "percent": 1.53,
+      "symbol": "[.] <alloc::collections::btree::map::BTreeMap<_, _, _> as core::clone::Clone>::clone::clone_subtree::<sonatina_verifier::verify::function::enum_proofs::views::View, alloc::collections::btree::set_val::SetValZST, alloc::alloc::Global>"
+    },
+    {
+      "percent": 1.5,
+      "symbol": "[.] <cranelift_codegen::ir::dfg::DataFlowGraph>::value_def"
+    },
+    {
+      "percent": 1.44,
+      "symbol": "[.] <sonatina_ir::module::ModuleCtx>::with_ty_store::<sonatina_codegen::transform::aggregate::shape::with_uncached_layout<core::option::Option<sonatina_ir::types::Type>, sonatina_codegen::transform::aggregate::shape::aggregate_child_ty::{closure#0}>::{closure#0}, core::option::Option<sonatina_ir::types::Type>>"
+    },
+    {
+      "percent": 1.33,
+      "symbol": "[.] <rpds::map::red_black_tree_map::Node<_, _, _>>::insert::ins::<u32, sonatina_codegen::transform::aggregate::object_initialization::InitializedValue, archery::shared_pointer::kind::arct::ArcTK>"
+    },
+    {
+      "percent": 1.19,
+      "symbol": "[.] 0x00000000001a1653"
+    },
+    {
+      "percent": 1.11,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::objects::State>::join"
+    },
+    {
+      "percent": 1.09,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::view_index::ViewIndex>::update"
+    },
+    {
+      "percent": 1.05,
+      "symbol": "[.] <triomphe::arc::Arc<rpds::map::red_black_tree_map::Node<u32, sonatina_codegen::transform::aggregate::object_initialization::InitializedValue, archery::shared_pointer::kind::arct::ArcTK>>>::drop_slow"
+    },
+    {
+      "percent": 1.05,
+      "symbol": "[.] <sonatina_codegen::transform::aggregate::provenance::ProvenanceSnapshot>::new"
+    },
+    {
+      "percent": 1.04,
+      "symbol": "[.] <sonatina_verifier::verify::function::enum_proofs::views::Place as core::cmp::Ord>::cmp"
+    }
+  ],
+  "scope": "Extended fixed O2 user-CPU leaf sample, startup before attachment excluded. Generic allocator/type costs cannot be assigned to callers. Baseline/fixed profile coverage differs, so relative percentages alone do not establish phase speedups.",
+  "captured_direct_leaf_percent": 0.06,
+  "references_join_direct_leaf_percent": 0.41
+}

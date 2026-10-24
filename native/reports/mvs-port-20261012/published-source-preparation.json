@@ -1,0 +1,29 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/sbillig/fe",
+    "fe_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+    "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "published Fe MVS prerequisites and Sonatina revision",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/tmp/fevm-mvs-published-20261013-r1/bootstrap/fe",
+  "sonatina_source_directory": "/tmp/fevm-mvs-published-20261013-r1/bootstrap/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v20.20.2",
+  "npm": "10.8.2",
+  "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "target_directory": "/tmp/fevm-mvs-published-20261013-r1/bootstrap/target",
+  "complete": false
+}

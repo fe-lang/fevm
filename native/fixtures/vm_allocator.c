@@ -2,12 +2,25 @@
 // buffers each request 131,072 bytes, larger than the frame/state descriptors.
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
 // The journal fixture uses FAIL_AT=1 to check atomic growth failure and undo.
+// The accounts fixture uses all three settings for code replacement and release.
+// WATCH_MIN additionally watches every allocation of at least that many bytes;
+// the calls fixture uses it to count child frame boxes.
 #define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+
+#ifndef WATCH_SIZE
+#define WATCH_SIZE 131072
+#endif
+#ifndef WATCH_SIZE_EXTRA
+#define WATCH_SIZE_EXTRA 0
+#endif
+#ifndef SUCCESS_ALLOCS
+#define SUCCESS_ALLOCS 2
+#endif
 
 static unsigned attempts;
 static unsigned allocations;
@@ -20,7 +33,10 @@ typedef union {
 } Header;
 
 void *malloc(size_t size) {
-    int watched = size == 131072;
+    int watched = size == WATCH_SIZE || (WATCH_SIZE_EXTRA != 0 && size == WATCH_SIZE_EXTRA);
+#ifdef WATCH_MIN
+    watched = watched || size >= WATCH_MIN;
+#endif
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;
@@ -45,8 +61,8 @@ void free(void *pointer) {
 }
 
 __attribute__((destructor)) static void check_releases(void) {
-    unsigned expected = FAIL_AT ? FAIL_AT - 1 : 2;
-    if (attempts != (FAIL_AT ? FAIL_AT : 2) ||
+    unsigned expected = FAIL_AT ? FAIL_AT - 1 : SUCCESS_ALLOCS;
+    if (attempts != (FAIL_AT ? FAIL_AT : SUCCESS_ALLOCS) ||
         failures != (FAIL_AT ? 1 : 0) ||
         allocations != expected || releases != expected) _Exit(101);
 }

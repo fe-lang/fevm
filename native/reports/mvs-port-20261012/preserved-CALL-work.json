@@ -1,0 +1,66 @@
+{
+  "complete": true,
+  "scope": "initial tracked and untracked CALL work differs only by intended MVS migration",
+  "files": {
+    "ingots/evm/src/constants.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+      "current_sha256": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71"
+    },
+    "ingots/evm/src/opcodes.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41",
+      "current_sha256": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41"
+    },
+    "ingots/evm/src/transaction.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "5f73a70ef6284c6c9923ee9df805a044886e2674250d02fb599f43fe4a327b8c",
+      "current_sha256": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5"
+    },
+    "ingots/evm/src/transaction_runtime.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "1e4c698084d332c072fd6502580ea57db52ad26e0f94bce8a528f21638e3715c",
+      "current_sha256": "bc47c302043226e1ce6573ab419ef01f918cc2dacbdb54cde9ac11ea0d1fcef3"
+    },
+    "ingots/evm/src/vm.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "8a924fefd13d1b6033f29092e807fd21c11137261a66c5f900a400ed5be3fc7c",
+      "current_sha256": "cbe2ac637deb6d3485e949539f44e2e1f254b909441ca9642691ca2a4a7f16c9"
+    },
+    "native/differential/state_driver/src/lib.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "0c4f079e5df8d9a09faf6500f03d4b150931cbea02d1b0830c9910bc523042dd",
+      "current_sha256": "108422f6457e78d8ec0402528cec07515b89ce64fa907fc55731d01059e1ef71"
+    },
+    "native/fixtures/journal/src/lib.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "21cdd03be14ec05b39cbad0e71fafbb55d67ba75b40bbad4d7061ac5a598170c",
+      "current_sha256": "95e06230ce00a8c18d465f0050a498034429eca932bfcc2c944f04e4a5764fa0"
+    },
+    "native/fixtures/logs/src/lib.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "de288dfac78c5f4f2b18bd7fc10b439ac35c49cd3635566e197bbf1461633e3e",
+      "current_sha256": "071195704f5edcde7c1cd86a9191fd6f1c219ba06f487709c81d35214581efef"
+    },
+    "native/perf/checkpoints.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "d43e2ef40a14a0d1406fa7aa610e4902d0cb84d7d6fdaff33a0f474cf8b69ebe",
+      "current_sha256": "8f5df035d8c93207bc82af687d8e7475ae066cdfd94a3661fae16f5885979f18"
+    },
+    "native/perf/run.py": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+      "current_sha256": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569"
+    },
+    "ingots/evm/src/calls_runtime.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "17e24c44410f2147c49a7d4063df3878d41dd316901018405c93c1d8f6f91250",
+      "current_sha256": "bf02217a0b65a9a300c6227c37cfe8686bfab55432696ca36f7730bc45430022"
+    },
+    "native/perf/calls.fe": {
+      "matches_expected_port_of_original_work": true,
+      "original_sha256": "799ba6929dfc0a0c1e622ca0124b2c5dc82682614ae62d5778381c8dda725b6a",
+      "current_sha256": "799ba6929dfc0a0c1e622ca0124b2c5dc82682614ae62d5778381c8dda725b6a"
+    }
+  }
+}

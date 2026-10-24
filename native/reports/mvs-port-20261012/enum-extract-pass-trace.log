@@ -1,0 +1,172 @@
+Running Inline
+Running DeadFuncElim
+Running FuncPasses([CfgCleanup])
+Running FuncPasses([AggregateCombine])
+Running FuncPasses([BranchCanonicalize])
+Running FuncPasses([ObjectLoadStore])
+Running FuncPasses([AggregateScalarize])
+Running FuncPasses([LoadStore])
+Running FuncPasses([CheckedArithElim])
+Running FuncPasses([JumpThread])
+Running FuncPasses([RangeBranchSimplify])
+Running FuncPasses([Sccp])
+Running FuncPasses([ScalarCanonicalize])
+Running FuncPasses([Gvn])
+Running FuncPasses([Licm])
+error [IR0600] enum.extract requires a proven active variant at the use site @ func29:block53:inst139 (%emit_log, enum.extract)
+
+func private %emit_log(v0.objref<@layout_12>, v1.i256, v2.constref<[i256; 4]>, v3.i64, v4.@layout_3, v5.i64, v6.i64) -> i32 {
+    block0:
+        v7.objref<i1> = obj.proj v0 9.i256;
+        obj.store v7 1.i1;
+        v8.objref<i1> = obj.proj v0 11.i256;
+        v9.i1 = obj.load v8;
+        br v9 block2 block4;
+
+    block2:
+        return 23.i32;
+
+    block4:
+        v10.objref<@layout_9> = obj.proj v0 3.i256;
+        v23.i1 = gt v3 4.i64;
+        br v23 block12 block26;
+
+    block12:
+        jump block13;
+
+    block13:
+        v35.i1 = phi (1.i1 block45) (0.i1 block12);
+        call %assert v35;
+        v37.objref<@layout_3> = obj.proj v10 0.i256;
+        v38.objref<i64> = obj.proj v37 1.i256;
+        v39.i64 = obj.load v38;
+        v40.objref<@layout_3> = obj.proj v10 1.i256;
+        v41.objref<i64> = obj.proj v40 1.i256;
+        v42.i64 = obj.load v41;
+        (v44.i64, v45.i1) = uaddo v39 192.i64;
+        br v45 block43 block44;
+
+    block22:
+        (v30.i64, v31.i1) = usubo v26 v5;
+        br v31 block43 block45;
+
+    block26:
+        v26.i64 = extract_value v4 1.i256;
+        v27.i1 = gt v5 v26;
+        br v27 block12 block22;
+
+    block30:
+        (v49.i64, v50.i1) = uaddo v42 v6;
+        br v50 block43 block46;
+
+    block31:
+        v55.i1 = call %try_resize v37 v39;
+        call %assert v55;
+        jump block7;
+
+    block33:
+        v58.i256 = and v1 1461501637330902918203684832716283019655932542975.i256;
+        call %write_word v37 v39 v58;
+        (v64.i64, v65.i1) = uaddo v39 32.i64;
+        jump block37;
+
+    block37:
+        v122.i64 = phi (0.i64 block33) (v132 block51);
+        v61.i1 = lt v122 v3;
+        br v61 block38 block39;
+
+    block38:
+        br v65 block43 block47;
+
+    block39:
+        v82.i256 = zext v42 i256;
+        v83.i256 = zext v6 i256;
+        v85.i256 = shl 64.i256 v83;
+        v86.i256 = or v82 v85;
+        v87.i256 = zext v3 i256;
+        v89.i256 = shl 128.i256 v87;
+        v90.i256 = or v86 v89;
+        (v93.i64, v94.i1) = uaddo v39 160.i64;
+        br v94 block43 block53;
+
+    block40:
+        v126.i64 = phi (0.i64 block53) (v134 block61);
+        v96.i1 = lt v126 v6;
+        br v96 block41 block7;
+
+    block41:
+        (v98.i64, v99.i1) = uaddo v42 v126;
+        br v99 block43 block54;
+
+    block43:
+        unreachable;
+
+    block44:
+        v47.i1 = call %try_resize v37 v44;
+        br v47 block30 block7;
+
+    block45:
+        v32.i1 = gt v6 v30;
+        br v32 block12 block13;
+
+    block46:
+        v52.i1 = call %try_resize v40 v49;
+        br v52 block33 block31;
+
+    block47:
+        (v67.i64, v68.i1) = umulo v122 32.i64;
+        br v68 block43 block48;
+
+    block48:
+        (v69.i64, v70.i1) = uaddo v64 v67;
+        br v70 block43 block49;
+
+    block49:
+        v72.i256 = zext v122 i256;
+        v74.i1 = lt v72 4.i256;
+        br v74 block51 block50;
+
+    block50:
+        unreachable;
+
+    block51:
+        v76.constref<i256> = const.index v2 v72;
+        v77.i256 = const.load v76;
+        call %write_word v37 v69 v77;
+        v132.i64 = add v122 1.i64;
+        jump block37;
+
+    block53:
+        call %write_word v37 v93 v90;
+        v103.i64 = extract_value v4 1.i256;
+        v105.@layout_2 = extract_value v4 0.i256;
+        v106.enumtag(@layout_2) = enum.tag v105;
+        v109.i256 = enum.extract v105 #variant_0 0.i256;
+        jump block40;
+
+    block54:
+        (v101.i64, v102.i1) = uaddo v5 v126;
+        br v102 block43 block57;
+
+    block57:
+        v104.i1 = lt v101 v103;
+        call %assert v104;
+        br_table v106 (0.enumtag(@layout_2) block61) (1.enumtag(@layout_2) block62);
+
+    block61:
+        enum.assert_variant v105 #variant_0;
+        v110.i256 = zext v101 i256;
+        v113.i256 = add v109 v110;
+        v114.i8 = mload v113 i8;
+        call %set_byte v40 v98 v114;
+        v134.i64 = add v126 1.i64;
+        jump block40;
+
+    block62:
+        unreachable;
+
+    block7:
+        v12.i32 = phi (0.i32 block40) (21.i32 block31) (21.i32 block44);
+        return v12;
+}
+

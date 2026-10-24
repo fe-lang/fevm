@@ -1,0 +1,39 @@
+{
+  "published": false,
+  "publication_requested_for_this_work": false,
+  "requires_explicit_push_authorization": true,
+  "instruction_source": "User-provided AGENTS.md: Push only when user asks.",
+  "reviewed_at_utc": "2026-10-15T20:21:16.973784+00:00",
+  "scope": "two new compiler performance refs only; no new branches or FeVM changes have been pushed",
+  "refs": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "branch": "perf/fevm-native-compile-20261015",
+      "ref": "refs/heads/perf/fevm-native-compile-20261015",
+      "revision": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+      "parent_revision": "8de35117e3de35c2f92967ec260e124db87c85bb",
+      "source_directory": "/tmp/fevm-mvs-compile-perf-20261015-r1/fe",
+      "source_clean": true,
+      "patch": "fe-performance.patch",
+      "patch_sha256": "a80aa5de764d4eed0d10297240fbb7b8682d8bb0f3a9e5fcb0843682018f6a13",
+      "remote_ref_absent_verified": true,
+      "published": false
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "branch": "perf/fevm-verifier-20261015",
+      "ref": "refs/heads/perf/fevm-verifier-20261015",
+      "revision": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+      "parent_revision": "1544e570257cbb1e453283b8a81b25b828ec3ca0",
+      "source_directory": "/tmp/fevm-mvs-compile-perf-20261015-r1/sonatina",
+      "source_clean": true,
+      "patch": "sonatina-performance.patch",
+      "patch_sha256": "4c6812f2e5a819e98a00917daad9c56c2d4dc609abf8f5b7c881875e411dada8",
+      "remote_ref_absent_verified": true,
+      "published": false
+    }
+  ],
+  "local_bootstrap_source_verification": "source-verification.json",
+  "default_remote_bootstrap_requires_publication": true,
+  "local_repository_overrides_documented": true
+}

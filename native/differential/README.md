@@ -3,12 +3,22 @@
 This runner compares FeVM's single-frame execution with `revm-interpreter`
 **31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
 explicitly configured for **Cancun**. Cargo.lock pins the reference and its
-dependencies. The corpus includes 1,729 frames: arithmetic batches, all PUSH
+dependencies. The corpus includes 1,840 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
-remaining gas, and returned/reverted bytes. A looping program checks gas exhaustion.
+remaining gas, Keccak ranges/padding/gas, code/calldata beyond 4 KiB, and
+returned/reverted bytes. A looping program checks gas exhaustion.
 Specification-derived anchors also check the reference independently.
 
-Current checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
+Keccak checkpoint: **1,835 frames and 383 state sequences pass at O0/O1/O2
+on x86_64 Linux**, including 106 Keccak frames and 34 new block-history/gas
+sequences. See the [Keccak integration report](../reports/keccak-integration.md).
+
+Current account-code checkpoint: **1,835 frames and 737 state sequences pass at
+O0/O1/O2 on x86_64 Linux**, including 354 new external-code cases. State results
+match exactly; frames retain the same three declared fault-reason differences.
+See the [account-code report](../reports/account-code.md).
+
+Previous checkpoint: **1,729 frames pass at O0/O1/O2 on x86_64 Linux**, including
 96 memory and 31 gas cases. The three explicitly declared simultaneous-fault
 reason differences per level match the agreed contract below. See the
 [state-gas acceptance report](../reports/state-gas.md).
@@ -20,8 +30,9 @@ overflow without changing successful instruction paths or gas charging.
 
 ## Running
 
-Use the pinned native compiler and install the Rust version in
-`native/toolchain.json` with rustup. Both frame and state runners select that
+Use the milestone
+[compiler manifest](../reports/account-code-toolchain.json) and install its Rust
+version with rustup. Both frame and state runners select that
 version explicitly; `--toolchain` selects another installed toolchain for a
 diagnostic run. `native/accept.py` forwards its bootstrap record's Rust version
 to both runners. Keep outputs outside temporary storage:
@@ -77,7 +88,9 @@ bounded EVM programs, preserving every arithmetic result on the stack.
 
 The expanded slice adds gas and active-memory accounting for implemented stateless
 frame instructions. Each case supplies its gas limit; the usual budget is
-1,000,000. Inputs remain bounded to 4,096 bytes by the parser. The stateless corpus excludes external state and nested calls. The additional
+1,000,000. Code and calldata use growable owned buffers. The state wire format
+uses two-byte lengths for individual fields; it no longer imposes a 4 KiB total
+packet limit. The stateless corpus excludes external state and nested calls. The additional
 stateful corpus below covers implemented state access, refunds and checkpoint
 rollback. Neither corpus establishes full Cancun conformance, CALL/CREATE
 execution, resident allocation reclamation or performance.
@@ -102,33 +115,46 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 349 deterministic cases. Its reference uses the pinned
+The stateful corpus has 1,142 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,
-account/slot warmness, signed refund deltas and cumulative refunds. Transaction
-results also compare committed state, capped refunds and net gas used. Repeated
+account/slot warmness, signed refund deltas, cumulative refunds and ordered logs.
+Transaction results also compare committed state, logs, capped refunds and net gas used. Repeated
 transactions share persistent state but start fresh transient/access/refund state.
 The reference observes its journal directly so inspection does not warm a key.
 
 Cases include the EIP-2200 storage sequences adjusted to Cancun, cold/warm gas
 boundaries, upfront sender/destination/coinbase/precompile warming, duplicate
 access lists, high-bit BALANCE aliases, negative frame refund contributions,
-static writes, child commit/revert, parent rollback, and transaction abort/reuse.
-The Python contract checks field shapes and accounting invariants; independent
+static writes, child commit/revert, parent rollback, transaction abort/reuse, and
+BLOCKHASH history-window/operand/gas boundaries. External-code cases distinguish
+absent, explicitly empty, storage-only, funded, nonce-bearing and code-bearing
+accounts; check static reads, high address bits, copy padding and full-width
+sources, exact gas, shared warming and rollback across frames and transactions.
+Log cases cover all topic counts, data copying and zero padding, exact gas,
+full-width empty offsets, static rejection, frame failure and nested rollback.
+Blob-hash cases cover transaction inputs, full-width bounds, static reads, gas,
+checkpoint persistence and transaction reuse. Reference transactions derive their
+EIP-4844 type when blob hashes are present, so the host BLOBHASH path is exercised.
+The Python contract checks field shapes, log encoding and accounting invariants; independent
 anchors check the reference's gas, refund and value results. Operational failures
 fail the comparison. Unlike the stateless simultaneous-fault controls, these
 state cases require exact diagnostic reasons as well as exact results.
 
 The native state driver takes one versioned binary case encoded as hex. Integers
-and lengths use big endian; the encoder lives in `state_corpus.py`. Its current
+and lengths use big endian. Version 4 carries block history and explicit accounts:
+address (20 bytes), balance (32), nonce (8), code length (2) and code bytes. Each
+transaction's block number is followed by a blob-hash count (2 bytes) and that many
+32-byte hashes, before its commit flag and access lists. Earlier wire versions
+are rejected. The encoder lives in `state_corpus.py`. Its current
 4,096-byte input limit is a harness limit. JSON lines remain the reference input
 and retained corpus format. Each case starts a fresh native process, while all
 frames and transactions in that case execute in that process. The scope models
 journal boundaries directly; it does not implement CALL/CREATE, transaction
 signatures, intrinsic gas or access-list intrinsic charges.
 
-All 349 stateful cases pass at O0/O1/O2 on x86_64 Linux with the
+The previous 349 stateful cases pass at O0/O1/O2 on x86_64 Linux with the
 [state-gas compiler pin](../reports/state-gas-toolchain.json). AArch64 macOS
 acceptance remains pending. The full native acceptance command includes this
 corpus as its own stage.

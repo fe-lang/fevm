@@ -1,0 +1,11 @@
+
+running 6 tests
+test transform::aggregate::object_initialization::tests::compilation_join_probe ... ignored
+test transform::aggregate::object_initialization::tests::nested_joins_intersect_definedness_with_sparse_defaults ... ok
+test transform::aggregate::object_initialization::tests::object_reads_need_point_specific_snapshots ... ok
+test transform::aggregate::object_initialization::tests::shared_enum_snapshots_preserve_tag_and_payload_definedness ... ok
+test transform::aggregate::object_initialization::tests::snapshots_share_subtrees_and_isolate_partial_writes ... ok
+test transform::aggregate::object_initialization::tests::unchanged_joins_share_storage_without_merging_variant_metadata ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 1064 filtered out; finished in 0.00s
+

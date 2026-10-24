@@ -3,7 +3,6 @@ use std::io::{Write, host, write, write_char, writeln}
 use std::native::Args
 use ingot::constants::{
     ERR_BAD_HEX,
-    ERR_CODE_TOO_LONG,
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
     ERR_OUT_OF_GAS,
@@ -14,19 +13,16 @@ use ingot::constants::{
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
     ERR_STATE_LIMIT,
-    ERR_TODO_OPCODE,
-    ERR_UNSUPPORTED_OPCODE,
+    ERR_UNSUPPORTED_PRECOMPILE,
     ERR_USAGE,
     OK,
 }
 use ingot::hex::{
     parse_hex_bytes,
     parse_hex_program,
-    write_hex_byte,
     write_hex_bytes,
     write_hex_u256,
 }
-use ingot::opcodes::write_opcode_name
 use ingot::state::WorldState
 use ingot::types::{default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute_vm}
@@ -40,7 +36,7 @@ fn write_parse_error(_ status: i32) uses (w: mut Write) {
     match status {
         ERR_BAD_HEX => writeln("invalid hex bytecode"),
         ERR_ODD_HEX => writeln("hex bytecode has an odd number of digits"),
-        ERR_CODE_TOO_LONG => writeln("bytecode is too large"),
+        ERR_HOST_ALLOCATION => writeln("host allocation failed"),
         _ => writeln("failed to parse bytecode"),
     }
 }
@@ -49,13 +45,7 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
     match vm.status {
         ERR_STACK_UNDERFLOW => writeln("stack underflow"),
         ERR_STACK_OVERFLOW => writeln("stack overflow"),
-        ERR_TODO_OPCODE => {
-            write("todo opcode 0x")
-            write_hex_byte(vm.unsupported_opcode)
-            write(" ")
-            write_opcode_name(vm.unsupported_opcode)
-            write_char(10)
-        },
+        ERR_UNSUPPORTED_PRECOMPILE => writeln("unsupported precompile input"),
         ERR_HOST_ALLOCATION => writeln("host allocation failed"),
         ERR_OUT_OF_GAS => writeln("out of gas"),
         ERR_INVALID_JUMP => writeln("invalid jump destination"),
@@ -65,13 +55,6 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
         ERR_REVERT => {
             write("revert ")
             write_hex_bytes(vm.output)
-        },
-        ERR_UNSUPPORTED_OPCODE => {
-            write("unsupported opcode 0x")
-            write_hex_byte(vm.unsupported_opcode)
-            write(" ")
-            write_opcode_name(vm.unsupported_opcode)
-            write_char(10)
         },
         _ => writeln("execution failed"),
     }
@@ -87,8 +70,7 @@ fn write_result(_ vm: Vm) uses (w: mut Write) {
     }
 }
 
-pub fn run(argc: i32, argv: **u8) -> i32 {
-    let args = Args::new(argc, argv)
+pub fn run(_ args: Args) -> i32 {
     with (Write = host()) {
         if args.len() != 2 && args.len() != 3 {
             return usage()
@@ -97,19 +79,21 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
         let program = parse_hex_program(args.get(1))
         if program.status != OK {
             write_parse_error(program.status)
-            return program.status
+            let status = program.status
+            program.release()
+            return status
         }
 
-        let mut calldata = empty_bytes()
-        if args.len() == 3 {
-            calldata = parse_hex_bytes(args.get(2))
-            if calldata.status != OK {
-                write_parse_error(calldata.status)
-                return calldata.status
-            }
+        let calldata = if args.len() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
+        if calldata.status != OK {
+            write_parse_error(calldata.status)
+            let status = calldata.status
+            calldata.release()
+            program.release()
+            return status
         }
 
-        let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
         let vm = execute_vm(
             program,
             calldata,
@@ -117,7 +101,7 @@ pub fn run(argc: i32, argv: **u8) -> i32 {
             default_block_env(),
             mut state,
         )
-        let _ = state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining).state
+        state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining).release()
         if vm.status != OK {
             write_vm_error(vm)
             let status = vm.status

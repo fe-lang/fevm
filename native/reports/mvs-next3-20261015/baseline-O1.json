@@ -1,0 +1,20 @@
+{
+  "status": 0,
+  "seconds": 636.9030882401858,
+  "command": [
+    "/tmp/fevm-mvs-compile-perf-20261015-r1/candidate-bootstrap/bin/fe",
+    "test",
+    "--backend",
+    "native",
+    "--jobs",
+    "1",
+    "-O",
+    "1",
+    "--report",
+    "--report-out",
+    "/tmp/fevm-mvs-next3-20261015-r1/baseline-O1-native-report.tar.gz",
+    "/home/sean/code/fevm"
+  ],
+  "compiler_sha256": "c9ffe9ef6d74f3acd62ba76dc19db17769f66c58eadb26d124a21aa1fb1435ff",
+  "scope": "Full one-thread O1 workspace with reports enabled on both sides; report serialization included"
+}

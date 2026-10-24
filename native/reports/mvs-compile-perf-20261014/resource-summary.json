@@ -1,0 +1,61 @@
+{
+  "baseline": [
+    {
+      "level": "0",
+      "pid": 2461547,
+      "first_time": 1791998311.957448,
+      "first_cpu_seconds": 6.41,
+      "peak_sampled_rss_bytes": 4761505792,
+      "last_time": 1791999512.3169265,
+      "last_cpu_seconds": 1206.1
+    },
+    {
+      "level": "1",
+      "pid": 2462351,
+      "first_time": 1791999522.3199596,
+      "first_cpu_seconds": 3.05,
+      "peak_sampled_rss_bytes": 7344762880,
+      "last_time": 1792000792.6973348,
+      "last_cpu_seconds": 1272.79
+    },
+    {
+      "level": "2",
+      "pid": 2463956,
+      "first_time": 1792000802.7003653,
+      "first_cpu_seconds": 1.33,
+      "peak_sampled_rss_bytes": 7395446784,
+      "last_time": 1792002073.0826247,
+      "last_cpu_seconds": 1271.07
+    }
+  ],
+  "fixed": [
+    {
+      "level": "0",
+      "pid": 2520266,
+      "first_time": 1792006343.4415255,
+      "first_cpu_seconds": 8.63,
+      "peak_sampled_rss_bytes": 4841426944,
+      "last_time": 1792006943.6294208,
+      "last_cpu_seconds": 608.06
+    },
+    {
+      "level": "1",
+      "pid": 2520750,
+      "first_time": 1792006953.6328123,
+      "first_cpu_seconds": 3.88,
+      "peak_sampled_rss_bytes": 7410991104,
+      "last_time": 1792007633.8423731,
+      "last_cpu_seconds": 683.51
+    },
+    {
+      "level": "2",
+      "pid": 2521303,
+      "first_time": 1792007643.8457136,
+      "first_cpu_seconds": 6.99,
+      "peak_sampled_rss_bytes": 7384027136,
+      "last_time": 1792008314.0506349,
+      "last_cpu_seconds": 676.6
+    }
+  ],
+  "scope": "10-second samples; peaks are observed samples, not exact maxima. CPU deltas exclude process startup before the first sample."
+}

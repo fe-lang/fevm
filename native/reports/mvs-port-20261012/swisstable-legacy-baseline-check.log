@@ -1,0 +1,68 @@
+errors in file:///tmp/fevm-swisstable-legacy-baseline.fe
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:31:9
+   │
+31 │     let mut x = key ^ 0x9e3779b97f4a7c15
+   │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:82:13
+   │
+82 │         let mut first_deleted: usize = 0
+   │             ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:83:13
+   │
+83 │         let mut saw_deleted = false
+   │             ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:84:13
+   │
+84 │         let mut group = group_start(hash)
+   │             ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:85:13
+   │
+85 │         let mut probe: usize = 0
+   │             ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+   ┌─ fevm-swisstable-legacy-baseline.fe:88:17
+   │
+88 │             let mut i: usize = 0
+   │                 ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+    ┌─ fevm-swisstable-legacy-baseline.fe:174:9
+    │
+174 │     let mut table = SwissTable<u256, u256>::empty()
+    │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+    ┌─ fevm-swisstable-legacy-baseline.fe:200:9
+    │
+200 │     let mut table = SwissTable<u256, u256>::empty()
+    │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+    ┌─ fevm-swisstable-legacy-baseline.fe:201:9
+    │
+201 │     let mut i: usize = 0
+    │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+    ┌─ fevm-swisstable-legacy-baseline.fe:221:9
+    │
+221 │     let mut table = SwissTable<u256, u256>::empty()
+    │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+
+error[1-0001]: `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+    ┌─ fevm-swisstable-legacy-baseline.fe:222:9
+    │
+222 │     let mut i: usize = 0
+    │         ^^^ `let mut` is not Fe: `var x = …` binds a mutable value, and `let x = mut p` a mutable access
+

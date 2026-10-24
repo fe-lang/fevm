@@ -6,17 +6,17 @@ use ingot::vm::Vm
 
 #[test]
 fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
-    let mut bytes: [u8; 4096] = [0; 4096]
-    let mut i: usize = 0
+    var bytes: [u8; 4096] = [0; 4096]
+    var i: usize = 0
     // Store 0xab at 8999 and return the first 9000 bytes.
     for op in [0x60, 0xab, 0x61, 0x23, 0x27, 0x53, 0x61, 0x23, 0x28, 0x5f, 0xf3] {
         bytes[i] = op
         i += 1
     }
-    let large = Program::new(bytes, len: i, status: OK)
-    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut vm = Vm::new()
-    vm.run(
+    let large = Program::copy_from(bytes, len: i)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
+    vm.run_owned(
         large,
         empty_bytes(),
         default_call_env(),
@@ -31,28 +31,28 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     let memory_capacity = vm.memory.capacity()
     let output_capacity = vm.output.capacity()
 
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     bytes[0] = 0x60
     bytes[1] = 32
     bytes[2] = 0x5f
     bytes[3] = 0xf3
-    let small = Program::new(bytes, len: 4, status: OK)
-    let mut call = default_call_env()
+    let small = Program::copy_from(bytes, len: 4)
+    var call = default_call_env()
     call.gas_limit = 20
-    vm.run(small, empty_bytes(), call, default_block_env(), mut state)
+    vm.run_owned(small, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.sp == 0)
     core::assert(vm.memory.len() == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
     core::assert(vm.output.capacity() == output_capacity)
 
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     bytes[0] = 0x61
     bytes[1] = 0x23
     bytes[2] = 0x28
     bytes[3] = 0x5f
     bytes[4] = 0xf3
-    let regrow = Program::new(bytes, len: 5, status: OK)
-    vm.run(
+    let regrow = Program::copy_from(bytes, len: 5)
+    vm.run_owned(
         regrow,
         empty_bytes(),
         default_call_env(),
@@ -65,28 +65,28 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     )
     let result = vm.into_result()
     core::assert(result.output_valid && result.output.len() == 9000)
-    let mut index: u64 = 0
+    var index: u64 = 0
     while index < result.output.len() {
         core::assert(result.output.byte_at(index) == 0)
         index += 1
     }
     result.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).release()
 }
 
 #[test]
 fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
-    let mut bytes: [u8; 4096] = [0; 4096]
+    var bytes: [u8; 4096] = [0; 4096]
     // MSTORE8 at 2^255: charge failure must precede host allocation.
     bytes[0] = 0x60
     bytes[1] = 1
     bytes[2] = 0x7f
     bytes[3] = 0x80
     bytes[35] = 0x53
-    let huge = Program::new(bytes, len: 36, status: OK)
-    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-    let mut vm = Vm::new()
-    vm.run(
+    let huge = Program::copy_from(bytes, len: 36)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
+    vm.run_owned(
         huge,
         empty_bytes(),
         default_call_env(),
@@ -97,12 +97,12 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
     core::assert(vm.output.len() == 0 && vm.output.capacity() == 0)
 
-    let stop = Program::new([0; 4096], len: 1, status: OK)
-    let mut call = default_call_env()
+    let stop = Program::copy_from([0 as u8], len: 1)
+    var call = default_call_env()
     call.gas_limit = 0
-    vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
+    vm.run_owned(stop, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
     vm.release()
-    let _ = state.finish(commit: true, gas_spent: 0).state
+    state.finish(commit: true, gas_spent: 0).release()
 }

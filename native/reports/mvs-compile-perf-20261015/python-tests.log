@@ -1,0 +1,12 @@
+....workspace-O0: passed
+workspace-O1: passed
+workspace-O2: passed
+cli-smoke: passed
+cancun-frames: passed
+cancun-state: passed
+arithmetic: passed
+.........
+----------------------------------------------------------------------
+Ran 13 tests in 0.352s
+
+OK

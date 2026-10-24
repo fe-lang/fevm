@@ -1,16 +1,13 @@
-pub const MAX_CODE: usize = 4096
-pub const INPUT_LIMIT: usize = 4096
 pub const STACK_LIMIT: usize = 1024
 
 pub const OK: i32 = 0
 pub const ERR_USAGE: i32 = 2
 pub const ERR_BAD_HEX: i32 = 3
 pub const ERR_ODD_HEX: i32 = 4
-pub const ERR_CODE_TOO_LONG: i32 = 5
 pub const ERR_STACK_UNDERFLOW: i32 = 10
 pub const ERR_STACK_OVERFLOW: i32 = 11
-pub const ERR_UNSUPPORTED_OPCODE: i32 = 13
-pub const ERR_TODO_OPCODE: i32 = 14
+// A precompile input beyond the host's supported size; not an EVM outcome.
+pub const ERR_UNSUPPORTED_PRECOMPILE: i32 = 14
 pub const ERR_OUT_OF_GAS: i32 = 15
 pub const ERR_INVALID_JUMP: i32 = 16
 pub const ERR_INVALID_OPCODE: i32 = 17
@@ -20,5 +17,12 @@ pub const ERR_STATE_LIMIT: i32 = 20
 
 pub const I256_MIN: i256 = -57896044618658097711785492504343953926634992332820282019728792003956564819968
 pub const ERR_HOST_ALLOCATION: i32 = 21
-pub const ERR_CALL_DEPTH: i32 = 22
 pub const ERR_STATIC_WRITE: i32 = 23
+// EIP-3541: deployed code may not start with 0xEF.
+pub const ERR_CODE_PREFIX: i32 = 24
+// A precompile rejected its input or ran out of gas.
+pub const ERR_PRECOMPILE: i32 = 25
+// A transfer would overflow a 256-bit balance; this is a host error, not an EVM halt.
+pub const ERR_BALANCE_OVERFLOW: i32 = 26
+// A creation transaction targets an account with code or a nonce; all gas is consumed.
+pub const ERR_ADDRESS_COLLISION: i32 = 27

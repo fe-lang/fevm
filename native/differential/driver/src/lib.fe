@@ -9,8 +9,8 @@ fn parse_gas(_ arg: Arg) -> Option<u64> {
     if arg.len() == 0 {
         return Option::None
     }
-    let mut value: u64 = 0
-    let mut i: usize = 0
+    var value: u64 = 0
+    var i: usize = 0
     while i < arg.len() {
         let byte = arg.byte_at(i)
         if byte < 48 || byte > 57 {
@@ -27,7 +27,7 @@ fn parse_gas(_ arg: Arg) -> Option<u64> {
 }
 
 pub fn write_gas(_ value: u64) uses (w: mut Write) {
-    let mut divisor: u64 = 1
+    var divisor: u64 = 1
     while value / divisor >= 10 {
         divisor *= 10
     }
@@ -69,7 +69,7 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
     write(",\"stack\":")
     if completed {
         write("[")
-        let mut i: usize = 0
+        var i: usize = 0
         while i < vm.sp {
             if i != 0 { write(",") }
             write("\"")
@@ -84,7 +84,7 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
     write(",\"memory\":")
     if completed {
         write("\"0x")
-        let mut i: u64 = 0
+        var i: u64 = 0
         while i < vm.memory.len() {
             write_hex_byte(vm.memory.byte_at(i) as i32)
             i += 1
@@ -94,7 +94,7 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
         write("null")
     }
     write(",\"output\":\"0x")
-    let mut i: u64 = 0
+    var i: u64 = 0
     while i < vm.output.len() {
         write_hex_byte(vm.output.byte_at(i) as i32)
         i += 1
@@ -103,25 +103,30 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
 }
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
-    let args = Args::new(argc, argv)
+    // Native main supplies live NUL-terminated arguments for this process.
+    let args = unsafe { Args::new(argc, argv) }
     if args.len() != 4 {
         return 2
     }
     let program = parse_hex_program(args.get(1))
     let calldata = parse_hex_bytes(args.get(2))
     if program.status != 0 || calldata.status != 0 {
+        program.release()
+        calldata.release()
         return 2
     }
-    let mut call = default_call_env()
+    var call = default_call_env()
     match parse_gas(args.get(3)) {
         Option::Some(gas,) => call.gas_limit = gas,
         Option::None => {
+            program.release()
+            calldata.release()
             return 2
         },
     }
-    let mut state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
-    let _ = state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining).state
+    state.finish(commit: vm.status == 0, gas_spent: call.gas_limit - vm.gas_remaining).release()
     let supported = vm.status == 0
         || (vm.status >= 15 && vm.status <= 19)
         || vm.status == 10

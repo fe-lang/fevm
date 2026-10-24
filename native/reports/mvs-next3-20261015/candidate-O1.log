@@ -1,0 +1,2 @@
+[ perf record: Woken up 653 times to write data ]
+[ perf record: Captured and wrote 148.739 MB /tmp/fevm-mvs-next3-20261015-r1/candidate-O1.data (18484 samples) ]

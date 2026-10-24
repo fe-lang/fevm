@@ -1,0 +1,20 @@
+{
+  "status": 0,
+  "seconds": 678.3414670510683,
+  "command": [
+    "/tmp/fevm-mvs-next3-20261015-r1/ablation-layout/bin/fe",
+    "test",
+    "--backend",
+    "native",
+    "--jobs",
+    "1",
+    "-O",
+    "1",
+    "--report",
+    "--report-out",
+    "/tmp/fevm-mvs-next3-20261015-r1/layout-O1-native-report.tar.gz",
+    "/home/sean/code/fevm"
+  ],
+  "compiler_sha256": "afaecee3515803341bc916ccf7565e8c65d5e36829b6a290b8915e27a59163db",
+  "scope": "Full one-thread O1 workspace with reports enabled on both sides; report serialization included"
+}

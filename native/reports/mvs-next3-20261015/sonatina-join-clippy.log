@@ -1,0 +1,5 @@
+    Checking sonatina-verifier v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/verifier)
+    Checking sonatina-codegen v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/codegen)
+    Checking sonatina-filecheck v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/filecheck)
+    Checking sonatina-cli v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/cli)
+    Finished `release` profile [optimized] target(s) in 6.81s

@@ -36,7 +36,7 @@ impl Frame {
 }
 
 fn run() -> ByteBuffer {
-    let mut frame = Frame::new()
+    var frame = Frame::new()
     frame.run(size: 9000, value: 42)
     let capacity = frame.memory.capacity()
     frame.run(size: 32, value: 7)

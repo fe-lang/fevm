@@ -1,0 +1,13 @@
+{
+  "complete": true,
+  "baseline_fe": "d7fdfbb73956b2f3d41e7f4b8101a5a49de46509",
+  "baseline_sonatina": "498ce58134505992ccd1146dcbdb94a11483fcf0",
+  "fork_mvs": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "leads": [
+    "Persistent enum verifier view-index snapshots",
+    "Repeated native type layouts",
+    "Shared native test runtime across source modules"
+  ],
+  "final_fe": "d1ccff352971945e4a9cd326fe5dc0b106a016ac",
+  "final_sonatina": "325114276de157cde38f5833ed8413166ef9741a"
+}

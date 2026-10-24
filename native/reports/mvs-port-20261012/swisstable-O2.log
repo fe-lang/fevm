@@ -1,0 +1,8 @@
+PASS  [0.0022s] swisstable_hash_reference_vectors
+PASS  [0.0024s] swisstable_hash_distributes_each_limb
+PASS  [0.0167s] swisstable_collisions_updates_and_churn
+PASS  [0.0032s] swisstable_basic_operations
+PASS  [0.0032s] swisstable_many_entries_roundtrip
+PASS  [0.0030s] swisstable_tombstones_reuse_full_table_slots
+
+test result: ok. 6 passed; 0 failed

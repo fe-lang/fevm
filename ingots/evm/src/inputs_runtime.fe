@@ -1,0 +1,80 @@
+use std::native::ByteBuffer
+use ingot::constants::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
+use ingot::{InputData, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
+use ingot::vm::Vm
+
+#[test]
+pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
+    var bytes = ByteBuffer::new()
+    core::assert(bytes.try_resize(9001))
+    bytes.set_byte(index: 9000, value: 42)
+    let input = InputData::new(bytes, status: OK)
+    // PUSH2 9000; CALLDATALOAD; CALLDATASIZE.
+    let program = Program::copy_from([0x61 as u8, 0x23, 0x28, 0x35, 0x36], len: 5)
+    var vm = Vm::new()
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    for _ in 0..2 {
+        vm.run(program, input, default_call_env(), default_block_env(), mut tx)
+        core::assert(vm.status == OK && vm.sp == 2)
+        core::assert(vm.stack[0] == (42 << 248) && vm.stack[1] == 9001)
+    }
+    program.release()
+    input.release()
+    vm.release()
+    tx.finish(commit: true, gas_spent: 0).release()
+}
+
+#[test]
+pub fn vm_input_failure_preserves_the_transaction_setup_phase() {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
+    for failed_code in [true, false] {
+        let program = if failed_code {
+            Program::new(InputData::new(ByteBuffer::new(), status: ERR_HOST_ALLOCATION))
+        } else { Program::copy_from([0 as u8], len: 1) }
+        let input = if failed_code { empty_bytes() }
+            else { InputData::new(ByteBuffer::new(), status: ERR_HOST_ALLOCATION) }
+        vm.run_owned(program, input, default_call_env(), default_block_env(), mut tx)
+        core::assert(vm.status == ERR_HOST_ALLOCATION && tx.depth() == 0)
+        core::assert(vm.gas_remaining == default_call_env().gas_limit)
+        // A rejected input has not begun EVM execution.
+        core::assert(tx.add_blob_hash(7))
+    }
+    vm.release()
+    tx.finish(commit: true, gas_spent: 0).release()
+}
+
+#[test]
+pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var vm = Vm::new()
+    var code = ByteBuffer::new()
+    core::assert(code.try_resize(8193))
+    code.set_byte(index: 0, value: 0x38)
+    vm.run_owned(Program::new(InputData::new(code, status: OK)), empty_bytes(),
+                 default_call_env(), default_block_env(), mut tx)
+    core::assert(vm.status == OK && vm.sp == 1 && vm.stack[0] == 8193)
+    core::assert(vm.gas_remaining == 999998)
+    for into_push_data in [false, true] {
+        var code = ByteBuffer::new()
+        core::assert(code.try_resize(8195))
+        // PUSH2 8192; JUMP. At the destination: JUMPDEST; PUSH1 42.
+        code.set_byte(index: 0, value: 0x61)
+        code.set_byte(index: 1, value: 0x20)
+        code.set_byte(index: 3, value: 0x56)
+        if into_push_data { code.set_byte(index: 8191, value: 0x60) }
+        code.set_byte(index: 8192, value: 0x5b)
+        code.set_byte(index: 8193, value: 0x60)
+        code.set_byte(index: 8194, value: 42)
+        vm.run_owned(Program::new(InputData::new(code, status: OK)), empty_bytes(),
+                     default_call_env(), default_block_env(), mut tx)
+        if into_push_data {
+            core::assert(vm.status == ERR_INVALID_JUMP && vm.gas_remaining == 0)
+        } else {
+            core::assert(vm.status == OK && vm.sp == 1 && vm.stack[0] == 42)
+            core::assert(vm.gas_remaining == 999985)
+        }
+    }
+    vm.release()
+    tx.finish(commit: true, gas_spent: 0).release()
+}

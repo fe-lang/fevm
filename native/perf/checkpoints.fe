@@ -1,0 +1,87 @@
+use std::io::{Write, host, write}
+use std::native::ByteBuffer
+use ingot::logs::LogBuffer
+use ingot::state::WorldState
+use ingot::transaction::Transaction
+
+struct Reader { data: ByteBuffer, position: u64 }
+
+impl Reader {
+    fn read(mut self) -> u8 {
+        core::assert(self.position < self.data.len())
+        let value = self.data.byte_at(self.position)
+        self.position += 1
+        value
+    }
+}
+
+struct Frame { memory: ByteBuffer }
+
+impl Frame {
+    fn run(mut self, _ tx: mut Transaction) {
+        core::assert(self.memory.try_resize(1))
+        self.memory.set_byte(index: 0, value: 42)
+        core::assert(tx.emit_log(
+            address: 7, topics: [0; 4], topic_count: 0,
+            data: self.memory, offset: 0, len: 1,
+        ) == 0)
+    }
+
+    fn release(own self) { self.memory.release() }
+}
+
+fn frame(_ tx: mut Transaction) {
+    var frame = Frame { memory: ByteBuffer::new() }
+    frame.run(mut tx)
+    frame.release()
+}
+
+fn write_logs(_ logs: LogBuffer) uses (w: mut Write) {
+    var index: u64 = 0
+    while index < logs.len() {
+        let entry = logs.entry(index)
+        core::assert(entry.address == 7 && entry.len() == 1)
+        core::assert(logs.byte_at(entry: index, index: 0) == 42)
+        write("1")
+        index += 1
+    }
+}
+
+fn actions(_ tx: mut Transaction, _ reader: mut Reader) uses (w: mut Write) {
+    let count = reader.read()
+    var index: u8 = 0
+    while index < count {
+        if reader.read() == 0 {
+            frame(mut tx)
+        } else {
+            let commit = reader.read()
+            let point = tx.checkpoint(is_static: false)
+            actions(mut tx, mut reader)
+            if commit == 0 { tx.revert(point) } else { tx.commit(point) }
+        }
+        write_logs(tx.logs())
+        index += 1
+    }
+}
+
+pub fn main() -> i32 {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var reader = Reader { data: ByteBuffer::new(), position: 0 }
+    // Emit, emit in a reverted child, then emit in a committed child.
+    let input: [u8; 10] = [3, 0, 1, 0, 1, 0, 1, 1, 1, 0]
+    core::assert(reader.data.try_resize(10))
+    var index: u64 = 0
+    while index < 10 {
+        reader.data.set_byte(index, value: input[index as usize])
+        index += 1
+    }
+    with (Write = host()) { actions(mut tx, mut reader) }
+    core::assert(reader.position == 10)
+    let receipt = tx.finish(commit: true, gas_spent: 0)
+    core::assert(receipt.logs.len() == 2)
+    core::assert(receipt.logs.byte_at(entry: 0, index: 0) == 42)
+    core::assert(receipt.logs.byte_at(entry: 1, index: 0) == 42)
+    receipt.release()
+    reader.data.release()
+    0
+}

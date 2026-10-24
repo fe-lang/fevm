@@ -1,0 +1,11 @@
+   Compiling sonatina-ir v0.0.3-alpha (/run/user/1000/fevm-mvs-sonatina/crates/ir)
+   Compiling sonatina-parser v0.0.3-alpha (/run/user/1000/fevm-mvs-sonatina/crates/parser)
+   Compiling sonatina-verifier v0.0.3-alpha (/run/user/1000/fevm-mvs-sonatina/crates/verifier)
+   Compiling sonatina-codegen v0.0.3-alpha (/run/user/1000/fevm-mvs-sonatina/crates/codegen)
+    Finished `release` profile [optimized] target(s) in 224m 04s
+────────────
+ Nextest run ID b1327b60-ad66-4f98-8b38-bef7018c61e6 with nextest profile: default
+    Starting 1 test across 1 binary (51 tests skipped)
+        PASS [   0.104s] (1/1) sonatina-codegen::opt_pipeline loop_enum_extract_keeps_its_variant_proof
+────────────
+     Summary [   0.106s] 1 test run: 1 passed, 51 skipped

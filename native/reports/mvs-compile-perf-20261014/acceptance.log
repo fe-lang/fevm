@@ -1,0 +1,30 @@
+workspace-O0: passed
+workspace-O1: passed
+workspace-O2: passed
+cli-smoke: passed
+cancun-frames: passed
+cancun-state: passed
+arithmetic: passed
+	Command being timed: "/usr/bin/python3 /home/sean/code/fevm/native/accept.py --build /tmp/fevm-mvs-compile-perf-20261014-r1/bootstrap/build.json --out /tmp/fevm-mvs-compile-perf-20261014-r1/acceptance --check-only --stage-timeout 7200 --build-timeout 1800"
+	User time (seconds): 2570.38
+	System time (seconds): 89.21
+	Percent of CPU this job got: 101%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 43:43.59
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 7237296
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 210
+	Minor (reclaiming a frame) page faults: 39495257
+	Voluntary context switches: 445736
+	Involuntary context switches: 19676
+	Swaps: 0
+	File system inputs: 459248
+	File system outputs: 5853384
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

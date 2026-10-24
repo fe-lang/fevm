@@ -1,0 +1,68 @@
+{
+  "complete": true,
+  "scope": "focused original failing log fixture with uncommitted Fe integration; final clean bootstrap acceptance required",
+  "build_seconds": 36.29729174403474,
+  "checks": [
+    {
+      "mode": "h",
+      "size": 131072,
+      "failure": 0,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "mode": "h",
+      "size": 131072,
+      "failure": 1,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "mode": "b",
+      "size": 32,
+      "failure": 0,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "mode": "b",
+      "size": 32,
+      "failure": 1,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "mode": "b",
+      "size": 64,
+      "failure": 0,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "mode": "b",
+      "size": 64,
+      "failure": 1,
+      "passed": true,
+      "status": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "artifacts": {
+    "object_bytes": 7567000,
+    "text_bytes": 7560952,
+    "executable_bytes": 7578712,
+    "relink_seconds": 0.022941699950024486,
+    "executable_sha256": "563728ce54056e82cda7499428f6400c79bac79a08fbc38d524c092d8e33c032"
+  }
+}

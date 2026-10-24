@@ -1,7 +1,8 @@
 # Native FeVM and arithmetic acceptance tooling
 
 This suite checks the native FeVM workspace and CLI, Cancun frame results,
-and arithmetic/SwissTable differential kernels. It uses the pinned compiler in `toolchain.json`.
+and arithmetic differential kernels. Select the compiler manifest for the
+milestone being verified.
 CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
 separate interpreter milestones.
 
@@ -10,13 +11,23 @@ x86_64 Linux: 37 workspace tests, 14 CLI/allocator checks, 1,729 Cancun frames
 and 349 stateful sequences at each of O0/O1/O2, plus arithmetic and SwissTable
 matrices. It adds Cancun warm/cold access, original storage and signed refunds
 to the accepted [transaction journal](reports/transaction-journal.md).
-This compiler pin and state-gas source still need an AArch64 macOS acceptance run.
+That historical checkpoint retains its own compiler pin. The current pin and
+expanded corpus still need an AArch64 macOS acceptance run.
 The earlier [1,602-frame evidence](reports/cancun-frames.md) is explicitly scoped
 to its historical FeVM revisions and compiler pin.
+
+The preceding [Keccak integration](reports/keccak-integration.md) passes all seven
+stages on published Fe master: 35 workspace tests, 16 CLI checks, 1,835 frames
+and 383 state sequences at O0/O1/O2, plus the arithmetic matrix. Keccak and
+SwissTable now own their standalone test suites in their respective repositories.
 
 The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
 [owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
 compiler manifests and historical platform evidence.
+
+The [account-code milestone](reports/account-code.md) passes all seven stages on
+local Fe `4c03313f1`: 39 workspace tests, 22 CLI/allocator checks, 1,835 frames
+and 737 state sequences at O0/O1/O2, plus 74,676 arithmetic checks.
 
 ## Hosts and prerequisites
 
@@ -26,29 +37,58 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current Fe compiler is the local branch `integrate/fevm-transactions-20261001`,
-based on master with performance PRs #1661–#1667, pointer-analysis PR #1628,
-and LSP PR #1674. Transaction prerequisites add PRs #1681, #1683, #1685,
-#1686, #1687, #1689, and #1693 for input separation, call effects, and recursive
-buffer summaries. State-driver builds also include PR #1694 for runtime String
-`AsBytes` conversion. Master already includes shared guard graphs from PR #1638.
-The published Sonatina pin includes merged verifier PR #356 and aggregate
-initialization-sharing PR #357, plus PRs #368–#370 in stack #371 for reference
-retirement and indexed view writes. Exact revisions and the Cargo lock hash are
-in `toolchain.json`.
+The current compiler is upstream Fe master
+[`fa06c6cd5ba19cbf15da718fad80b84d79a569b9`](https://github.com/argotorg/fe/tree/fa06c6cd5ba19cbf15da718fad80b84d79a569b9).
+Its Cargo.lock pins Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`. Master
+stores whole aggregate values and constants into objects; building and running
+the evm ingot's tests peaks at 1.0-1.3 GB at each level. It also includes
+`ByteBuffer::copy_from`, which FeVM uses for every bulk byte copy, as well
+as MVS, native `FixedStack` and the FeVM compile-time work previously pinned
+from forks (enum-proof indexes, borrowed native layouts and one shared native test
+runtime per ingot). It uses Rust 1.99.0; the default [`toolchain.json`](toolchain.json)
+records the exact revisions and lock hash, and bootstrap fetches both from their
+upstream repositories.
 
-The Fe integration commit is not published. Supply the local Fe repository or
-a Git bundle containing it with `--fe-repository`; on this machine it is `../fe`.
-The bootstrap verifies exact commits and uses their committed sources.
-See [Cloud/Linux handoff](cloud-linux.md) for moving the local integration.
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 80
+workspace tests, 39 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
+comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
+three declared simultaneous-fault reason differences per level. The Python
+harness's 13 tests and the Rust reference's nine tests pass. See the
+[Fe master report](reports/fe-master-20261024/README.md); the earlier
+[bulk-copy](reports/bulk-copy-20261019/README.md) report keeps its compiler
+`21db8bc23`, and the [Fe master](reports/fe-master-20261019/README.md) (47
+workspace tests, before the CALL and transaction work) and
+[macOS](reports/macos-arm64-20261019/README.md) reports keep `f69b911ce`. The
+[Cancun state-test runner](conformance/README.md) is separate from acceptance.
+
+The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
+[enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
+[MVS refresh](reports/mvs-refresh-20261014/README.md) and
+[MVS port](reports/mvs-port-20261012/README.md) retain their historical compilers,
+measurements and publication evidence.
+
+Earlier [owned-input results](reports/owned-inputs.md), the
+[logs/BLOBHASH report](reports/logs-blobhash.md), and the
+[#1718 integration](reports/keccak-pr1718.md) retain their own historical compiler
+manifests and verification scope. They do not establish MVS acceptance. Keccak's
+standalone differential and timing suite lives in
+[fe-lang/keccak](https://github.com/fe-lang/keccak); FeVM does not use the
+experimental compiler barrier required by that benchmark.
+
+Bootstrap verifies exact commits and builds their committed sources. Native
+acceptance defaults to one test suite at a time (`--jobs` overrides it), because
+preparing the optimized interpreter tests can use substantial memory.
 
 ```sh
-python3 native/bootstrap.py --out native/out/toolchain \
-  --toolchain 1.98.1 \
-  --fe-repository ../fe
+python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
+
+For slower compiler candidates, `--build-timeout SECONDS` overrides each CLI/frame/state
+Fe build deadline, and `--stage-timeout SECONDS` overrides the deadline for a complete
+acceptance stage. Reports record both settings; a timeout still fails acceptance.
+Standalone CLI and differential runners also accept `--build-timeout`.
 
 Choose a fresh output directory for each bootstrap and arithmetic run.
 `--target-dir /path/to/cache` can reuse Cargo artifacts while checking out clean
@@ -63,7 +103,7 @@ Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
 The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the Cancun frame/state, SwissTable and arithmetic corpora
+CLI smoke cases, and the Cancun frame/state and arithmetic corpora
 at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
 against revm's real journal.
 Both frame and state runners build their reference with the bootstrap record's
@@ -76,19 +116,52 @@ commands on each supported host; an unexecuted platform is not a passing result.
 Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
 is additional to this downstream suite.
 
-The [Cancun frame suite](differential/README.md) compares 1,729 deterministic
+## Reduced O1 development check
+
+The checkpoint probe compiles the real transaction, journal, state and log modules
+with a small entry point, then checks nested log commit/rollback and receipt
+ownership. It avoids compiling the full interpreter and differential drivers.
+
+```sh
+python3 native/perf/run.py --probe checkpoints --fe /path/to/fe \
+  --out native/out/checkpoints-o1
+python3 native/perf/run.py --probe inputs --fe /path/to/fe \
+  --out native/out/inputs-o1
+python3 native/perf/run.py --probe vm_inputs --fe /path/to/fe \
+  --out native/out/vm-inputs-o1
+```
+
+Each run requires a fresh output directory and records source/compiler hashes,
+one-thread O1 build wall/CPU time, peak RSS and checked execution output. The
+default build deadline is 180 seconds (`--build-timeout` overrides it). Use CPU
+time for shared-host comparisons and compare identical source hashes. This probe
+does not establish full interpreter conformance or an end-to-end speedup.
+
+The input probe compiles only the real code/input types and hex parser. It checks
+50,000-byte inputs, copy ownership, PUSH/jump boundaries, malformed hex, and
+allocation/release behavior when code or jump-map allocation fails. Its controlled
+allocator is relinked against the same native object, avoiding another Fe build.
+
+`--probe vm_inputs` compiles the VM production modules and calls three owned-input
+integration tests. They pass at O1 with the current development compiler: reusable
+9,001-byte calldata, failed inputs before checkpointing, and large code with valid
+and invalid jump boundaries. The build took 174.09 seconds and peaked at 2.42 GB RSS
+on x86_64 Linux. This focused result does not establish full VM acceptance; the
+whole-ingot suite and CLI/differential matrices remain deferred.
+
+The [Cancun frame suite](differential/README.md) compares 1,840 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 349-case state suite checks current/original/transient storage,
-account/slot warmness, signed refunds and nested checkpoints. Signed transaction
+The additional 1,142-case state suite checks current/original/transient storage,
+account code and hashes, copy semantics, account/slot warmness, signed refunds,
+logs, blob hashes and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
 
-The [SwissTable suite](swisstable/README.md) compares full-key hashing against
-the original table, checks dictionary behavior and native probe counts, and
-measures uninstrumented lookups across key distributions, occupancy, and deletion
-histories. Acceptance runs its correctness matrix; timing is a separate command.
-Its baseline Git revision must be available locally.
+SwissTable unit tests, differential checks, and benchmarks live in the
+[standalone library repository](https://github.com/fe-lang/swisstable/tree/main/native).
+FeVM workspace tests exercise its pinned git dependency through interpreter and
+transaction behavior.
 
 ## Arithmetic correctness and measurement
 

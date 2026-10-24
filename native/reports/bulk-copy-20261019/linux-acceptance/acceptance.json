@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/argotorg/fe",
+      "fe_revision": "21db8bc23f3e52dc9b4e037f11dfb64f2cf73fda",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6bef907f7e5854d0c77cf18624b7042213526960",
+      "cargo_lock_sha256": "90db1b0c9789e57a7a2faaf76309c501ffbde90a0b43e3f70854e942216e8b39",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "upstream argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/home/sean/code/fevm/native/out/fe-master-20261019b/toolchain/fe",
+    "sonatina_source_directory": "/home/sean/code/fevm/native/out/fe-master-20261019b/toolchain/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/tmp/claude-1000/-home-sean-code-fevm/19bf8778-dfea-47dd-9f9b-9fce54efb227/scratchpad/fe-master-target",
+    "complete": true,
+    "compiler_build_seconds": 84.14763022912666,
+    "compiler": "/home/sean/code/fevm/native/out/fe-master-20261019b/toolchain/bin/fe",
+    "compiler_sha256": "ff707c22937b84a993089f38213d7a9539c2dc8a9ce6ca2d207f4287eb0ae524",
+    "compiler_version": "fe 26.4.0 (21db8bc23)"
+  },
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "complete": true,
+  "scope": "native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending",
+  "stage_timeout_seconds": 3600,
+  "build_timeout_seconds": null,
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 812.0664108400233
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 2303.3825907870196
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 490.2079742089845
+    },
+    {
+      "name": "cli-smoke",
+      "status": 0,
+      "seconds": 321.58152567688376
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 109.3591017969884
+    },
+    {
+      "name": "cancun-state",
+      "status": 0,
+      "seconds": 272.82989073893987
+    },
+    {
+      "name": "arithmetic",
+      "status": 0,
+      "seconds": 13.644743731012568
+    }
+  ]
+}

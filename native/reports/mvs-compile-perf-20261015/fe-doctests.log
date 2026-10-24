@@ -1,0 +1,142 @@
+   Compiling fe-parser v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/parser)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/fe-web)
+   Compiling fe-common v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/common)
+   Compiling fe-test-utils v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/test-utils)
+   Compiling fe-trace-facts v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/trace-facts)
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/hir)
+   Compiling fe-resolver v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/resolver)
+   Compiling fe-fmt v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/fmt)
+   Compiling tree-sitter-fe v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/tree-sitter-fe)
+   Compiling fe-debug-export v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/debug-export)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/fe)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/driver)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/mir)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/codegen)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/contract-harness)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/semantic-indexing)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/fe/crates/language-server)
+    Finished `release` profile [optimized] target(s) in 2m 15s
+   Doc-tests fe
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_codegen
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_common
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_contract_harness
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_dataflow
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_debug_export
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_driver
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_fmt
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_hir
+
+running 1 test
+test crates/hir/src/core/hir_def/scope_graph.rs - core::hir_def::scope_graph::ScopeId<'db>::items_in_scope (line 300) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.09s; merged doctests compilation took 0.09s
+   Doc-tests fe_language_server
+
+running 1 test
+test crates/language-server/src/panic_context.rs - panic_context::enter (line 45) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.08s; merged doctests compilation took 0.08s
+   Doc-tests fe_mir
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_parser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_resolver
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_semantic_indexing
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_solc_runner
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_test_utils
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_trace_facts
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_trace_facts_macros
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests fe_web
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests tree_sitter_fe
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

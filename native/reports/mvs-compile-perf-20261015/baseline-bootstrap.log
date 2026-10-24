@@ -1,0 +1,72 @@
++ git init /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/.git/
++ git -C /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe fetch /tmp/fevm-mvs-compile-perf-20261015-r1/fe 8de35117e3de35c2f92967ec260e124db87c85bb
+From /tmp/fevm-mvs-compile-perf-20261015-r1/fe
+ * branch                8de35117e3de35c2f92967ec260e124db87c85bb -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe checkout --detach FETCH_HEAD
+HEAD is now at 8de35117e Add safe copied reads of persistent and transient state words
++ git init /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/sonatina
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Initialized empty Git repository in /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/sonatina/.git/
++ git -C /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/sonatina fetch /tmp/fevm-mvs-compile-perf-20261015-r1/sonatina 1544e570257cbb1e453283b8a81b25b828ec3ca0
+From /tmp/fevm-mvs-compile-perf-20261015-r1/sonatina
+ * branch              1544e570257cbb1e453283b8a81b25b828ec3ca0 -> FETCH_HEAD
++ git -C /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/sonatina checkout --detach FETCH_HEAD
+HEAD is now at 1544e570 Leave zero-sized objects out of call-site object facts (#407)
++ npm ci --ignore-scripts
+
+added 3 packages, and audited 4 packages in 565ms
+
+found 0 vulnerabilities
++ npm rebuild tree-sitter-cli
+rebuilt dependencies successfully
++ npx --no-install tree-sitter generate --abi=14
++ rustup run 1.99.0 cargo build --release --locked -p fe --features cranelift
+    Updating git repository `https://github.com/fe-lang/sonatina`
+   Compiling fe-parser v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/parser)
+   Compiling fe-common v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/common)
+   Compiling fe-trace-facts-macros v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/trace-facts-macros)
+   Compiling sonatina-ir v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/hir)
+   Compiling fe-dataflow v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/fe-dataflow)
+   Compiling tree-sitter-fe v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/tree-sitter-fe)
+   Compiling sonatina-triple v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling sonatina-macros v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling sonatina-parser v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling fe-trace-facts v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/trace-facts)
+   Compiling fe-test-utils v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/test-utils)
+   Compiling fe-resolver v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/resolver)
+   Compiling sonatina-codegen v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling sonatina-verifier v0.0.3-alpha (https://github.com/fe-lang/sonatina?rev=1544e570257cbb1e453283b8a81b25b828ec3ca0#1544e570)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/driver)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/fe-web)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/codegen)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/mir)
+   Compiling fe-fmt v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/fmt)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/semantic-indexing)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/fe)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/language-server)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/contract-harness)
+   Compiling fe-debug-export v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/debug-export)
+   Compiling fe-solc-runner v26.4.0 (/tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/fe/crates/solc-runner)
+    Finished `release` profile [optimized] target(s) in 3m 17s
+Native compiler: /tmp/fevm-mvs-compile-perf-20261015-r1/baseline-bootstrap/bin/fe

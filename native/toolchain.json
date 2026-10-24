@@ -1,52 +1,17 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/argotorg/fe",
-  "fe_revision": "09aed1e8817d0be5a9340dc7d6ad3fd7fec43f50",
+  "fe_revision": "fa06c6cd5ba19cbf15da718fad80b84d79a569b9",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "736c2be7fc7ae2258bb781213e2e6eae1903b6c0",
-  "cargo_lock_sha256": "163272f88aec018c3ea116b5269ae052f6f4c7564889995315c5e25413e21413",
-  "rust_version": "1.98.1",
+  "sonatina_revision": "fcdbdc4d8706f7b93415d605ed8e9aa277179f98",
+  "cargo_lock_sha256": "ef577f29c5f582e986cd0dfe89932b5c26ecffa5d2fbdad5f3a5b020f1e666f3",
+  "rust_version": "1.99.0",
   "features": [
     "cranelift"
   ],
-  "publication": "local Fe branch integrate/fevm-transactions-20261001; supply --fe-repository with the local checkout or a bundle; Sonatina revision is published",
+  "publication": "upstream argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"
-  ],
-  "integration": {
-    "fe_base_revision": "2cd823883c401634b32fcc1bea6b72492004ca24",
-    "fe_prs": [
-      1661,
-      1662,
-      1663,
-      1664,
-      1665,
-      1666,
-      1667,
-      1628,
-      1674,
-      1681,
-      1683,
-      1685,
-      1686,
-      1687,
-      1689,
-      1693,
-      1694
-    ],
-    "sonatina_merged_prs": [
-      356,
-      357,
-      358,
-      359,
-      366
-    ],
-    "sonatina_prs": [
-      368,
-      369,
-      370
-    ],
-    "sonatina_stack": 371
-  }
+  ]
 }

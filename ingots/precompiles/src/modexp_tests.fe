@@ -1,0 +1,166 @@
+use std::native::ByteBuffer
+use ingot::{FAILURE, SUCCESS, run}
+
+fn append<const N: usize>(_ buffer: mut ByteBuffer, _ bytes: [u8; N]) {
+    var i: usize = 0
+    while i < N {
+        let len = buffer.len()
+        core::assert(buffer.try_resize(len + 1))
+        buffer.set_byte(index: len, value: bytes[i])
+        i += 1
+    }
+}
+
+fn append_word(_ buffer: mut ByteBuffer, _ value: u256) {
+    var bytes: [u8; 32] = [0; 32]
+    var i: usize = 0
+    while i < 32 {
+        bytes[i] = (value >> ((31 - i) * 8) as u256).downcast_truncate()
+        i += 1
+    }
+    append(mut buffer, bytes)
+}
+
+// EIP-198 layout: three length words, then base, exponent and modulus.
+fn input<const B: usize, const E: usize, const M: usize>(_ base: [u8; B], _ exponent: [u8; E], _ modulus: [u8; M]) -> ByteBuffer {
+    var buffer = ByteBuffer::new()
+    append_word(mut buffer, B as u256)
+    append_word(mut buffer, E as u256)
+    append_word(mut buffer, M as u256)
+    append(mut buffer, base)
+    append(mut buffer, exponent)
+    append(mut buffer, modulus)
+    buffer
+}
+
+fn equals<const N: usize>(_ buffer: ByteBuffer, _ expected: [u8; N]) -> bool {
+    if buffer.len() as usize != N { return false }
+    var i: usize = 0
+    while i < N {
+        if buffer.byte_at(i.downcast_unchecked()) != expected[i] { return false }
+        i += 1
+    }
+    true
+}
+
+const FIELD_PRIME: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfc, 0x2f,
+]
+const FIELD_PRIME_MINUS_ONE: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfc, 0x2e,
+]
+
+#[test]
+fn modexp_eip198_examples() {
+    // Fermat: 3^(p-1) mod p = 1, charged 16 * 255 / 3 gas.
+    let fermat = input([3 as u8], FIELD_PRIME_MINUS_ONE, FIELD_PRIME)
+    let result = run(address: 5, input: fermat, gas: 1360)
+    var one: [u8; 32] = [0; 32]
+    one[31] = 1
+    core::assert(result.status == SUCCESS && result.gas_used == 1360 && equals(result.output, one))
+    result.release()
+    let short = run(address: 5, input: fermat, gas: 1359)
+    core::assert(short.status == FAILURE && short.gas_used == 1359)
+    short.release()
+    fermat.release()
+    // An empty base is zero.
+    let empty: [u8; 0] = []
+    let zero_base = input(empty, FIELD_PRIME_MINUS_ONE, FIELD_PRIME)
+    let result = run(address: 5, input: zero_base, gas: 1360)
+    let zeros: [u8; 32] = [0; 32]
+    core::assert(result.status == SUCCESS && equals(result.output, zeros))
+    result.release()
+    zero_base.release()
+}
+
+#[test]
+fn modexp_multi_limb_even_modulus_and_long_base() {
+    // Verified with Python's pow(); the modulus has a leading zero byte.
+    let base: [u8; 100] = [
+        0x6c, 0xad, 0x4a, 0x26, 0x8d, 0x11, 0x6e, 0xce, 0x17, 0x38, 0xf7, 0xd9, 0x3d, 0x9c, 0x17, 0x24,
+        0x11, 0xe2, 0x0b, 0x8f, 0x6b, 0x0d, 0x54, 0x9b, 0x6f, 0x03, 0x67, 0x5a, 0x16, 0x00, 0xa3, 0x5a,
+        0x09, 0x99, 0x50, 0xd8, 0x36, 0xf6, 0x75, 0xcc, 0x81, 0xe7, 0x4e, 0xf5, 0xe8, 0xe2, 0x5d, 0x94,
+        0x0e, 0xd9, 0x04, 0x75, 0x95, 0x31, 0x98, 0x5d, 0x5d, 0x9d, 0xc9, 0xf8, 0x18, 0x18, 0xe8, 0x11,
+        0x89, 0x2f, 0x90, 0x2b, 0xd2, 0x3f, 0x08, 0x24, 0x12, 0x8b, 0x2f, 0x33, 0x0c, 0x5c, 0x7f, 0xd0,
+        0xa6, 0xa3, 0xa4, 0x50, 0x65, 0x13, 0x27, 0x0e, 0x26, 0x9e, 0x0d, 0x37, 0xf2, 0xa7, 0x4d, 0xe4,
+        0x52, 0xe6, 0xb4, 0x38,
+    ]
+    let modulus: [u8; 70] = [
+        0x00, 0x0b, 0x38, 0x98, 0xd1, 0x90, 0xf9, 0xeb, 0xda, 0xcc, 0x0c, 0xb1, 0xe2, 0x9c, 0x65, 0x8c,
+        0xda, 0x14, 0x95, 0xe6, 0x0a, 0xf5, 0x93, 0xbd, 0x04, 0xcf, 0x0f, 0xd6, 0x30, 0xf1, 0xf2, 0x9d,
+        0x0d, 0xa9, 0x95, 0x3f, 0x48, 0xf1, 0xa0, 0x9f, 0x76, 0xb5, 0xa1, 0x70, 0xb3, 0x38, 0x39, 0x26,
+        0x30, 0x59, 0xf2, 0x8c, 0x10, 0x5d, 0x1f, 0xb1, 0x7c, 0x23, 0x90, 0xc1, 0x92, 0xcf, 0xd3, 0xac,
+        0x94, 0xaf, 0x0f, 0x21, 0xdd, 0xb6,
+    ]
+    let expected: [u8; 70] = [
+        0x00, 0x0a, 0xa9, 0x91, 0x02, 0x62, 0xf6, 0x94, 0x5e, 0x9f, 0x2e, 0x75, 0x9b, 0x7b, 0xb7, 0x36,
+        0x25, 0x97, 0x77, 0x63, 0xe7, 0xc9, 0x42, 0x3d, 0x12, 0x04, 0xdb, 0x2b, 0xda, 0x1f, 0x27, 0x86,
+        0x16, 0x07, 0x00, 0x4b, 0xcf, 0x5f, 0x65, 0x05, 0x34, 0xea, 0xe9, 0x0b, 0xd5, 0xb7, 0xc5, 0x53,
+        0xf1, 0x30, 0x3a, 0x09, 0x98, 0xf1, 0xe0, 0xde, 0xae, 0xc2, 0x98, 0x59, 0x9d, 0x96, 0x03, 0x3d,
+        0x24, 0x23, 0x2a, 0x75, 0x1a, 0x28,
+    ]
+    let data = input(base, [0x01 as u8, 0xf3, 0xa5, 0xb7, 0xc9], modulus)
+    // 13 words squared, 32 iterations, divided by 3.
+    let result = run(address: 5, input: data, gas: 1802)
+    core::assert(result.status == SUCCESS && result.gas_used == 1802 && equals(result.output, expected))
+    result.release()
+    data.release()
+}
+
+#[test]
+fn modexp_edge_cases() {
+    let empty: [u8; 0] = []
+    // Zero base and modulus lengths return nothing for the minimum charge.
+    let nothing = input(empty, [5 as u8], empty)
+    let result = run(address: 5, input: nothing, gas: 200)
+    core::assert(result.status == SUCCESS && result.gas_used == 200 && result.output.len() == 0)
+    result.release()
+    nothing.release()
+    // A zero modulus returns zeros; modulus 1 reduces everything to zero.
+    let zero = input([7 as u8], [3 as u8], [0 as u8, 0])
+    let result = run(address: 5, input: zero, gas: 200)
+    core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
+    result.release()
+    zero.release()
+    let unit = input([7 as u8], empty, [0 as u8, 1])
+    let result = run(address: 5, input: unit, gas: 200)
+    core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
+    result.release()
+    unit.release()
+    // A zero exponent gives 1; 0x1234567890abcdef^65537 mod (2^64 - 5) per pow().
+    let identity = input([2 as u8], [0 as u8], [0 as u8, 9])
+    let result = run(address: 5, input: identity, gas: 200)
+    core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 1]))
+    result.release()
+    identity.release()
+    let single = input([0x12 as u8, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef], [1 as u8, 0, 1],
+                       [0xff as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb])
+    let result = run(address: 5, input: single, gas: 200)
+    // 6202122992327880755 = 0x56125e0052fc7033.
+    core::assert(result.status == SUCCESS
+        && equals(result.output, [0x56 as u8, 0x12, 0x5e, 0x00, 0x52, 0xfc, 0x70, 0x33]))
+    result.release()
+    single.release()
+    // Truncated input: the modulus 0x0100 is cut to its first byte; missing bytes read as zero.
+    var truncated = ByteBuffer::new()
+    append_word(mut truncated, 1)
+    append_word(mut truncated, 1)
+    append_word(mut truncated, 2)
+    append(mut truncated, [3 as u8, 2, 1])
+    let result = run(address: 5, input: truncated, gas: 200)
+    // 3^2 mod 0x0100 = 9.
+    core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 9]))
+    result.release()
+    truncated.release()
+    // An absurd base length saturates the charge instead of allocating.
+    var huge = ByteBuffer::new()
+    append_word(mut huge, 1 << 255)
+    append_word(mut huge, 1)
+    append_word(mut huge, 1)
+    let result = run(address: 5, input: huge, gas: 0xffffffffffffffff)
+    core::assert(result.status == FAILURE && result.gas_used == 0xffffffffffffffff)
+    result.release()
+    huge.release()
+}

@@ -1,0 +1,163 @@
+use core::Option
+use std::native::ByteBuffer
+use keccak::{ByteSource, keccak256}
+pub use hashes::{ripemd160, sha256}
+
+/// The call returned output and consumed `gas_used`.
+pub const SUCCESS: u8 = 0
+/// An exceptional halt: invalid input or insufficient gas consumes all forwarded gas.
+pub const FAILURE: u8 = 1
+/// The host could not allocate the output; this is not an EVM outcome.
+pub const HOST_ALLOCATION: u8 = 2
+/// The host cannot evaluate this input (a MODEXP modulus beyond its limb
+/// capacity); this is not an EVM outcome.
+pub const UNSUPPORTED: u8 = 3
+
+pub struct Output { pub status: u8, pub gas_used: u64, pub output: ByteBuffer }
+
+impl Output {
+    pub fn release(own self) { self.output.release() }
+}
+
+/// Cancun precompiles occupy addresses 0x01 through 0x0a.
+pub fn is_precompile(_ address: u256) -> bool { address >= 1 && address <= 10 }
+
+fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
+
+fn failure(_ gas: u64) -> Output {
+    Output { status: FAILURE, gas_used: gas, output: ByteBuffer::new() }
+}
+
+fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
+    var output = ByteBuffer::new()
+    let len = source.len()
+    if !output.try_resize(len) {
+        return Output { status: HOST_ALLOCATION, gas_used, output }
+    }
+    var i: u64 = 0
+    while i < len {
+        output.set_byte(index: i, value: source.byte_at(i))
+        i += 1
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+// Copy `source` into a zero-filled output of `len` bytes, ending at its last byte.
+fn right_aligned<T: ByteSource>(_ source: T, len: u64, gas_used: u64) -> Output {
+    var output = ByteBuffer::new()
+    if !output.try_resize(len) {
+        return Output { status: HOST_ALLOCATION, gas_used, output }
+    }
+    let offset = len - source.len()
+    var i: u64 = 0
+    while i < source.len() {
+        output.set_byte(index: offset + i, value: source.byte_at(i))
+        i += 1
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+// The big-endian word at `offset`, zero-padded past the input as buffer_read.
+fn word_at<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+    var value: u256 = 0
+    var i: u64 = 0
+    while i < 32 {
+        let index = offset + i
+        value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }
+        i += 1
+    }
+    value
+}
+
+// Recover the signer address of (hash, v, r, s). Malformed or unrecoverable
+// signatures succeed with empty output.
+fn ecrecover<T: ByteSource>(_ input: T) -> Output {
+    let hash = word_at(input, offset: 0)
+    let v = word_at(input, offset: 32)
+    let r = word_at(input, offset: 64)
+    let s = word_at(input, offset: 96)
+    let malformed = (v != 27 && v != 28) || r == 0 || r >= secp256k1::N || s == 0 || s >= secp256k1::N
+    let key = if malformed { Option::None } else { secp256k1::recover(hash, recovery_id: v - 27, r, s) }
+    match key {
+        Option::Some(key) => {
+            var preimage: [u8; 64] = [0; 64]
+            var i: u64 = 0
+            while i < 32 {
+                let shift = ((31 - i) * 8) as u256
+                preimage[i as usize] = (key.x >> shift).downcast_truncate()
+                preimage[(32 + i) as usize] = (key.y >> shift).downcast_truncate()
+                i += 1
+            }
+            let digest = keccak256(preimage)
+            var address: [u8; 32] = [0; 32]
+            i = 12
+            while i < 32 {
+                address[i as usize] = digest[i as usize]
+                i += 1
+            }
+            copied(address, gas_used: 3000)
+        },
+        Option::None => Output { status: SUCCESS, gas_used: 3000, output: ByteBuffer::new() },
+    }
+}
+
+/// Execute precompile `address` with `gas` available. Charges are computed and
+/// checked before any work or allocation.
+pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
+    core::assert(is_precompile(address))
+    let len = input.len()
+    if address == 1 {
+        if gas < 3000 { return failure(gas) }
+        return ecrecover(input)
+    }
+    if address == 2 || address == 3 || address == 4 {
+        let (base, per_word): (u128, u128) = if address == 2 { (60, 12) }
+            else if address == 3 { (600, 120) } else { (15, 3) }
+        let cost = base + per_word * words(len)
+        if cost > gas as u128 { return failure(gas) }
+        let used: u64 = cost.downcast_unchecked()
+        return if address == 2 { copied(sha256(input), gas_used: used) }
+            else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
+            else { copied(input, gas_used: used) }
+    }
+    if address == 5 { return modexp::run(input, gas) }
+    if address == 6 || address == 7 {
+        // EIP-1108 prices; invalid points are exceptional failures.
+        let cost: u64 = if address == 6 { 150 } else { 6000 }
+        if cost > gas { return failure(gas) }
+        let point = if address == 6 { bn254::add(input) } else { bn254::mul(input) }
+        return match point {
+            Option::Some(encoded) => copied(encoded, gas_used: cost),
+            Option::None => failure(gas),
+        }
+    }
+    if address == 8 {
+        let cost = 45000 + 34000 * (len / 192) as u128
+        if cost > gas as u128 { return failure(gas) }
+        return match bn254::pairing(input) {
+            Option::Some(holds) => {
+                var result: [u8; 32] = [0; 32]
+                if holds { result[31] = 1 }
+                copied(result, gas_used: cost.downcast_unchecked())
+            },
+            Option::None => failure(gas),
+        }
+    }
+    if address == 9 {
+        if len != blake2f::INPUT_LEN { return failure(gas) }
+        let rounds = blake2f::rounds(input)
+        if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
+        return copied(blake2f::compress(input), gas_used: rounds)
+    }
+    // Address 10: KZG point evaluation (EIP-4844).
+    if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }
+    var result: [u8; 64] = [0; 64]
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        result[i as usize] = (kzg::FIELD_ELEMENTS_PER_BLOB >> shift).downcast_truncate()
+        result[(32 + i) as usize] = (kzg::BLS_MODULUS >> shift).downcast_truncate()
+        i += 1
+    }
+    copied(result, gas_used: kzg::GAS)
+}

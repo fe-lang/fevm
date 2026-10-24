@@ -1,0 +1,18 @@
+{
+  "compiler_sha256": "e5eea96dca7e8830b9f04829347a0b7b633f74a6ad9813b17fd02206df2f36db",
+  "source_artifact": "/tmp/fevm-mvs-target-preserved-on-disk/release/deps/sonatina_ir-4355828b4131b1ed",
+  "command": [
+    "cargo",
+    "+1.99.0",
+    "test",
+    "--release",
+    "--locked",
+    "-p",
+    "sonatina-ir",
+    "benchmark_native_layout",
+    "--",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ]
+}

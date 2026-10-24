@@ -1,0 +1,17 @@
+{
+  "0": {
+    "maximum_sampled_rss_bytes": 4885159936,
+    "maximum_sampled_cpu_seconds": 1213.66,
+    "maximum_full_pressure_avg10": 0
+  },
+  "1": {
+    "maximum_sampled_rss_bytes": 7410536448,
+    "maximum_sampled_cpu_seconds": 1273.15,
+    "maximum_full_pressure_avg10": 0.39
+  },
+  "2": {
+    "maximum_sampled_rss_bytes": 7257051136,
+    "maximum_sampled_cpu_seconds": 1267.31,
+    "maximum_full_pressure_avg10": 0
+  }
+}

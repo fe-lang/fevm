@@ -1,0 +1,17 @@
+   Compiling fe-hir v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/hir)
+   Compiling fe-web v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/fe-web)
+   Compiling fe v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/fe)
+   Compiling fe-driver v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/driver)
+   Compiling fe-mir v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/mir)
+   Compiling fe-codegen v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/codegen)
+   Compiling fe-contract-harness v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/contract-harness)
+   Compiling fe-semantic-indexing v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/semantic-indexing)
+   Compiling fe-language-server v26.4.0 (/tmp/fevm-mvs-fe5c32c1/crates/language-server)
+    Finished `release` profile [optimized] target(s) in 2m 15s
+────────────
+ Nextest run ID 07d1ddef-d45d-4a3e-9781-2beef0c05a64 with nextest profile: default
+    Starting 2 tests across 2 binaries (36 tests skipped)
+        PASS [   0.187s] (1/2) fe-codegen::native_backend native_effect_place_preserves_owned_buffer_field_layout
+        PASS [   0.560s] (2/2) fe::native_runtime native_owned_effect_provider_preserves_buffer_storage_and_identity
+────────────
+     Summary [   0.560s] 2 tests run: 2 passed, 36 skipped

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "fe_repository": "https://github.com/sbillig/fe",
+  "fe_revision": "d1ccff352971945e4a9cd326fe5dc0b106a016ac",
+  "sonatina_repository": "https://github.com/fe-lang/sonatina",
+  "sonatina_revision": "325114276de157cde38f5833ed8413166ef9741a",
+  "cargo_lock_sha256": "fc965db5a4186453ac0ad7c6b752252d107b11191c8a2c75015873e185b4b542",
+  "rust_version": "1.99.0",
+  "features": [
+    "cranelift"
+  ],
+  "publication": "local latest-MVS compiler with shared native test runtimes, enum proof indexes, and borrowed native layouts; publication pending",
+  "hosts": [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ]
+}

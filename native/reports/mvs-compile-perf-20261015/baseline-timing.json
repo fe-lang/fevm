@@ -1,0 +1,16 @@
+{
+  "complete": true,
+  "workspace_tests_passed": 52,
+  "native_wall_seconds": 690.43,
+  "wrapper_wall_seconds": 695.4334120750427,
+  "user_seconds": 672.93,
+  "system_seconds": 14.77,
+  "max_rss_bytes": 7420243968,
+  "rayon_threads": 1,
+  "test_suite_jobs": 1,
+  "profiling": "49Hz task-clock:u and incomplete DWARF callgraphs throughout; two additional 30s diagnostic captures",
+  "peak_sampled_rss_bytes": 7399333888,
+  "source_inputs": "source-inputs.json",
+  "compiler_build": "baseline-bootstrap/build.json",
+  "limitations": "One integration run; no inclusive attribution from incomplete callgraphs; source module inventory attempt after process exit yielded no data."
+}

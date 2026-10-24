@@ -1,0 +1,612 @@
+{
+  "complete": true,
+  "status": "MVS port committed, all acceptance stages passed, all five prerequisite branches published and cold remote source resolution verified",
+  "compiler": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "cargo_lock_sha256": "c54a4d20b1ca2f9665555c3755dd55d03ddb3352eb6f81b2ceeabce1a236371b",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local Fe and Sonatina prerequisite commits; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/tmp/fevm-mvs-bootstrap-r3/fe",
+    "sonatina_source_directory": "/tmp/fevm-mvs-bootstrap-r3/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/dev/shm/fevm-mvs-target",
+    "complete": true,
+    "compiler_build_seconds": 198.74293642898556,
+    "compiler": "/tmp/fevm-mvs-bootstrap-r3/bin/fe",
+    "compiler_sha256": "e45b3315ebd67d6b01fdc103cc17bcf2839dd00fc193ef795488cfebaf62b896",
+    "compiler_version": "fe 26.4.0 (1c8e2c20d)"
+  },
+  "dependencies": {
+    "keccak": {
+      "source_directory": "/tmp/fevm-keccak-mvs",
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae",
+      "published": true,
+      "native_library_tests_per_level": 3,
+      "levels": [
+        0,
+        1,
+        2
+      ],
+      "source": "https://github.com/fe-lang/keccak"
+    },
+    "swisstable": {
+      "source_directory": "/tmp/fevm-swisstable-mvs",
+      "revision": "7e275c449c26d892a6d66243f2ddec0fc6cf660c",
+      "published": true,
+      "native_library_tests_per_level": 6,
+      "levels": [
+        0,
+        1,
+        2
+      ],
+      "source": "https://github.com/fe-lang/swisstable",
+      "benchmark_revision": "770372e54571d0905167bc0d79b9b9b303e6d379",
+      "benchmark_baseline_revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
+    }
+  },
+  "source_sha256": {
+    "fe.toml": "fd80d8e32370069b1f37bc1ebde6b68edbc24d9ac474265419d6c217969fea45",
+    "ingots/evm/fe.toml": "05074653e95429944d7e7148d05202abc7af9e5284fc47b06f9e1fd9df0a88b9",
+    "ingots/evm/src/account_runtime.fe": "5b0ec7baac7b85122186f5cc346bcc4e14a392cb05143ce1b1d60928aeb34ba9",
+    "ingots/evm/src/buffer.fe": "29561950e701a1338abd1db0ca133f5a7a54f9c058a8e1a6e234b84fcdb9bb4a",
+    "ingots/evm/src/calls_runtime.fe": "bf02217a0b65a9a300c6227c37cfe8686bfab55432696ca36f7730bc45430022",
+    "ingots/evm/src/cli.fe": "e806043e5785b4a335c72ba958c81499be4c4291c8d04774731206c4de19145c",
+    "ingots/evm/src/constants.fe": "acb96873f49d8c23d6d38f703f6fac8396f72911316371c047070bd997076b71",
+    "ingots/evm/src/environment_runtime.fe": "d291fc464dfb44062fab88c2b7d4dce307ef241e7b7d2fe745b9ccb104642178",
+    "ingots/evm/src/gas.fe": "0f9544b2593f255cbaf1ed3ab0291a3fd06b55d7707ad3651cbb790653589059",
+    "ingots/evm/src/hex.fe": "2a267036684ffa6d731420feb6f6a2a10c2013cbfbe061c50333dcf509a206f8",
+    "ingots/evm/src/inputs_runtime.fe": "e011d0394383f5b23a807264e6f21e689144418684d3fb383ff4ac6204a8bf3c",
+    "ingots/evm/src/journal.fe": "156dac4720636be5eaac6149b5b18d1ca7eb31333b82400954ea389fbf893b43",
+    "ingots/evm/src/keccak_runtime.fe": "9f13006c07c3a9f74bb294cbc89d0f41f90f2cf77df450f818d01db215d600ed",
+    "ingots/evm/src/lib.fe": "153b138c6b9c8117c75827dc1c3c19e010a0064656326832ba4f636e98748518",
+    "ingots/evm/src/logs.fe": "44da959812c8ec04781f93e9c059cc848e4f6ebf10f2caed6f202029b2562db9",
+    "ingots/evm/src/logs_runtime.fe": "a57f396a07b7b9546c09f0d735e1dbe5f569896d4c008793dafc5512fbadb9b0",
+    "ingots/evm/src/memory.fe": "53edf52c16ec1b4634ec01cc8b1f529bb1b612b1cde4ee8b3769a967e81d1ace",
+    "ingots/evm/src/memory_runtime.fe": "9f4eaaae5ed120dc83b387d5856a4459fde2dcf3e57c6c0a22b7a3c378bcc492",
+    "ingots/evm/src/opcodes.fe": "64e65d8f627c6981bf0ceb3b8e679185b23ed719dc270235cdcc6b9aee8b6e41",
+    "ingots/evm/src/state.fe": "a92f0bfec2c4ddb849024cde398826a6881ecce4e06529106b110d13c8275b13",
+    "ingots/evm/src/state_gas_runtime.fe": "17ac9b3122f2ae7713681b4cba560be528d1c402df587cbc8972dee84c6b8f21",
+    "ingots/evm/src/transaction.fe": "cbd8918b10105b463f8d4fde6b12d968dffd5155b006392ed9b21dec9b6a0dc5",
+    "ingots/evm/src/transaction_runtime.fe": "bc47c302043226e1ce6573ab419ef01f918cc2dacbdb54cde9ac11ea0d1fcef3",
+    "ingots/evm/src/types.fe": "1db979c7ca80d7ef4943008fa43b63d978a7981a33fd0be288754f9f48b6bb2a",
+    "ingots/evm/src/vm.fe": "cbe2ac637deb6d3485e949539f44e2e1f254b909441ca9642691ca2a4a7f16c9",
+    "native/accept.py": "1a611494e3a973c5e1f64127069641276ca6b25ecfbb9985dd99cb1f4deefd3d",
+    "native/arith/compare.py": "d949a23a7d0d46b475ccb4013fc42213abde3f5072a569fa55b257ecd01b3310",
+    "native/arith/driver.fe": "6654a3feb8ab13e80c1bf9db1409ca4784e7a8f31a78c3e294c9e64248dd8039",
+    "native/arith/run.py": "27ca58b865a2af069f9363c8c33f4e609c2ecb32df425bee98e9efa9bc3d2ec7",
+    "native/arith/words.fe": "4253c5a8224c1c9385a81e95512cf88bc902cf9025183bc0b25e6f9c46133362",
+    "native/bootstrap.py": "ec95062b157b3bdc4b7cd52c785a438a577317731961286f49d871b0d3843483",
+    "native/cli.py": "ae62a5941e0394d3d5acd3c62fd1d99d54402ee4485384a1aa5f26c6e5f18985",
+    "native/differential/contract.py": "5cf907fb3bd7608fa8df3a41f3f7bf583ce8e1737e9b6a8abc1d041b24764a10",
+    "native/differential/corpus.py": "c4043f3e20d0163ba4ab9b01ef44267ba376650d4a3861da3d64735d606998e0",
+    "native/differential/driver/fe.toml": "57ddbbf3877e260169d1c431971998a54a1ac6775094fe23be0ed0ca44906061",
+    "native/differential/driver/src/lib.fe": "7921f1ba37050cfc5356976cb375d12d037649cefb03462fbb12ebbca3cfaf5e",
+    "native/differential/run.py": "23b131bdff0e3388f5bb73f9e4f07105dadf2788f877d3c605086256b6decd6d",
+    "native/differential/state_contract.py": "86aecacb46c848dd7ce80bd7d9daf2556a750e76b2347326808a0c98defaa477",
+    "native/differential/state_corpus.py": "5c2837aa644924642c9a61ab0d217b62369e9b1fdfadf5be449821226966ac96",
+    "native/differential/state_driver/fe.toml": "44035be508f3fb558f19efceb0b12544b95726ea6206c70cef8662152c4d54eb",
+    "native/differential/state_driver/src/lib.fe": "108422f6457e78d8ec0402528cec07515b89ce64fa907fc55731d01059e1ef71",
+    "native/differential/state_run.py": "6a9ff0d6b4080f177eeb11d8559247f99efd7f121cd156eb41fc316e0c5edc6e",
+    "native/differential/test_contract.py": "0a0e3cb5bc2774e202eb9f406b840586b6170ecc5c76fae7521edb5aedcb1203",
+    "native/differential/test_run.py": "e70056ecb7e2d165e1f9a7ce029634954fa5a0ead0a36882d5e1461105d1d425",
+    "native/differential/test_state_contract.py": "605541069ada3099ac9b5fefab2a109e31a5ee242122f42af5500234a44e1378",
+    "native/fixtures/accounts/fe.toml": "13a2cd7ba178acbecd4099e27836a75fa7a81dd4fd27dafe565764b1d8c918c7",
+    "native/fixtures/accounts/src/lib.fe": "3f1b0ab8d7ab3a9462256ec4ea04e8fbcb1d4e24365a81d8ceb8536765845922",
+    "native/fixtures/buffer-borrow-scaling/single_buffer_loop.fe": "da931f0be594d34df6900bb1c95bfeb12a02b8c154b40a350de2d9591c8185e8",
+    "native/fixtures/buffer-borrow-scaling/single_buffer_store.fe": "2c3dfbba5175612e7fe1a15a0afe2588be0818578d6bdbbb4f42fd6530c13429",
+    "native/fixtures/buffer-borrow-scaling/two_buffers.fe": "14f7085fe800f97ede1a1954c55864ea9027f4048ba2fc15f7b2066379a056fb",
+    "native/fixtures/buffer-borrow-scaling/two_buffers_no_loop.fe": "91c787ecd2cb334f1a217b6a86f1f80d97b18f8d6478d6b49660a49c95ed2a74",
+    "native/fixtures/buffer-borrow-scaling/two_buffers_one_loop.fe": "d04894b93e1006979a7e61f16b2c4d205c578772e28832d9aa239b814f1375d1",
+    "native/fixtures/journal/fe.toml": "2945cb10ca4c4d85f4879948b0f0035300e1a6106a8c71c98a051c950de28cf5",
+    "native/fixtures/journal/src/lib.fe": "95e06230ce00a8c18d465f0050a498034429eca932bfcc2c944f04e4a5764fa0",
+    "native/fixtures/logs/fe.toml": "14ae86f279b5db73dedaf796a655ff4132504411fb39df83b102357b37df7de5",
+    "native/fixtures/logs/src/lib.fe": "071195704f5edcde7c1cd86a9191fd6f1c219ba06f487709c81d35214581efef",
+    "native/fixtures/owned_buffer_frame.fe": "647c0158234eaaa2ba309306103de7218015644d6ff83437a275a988dcd9836f",
+    "native/handoff.py": "ce5f1b6839466fd56a42fc3afec65c2efcedbf67ec2fcecd4ea3950ab1b6a371",
+    "native/perf/calls.fe": "799ba6929dfc0a0c1e622ca0124b2c5dc82682614ae62d5778381c8dda725b6a",
+    "native/perf/checkpoints.fe": "8f5df035d8c93207bc82af687d8e7475ae066cdfd94a3661fae16f5885979f18",
+    "native/perf/inputs.fe": "5aee7172a643cd0b76b666bf48a7c05ce2c2d48a994ac53c6954324c716e50fc",
+    "native/perf/run.py": "de3625b61fe13b0d35b426bbf8411c3d80c70c448715251bec0f16d01ccbf569",
+    "native/perf/vm_inputs.fe": "cd197333e4d756b3b5ab5adc0d27116d668f7f8da6ecb5d81907cb9f052d8226",
+    "native/toolchain.json": "c8fc63d886d8d429e1e01fc329afa761f0009cb2671c072afe83dd64502e2b0a"
+  },
+  "checks": {
+    "arithmetic": {
+      "complete": true,
+      "builds": 48,
+      "checked_cases": 74676
+    },
+    "inputs_O1": {
+      "complete": true,
+      "execution_checks": 14
+    },
+    "checkpoints_O1": {
+      "complete": true,
+      "execution_checks": 1
+    },
+    "python_harness_tests": 13,
+    "rust_reference_tests": 9,
+    "strict_reference_clippy": true,
+    "workspace_O0": {
+      "complete": false,
+      "status": 1,
+      "compilation_failures": 6,
+      "cause": "std::native::FixedStack absent from unchanged MVS branch",
+      "log": "workspace-O0.log"
+    },
+    "fixed_stack_candidate": {
+      "complete": true,
+      "compiler": "/dev/shm/fevm-mvs-stack-fe",
+      "tests": 4,
+      "scope": "FixedStack owned slots, full-stack returned owner, O0/O1/O2 allocation failures and top access conflicts; existing ByteBuffer regressions",
+      "log": "compiler-stack-tests.log"
+    },
+    "workspace_check_candidate": {
+      "complete": true,
+      "log": "workspace-check-candidate.log"
+    },
+    "compiler_clippy": {
+      "complete": true,
+      "scope": "release, workspace, all targets, all features; -D clippy::all",
+      "log": "compiler-clippy-MVS.log"
+    },
+    "workspace_candidate_O0": {
+      "complete": false,
+      "status": 1,
+      "cause": "root disk exhausted emitting native test object; rerun with TMPDIR on shared memory",
+      "log": "workspace-stack-O0-environment.log"
+    },
+    "compiler_release_nextest": {
+      "complete": true,
+      "passed": 3782,
+      "failed": 0,
+      "skipped": 1,
+      "log": "compiler-nextest-MVS.log",
+      "scope": "release, locked, workspace, all features"
+    },
+    "effect_provider_MVS": {
+      "complete": true,
+      "tests": 2,
+      "native_execution_levels": [
+        0,
+        1,
+        2
+      ],
+      "log": "compiler-effect-provider-tests.log",
+      "scope": "owned native buffer field layout, repeated mutable provider identity, buffer updates and release"
+    },
+    "portable_dependency_pins": {
+      "complete": true,
+      "scope": "full workspace semantic check with portable URLs and scoped local Git URL overrides; publication still pending",
+      "log": "workspace-check-portable.log"
+    },
+    "compiler_release_nextest_baseline": {
+      "complete": false,
+      "tests_run": 3771,
+      "passed": 3770,
+      "failed": 1,
+      "skipped": 1,
+      "log": "compiler-nextest.log",
+      "failure": "fe-codegen::native_backend native_effect_place_preserves_its_reference_field_layout",
+      "cause": "fixture stores a mutable reference field, which unchanged MVS rejects; reproduced with untouched base compiler"
+    },
+    "calls_O1": {
+      "complete": true,
+      "execution_checks": 1,
+      "log": "calls-O1.json",
+      "scope": "existing CALL scheduler and cases with owned native FixedStack; reduced probe"
+    },
+    "clean_bootstrap": {
+      "complete": true,
+      "log": "compiler-build.json",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
+    },
+    "preserved_CALL_work": {
+      "complete": true,
+      "files": 12,
+      "log": "preserved-CALL-work.json",
+      "scope": "original tracked and untracked CALL work matches exactly after intended MVS syntax, argument safety, log-access and buffer move/refill changes"
+    },
+    "migration_commit_semantics": {
+      "complete": true,
+      "log": "workspace-check-migration-commit.log",
+      "scope": "separate complete workspace reconstructed from the proposed migration commit, excluding all pre-existing CALL changes"
+    },
+    "swisstable_historical_benchmark": {
+      "complete": true,
+      "builds": 12,
+      "scenario_checks": 2004,
+      "levels": [
+        0,
+        1,
+        2
+      ],
+      "baseline_revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8",
+      "runner_revision": "770372e54571d0905167bc0d79b9b9b303e6d379",
+      "baseline_unit_tests_per_level": 3,
+      "candidate_unit_tests_per_level": 6,
+      "baseline_algorithm_unchanged": true,
+      "log": "swisstable-MVS-checks.log",
+      "results": "swisstable-MVS-results.json.gz",
+      "results_sha256": "d32852db3902c87b77fd177309ce22cfb4fbdcbcc41b2be45cb7bd2157ca6864",
+      "scope": "historical/current algorithms; dictionary behavior, exact physical probes, relinked object checks; timing trials omitted"
+    },
+    "workspace_MVS_O0": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "log": "workspace-MVS-O0.log",
+      "scope": "full current working tree including five pre-existing CALL tests"
+    },
+    "workspace_MVS_O1": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "log": "workspace-MVS-O1.log",
+      "scope": "full current working tree including five pre-existing CALL tests"
+    },
+    "workspace_MVS_O2": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "log": "workspace-MVS-O2.log",
+      "scope": "full current working tree including five pre-existing CALL tests"
+    },
+    "cli_MVS_partial": {
+      "complete": false,
+      "O0_checks_passed": 35,
+      "O1_checks_passed_before_build_failure": 29,
+      "failure": "IR0600 enum.extract requires a proven active variant at the use site in emit_log",
+      "log": "cli-MVS-O1-compiler-failure.log",
+      "results": "cli-MVS-partial.json"
+    },
+    "frames_MVS": {
+      "complete": true,
+      "levels": [
+        0,
+        1,
+        2
+      ],
+      "cases_per_level": 1840,
+      "log": "frames-MVS.log",
+      "results": "frames-MVS-results.json"
+    },
+    "sonatina_enum_speculation": {
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "repository": "https://github.com/fe-lang/sonatina",
+      "branch": "fix/enum-extract-speculation",
+      "tests_passed": 1952,
+      "tests_skipped": 3,
+      "filechecks_passed": 353,
+      "strict_clippy": true,
+      "doctests": true,
+      "fmt": true,
+      "actual_failing_pass": "Licm",
+      "trace": "enum-extract-pass-trace.log",
+      "source_directory": "/run/user/1000/fevm-mvs-sonatina",
+      "complete": true
+    },
+    "compiler_enum_release_nextest": {
+      "tests_passed": 3782,
+      "tests_skipped": 1,
+      "log": "compiler-enum-nextest.log",
+      "sonatina_revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59",
+      "complete": true
+    },
+    "enum_log_fixture_O1": {
+      "complete": true,
+      "controlled_allocator_checks": 6,
+      "results": "enum-extract-log-fixture-O1.json",
+      "compiler_sha256": "8b56b6ae104fdc91910ddcb4dd3d985740d2f6cc970884277d819e957b1225d7"
+    },
+    "compiler_enum_clippy": {
+      "complete": true,
+      "scope": "release, workspace, all targets, all features; -D clippy::all",
+      "log": "compiler-enum-clippy.log"
+    },
+    "final_migration_commit_semantics": {
+      "complete": true,
+      "compiler_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "log": "workspace-check-final-migration-commit.log",
+      "scope": "complete migration-only workspace reconstructed through an alternate index; excludes all original CALL work"
+    },
+    "strict_reference_clippy_final": {
+      "complete": true,
+      "log": "reference-clippy-final.log"
+    },
+    "workspace_final_O0": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "seconds": 1226.8528123280266,
+      "compiler_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "log": "workspace-final-O0.log"
+    },
+    "workspace_final_O1_timeout": {
+      "complete": false,
+      "status": 124,
+      "seconds": 7200.288018646068,
+      "log": "workspace-final-O1-memory-timeout.log",
+      "diagnostic": null
+    },
+    "workspace_final_O1": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "seconds": 1276.2564556299476,
+      "compiler_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "log": "workspace-final-O1.log"
+    },
+    "workspace_final_O2": {
+      "complete": true,
+      "passed": 52,
+      "failed": 0,
+      "seconds": 1275.0136307110079,
+      "compiler_revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+      "log": "workspace-final-O2.log"
+    },
+    "full_native_acceptance": {
+      "complete": true,
+      "stages": 7,
+      "results": "acceptance-final.json",
+      "log": "acceptance-final.log",
+      "levels": [
+        0,
+        1,
+        2
+      ]
+    },
+    "cli_final": {
+      "complete": true,
+      "checks_per_level": 35,
+      "results": "cli-final.json"
+    },
+    "frames_final": {
+      "complete": true,
+      "cases_per_level": 1840,
+      "results": "frames-final.json",
+      "scope": "outcome, remaining gas, output, completed stack/active memory; simultaneous-fault reasons retained separately; external state is not compared",
+      "known_simultaneous_fault_reason_differences_per_level": 3
+    },
+    "state_final": {
+      "complete": true,
+      "cases_per_level": 1142,
+      "results": "state-final.json",
+      "scope": "frame results, watched persistent/transient/original state, warmness, signed refunds, nested checkpoints and transaction settlement; signed envelopes and CALL/CREATE are excluded"
+    },
+    "arithmetic_final": {
+      "complete": true,
+      "builds": 48,
+      "checked_cases": 74676,
+      "results": "arithmetic-final.json",
+      "timing": false
+    },
+    "memory_pressure_retry": {
+      "complete": true,
+      "source_or_compiler_changes": false,
+      "resource_summary": "acceptance-resource-summary.json",
+      "resources": "acceptance-resources.jsonl.gz"
+    },
+    "cold_published_sources": {
+      "complete": true,
+      "local_git_url_overrides": false,
+      "fresh_ingot_cache": true,
+      "results": "published-verification.json",
+      "log": "published-workspace-check.log"
+    }
+  },
+  "pending": [],
+  "arithmetic_commit": "cf1db10ed017c7ad6ca8e9ff47611cec560410d3",
+  "compiler_candidate": {
+    "branch": "fevm-mvs-fixed-stack",
+    "source_directory": "/tmp/fevm-mvs-fe5c32c1",
+    "base_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
+    "committed": true,
+    "compiler": "/tmp/fevm-mvs-bootstrap-r3/bin/fe",
+    "compiler_sha256": "e45b3315ebd67d6b01fdc103cc17bcf2839dd00fc193ef795488cfebaf62b896",
+    "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47",
+    "commits": [
+      "c4b5c2a902ee6fb039c595dc710b309ccb904578",
+      "2c114c8ae9d931aacef495b3e18042a8bc266944",
+      "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
+    ],
+    "scope": "final committed prerequisite rebuilt from clean pinned sources"
+  },
+  "goal_status": "complete",
+  "verification_overrides": {
+    "keccak": "file:///tmp/fevm-keccak-mvs",
+    "swisstable": "file:///tmp/fevm-swisstable-mvs",
+    "scope": "environment-only Git URL insteadOf settings; no global Git config changes"
+  },
+  "historical_blocked_audit": {
+    "consecutive_turns": 3,
+    "remote_mvs_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
+    "fixture_unchanged_from_base": true,
+    "migration_source_hashes_match": true,
+    "active_verification_processes": 0,
+    "requires": "user direction to migrate the obsolete Fe dependency regression per AGENTS.md"
+  },
+  "compiler_baseline": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "fe5c32c1b9913a259667be9123a9090beb16ed1a",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "11722eacb49ce1f565191145d290bd25618c7342",
+      "cargo_lock_sha256": "db87456660c366f6db37f0722602b9cecbf9d00688f6520b55963d8664ed8c21",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "sbillig/fe mvs branch and published Sonatina revision",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "source_directory": "/tmp/fevm-mvs-fe5c32c1",
+    "target_directory": "/dev/shm/fevm-mvs-target",
+    "compiler": "/tmp/fevm-mvs-fe",
+    "compiler_sha256": "480068cd04eb1d33f3b9f2f89bc1a99b43b0330e98878a589ec12b49c1dccffa",
+    "compiler_version": "fe 26.4.0 (fe5c32c)",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "complete": true,
+    "build_command": "CARGO_TARGET_DIR=/dev/shm/fevm-mvs-target CARGO_BUILD_JOBS=2 cargo +1.99.0 build --release --locked -p fe --features cranelift",
+    "provenance": "Clean isolated shallow checkout of the exact manifest revision; Sonatina fetched through locked Cargo dependencies; compiler copied after successful build"
+  },
+  "acceptance_run": {
+    "status": "complete",
+    "out": "/tmp/fevm-mvs-acceptance-r3",
+    "bootstrap_record": "/tmp/fevm-mvs-bootstrap-r3/build.json",
+    "log": "/tmp/fevm-mvs-acceptance-r3.log",
+    "resources": "/tmp/fevm-mvs-acceptance-r3-resources.jsonl",
+    "stage_timeout_seconds": 7200,
+    "build_timeout_seconds": 1800,
+    "complete": true,
+    "results": "acceptance-final.json",
+    "completed_stages": [
+      "workspace-O0",
+      "workspace-O1",
+      "workspace-O2",
+      "cli-smoke",
+      "cancun-frames",
+      "cancun-state",
+      "arithmetic"
+    ]
+  },
+  "publication_review": "native/reports/mvs-port-20261012/publication.json",
+  "new_compiler_failure": {
+    "compiler_revision": "2c114c8ae9d931aacef495b3e18042a8bc266944",
+    "compiler_sha256": "6f83308ab8b9ed73c3aa22b06a7d28de945789678668a0b9721e3c19843ccded",
+    "function": "emit_log",
+    "diagnostic": "IR0600 enum.extract requires a proven active variant at the use site",
+    "command": [
+      "fe",
+      "build",
+      "/home/sean/code/fevm",
+      "--ingot",
+      "fevm_logs",
+      "--backend",
+      "native",
+      "-O",
+      "1",
+      "--emit",
+      "ir,executable"
+    ],
+    "notes": "Fixed in Sonatina 6f4b0397: isolated pass tracing proved Licm hoisted enum.extract before its variant proof. Original O1 fixture and six allocator checks pass with repaired integration candidate.",
+    "issue": "/home/sean/code/notes/issues/cross-project/fevm-mvs-o1-log-enum-extract-proof.md"
+  },
+  "approved_cleanup": {
+    "manifest": "/tmp/fevm-mvs-obsolete-test-binaries.json",
+    "record": "/tmp/fevm-mvs-obsolete-test-binaries-cleanup.json",
+    "files": 47,
+    "bytes_freed": 2456909776
+  },
+  "compiler_pre_enum_fix": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "2c114c8ae9d931aacef495b3e18042a8bc266944",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "11722eacb49ce1f565191145d290bd25618c7342",
+      "cargo_lock_sha256": "db87456660c366f6db37f0722602b9cecbf9d00688f6520b55963d8664ed8c21",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local sbillig/fe MVS prerequisite commits; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/dev/shm/fevm-mvs-bootstrap-r2/fe",
+    "sonatina_source_directory": "/dev/shm/fevm-mvs-bootstrap-r2/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/dev/shm/fevm-mvs-target",
+    "complete": true,
+    "compiler_build_seconds": 153.2605806790525,
+    "compiler": "/dev/shm/fevm-mvs-bootstrap-r2/bin/fe",
+    "compiler_sha256": "6f83308ab8b9ed73c3aa22b06a7d28de945789678668a0b9721e3c19843ccded",
+    "compiler_version": "fe 26.4.0 (2c114c8ae)"
+  },
+  "acceptance_memory_timeout": {
+    "status": "stopped after O1 stage timeout under severe host memory pressure; O0 passed; retry after preserving idle RAM artifacts on disk",
+    "out": "/tmp/fevm-mvs-acceptance-r2",
+    "bootstrap_record": "/tmp/fevm-mvs-bootstrap-r3/build.json",
+    "log": "/tmp/fevm-mvs-acceptance-r2.log",
+    "stage_timeout_seconds": 7200,
+    "build_timeout_seconds": 1800,
+    "environment": {
+      "TMPDIR": "/dev/shm/fevm-mvs-runs",
+      "RAYON_NUM_THREADS": "1",
+      "CARGO_BUILD_JOBS": "2"
+    },
+    "completed_stages": [
+      "workspace-O0"
+    ]
+  },
+  "local_verification_complete": true,
+  "migration_commit": "e4fe238fa99614c467a237f64c4819660152f9ee",
+  "migration_committed": true,
+  "published_prerequisites": [
+    {
+      "repository": "https://github.com/sbillig/fe.git",
+      "branch": "fevm-mvs-fixed-stack",
+      "revision": "1c8e2c20d5f2a86887b8daca46b0be2cdc5aab47"
+    },
+    {
+      "repository": "https://github.com/fe-lang/keccak.git",
+      "branch": "mvs",
+      "revision": "0702d006a37efc85390726b933b2a275b215c2ae"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs",
+      "revision": "770372e54571d0905167bc0d79b9b9b303e6d379"
+    },
+    {
+      "repository": "https://github.com/fe-lang/swisstable.git",
+      "branch": "mvs-hash-baseline",
+      "revision": "60017e7f2f033e971bdb2a5f5d4af097115f3be8"
+    },
+    {
+      "repository": "https://github.com/fe-lang/sonatina.git",
+      "branch": "fix/enum-extract-speculation",
+      "revision": "6f4b0397cfa77165a0ff4fafadc0a003fb72dc59"
+    }
+  ],
+  "post_publication": {
+    "complete": true,
+    "verification": "published-verification.json",
+    "push_audit": "publication-push.json",
+    "manifest_publication_text_only": true,
+    "current_manifest_sha256": "10b878bb48ffaf129f73f55fd3722eea0aa34a3741f0f1c4462d2bf9ed2e355e",
+    "runtime_source_hashes_match_accepted_snapshot": true
+  }
+}

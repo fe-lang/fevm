@@ -1,0 +1,70 @@
+   Compiling smallvec v1.15.1
+   Compiling sonatina-ir v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/ir)
+   Compiling parking_lot_core v0.9.10
+   Compiling inplace-vec-builder v0.1.1
+   Compiling vec-collections v0.4.3
+   Compiling dashmap v6.1.0
+   Compiling parking_lot v0.12.3
+   Compiling sonatina-parser v0.0.3-alpha (/tmp/fevm-mvs-next3-20261015-r1/sonatina/crates/parser)
+    Finished `release` profile [optimized] target(s) in 16.37s
+     Running unittests src/lib.rs (/tmp/fevm-mvs-target-preserved-on-disk/release/deps/sonatina_ir-4355828b4131b1ed)
+
+running 1 test
+test isa::native::tests::benchmark_native_layout ... LAYOUT_PROBE depth=2 pair=0 compiler=baseline iterations=256 seconds=0.000060400
+LAYOUT_PROBE depth=2 pair=0 compiler=candidate iterations=256 seconds=0.000016800
+LAYOUT_PROBE depth=2 pair=1 compiler=candidate iterations=256 seconds=0.000016900
+LAYOUT_PROBE depth=2 pair=1 compiler=baseline iterations=256 seconds=0.000057300
+LAYOUT_PROBE depth=2 pair=2 compiler=baseline iterations=256 seconds=0.000056500
+LAYOUT_PROBE depth=2 pair=2 compiler=candidate iterations=256 seconds=0.000017000
+LAYOUT_PROBE depth=2 pair=3 compiler=candidate iterations=256 seconds=0.000017100
+LAYOUT_PROBE depth=2 pair=3 compiler=baseline iterations=256 seconds=0.000057000
+LAYOUT_PROBE depth=2 pair=4 compiler=baseline iterations=256 seconds=0.000076000
+LAYOUT_PROBE depth=2 pair=4 compiler=candidate iterations=256 seconds=0.000016200
+LAYOUT_PROBE depth=2 pair=5 compiler=candidate iterations=256 seconds=0.000017100
+LAYOUT_PROBE depth=2 pair=5 compiler=baseline iterations=256 seconds=0.000056400
+LAYOUT_PROBE depth=6 pair=0 compiler=baseline iterations=256 seconds=0.002764700
+LAYOUT_PROBE depth=6 pair=0 compiler=candidate iterations=256 seconds=0.000690500
+LAYOUT_PROBE depth=6 pair=1 compiler=candidate iterations=256 seconds=0.000652000
+LAYOUT_PROBE depth=6 pair=1 compiler=baseline iterations=256 seconds=0.002793000
+LAYOUT_PROBE depth=6 pair=2 compiler=baseline iterations=256 seconds=0.002740100
+LAYOUT_PROBE depth=6 pair=2 compiler=candidate iterations=256 seconds=0.000660200
+LAYOUT_PROBE depth=6 pair=3 compiler=candidate iterations=256 seconds=0.000650700
+LAYOUT_PROBE depth=6 pair=3 compiler=baseline iterations=256 seconds=0.002749601
+LAYOUT_PROBE depth=6 pair=4 compiler=baseline iterations=256 seconds=0.002770200
+LAYOUT_PROBE depth=6 pair=4 compiler=candidate iterations=256 seconds=0.000661500
+LAYOUT_PROBE depth=6 pair=5 compiler=candidate iterations=256 seconds=0.000669500
+LAYOUT_PROBE depth=6 pair=5 compiler=baseline iterations=256 seconds=0.002711500
+LAYOUT_PROBE depth=10 pair=0 compiler=baseline iterations=256 seconds=0.073316004
+LAYOUT_PROBE depth=10 pair=0 compiler=candidate iterations=256 seconds=0.016671200
+LAYOUT_PROBE depth=10 pair=1 compiler=candidate iterations=256 seconds=0.016603401
+LAYOUT_PROBE depth=10 pair=1 compiler=baseline iterations=256 seconds=0.073353904
+LAYOUT_PROBE depth=10 pair=2 compiler=baseline iterations=256 seconds=0.073132003
+LAYOUT_PROBE depth=10 pair=2 compiler=candidate iterations=256 seconds=0.016729001
+LAYOUT_PROBE depth=10 pair=3 compiler=candidate iterations=256 seconds=0.016577501
+LAYOUT_PROBE depth=10 pair=3 compiler=baseline iterations=256 seconds=0.073075604
+LAYOUT_PROBE depth=10 pair=4 compiler=baseline iterations=256 seconds=0.073220603
+LAYOUT_PROBE depth=10 pair=4 compiler=candidate iterations=256 seconds=0.016889301
+LAYOUT_PROBE depth=10 pair=5 compiler=candidate iterations=256 seconds=0.016694801
+LAYOUT_PROBE depth=10 pair=5 compiler=baseline iterations=256 seconds=0.073292904
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 115 filtered out; finished in 0.56s
+
+     Running tests/common.rs (/tmp/fevm-mvs-target-preserved-on-disk/release/deps/common-ebff55b2be3db023)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/linker.rs (/tmp/fevm-mvs-target-preserved-on-disk/release/deps/linker-123710d6b5650023)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/writer.rs (/tmp/fevm-mvs-target-preserved-on-disk/release/deps/writer-a2cffced1213b708)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+

@@ -1,0 +1,788 @@
+From 498ce58134505992ccd1146dcbdb94a11483fcf0 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Thu, 15 Oct 2026 12:14:49 -0700
+Subject: [PATCH 1/4] Reuse unchanged aggregate initialization joins
+
+---
+ .../aggregate/object_initialization.rs        | 146 +++++++++++++++++-
+ 1 file changed, 142 insertions(+), 4 deletions(-)
+
+diff --git a/crates/codegen/src/transform/aggregate/object_initialization.rs b/crates/codegen/src/transform/aggregate/object_initialization.rs
+index d9429d3e..32b023d7 100644
+--- a/crates/codegen/src/transform/aggregate/object_initialization.rs
++++ b/crates/codegen/src/transform/aggregate/object_initialization.rs
+@@ -200,18 +200,35 @@ impl InitializedValue {
+ 
+     pub(crate) fn join(&self, ctx: &ModuleCtx, other: &Self) -> Self {
+         debug_assert_eq!(self.ty, other.ty);
+-        if self.defined(ctx) && other.defined(ctx) && self.variant != other.variant {
++        if self.default_defined == other.default_defined
++            && self.variant == other.variant
++            && self.children.ptr_eq(&other.children)
++        {
++            return self.clone();
++        }
++        if self.variant != other.variant && self.defined(ctx) && other.defined(ctx) {
+             return Self::new(self.ty, true);
+         }
+-        let mut result = Self::new(self.ty, self.default_defined && other.default_defined);
++        let mut result = self.clone();
++        result.default_defined &= other.default_defined;
+         result.variant = self
+             .variant
+             .filter(|variant| Some(*variant) == other.variant);
+-        for &index in self.children.keys().chain(other.children.keys()) {
++        // Join overlapping keys once. Retained snapshots share unchanged
++        // entries, and only changed children need a new persistent map path.
++        for &index in self.children.keys().chain(
++            other
++                .children
++                .keys()
++                .filter(|index| !self.children.contains_key(*index)),
++        ) {
+             if let Some(a) = self.child(ctx, index)
+                 && let Some(b) = other.child(ctx, index)
+             {
+-                result.children.insert_mut(index, a.join(ctx, &b));
++                let child = a.join(ctx, &b);
++                if result.children.get(&index) != Some(&child) {
++                    result.children.insert_mut(index, child);
++                }
+             }
+         }
+         result
+@@ -515,4 +532,125 @@ block0:
+             }
+         });
+     }
++
++    #[test]
++    fn nested_joins_intersect_definedness_with_sparse_defaults() {
++        let parsed = parse_module(
++            r#"
++target = "evm-ethereum-osaka"
++type @Pair = { i256, i256 };
++type @Nested = { @Pair, @Pair };
++func private %f(v0.@Nested) {
++block0:
++    return;
++}
++"#,
++        )
++        .unwrap();
++        let ctx = &parsed.module.ctx;
++        let ty = ctx.func_sig(parsed.module.funcs()[0], |sig| sig.args()[0]);
++        let slices = [[0, 0], [0, 1], [1, 0], [1, 1]]
++            .map(|path| shape::aggregate_slice_for_path(ctx, ty, &path).unwrap());
++        let states: Vec<_> = [false, true]
++            .into_iter()
++            .flat_map(|default| (0_u8..16).map(move |mask| (default, mask)))
++            .map(|(default, mask)| {
++                let mut layout = AggregateLayoutCache::default();
++                let mut value = InitializedValue::new(ty, default);
++                let mut defined = [default; 4];
++                for (index, slice) in slices.iter().enumerate() {
++                    if mask & (1 << index) != 0 {
++                        defined[index] = !default;
++                        value.put(
++                            ctx,
++                            *slice,
++                            InitializedValue::new(slice.ty, !default),
++                            &mut layout,
++                        );
++                    }
++                }
++                (value, defined)
++            })
++            .collect();
++        for (left, left_bits) in &states {
++            for (right, right_bits) in &states {
++                let joined = left.join(ctx, right);
++                let mut layout = AggregateLayoutCache::default();
++                let expected: Vec<_> = left_bits
++                    .iter()
++                    .zip(right_bits)
++                    .map(|(a, b)| *a && *b)
++                    .collect();
++                assert_eq!(joined.defined(ctx), expected.iter().all(|bit| *bit));
++                for (slice, expected) in slices.iter().zip(expected) {
++                    assert_eq!(joined.at(ctx, *slice, &mut layout).defined(ctx), expected);
++                }
++                assert_eq!(joined, right.join(ctx, left));
++                assert_eq!(joined, joined.join(ctx, &joined));
++                assert_eq!(left.defined(ctx), left_bits.iter().all(|bit| *bit));
++                assert_eq!(right.defined(ctx), right_bits.iter().all(|bit| *bit));
++            }
++        }
++    }
++
++    #[test]
++    fn unchanged_joins_share_storage_without_merging_variant_metadata() {
++        let parsed = parse_module(
++            r#"
++target = "evm-ethereum-osaka"
++type @E = enum { #None, #Some(i256) };
++type @Pair = { @E, @E };
++func private %f(v0.@Pair) {
++block0:
++    return;
++}
++"#,
++        )
++        .unwrap();
++        let ctx = &parsed.module.ctx;
++        let ty = ctx.func_sig(parsed.module.funcs()[0], |sig| sig.args()[0]);
++        let enum_ty = shape::aggregate_child_ty(ctx, ty, 0).unwrap();
++        let Type::Compound(enum_id) = enum_ty else {
++            panic!("expected enum");
++        };
++        let some = EnumVariantRef::new(enum_id, 1);
++        let none = EnumVariantRef::new(enum_id, 0);
++        let mut value = InitializedValue::new(ty, false);
++        let mut layout = AggregateLayoutCache::default();
++        let mut populated = InitializedValue::new(enum_ty, false);
++        populated.select(ctx, some);
++        let payload = shape::enum_variant_field_slice(ctx, enum_ty, some, 0).unwrap();
++        populated.put(
++            ctx,
++            payload,
++            InitializedValue::new(payload.ty, true),
++            &mut layout,
++        );
++        for index in [0, 1] {
++            let slice = shape::aggregate_slice_for_path(ctx, ty, &[index]).unwrap();
++            value.put(ctx, slice, populated.clone(), &mut layout);
++        }
++        assert!(value.defined(ctx));
++        let joined = value.join(ctx, &value);
++        assert!(joined.children.ptr_eq(&value.children));
++        let mut changed = value.clone();
++        let first = shape::aggregate_slice_for_path(ctx, ty, &[0]).unwrap();
++        let mut alternate = populated.clone();
++        alternate.assume_variant(none);
++        assert!(alternate.children.ptr_eq(&populated.children));
++        assert!(alternate.defined(ctx));
++        changed.put(ctx, first, alternate, &mut layout);
++        let mixed = value.join(ctx, &changed);
++        assert!(mixed.defined(ctx));
++        assert_eq!(mixed.children[&0].variant(), None);
++        assert_eq!(mixed.children[&1].variant(), Some(some));
++        assert!(ptr::eq(&mixed.children[&1], &value.children[&1]));
++        assert_eq!(value.children[&0].variant(), Some(some));
++        assert_eq!(changed.children[&0].variant(), Some(none));
++        let mut fork = joined;
++        fork.forget(ctx, first, &mut layout);
++        assert!(!fork.defined(ctx));
++        assert!(value.defined(ctx));
++        assert!(mixed.defined(ctx));
++    }
+ }
+-- 
+2.43.0
+
+
+From 7d296244000adbf3cde76eb7a597b244d9ffe4e6 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Thu, 15 Oct 2026 16:46:59 -0700
+Subject: [PATCH 2/4] Share enum proof view-index snapshots
+
+---
+ .../verify/function/enum_proofs/view_index.rs | 118 ++++++++++++++----
+ 1 file changed, 96 insertions(+), 22 deletions(-)
+
+diff --git a/crates/verifier/src/verify/function/enum_proofs/view_index.rs b/crates/verifier/src/verify/function/enum_proofs/view_index.rs
+index 834b1a4c..eab2f9a1 100644
+--- a/crates/verifier/src/verify/function/enum_proofs/view_index.rs
++++ b/crates/verifier/src/verify/function/enum_proofs/view_index.rs
+@@ -1,43 +1,44 @@
+ //! Conservative write candidates. Facts remain in State; this index only skips
+ //! facts whose anchors, physical locations and guard locations are disjoint.
+ use std::{
+-    collections::{BTreeMap, BTreeSet},
++    collections::BTreeSet,
+     ops::Bound::{Excluded, Unbounded},
+ };
+ 
++use rpds::{RedBlackTreeMapSync, RedBlackTreeSetSync};
+ use sonatina_ir::ValueId;
+ 
+ use super::views::{Index, References, Root, Step};
+ 
+ #[derive(Clone, Debug, Default, PartialEq, Eq)]
+ struct Paths {
+-    values: BTreeSet<ValueId>,
+-    children: BTreeMap<Step, Self>,
++    values: RedBlackTreeSetSync<ValueId>,
++    children: RedBlackTreeMapSync<Step, Self>,
+ }
+ 
+ impl Paths {
+     fn update(&mut self, path: &[Step], id: ValueId, insert: bool) {
+         if let Some((step, rest)) = path.split_first() {
+             if insert {
+-                self.children
+-                    .entry(*step)
+-                    .or_default()
+-                    .update(rest, id, true);
++                if !self.children.contains_key(step) {
++                    self.children.insert_mut(*step, Self::default());
++                }
++                self.children.get_mut(step).unwrap().update(rest, id, true);
+             } else if let Some(child) = self.children.get_mut(step) {
+                 child.update(rest, id, false);
+                 if child.values.is_empty() && child.children.is_empty() {
+-                    self.children.remove(step);
++                    self.children.remove_mut(step);
+                 }
+             }
+         } else if insert {
+-            self.values.insert(id);
++            self.values.insert_mut(id);
+         } else {
+-            self.values.remove(&id);
++            self.values.remove_mut(&id);
+         }
+     }
+ 
+     fn all(&self, found: &mut BTreeSet<ValueId>) {
+-        found.extend(&self.values);
++        found.extend(self.values.iter().copied());
+         for child in self.children.values() {
+             child.all(found);
+         }
+@@ -48,7 +49,7 @@ impl Paths {
+             self.all(found);
+             return;
+         };
+-        found.extend(&self.values);
++        found.extend(self.values.iter().copied());
+         match step {
+             Step::Index(Index::Constant(_)) => {
+                 if let Some(child) = self.children.get(step) {
+@@ -82,42 +83,55 @@ impl Paths {
+ }
+ 
+ fn update_paths<K: Copy + Ord>(
+-    paths: &mut BTreeMap<K, Paths>,
++    paths: &mut RedBlackTreeMapSync<K, Paths>,
+     key: K,
+     path: &[Step],
+     id: ValueId,
+     insert: bool,
+ ) {
+     if insert {
+-        paths.entry(key).or_default().update(path, id, true);
++        if !paths.contains_key(&key) {
++            paths.insert_mut(key, Paths::default());
++        }
++        paths.get_mut(&key).unwrap().update(path, id, true);
+     } else if let Some(tree) = paths.get_mut(&key) {
+         tree.update(path, id, false);
+         if tree.values.is_empty() && tree.children.is_empty() {
+-            paths.remove(&key);
++            paths.remove_mut(&key);
+         }
+     }
+ }
+ 
+ #[derive(Clone, Debug, Default, PartialEq, Eq)]
+ pub(super) struct ViewIndex {
+-    places: BTreeMap<Root, Paths>,
+-    anchors: BTreeMap<ValueId, Paths>,
+-    bindings: BTreeMap<ValueId, BTreeSet<ValueId>>,
++    // CFG snapshots share unchanged roots and paths. Updating an index copies
++    // only the map search paths and the affected reference path.
++    places: RedBlackTreeMapSync<Root, Paths>,
++    anchors: RedBlackTreeMapSync<ValueId, Paths>,
++    bindings: RedBlackTreeMapSync<ValueId, RedBlackTreeSetSync<ValueId>>,
+ }
+ 
+ impl ViewIndex {
+     pub fn binding_candidates(&self, binding: ValueId) -> BTreeSet<ValueId> {
+-        self.bindings.get(&binding).cloned().unwrap_or_default()
++        self.bindings
++            .get(&binding)
++            .into_iter()
++            .flat_map(|values| values.iter().copied())
++            .collect()
+     }
+ 
+     pub fn update(&mut self, id: ValueId, refs: &References, insert: bool) {
+         for binding in refs.bindings() {
+             if insert {
+-                self.bindings.entry(binding).or_default().insert(id);
++                if !self.bindings.contains_key(&binding) {
++                    self.bindings
++                        .insert_mut(binding, RedBlackTreeSetSync::new_sync());
++                }
++                self.bindings.get_mut(&binding).unwrap().insert_mut(id);
+             } else if let Some(values) = self.bindings.get_mut(&binding) {
+-                values.remove(&id);
++                values.remove_mut(&id);
+                 if values.is_empty() {
+-                    self.bindings.remove(&binding);
++                    self.bindings.remove_mut(&binding);
+                 }
+             }
+         }
+@@ -276,4 +290,64 @@ mod tests {
+         index.update(id, &refs, false);
+         assert_eq!(index, ViewIndex::default());
+     }
++
++    #[test]
++    fn snapshots_keep_paths_guards_anchors_and_bindings_independent() {
++        let id = ValueId::from_u32(1);
++        let binding = ValueId::from_u32(2);
++        let local = Root::Recent(id);
++        let guard = Root::Summary(id);
++        let original = References {
++            views: BTreeSet::from([View {
++                place: Place {
++                    root: local,
++                    path: vec![Step::Index(Index::Symbol(binding))],
++                },
++                guards: BTreeSet::from([Guard {
++                    place: Place {
++                        root: guard,
++                        path: vec![],
++                    },
++                    variant: 0,
++                    witness: Some(binding),
++                    anchor: None,
++                }]),
++            }]),
++            anchors: BTreeSet::from([Anchor {
++                value: binding,
++                path: vec![],
++            }]),
++            cache: Some(id),
++            unknown: false,
++        };
++        let mut before = ViewIndex::default();
++        before.update(id, &original, true);
++        let mut changed = before.clone();
++        let mut replacement = References::root(Root::Incoming(id));
++        replacement.cache = Some(binding);
++        changed.update(id, &original, false);
++        changed.update(binding, &replacement, true);
++        assert!(!before.places.ptr_eq(&changed.places));
++        for root in [local, guard] {
++            assert_eq!(
++                before.candidates(&References::root(root)),
++                BTreeSet::from([id])
++            );
++            assert!(changed.candidates(&References::root(root)).is_empty());
++        }
++        assert_eq!(before.binding_candidates(binding), BTreeSet::from([id]));
++        assert_eq!(
++            changed.binding_candidates(binding),
++            BTreeSet::from([binding])
++        );
++        let mut anchored = References::root(Root::Recent(binding));
++        anchored.cache = Some(id);
++        assert_eq!(before.candidates(&anchored), BTreeSet::from([id]));
++        assert!(changed.candidates(&anchored).is_empty());
++        before.update(id, &original, false);
++        assert_eq!(before, ViewIndex::default());
++        assert_eq!(changed.candidates(&replacement), BTreeSet::from([binding]));
++        changed.update(binding, &replacement, false);
++        assert_eq!(changed, ViewIndex::default());
++    }
+ }
+-- 
+2.43.0
+
+
+From ca25abf9a96ce4d31da3923cc4a6dddc13be3c81 Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Thu, 15 Oct 2026 16:47:00 -0700
+Subject: [PATCH 3/4] Borrow native layout types under one read guard
+
+---
+ crates/ir/src/isa/native.rs | 167 +++++++++++++++++++++++-------------
+ 1 file changed, 108 insertions(+), 59 deletions(-)
+
+diff --git a/crates/ir/src/isa/native.rs b/crates/ir/src/isa/native.rs
+index b448582b..fb66f339 100644
+--- a/crates/ir/src/isa/native.rs
++++ b/crates/ir/src/isa/native.rs
+@@ -5,7 +5,9 @@ use sonatina_triple::{Architecture, OperatingSystem, TargetTriple, Vendor};
+ use super::{Endian, Isa, TypeLayout, TypeLayoutError};
+ use crate::{
+     AddressSpaceDesc, AddressSpaceId, AddressSpaceInfo, AddressSpaceKind, Type,
+-    inst::native::inst_set::NativeInstSet, module::ModuleCtx, types::CompoundType,
++    inst::native::inst_set::NativeInstSet,
++    module::ModuleCtx,
++    types::{CompoundType, TypeStore},
+ };
+ 
+ pub mod space {
+@@ -88,76 +90,91 @@ pub fn inst_set() -> &'static NativeInstSet {
+     &INST_SET
+ }
+ 
+-impl TypeLayout for NativeTypeLayout {
+-    fn size_of(&self, ty: Type, ctx: &ModuleCtx) -> Result<usize, TypeLayoutError> {
+-        let size = match ty {
+-            Type::Unit => 0,
+-            Type::I1 | Type::I8 => 1,
+-            Type::I16 => 2,
+-            Type::I32 => 4,
+-            Type::I64 => 8,
+-            Type::I128 => 16,
+-            Type::I256 => 32,
+-            Type::EnumTag(_) => return Err(TypeLayoutError::UnrepresentableType(ty)),
+-            Type::Compound(compound) => {
+-                match ctx.with_ty_store(|store| store.resolve_compound(compound).clone()) {
+-                    CompoundType::Array { elem, len } => self.size_of(elem, ctx)? * len,
+-                    CompoundType::Struct(data) => {
+-                        if data.packed {
+-                            return Err(TypeLayoutError::UnsupportedType(ty));
+-                        }
+-                        let mut size = 0usize;
+-                        let mut struct_align = 1usize;
+-                        for field in data.fields {
+-                            let align = self.align_of(field, ctx)?;
+-                            size = size.next_multiple_of(align);
+-                            size += self.size_of(field, ctx)?;
+-                            struct_align = struct_align.max(align);
+-                        }
+-                        size.next_multiple_of(struct_align)
+-                    }
+-                    CompoundType::Ptr(_) | CompoundType::ObjRef(_) | CompoundType::ConstRef(_) => 8,
+-                    CompoundType::Enum(_) | CompoundType::Func { .. } => {
+-                        return Err(TypeLayoutError::UnrepresentableType(ty));
+-                    }
++impl NativeTypeLayout {
++    fn size(ty: Type, store: &TypeStore) -> Result<usize, TypeLayoutError> {
++        let Type::Compound(compound) = ty else {
++            return Self::scalar_layout(ty).map(|(size, _)| size);
++        };
++        let size = match store.resolve_compound(compound) {
++            CompoundType::Array { elem, len } => Self::size(*elem, store)? * len,
++            CompoundType::Struct(data) => {
++                if data.packed {
++                    return Err(TypeLayoutError::UnsupportedType(ty));
+                 }
++                let mut size = 0usize;
++                let mut struct_align = 1usize;
++                for &field in &data.fields {
++                    let align = Self::align(field, store)?;
++                    size = size.next_multiple_of(align);
++                    size += Self::size(field, store)?;
++                    struct_align = struct_align.max(align);
++                }
++                size.next_multiple_of(struct_align)
++            }
++            CompoundType::Ptr(_) | CompoundType::ObjRef(_) | CompoundType::ConstRef(_) => 8,
++            CompoundType::Enum(_) | CompoundType::Func { .. } => {
++                return Err(TypeLayoutError::UnrepresentableType(ty));
+             }
+         };
+         Ok(size)
+     }
+ 
+-    fn align_of(&self, ty: Type, ctx: &ModuleCtx) -> Result<usize, TypeLayoutError> {
+-        let align = match ty {
+-            Type::Unit | Type::I1 | Type::I8 => 1,
+-            Type::I16 => 2,
+-            Type::I32 => 4,
+-            Type::I64 => 8,
+-            Type::I128 => 16,
+-            Type::I256 => 16,
+-            Type::EnumTag(_) => return Err(TypeLayoutError::UnrepresentableType(ty)),
+-            Type::Compound(compound) => {
+-                match ctx.with_ty_store(|store| store.resolve_compound(compound).clone()) {
+-                    CompoundType::Array { elem, .. } => self.align_of(elem, ctx)?,
+-                    CompoundType::Struct(data) => {
+-                        if data.packed {
+-                            return Err(TypeLayoutError::UnsupportedType(ty));
+-                        }
+-                        let mut align = 1usize;
+-                        for field in data.fields {
+-                            align = align.max(self.align_of(field, ctx)?);
+-                        }
+-                        align
+-                    }
+-                    CompoundType::Ptr(_) | CompoundType::ObjRef(_) | CompoundType::ConstRef(_) => 8,
+-                    CompoundType::Enum(_) | CompoundType::Func { .. } => {
+-                        return Err(TypeLayoutError::UnrepresentableType(ty));
+-                    }
++    fn align(ty: Type, store: &TypeStore) -> Result<usize, TypeLayoutError> {
++        let Type::Compound(compound) = ty else {
++            return Self::scalar_layout(ty).map(|(_, align)| align);
++        };
++        let align = match store.resolve_compound(compound) {
++            CompoundType::Array { elem, .. } => Self::align(*elem, store)?,
++            CompoundType::Struct(data) => {
++                if data.packed {
++                    return Err(TypeLayoutError::UnsupportedType(ty));
++                }
++                let mut align = 1usize;
++                for &field in &data.fields {
++                    align = align.max(Self::align(field, store)?);
+                 }
++                align
++            }
++            CompoundType::Ptr(_) | CompoundType::ObjRef(_) | CompoundType::ConstRef(_) => 8,
++            CompoundType::Enum(_) | CompoundType::Func { .. } => {
++                return Err(TypeLayoutError::UnrepresentableType(ty));
+             }
+         };
+         Ok(align)
+     }
+ 
++    fn scalar_layout(ty: Type) -> Result<(usize, usize), TypeLayoutError> {
++        Ok(match ty {
++            Type::Unit => (0, 1),
++            Type::I1 | Type::I8 => (1, 1),
++            Type::I16 => (2, 2),
++            Type::I32 => (4, 4),
++            Type::I64 => (8, 8),
++            Type::I128 => (16, 16),
++            Type::I256 => (32, 16),
++            Type::EnumTag(_) => return Err(TypeLayoutError::UnrepresentableType(ty)),
++            Type::Compound(_) => unreachable!("compound layout needs its type store"),
++        })
++    }
++}
++
++impl TypeLayout for NativeTypeLayout {
++    fn size_of(&self, ty: Type, ctx: &ModuleCtx) -> Result<usize, TypeLayoutError> {
++        if matches!(ty, Type::Compound(_)) {
++            ctx.with_ty_store(|store| Self::size(ty, store))
++        } else {
++            Self::scalar_layout(ty).map(|(size, _)| size)
++        }
++    }
++
++    fn align_of(&self, ty: Type, ctx: &ModuleCtx) -> Result<usize, TypeLayoutError> {
++        if matches!(ty, Type::Compound(_)) {
++            ctx.with_ty_store(|store| Self::align(ty, store))
++        } else {
++            Self::scalar_layout(ty).map(|(_, align)| align)
++        }
++    }
++
+     fn pointer_repl(&self) -> Type {
+         Type::I64
+     }
+@@ -270,4 +287,36 @@ mod tests {
+         assert_eq!(module.ctx.size_of(pointer).unwrap(), 8);
+         assert_eq!(module.ctx.align_of(pointer).unwrap(), 8);
+     }
++    #[test]
++    fn native_nested_layouts_follow_type_updates_and_isolate_forked_stores() {
++        let module = Module::new(&native_isa());
++        let (inner, outer) = module.ctx.with_ty_store_mut(|store| {
++            let inner = store.make_struct("Inner", &[Type::I8, Type::I128], false);
++            let array = store.make_array(inner, 3);
++            let outer = store.make_struct("Outer", &[Type::I8, array, Type::I256], false);
++            (inner, outer)
++        });
++        let shared = module.ctx.clone();
++        let forked = module.ctx.fork();
++        let copied = module.ctx.deep_clone();
++        for ctx in [&module.ctx, &shared, &forked, &copied] {
++            assert_eq!(ctx.size_of(inner).unwrap(), 32);
++            assert_eq!(ctx.align_of(inner).unwrap(), 16);
++            assert_eq!(ctx.size_of(outer).unwrap(), 144);
++            assert_eq!(ctx.align_of(outer).unwrap(), 16);
++        }
++        module.ctx.with_ty_store_mut(|store| {
++            store.update_struct_fields("Inner", &[Type::I8, Type::I64]);
++        });
++        for ctx in [&module.ctx, &shared] {
++            assert_eq!(ctx.size_of(inner).unwrap(), 16);
++            assert_eq!(ctx.align_of(inner).unwrap(), 8);
++            assert_eq!(ctx.size_of(outer).unwrap(), 96);
++            assert_eq!(ctx.align_of(outer).unwrap(), 16);
++        }
++        for ctx in [&forked, &copied] {
++            assert_eq!(ctx.size_of(inner).unwrap(), 32);
++            assert_eq!(ctx.size_of(outer).unwrap(), 144);
++        }
++    }
+ }
+-- 
+2.43.0
+
+
+From 325114276de157cde38f5833ed8413166ef9741a Mon Sep 17 00:00:00 2001
+From: Sean Billig <sean.billig@gmail.com>
+Date: Thu, 15 Oct 2026 17:18:58 -0700
+Subject: [PATCH 4/4] Retain enum proof indexes at control-flow joins
+
+---
+ .../verify/function/enum_proofs/objects.rs    | 132 +++++++++++++++++-
+ 1 file changed, 128 insertions(+), 4 deletions(-)
+
+diff --git a/crates/verifier/src/verify/function/enum_proofs/objects.rs b/crates/verifier/src/verify/function/enum_proofs/objects.rs
+index fda6ed89..9ff7f164 100644
+--- a/crates/verifier/src/verify/function/enum_proofs/objects.rs
++++ b/crates/verifier/src/verify/function/enum_proofs/objects.rs
+@@ -366,6 +366,7 @@ impl State {
+         let mut result = Self {
+             objects: self.objects.clone(),
+             bound: self.bound.union(&other.bound).copied().collect(),
++            view_index: self.view_index.clone(),
+             ..Self::default()
+         };
+         // Allocation facts are conditional on that allocation existing. Phi
+@@ -383,21 +384,27 @@ impl State {
+                 result.values.insert(id, a.join(ctx, b));
+             }
+         }
++        // Joined views are a subset of our views; values and guard facts do not
++        // affect the index. Only changed or missing references need reindexing.
+         for (&id, a) in &self.views {
+             if let Some(b) = other.views.get(&id) {
++                let references = a.references.join(&b.references);
++                if references != a.references {
++                    result.view_index.update(id, &a.references, false);
++                    result.view_index.update(id, &references, true);
++                }
+                 result.views.insert(
+                     id,
+                     ViewFact {
+-                        references: a.references.join(&b.references),
++                        references,
+                         value: a.value.join(ctx, &b.value),
+                         guards: a.guards && b.guards,
+                     },
+                 );
++            } else {
++                result.view_index.update(id, &a.references, false);
+             }
+         }
+-        for (&id, fact) in &result.views {
+-            result.view_index.update(id, &fact.references, true);
+-        }
+         for (&id, refs) in &self.observations {
+             if let Some(other) = other.observations.get(&id)
+                 && (refs == other || refs.same_location(other))
+@@ -596,3 +603,120 @@ impl State {
+         self.close_exposure(ctx);
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use sonatina_ir::{Module, isa::evm::Evm};
++    use sonatina_triple::TargetTriple;
++
++    use super::{
++        super::views::{Anchor, Guard, View},
++        *,
++    };
++
++    #[test]
++    fn joins_retain_only_common_views_and_update_reference_candidates() {
++        let module = Module::new(&Evm::new(
++            TargetTriple::parse("evm-ethereum-cancun").unwrap(),
++        ));
++        let ids = [0, 1, 2, 3, 4, 5].map(ValueId::from_u32);
++        let witness = ValueId::from_u32(10);
++        let anchor = ValueId::from_u32(11);
++        let mut left = State::default();
++        for &id in &ids[..4] {
++            let mut references = References::root(Root::Recent(id));
++            references.cache = Some(id);
++            left.views.insert(
++                id,
++                ViewFact {
++                    references,
++                    value: ValueState::new(Type::I32, true),
++                    guards: true,
++                },
++            );
++        }
++        left.views.get_mut(&ids[2]).unwrap().references.views = BTreeSet::from([View {
++            place: Place {
++                root: Root::Recent(ids[2]),
++                path: vec![],
++            },
++            guards: BTreeSet::from([Guard {
++                place: Place {
++                    root: Root::Summary(ids[0]),
++                    path: vec![],
++                },
++                variant: 0,
++                witness: Some(witness),
++                anchor: Some(Anchor {
++                    value: anchor,
++                    path: vec![],
++                }),
++            }]),
++        }]);
++        for (&id, fact) in &left.views {
++            left.view_index.update(id, &fact.references, true);
++        }
++        let mut right = left.clone();
++        right.views.get_mut(&ids[0]).unwrap().guards = false;
++        let mut moved = References::root(Root::Recent(ids[4]));
++        moved.cache = Some(ids[1]);
++        for (id, references) in [
++            (ids[1], moved),
++            (ids[3], References::root(Root::Recent(ids[3]))),
++        ] {
++            let fact = right.views.get_mut(&id).unwrap();
++            right.view_index.update(id, &fact.references, false);
++            fact.references = references;
++            right.view_index.update(id, &fact.references, true);
++        }
++        let removed = right.views.remove(&ids[2]).unwrap();
++        right.view_index.update(ids[2], &removed.references, false);
++        let added = ViewFact {
++            references: References::root(Root::Recent(ids[5])),
++            value: ValueState::new(Type::I32, true),
++            guards: true,
++        };
++        right.view_index.update(ids[5], &added.references, true);
++        right.views.insert(ids[5], added);
++
++        let joined = left.join(&module.ctx, &right);
++        assert_eq!(
++            joined.views.keys().copied().collect::<Vec<_>>(),
++            vec![ids[0], ids[1], ids[3]]
++        );
++        assert!(!joined.views[&ids[0]].guards);
++        for (root, expected) in [
++            (Root::Recent(ids[0]), BTreeSet::from([ids[0]])),
++            (Root::Recent(ids[1]), BTreeSet::from([ids[1]])),
++            (Root::Recent(ids[2]), BTreeSet::new()),
++            (Root::Recent(ids[3]), BTreeSet::from([ids[3]])),
++            (Root::Recent(ids[4]), BTreeSet::from([ids[1]])),
++            (Root::Recent(ids[5]), BTreeSet::new()),
++            (Root::Summary(ids[0]), BTreeSet::new()),
++        ] {
++            assert_eq!(
++                joined.view_index.candidates(&References::root(root)),
++                expected,
++                "{root:?}"
++            );
++        }
++        for id in [ids[2], ids[3], witness, anchor] {
++            assert!(
++                joined.view_index.binding_candidates(id).is_empty(),
++                "{id:?}"
++            );
++            assert_eq!(
++                left.view_index.binding_candidates(id),
++                BTreeSet::from([if id == ids[3] { ids[3] } else { ids[2] }])
++            );
++        }
++        let mut cached = References::root(Root::Recent(ids[5]));
++        cached.cache = Some(ids[3]);
++        assert!(joined.view_index.candidates(&cached).is_empty());
++        assert_eq!(
++            left.view_index.candidates(&cached),
++            BTreeSet::from([ids[3]])
++        );
++        assert_eq!(joined, right.join(&module.ctx, &left));
++    }
++}
+-- 
+2.43.0
+

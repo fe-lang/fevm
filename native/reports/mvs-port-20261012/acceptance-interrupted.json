@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "build": {
+    "manifest": {
+      "schema": 1,
+      "fe_repository": "https://github.com/sbillig/fe",
+      "fe_revision": "2c114c8ae9d931aacef495b3e18042a8bc266944",
+      "sonatina_repository": "https://github.com/fe-lang/sonatina",
+      "sonatina_revision": "11722eacb49ce1f565191145d290bd25618c7342",
+      "cargo_lock_sha256": "db87456660c366f6db37f0722602b9cecbf9d00688f6520b55963d8664ed8c21",
+      "rust_version": "1.99.0",
+      "features": [
+        "cranelift"
+      ],
+      "publication": "local sbillig/fe MVS prerequisite commits; publication pending",
+      "hosts": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu"
+      ]
+    },
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "source_directory": "/dev/shm/fevm-mvs-bootstrap-r2/fe",
+    "sonatina_source_directory": "/dev/shm/fevm-mvs-bootstrap-r2/sonatina",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "target_directory": "/dev/shm/fevm-mvs-target",
+    "complete": true,
+    "compiler_build_seconds": 153.2605806790525,
+    "compiler": "/dev/shm/fevm-mvs-bootstrap-r2/bin/fe",
+    "compiler_sha256": "6f83308ab8b9ed73c3aa22b06a7d28de945789678668a0b9721e3c19843ccded",
+    "compiler_version": "fe 26.4.0 (2c114c8ae)"
+  },
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "complete": false,
+  "scope": "native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending",
+  "stage_timeout_seconds": 7200,
+  "build_timeout_seconds": 1800,
+  "checks": [
+    {
+      "name": "workspace-O0",
+      "status": 0,
+      "seconds": 1215.8365608729655
+    },
+    {
+      "name": "workspace-O1",
+      "status": 0,
+      "seconds": 1281.4857797030127
+    },
+    {
+      "name": "workspace-O2",
+      "status": 0,
+      "seconds": 1287.7681256200885
+    },
+    {
+      "name": "cli-smoke",
+      "status": 1,
+      "seconds": 173.09743238403462
+    },
+    {
+      "name": "cancun-frames",
+      "status": 0,
+      "seconds": 95.36776972806547
+    }
+  ]
+}

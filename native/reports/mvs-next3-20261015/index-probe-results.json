@@ -1,0 +1,290 @@
+[
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.015225500"
+  },
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.068146000"
+  },
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.325094899"
+  },
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001032500"
+  },
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001225400"
+  },
+  {
+    "pair": 0,
+    "warmup": true,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001480600"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001029300"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001291700"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001508000"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.014653800"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.064681600"
+  },
+  {
+    "pair": 1,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.324037295"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.014658700"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.065179097"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.321325488"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001068299"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001244400"
+  },
+  {
+    "pair": 2,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001453900"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001060200"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001238700"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001486099"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.014603600"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.065039697"
+  },
+  {
+    "pair": 3,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.318896788"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.014570799"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.064738198"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.318972888"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001022300"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001248200"
+  },
+  {
+    "pair": 4,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001456500"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.001016800"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.001269500"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "candidate",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.001485900"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "256",
+    "iterations": "512",
+    "seconds": "0.014611799"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "1024",
+    "iterations": "512",
+    "seconds": "0.064885698"
+  },
+  {
+    "pair": 5,
+    "warmup": false,
+    "compiler": "baseline",
+    "count": "4096",
+    "iterations": "512",
+    "seconds": "0.323606387"
+  }
+]

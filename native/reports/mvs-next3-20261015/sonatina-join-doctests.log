@@ -1,0 +1,70 @@
+    Finished `release` profile [optimized] target(s) in 0.11s
+   Doc-tests sonatina_codegen
+
+running 1 test
+test crates/codegen/src/isa/cranelift/../../../docs/native.md - isa::cranelift (line 33) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.12s; merged doctests compilation took 0.12s
+   Doc-tests sonatina_filecheck
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sonatina_interpreter
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sonatina_ir
+
+running 4 tests
+test crates/ir/src/inst/inst_set.rs - inst::inst_set::InstSetExt (line 191) ... ignored
+test crates/ir/src/inst/inst_set.rs - inst::inst_set::apply_macro_to_all_insts (line 20) ... ignored
+test crates/ir/src/inst/inst_set.rs - inst::inst_set::match_string_to_inst (line 22) ... ignored
+test crates/ir/src/inst/inst_set.rs - inst::inst_set::InstSetExt (line 198) ... ok
+
+test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.11s; merged doctests compilation took 0.11s
+   Doc-tests sonatina_macros
+
+running 5 tests
+test crates/macros/src/lib.rs - derive_inst (line 11) ... ignored
+test crates/macros/src/lib.rs - inst_prop (line 108) ... ignored
+test crates/macros/src/lib.rs - inst_prop (line 86) ... ignored
+test crates/macros/src/lib.rs - inst_set (line 48) ... ignored
+test crates/macros/src/lib.rs - inst_set (line 58) ... ignored
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.08s; merged doctests compilation took 0.08s
+   Doc-tests sonatina_parser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sonatina_sp1
+
+running 1 test
+test crates/sp1/src/lib.rs - (line 34) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.10s; merged doctests compilation took 0.10s
+   Doc-tests sonatina_triple
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sonatina_verifier
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,23 +1,19 @@
-use core::Option
 use fevm::{Checkpoint, Transaction, WorldState, OK}
 use fevm::constants::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
-    match transaction.checkpoint(is_static: false) {
-        Option::Some(point) => point,
-        Option::None => core::panic(),
-    }
+    transaction.checkpoint(is_static: false)
 }
 
 // Linked with vm_allocator.c and FAIL_AT=1. Growing the journal to 131,072
 // bytes fails once; its earlier undo records and logical extent must survive.
 pub fn main() -> i32 {
-    let mut world = WorldState::empty()
+    var world = WorldState::empty()
     core::assert(world.storage_store(7, 3, 9000))
-    let mut transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut transaction)
-    let mut value: u256 = 1
-    let mut status = OK
+    var value: u256 = 1
+    var status = OK
     while value < 2048 && status == OK {
         status = transaction.storage_store(address: 7, slot: 3, value)
         if status == OK {
@@ -36,7 +32,8 @@ pub fn main() -> i32 {
     let child = checkpoint(mut transaction)
     core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
     transaction.revert(child)
-    let world = transaction.finish(commit: true, gas_spent: 0).state
+    let world = transaction.finish(commit: true, gas_spent: 0).into_state()
     core::assert(world.storage_load(7, 3) == 9000)
+    world.release()
     0
 }

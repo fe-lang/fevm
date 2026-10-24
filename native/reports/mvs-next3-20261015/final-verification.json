@@ -1,0 +1,13 @@
+{
+  "compiler_and_harness_gates": {
+    "fe-checks.json": true,
+    "sonatina-join-checks.json": true,
+    "fevm-checks.json": true
+  },
+  "native_acceptance": true,
+  "original_user_files": 14,
+  "standalone_executables_byte_identical": 57,
+  "backend_only_test_executables_byte_identical": 12,
+  "backend_only_objects_byte_identical": 12,
+  "fork_mvs_checked_current": "8de35117e3de35c2f92967ec260e124db87c85bb"
+}

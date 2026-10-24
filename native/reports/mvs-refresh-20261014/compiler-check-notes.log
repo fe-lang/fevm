@@ -1,0 +1,7 @@
+make -C /tmp/fevm-mvs-refresh-20261014-r1/eisenbote download
+make[1]: Entering directory '/tmp/fevm-mvs-refresh-20261014-r1/eisenbote'
+mkdir -p out
+curl -fsSL -o out/eisenbote "https://github.com/fe-lang/eisenbote/releases/download/last-working/eisenbote-x86_64-linux"
+chmod +x out/eisenbote
+make[1]: Leaving directory '/tmp/fevm-mvs-refresh-20261014-r1/eisenbote'
+/tmp/fevm-mvs-refresh-20261014-r1/eisenbote/bin/eisenbote check

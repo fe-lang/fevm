@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "fe_repository": "https://github.com/sbillig/fe",
+  "fe_revision": "8de35117e3de35c2f92967ec260e124db87c85bb",
+  "sonatina_repository": "https://github.com/fe-lang/sonatina",
+  "sonatina_revision": "1544e570257cbb1e453283b8a81b25b828ec3ca0",
+  "cargo_lock_sha256": "b90442aff508cb64d752033d65a8843d734355d9b44ba0e07dcdd2f19cf3d28a",
+  "rust_version": "1.99.0",
+  "features": [
+    "cranelift"
+  ],
+  "publication": "published fork MVS baseline for 2026-10-15 compilation investigation",
+  "hosts": [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu"
+  ]
+}

@@ -6,13 +6,16 @@ The [retained evidence](reports/linux-baseline-2026-09-22/README.md) includes
 exact compiler/source pins, complete acceptance records and stage logs. This
 covers the original six-stage baseline below, not the newer Cancun frame corpus.
 
-The current [owned-memory checkpoint](reports/memory-integration-draft.md) also
-passes the expanded seven-stage suite on x86_64 Linux, including all 1,729 frames
-at O0/O1/O2. Its Fe integration branch is local and not available from a public
-fetch. Transfer the committed FeVM checkout and a Fe Git bundle containing the
-revision in `native/toolchain.json`, or use `native/handoff.py` after bootstrap.
-Pass that repository or bundle to `--fe-repository`. Sonatina's pin is published
-on `fe-lang/sonatina`. Record the selected FeVM commit before running.
+The current pin uses published Fe master and Sonatina revisions from
+`native/toolchain.json`. The [Keccak checkpoint](reports/keccak-integration.md)
+records its acceptance status. Record the selected FeVM commit before running.
+Both SwissTable and Keccak are immutable Git dependencies fetched from GitHub;
+their standalone suites live in their own repositories.
+
+Historical compiler integrations, including the
+[owned-memory checkpoint](reports/memory-integration-draft.md), require the
+local repositories or bundles identified in their retained manifests. They are
+separate from the current published compiler pin.
 
 The earlier Linux baseline used these exact revisions:
 
@@ -41,10 +44,9 @@ returned HTTP 403 for all three public repositories. Its
 bootstrap or acceptance ran. Enabling POST resolved the Git smart-HTTP blocker;
 the fourth run fetched the exact pins and completed every acceptance stage.
 A dedicated FeVM environment can alternatively check out the repository directly.
-Set its setup script to `bash native/cloud-setup.sh` on `native-acceptance` and
+Set its setup script to `bash native/cloud-setup.sh` on the selected FeVM revision and
 enable task network access for GitHub and the Rust/Cargo/npm dependency downloads.
-The [setup script](cloud-setup.sh) checks the host/tools, installs pinned Rust and
-fetches the history needed for the SwissTable baseline. It does not run acceptance.
+The [setup script](cloud-setup.sh) checks the host/tools and installs pinned Rust. It does not run acceptance.
 
 The [native README](README.md) lists prerequisites. Install the exact Rust
 version and run from the pinned FeVM checkout, using fresh output directories:
@@ -53,17 +55,16 @@ version and run from the pinned FeVM checkout, using fresh output directories:
 uname -s -m
 git rev-parse HEAD
 python3 native/bootstrap.py --out native/out/linux-bootstrap \
-  --toolchain 1.98.1 \
-  --fe-repository /path/to/fe.bundle
+  --toolchain 1.98.1
 python3 native/accept.py --build native/out/linux-bootstrap/build.json \
   --out native/out/linux-acceptance --check-only
 ```
 
-Retain `build.json`, `acceptance.json`, CLI/arithmetic/SwissTable result JSON, and
+Retain `build.json`, `acceptance.json`, CLI/arithmetic/frame/state result JSON, and
 workspace and failure logs. Record host, revisions, commands, exit codes and
 counts; report failed or unexecuted stages explicitly. The suite covers native
-workspace execution, CLI/allocator checks, bounded Cancun frames, arithmetic and
-SwissTable. Full Cancun conformance remains pending.
+workspace execution, CLI/allocator checks, bounded Cancun frames/state, and
+arithmetic. Full Cancun conformance remains pending.
 Shared Cloud hardware is suitable for correctness acceptance, not timing claims.
 
 ## Retained local work

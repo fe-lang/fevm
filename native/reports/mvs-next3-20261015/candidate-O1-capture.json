@@ -1,0 +1,11 @@
+{
+  "compiler": "/tmp/fevm-mvs-next3-20261015-r1/candidate-bootstrap/bin/fe",
+  "pid": 2685451,
+  "started_unix": 1792112770.4541452,
+  "finished_unix": 1792113155.9563005,
+  "frequency_hz": 49,
+  "event": "task-clock:u",
+  "initial_sample_cpu_seconds": 7.15,
+  "status": -2,
+  "scope": "Fixed O1 acceptance compiler from first resource-sample detection until process exit; earlier startup excluded."
+}
