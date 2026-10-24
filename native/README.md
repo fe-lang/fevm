@@ -47,12 +47,12 @@ branch destroys owned values where their lifetime ends and replaces
 Rust 1.99.0; the default [`toolchain.json`](toolchain.json) records the exact
 revisions and lock hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 76 workspace tests, 35
+All seven native acceptance stages pass on x86_64 Linux: 80 workspace tests, 38
 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at each
 of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
 simultaneous-fault reason differences per level. The Python harness's 13 tests
 and the Rust reference's nine tests pass. See the
-[rebased owned-memory report](reports/owned-memory-rebase-20261020/README.md),
+[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md),
 and the [owned-memory report](reports/owned-memory-20261020/README.md) for the
 port itself; this compiler has not run on AArch64 macOS. The
 [Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe

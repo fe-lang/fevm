@@ -1,0 +1,850 @@
+{
+  "schema": 1,
+  "scope": "native FeVM CLI smoke, not Cancun conformance",
+  "compiler_sha256": "4452208f33b453244d0c14a46826d0de6e8119394d0298acde156176cfd3099f",
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "build_timeout_seconds": 600,
+  "complete": true,
+  "builds": [
+    {
+      "level": "0",
+      "build_seconds": 8.34023791202344,
+      "object_bytes": 20974696,
+      "text_bytes": 20758968,
+      "executable_bytes": 20872280,
+      "relink_seconds": 0.03869309998117387,
+      "executable_sha256": "6db067c5e7f99636728c6dd61b6e25a0e6c2e1eceb96dff9673964daf3cb5dc6",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-abc",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-hash",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-copy",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x00\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "blobhash-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-code-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002001\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-calldata-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002329\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        },
+        {
+          "name": "owned-output",
+          "passed": true,
+          "status": 0,
+          "stdout_bytes": 131077,
+          "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+          "stderr": ""
+        },
+        {
+          "name": "memory-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "output-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "journal-allocation-failure",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-1",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-2",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "level": "1",
+      "build_seconds": 11.785516021074727,
+      "object_bytes": 18536504,
+      "text_bytes": 18412016,
+      "executable_bytes": 18483288,
+      "relink_seconds": 0.033821200020611286,
+      "executable_sha256": "52648b6518fb9d971d835283db07a68794e50b9aad6365b807c317f46a6e64a4",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-abc",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-hash",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-copy",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x00\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "blobhash-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-code-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002001\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-calldata-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002329\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        },
+        {
+          "name": "owned-output",
+          "passed": true,
+          "status": 0,
+          "stdout_bytes": 131077,
+          "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+          "stderr": ""
+        },
+        {
+          "name": "memory-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "output-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "journal-allocation-failure",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-1",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-2",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "level": "2",
+      "build_seconds": 11.934168345993385,
+      "object_bytes": 18536504,
+      "text_bytes": 18412016,
+      "executable_bytes": 18483288,
+      "relink_seconds": 0.03426039987243712,
+      "executable_sha256": "52648b6518fb9d971d835283db07a68794e50b9aad6365b807c317f46a6e64a4",
+      "checks": [
+        {
+          "name": "usage",
+          "passed": true,
+          "status": 2,
+          "stdout": "usage: fevm <hex-bytecode> [hex-calldata]\n",
+          "stderr": ""
+        },
+        {
+          "name": "empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "stop",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n",
+          "stderr": ""
+        },
+        {
+          "name": "keccak-abc",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-hash",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "extcode-absent-copy",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x00\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "blobhash-empty",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000000\n",
+          "stderr": ""
+        },
+        {
+          "name": "add",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000000005\n",
+          "stderr": ""
+        },
+        {
+          "name": "calldata-return",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x1234\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-code-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002001\n",
+          "stderr": ""
+        },
+        {
+          "name": "large-calldata-size",
+          "passed": true,
+          "status": 0,
+          "stdout": "0x0000000000000000000000000000000000000000000000000000000000002329\n",
+          "stderr": ""
+        },
+        {
+          "name": "bad-hex",
+          "passed": true,
+          "status": 3,
+          "stdout": "invalid hex bytecode\n",
+          "stderr": ""
+        },
+        {
+          "name": "odd-hex",
+          "passed": true,
+          "status": 4,
+          "stdout": "hex bytecode has an odd number of digits\n",
+          "stderr": ""
+        },
+        {
+          "name": "stack-underflow",
+          "passed": true,
+          "status": 10,
+          "stdout": "stack underflow\n",
+          "stderr": ""
+        },
+        {
+          "name": "invalid",
+          "passed": true,
+          "status": 17,
+          "stdout": "invalid opcode\n",
+          "stderr": ""
+        },
+        {
+          "name": "revert",
+          "passed": true,
+          "status": 19,
+          "stdout": "revert 0x\n",
+          "stderr": ""
+        },
+        {
+          "name": "owned-output",
+          "passed": true,
+          "status": 0,
+          "stdout_bytes": 131077,
+          "stdout_sha256": "13ff7d404c351cefe7bda9d02a5104cc90618020b103d36010ce4ae7896fbb28",
+          "stderr": ""
+        },
+        {
+          "name": "memory-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "output-allocation-failure",
+          "passed": true,
+          "status": 21,
+          "stdout_bytes": 23,
+          "stdout_sha256": "8c4e851f981126aa21142a13ba85b1b2e55eccab3426cac77af2330716ac57d8",
+          "stderr": ""
+        },
+        {
+          "name": "journal-allocation-failure",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "account-code-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "call-frame-allocator-2",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "empty\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-1",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-data-allocator-2",
+          "passed": true,
+          "status": 21,
+          "stdout": "host allocation failed\n",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "log-headers-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-128-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-0",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "name": "blob-hashes-256-1",
+          "passed": true,
+          "status": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    }
+  ]
+}

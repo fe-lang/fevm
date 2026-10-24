@@ -237,7 +237,7 @@ Smoke samples:
 The [Cancun frame corpus](native/differential/README.md) compares selected frame
 results against pinned revm. FeVM passes all 16,847 Cancun state tests of
 execution-spec-tests v5.4.0
-([report](native/reports/owned-memory-20261020/README.md)).
+([report](native/reports/owned-memory-restack-20261024/README.md)).
 Performance comparisons with other EVMs remain future work.
 
 Native compiler arithmetic checks, performance measurements, and reproducible

@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "fork": "Cancun",
+  "host": "Linux-7.0.0-1014-azure-x86_64-with-glibc2.39",
+  "fixtures": "/home/sean/code/fevm/native/out/eest-v5.4.0/extracted/fixtures/state_tests",
+  "revision": "52d9d9118d761dfafa10bfdc2ecb7fbec9b3bf08",
+  "dirty": false,
+  "level": "2",
+  "select": [],
+  "compiler_sha256": "4452208f33b453244d0c14a46826d0de6e8119394d0298acde156176cfd3099f",
+  "compiler_version": "fe 26.4.0 (0f2218d38)",
+  "build_seconds": 11.238544885069132,
+  "executable_sha256": "4158aa2e8168c9a21bba253cb21ff181af35ebe118e2ccef5f6af6a9cd3c0754",
+  "seconds": 25.275421370984986,
+  "cases": 16847,
+  "totals": {
+    "passed": 16847
+  },
+  "groups": {
+    "berlin/eip2929_gas_cost_increases": {
+      "passed": 1
+    },
+    "berlin/eip2930_access_list": {
+      "passed": 533
+    },
+    "byzantium/eip196_ec_add_mul": {
+      "passed": 4
+    },
+    "byzantium/eip197_ec_pairing": {
+      "passed": 2
+    },
+    "byzantium/eip198_modexp_precompile": {
+      "passed": 39
+    },
+    "cancun/eip1153_tstore": {
+      "passed": 123
+    },
+    "cancun/eip4844_blobs": {
+      "passed": 1092
+    },
+    "cancun/eip5656_mcopy": {
+      "passed": 93
+    },
+    "cancun/eip6780_selfdestruct": {
+      "passed": 115
+    },
+    "cancun/eip7516_blobgasfee": {
+      "passed": 4
+    },
+    "constantinople/eip1014_create2": {
+      "passed": 24
+    },
+    "constantinople/eip145_bitwise_shift": {
+      "passed": 3
+    },
+    "frontier/create": {
+      "passed": 12
+    },
+    "frontier/identity_precompile": {
+      "passed": 24
+    },
+    "frontier/opcodes": {
+      "passed": 512
+    },
+    "frontier/precompiles": {
+      "passed": 73
+    },
+    "homestead/coverage": {
+      "passed": 1
+    },
+    "homestead/identity_precompile": {
+      "passed": 8
+    },
+    "istanbul/eip1344_chainid": {
+      "passed": 4
+    },
+    "istanbul/eip152_blake2": {
+      "passed": 117
+    },
+    "london/eip1559_fee_market_change": {
+      "passed": 1
+    },
+    "osaka/eip7883_modexp_gas_increase": {
+      "passed": 151
+    },
+    "paris/eip7610_create_collision": {
+      "passed": 45
+    },
+    "prague/eip2537_bls_12_381_precompiles": {
+      "passed": 7
+    },
+    "prague/eip7702_set_code_tx": {
+      "passed": 2
+    },
+    "shanghai/eip3651_warm_coinbase": {
+      "passed": 16
+    },
+    "shanghai/eip3855_push0": {
+      "passed": 10
+    },
+    "shanghai/eip3860_initcode": {
+      "passed": 62
+    },
+    "static/state_tests": {
+      "passed": 13769
+    }
+  }
+}
