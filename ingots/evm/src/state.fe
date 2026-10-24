@@ -79,12 +79,18 @@ impl WorldState {
         let account = self.accounts.get(address_word(address)).value
         account.balance == 0 && account.nonce == 0 && account.code_len == 0
     }
-    // Delete an account record and its code; storage entries are left to the caller.
+    // Delete an account record with its code and storage.
     pub fn remove_account(mut self, _ address: u256) {
         let address = address_word(address)
         let empty: [u8; 0] = []
         core::assert(self.set_code(address, code: empty) == OK)
         let _ = self.accounts.remove(address)
+        var slot: usize = 0
+        while slot < self.storage.capacity() {
+            let entry = self.storage.entry(slot)
+            if entry.occupied && entry.key.address == address { let _ = self.storage.remove(entry.key) }
+            slot += 1
+        }
     }
     pub fn has_storage(self, _ address: u256) -> bool {
         let address = address_word(address)

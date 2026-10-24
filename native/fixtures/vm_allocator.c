@@ -3,6 +3,8 @@
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
 // The journal fixture uses FAIL_AT=1 to check atomic growth failure and undo.
 // The accounts fixture uses all three settings for code replacement and release.
+// WATCH_MIN additionally watches every allocation of at least that many bytes;
+// the calls fixture uses it to count child frame boxes.
 #define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>
@@ -32,6 +34,9 @@ typedef union {
 
 void *malloc(size_t size) {
     int watched = size == WATCH_SIZE || (WATCH_SIZE_EXTRA != 0 && size == WATCH_SIZE_EXTRA);
+#ifdef WATCH_MIN
+    watched = watched || size >= WATCH_MIN;
+#endif
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;

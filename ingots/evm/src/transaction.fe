@@ -382,26 +382,15 @@ impl Transaction {
     }
 
     // End-of-transaction deletions, after every frame has closed and fees are
-    // paid. Self-destructed accounts created by this transaction lose their
-    // account and this transaction's storage writes; touched accounts left
-    // empty are removed. These direct world updates are not journaled.
+    // paid: self-destructed accounts created by this transaction, and touched
+    // accounts left empty. Each loses its code and storage. These direct world
+    // updates are not journaled.
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
         var slot: usize = 0
         while slot < self.doomed.capacity() {
             let doomed = self.doomed.entry(slot)
-            if doomed.occupied {
-                var index: u64 = 0
-                while index < self.journal.count() {
-                    let change = self.journal.change(index)
-                    if change.kind == STORAGE && change.address == doomed.key {
-                        let original = self.original_storage(address: change.address, slot: change.slot)
-                        core::assert(self.state.storage_store(change.address, change.slot, original))
-                    }
-                    index += 1
-                }
-                self.state.remove_account(doomed.key)
-            }
+            if doomed.occupied { self.state.remove_account(doomed.key) }
             slot += 1
         }
         slot = 0

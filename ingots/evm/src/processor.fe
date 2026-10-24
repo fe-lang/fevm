@@ -155,6 +155,8 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_BLOB { return INVALID_TX_TYPE }
+    // Only the blob envelope has versioned hashes.
+    if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
     if intrinsic_gas(request) > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
@@ -193,6 +195,11 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
 
 fn empty_receipt(invalid: i32, status: i32) -> Receipt {
     Receipt { invalid, status, gas_used: 0, output: ByteBuffer::new(), logs: LogBuffer::new() }
+}
+
+// A host failure during a valid transaction returns the pre-state.
+fn host_failure(_ tx: own Transaction, status: i32) -> Applied {
+    Applied { state: tx.finish(commit: false, gas_spent: 0).into_state(), receipt: empty_receipt(invalid: VALID, status) }
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
@@ -240,7 +247,8 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         return vm.into_result()
     }
     let checkpoint = tx.checkpoint(is_static: false)
-    let moved = if value == 0 { OK } else { transfer(mut tx, from: sender, to: target, value) }
+    // The call touches its target even without value; a failed call undoes the touch.
+    let moved = if value == 0 { tx.touch(target) } else { transfer(mut tx, from: sender, to: target, value) }
     if moved != OK {
         tx.revert(checkpoint)
         return status_result(moved)
@@ -279,17 +287,21 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     if !is_evm_outcome(result.status) && result.status != ERR_ADDRESS_COLLISION {
         let status = result.status
         result.release()
-        let state = tx.finish(commit: false, gas_spent: 0).into_state()
-        return Applied { state, receipt: empty_receipt(invalid: VALID, status) }
+        return host_failure(tx, status)
     }
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
     let gas_spent = env.gas_limit - gas_left
     let gas_used = gas_spent - tx.capped_refund(gas_spent)
-    let refunded = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
+    var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
     let coinbase = address_word(block.coinbase)
-    let paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
-    core::assert(refunded == OK && paid == OK)
+    if paid == OK {
+        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
+    }
+    if paid != OK {
+        result.release()
+        return host_failure(tx, status: paid)
+    }
     tx.settle()
     let settled = tx.finish(commit: true, gas_spent)
     Applied {

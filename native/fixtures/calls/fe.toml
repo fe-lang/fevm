@@ -1,0 +1,6 @@
+[ingot]
+name = "fevm_calls"
+version = "0.1.0"
+
+[dependencies]
+fevm = true

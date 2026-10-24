@@ -10,4 +10,5 @@ members = [
   { path = "native/fixtures/journal", name = "fevm_journal" },
   { path = "native/fixtures/accounts", name = "fevm_accounts" },
   { path = "native/fixtures/logs", name = "fevm_logs" },
+  { path = "native/fixtures/calls", name = "fevm_calls" },
 ]
