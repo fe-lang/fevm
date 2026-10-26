@@ -25,6 +25,9 @@ fn required_extent(current: u64, offset: u256, len: u256) -> Option<u64> {
 }
 
 fn expansion(current: u64, size: u64) -> Option<MemoryExpansion> {
+    if size == current {
+        return Option::Some(MemoryExpansion { size, gas: 0 })
+    }
     let before = (current / 32) as u128
     let after = (size / 32) as u128
     let before_cost = 3 * before + before * before / 512
