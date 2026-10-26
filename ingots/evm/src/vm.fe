@@ -432,7 +432,39 @@ impl Vm {
         }
     }
 
+    #[inline(always)]
     fn binary_arith(mut self, _ op: i32) {
+        // The top item is the first EVM operand; the result replaces the
+        // second, so the stack shrinks by one without a separate push.
+        let len = self.stack.len()
+        if len < 2 {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+        let lhs = self.stack[len - 1]
+        let rhs = self.stack[len - 2]
+        let result: u256 = match op {
+            0x01 => lhs.wrapping_add(rhs),
+            0x02 => lhs.wrapping_mul(rhs),
+            0x03 => lhs.wrapping_sub(rhs),
+            0x10 => if lhs < rhs { 1 } else { 0 },
+            0x11 => if lhs > rhs { 1 } else { 0 },
+            0x14 => if lhs == rhs { 1 } else { 0 },
+            0x16 => lhs & rhs,
+            0x17 => lhs | rhs,
+            0x18 => lhs ^ rhs,
+            0x1b => if lhs >= 256 { 0 } else { rhs << lhs },
+            0x1c => if lhs >= 256 { 0 } else { rhs >> lhs },
+            _ => {
+                self.binary_arith_general(op)
+                return
+            },
+        }
+        self.stack.truncate(len - 1)
+        self.stack[len - 2] = result
+    }
+
+    fn binary_arith_general(mut self, _ op: i32) {
         // The top item is the first EVM operand; some opcodes give it a
         // different role (shift amount, byte index, or sign-extension index).
         let lhs = self.pop()
@@ -527,17 +559,26 @@ impl Vm {
         }
     }
 
+    #[inline(always)]
     fn unary(mut self, _ op: i32) {
-        let value = self.pop()
-        if !self.ok() { return }
-
-        match op {
-            0x15 => self.push_bool(value == 0),
-            0x19 => self.push(!value),
-            _ => self.invalid(op),
+        // The result replaces the operand in place.
+        let len = self.stack.len()
+        if len < 1 {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return
+        }
+        let value = self.stack[len - 1]
+        self.stack[len - 1] = match op {
+            0x15 => if value == 0 { 1 } else { 0 },
+            0x19 => !value,
+            _ => {
+                self.invalid(op)
+                return
+            },
         }
     }
 
+    #[inline(always)]
     fn dup(mut self, _ index: usize) {
         let len = self.stack.len()
         if len < index {
@@ -549,6 +590,7 @@ impl Vm {
         self.push(value)
     }
 
+    #[inline(always)]
     fn swap(mut self, _ index: usize) {
         let len = self.stack.len()
         if len <= index {
