@@ -955,13 +955,9 @@ impl Vm {
     }
 }
 
+/// A PUSH immediate within a word of the end of the code, read byte by
+/// byte; bytes past the end read as zero.
 fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
-    // An immediate with a whole word of code after it is one big-endian read.
-    if vm.pc + 32 <= program.len() {
-        let word = program.bytes().read_word(vm.pc)
-        vm.pc += len
-        return word >> ((32 - len) * 8) as u256
-    }
     var value: u256 = 0
     var i: usize = 0
     while i < len {
@@ -1332,34 +1328,63 @@ impl Vm {
     fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
                        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
                        depth: usize) -> Option<Frame> {
-        // The code cannot change while the frame runs.
+        // The code cannot change while the frame runs. `pc` and gas live in
+        // locals here; `self` holds them only around calls that use them.
         let code = program.bytes()
-        while self.pc < code.len() && self.ok() && !self.halted {
-            let op = code.byte_at(self.pc) as i32
-            self.pc += 1
-            if !self.charge(base_cost(op) as u128) { break }
+        let len = code.len()
+        var pc = self.pc
+        var gas = self.gas_remaining
+        while pc < len && self.ok() && !self.halted {
+            let op = code.byte_at(pc) as i32
+            pc += 1
+            let cost = base_cost(op)
+            if cost > gas {
+                self.fault(ERR_OUT_OF_GAS)
+                break
+            }
+            gas -= cost
             if op == 0x00 {
                 self.halted = true
             } else if op == 0x5f {
                 self.push(0)
             } else if op >= 0x60 && op <= 0x7f {
-                let len: usize = (op - 0x5f).downcast_unchecked()
-                let value = read_push_value(mut self, program, len)
-                self.push(value)
-            } else if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 || op == 0xfa {
-                let child = if op == 0xf0 || op == 0xf5 {
-                    self.start_create(op, call, mut state, depth)
+                let n: usize = (op - 0x5f).downcast_unchecked()
+                let value = if pc + 32 <= len {
+                    // An immediate with a whole word of code after it is
+                    // one big-endian read.
+                    let word = code.read_word(pc)
+                    pc += n
+                    word >> ((32 - n) * 8) as u256
                 } else {
-                    self.start_call(op, call, mut state, depth)
+                    self.pc = pc
+                    let value = read_push_value(mut self, program, n)
+                    pc = self.pc
+                    value
                 }
-                match child {
-                    Option::Some(frame) => return Option::Some(frame),
-                    Option::None => {},
-                }
+                self.push(value)
             } else {
-                self.step(op, program, calldata, call, block, mut state)
+                self.pc = pc
+                self.gas_remaining = gas
+                if op == 0xf0 || op == 0xf1 || op == 0xf2 || op == 0xf4 || op == 0xf5 || op == 0xfa {
+                    let child = if op == 0xf0 || op == 0xf5 {
+                        self.start_create(op, call, mut state, depth)
+                    } else {
+                        self.start_call(op, call, mut state, depth)
+                    }
+                    match child {
+                        Option::Some(frame) => return Option::Some(frame),
+                        Option::None => {},
+                    }
+                } else {
+                    self.step(op, program, calldata, call, block, mut state)
+                }
+                pc = self.pc
+                gas = self.gas_remaining
             }
         }
+        // A fault that halts exceptionally leaves no gas.
+        self.pc = pc
+        self.gas_remaining = if exceptional(self.status) { 0 } else { gas }
         Option::None
     }
 
