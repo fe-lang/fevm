@@ -677,79 +677,7 @@ impl Vm {
                                   data: self.memory.slice(offset: start, len: length as usize)))
     }
 
-    fn step_state(mut self, _ op: i32, _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction) -> bool {
-        if op == 0xff {
-            self.selfdestruct(call, mut state)
-            return true
-        }
-        if op >= 0xa0 && op <= 0xa4 {
-            self.log((op - 0xa0).downcast_unchecked(), call, mut state)
-            return true
-        }
-        if op == 0x49 {
-            let index = self.pop()
-            if self.ok() { self.push(state.blob_hash(index)) }
-            return true
-        }
-        if op == 0x3c {
-            self.extcodecopy(mut state)
-            return true
-        }
-        if op == 0x31 || op == 0x3b || op == 0x3f {
-            let address = address_word(self.pop())
-            if self.ok() {
-                let gas: u128 = if state.account_is_warm(address) { 100 } else { 2600 }
-                if self.charge(gas) {
-                    self.fault(state.warm_account(address))
-                    if self.ok() {
-                        let value = if op == 0x31 { state.balance(address) }
-                            else if op == 0x3b { state.code_size(address) as u256 }
-                            else { state.code_hash(address) }
-                        self.push(value)
-                    }
-                }
-            }
-            return true
-        }
-
-        if op == 0x40 {
-            let number = self.pop()
-            if self.ok() {
-                let hash = if number < block.number && block.number - number <= 256 {
-                    state.block_hash(number)
-                } else { 0 }
-                self.push(hash)
-            }
-            return true
-        }
-
-        if op == 0x47 {
-            self.push(state.balance(call.address))
-            return true
-        }
-
-        if op == 0x54 {
-            self.sload(call, mut state)
-            return true
-        }
-
-        if op == 0x55 {
-            self.sstore(call, mut state)
-            return true
-        }
-
-        if op == 0x5c {
-            self.tload(call, state)
-            return true
-        }
-
-        if op == 0x5d {
-            self.tstore(call, mut state)
-            return true
-        }
-        false
-    }
-
+    #[inline(always)]
     fn step(
         mut self,
         _ op: i32,
@@ -757,6 +685,7 @@ impl Vm {
         _ calldata: InputData,
         _ call: CallEnv,
         _ block: BlockEnv,
+        _ state: mut Transaction,
     ) {
         if op == 0x50 {
             let _ = self.pop()
@@ -948,6 +877,76 @@ impl Vm {
 
         if op == 0xfd {
             self.finish_from_memory(ERR_REVERT)
+            return
+        }
+
+        if op == 0xff {
+            self.selfdestruct(call, mut state)
+            return
+        }
+        if op >= 0xa0 && op <= 0xa4 {
+            self.log((op - 0xa0).downcast_unchecked(), call, mut state)
+            return
+        }
+        if op == 0x49 {
+            let index = self.pop()
+            if self.ok() { self.push(state.blob_hash(index)) }
+            return
+        }
+        if op == 0x3c {
+            self.extcodecopy(mut state)
+            return
+        }
+        if op == 0x31 || op == 0x3b || op == 0x3f {
+            let address = address_word(self.pop())
+            if self.ok() {
+                let gas: u128 = if state.account_is_warm(address) { 100 } else { 2600 }
+                if self.charge(gas) {
+                    self.fault(state.warm_account(address))
+                    if self.ok() {
+                        let value = if op == 0x31 { state.balance(address) }
+                            else if op == 0x3b { state.code_size(address) as u256 }
+                            else { state.code_hash(address) }
+                        self.push(value)
+                    }
+                }
+            }
+            return
+        }
+
+        if op == 0x40 {
+            let number = self.pop()
+            if self.ok() {
+                let hash = if number < block.number && block.number - number <= 256 {
+                    state.block_hash(number)
+                } else { 0 }
+                self.push(hash)
+            }
+            return
+        }
+
+        if op == 0x47 {
+            self.push(state.balance(call.address))
+            return
+        }
+
+        if op == 0x54 {
+            self.sload(call, mut state)
+            return
+        }
+
+        if op == 0x55 {
+            self.sstore(call, mut state)
+            return
+        }
+
+        if op == 0x5c {
+            self.tload(call, state)
+            return
+        }
+
+        if op == 0x5d {
+            self.tstore(call, mut state)
             return
         }
 
@@ -1333,8 +1332,10 @@ impl Vm {
     fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
                        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
                        depth: usize) -> Option<Frame> {
-        while self.pc < program.len() && self.ok() && !self.halted {
-            let op = program.byte_at(self.pc) as i32
+        // The code cannot change while the frame runs.
+        let code = program.bytes()
+        while self.pc < code.len() && self.ok() && !self.halted {
+            let op = code.byte_at(self.pc) as i32
             self.pc += 1
             if !self.charge(base_cost(op) as u128) { break }
             if op == 0x00 {
@@ -1355,8 +1356,8 @@ impl Vm {
                     Option::Some(frame) => return Option::Some(frame),
                     Option::None => {},
                 }
-            } else if !self.step_state(op, call, block, mut state) {
-                self.step(op, program, calldata, call, block)
+            } else {
+                self.step(op, program, calldata, call, block, mut state)
             }
         }
         Option::None
