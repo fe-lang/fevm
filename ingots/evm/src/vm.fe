@@ -957,6 +957,12 @@ impl Vm {
 }
 
 fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
+    // An immediate with a whole word of code after it is one big-endian read.
+    if vm.pc + 32 <= program.len() {
+        let word = program.bytes().read_word(vm.pc)
+        vm.pc += len
+        return word >> ((32 - len) * 8) as u256
+    }
     var value: u256 = 0
     var i: usize = 0
     while i < len {
