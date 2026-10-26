@@ -34,8 +34,8 @@ pub struct Vm {
     pub gas_remaining: u64,
     pub refund_delta: i128,
     pub output_valid: bool,
-    pub stack: [u256; STACK_LIMIT],
-    pub sp: usize,
+    // On the heap, so moving a frame does not copy it.
+    pub stack: MemVec<u256>,
     pub pc: usize,
     pub status: i32,
     pub halted: bool,
@@ -51,8 +51,7 @@ impl Vm {
             gas_remaining: 0,
             refund_delta: 0,
             output_valid: false,
-            stack: [0; STACK_LIMIT],
-            sp: 0,
+            stack: MemVec::new(),
             pc: 0,
             status: OK,
             halted: false,
@@ -72,23 +71,23 @@ impl Vm {
     }
 
     fn push(mut self, _ value: u256) {
-        if self.sp >= STACK_LIMIT {
+        if self.stack.len() >= STACK_LIMIT {
             self.fault(ERR_STACK_OVERFLOW)
             return
         }
-
-        self.stack[self.sp] = value
-        self.sp += 1
+        if self.stack.try_push(value).is_err() {
+            self.fault(ERR_HOST_ALLOCATION)
+        }
     }
 
     fn pop(mut self) -> u256 {
-        if self.sp == 0 {
-            self.fault(ERR_STACK_UNDERFLOW)
-            return 0
+        match self.stack.pop() {
+            Option::Some(value) => value,
+            Option::None => {
+                self.fault(ERR_STACK_UNDERFLOW)
+                0
+            },
         }
-
-        self.sp -= 1
-        self.stack[self.sp]
     }
 
     fn push_bool(mut self, _ value: bool) {
@@ -540,25 +539,24 @@ impl Vm {
     }
 
     fn dup(mut self, _ index: usize) {
-        if self.sp < index {
+        let len = self.stack.len()
+        if len < index {
             self.fault(ERR_STACK_UNDERFLOW)
             return
         }
 
-        self.push(self.stack[self.sp - index])
+        let value = self.stack[len - index]
+        self.push(value)
     }
 
     fn swap(mut self, _ index: usize) {
-        if self.sp <= index {
+        let len = self.stack.len()
+        if len <= index {
             self.fault(ERR_STACK_UNDERFLOW)
             return
         }
 
-        let top = self.sp - 1
-        let other = top - index
-        let tmp = self.stack[top]
-        self.stack[top] = self.stack[other]
-        self.stack[other] = tmp
+        self.stack.swap(len - 1, len - 1 - index)
     }
 
     fn invalid(mut self, _ op: i32) {
@@ -1417,7 +1415,7 @@ impl Vm {
         self.output.clear()
         self.return_data.clear()
         self.output_valid = false
-        self.sp = 0
+        self.stack.clear()
         self.pc = 0
         self.status = OK
         self.halted = false
@@ -1443,17 +1441,18 @@ impl Vm {
         }
     }
     pub fn into_result(own self) -> ExecutionResult {
-        let stack_top: u256 = if self.sp == 0 {
+        let stack_len = self.stack.len()
+        let stack_top: u256 = if stack_len == 0 {
             0
         } else {
-            self.stack[self.sp - 1]
+            self.stack[stack_len - 1]
         }
         ExecutionResult {
             status: self.status,
             output: self.output,
             output_valid: self.output_valid,
             stack_top,
-            stack_len: self.sp,
+            stack_len,
             unsupported_opcode: self.unsupported_opcode,
             gas_remaining: self.gas_remaining,
             refund_delta: self.refund_delta,

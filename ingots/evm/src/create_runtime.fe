@@ -58,7 +58,7 @@ fn create_and_create2_deploy_code_endow_and_bump_nonces() {
                                           0x60, 5, 0x60, 10, 0x60, 22, 0x60, 0, 0xf5]), address: 0xaa, mut tx)
     let first = create_address(sender: 0xaa, nonce: 0)
     let second = create2_address(sender: 0xaa, salt: 5, code_hash: word(keccak256(initcode(0))))
-    core::assert(vm.status == OK && vm.sp == 2 && vm.stack[0] == first && vm.stack[1] == second)
+    core::assert(vm.status == OK && vm.stack.len() == 2 && vm.stack[0] == first && vm.stack[1] == second)
     core::assert(vm.return_data.len() == 0)
     core::assert(tx.nonce(0xaa) == 2 && tx.balance(0xaa) == 93)
     core::assert(tx.nonce(first) == 1 && tx.balance(first) == 7 && tx.code_size(first) == 1)
@@ -76,7 +76,7 @@ fn create_rejects_code_prefix_and_collisions() {
     // The first creation deposits 0xEF code and fails; the second collides.
     let vm = run_at(creator(initcode(0xef), [0x60, 10, 0x60, 22, 0x5f, 0xf0,
                                              0x60, 10, 0x60, 22, 0x5f, 0xf0, 0x5a]), address: 0xaa, mut tx)
-    core::assert(vm.status == OK && vm.sp == 3 && vm.stack[0] == 0 && vm.stack[1] == 0)
+    core::assert(vm.status == OK && vm.stack.len() == 3 && vm.stack[0] == 0 && vm.stack[1] == 0)
     // Each failure consumed the 63/64 of the remaining gas it forwarded.
     core::assert(vm.stack[2] < 5000)
     core::assert(tx.nonce(0xaa) == 2 && !tx.exists(target) && tx.nonce(target) == 0)

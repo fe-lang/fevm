@@ -88,7 +88,7 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
             if gas < cost {
                 core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
             } else {
-                core::assert(vm.status == OK && vm.gas_remaining == gas - cost && vm.sp == 0)
+                core::assert(vm.status == OK && vm.gas_remaining == gas - cost && vm.stack.len() == 0)
                 core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topic_count == count)
             }
             tx.finish(commit: true, gas_spent: gas)

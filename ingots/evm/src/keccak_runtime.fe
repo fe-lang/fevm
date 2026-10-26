@@ -25,7 +25,7 @@ fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
         if gas < 36 {
             core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0)
         } else {
-            core::assert(vm.status == OK && vm.gas_remaining == gas - 36 && vm.sp == 1)
+            core::assert(vm.status == OK && vm.gas_remaining == gas - 36 && vm.stack.len() == 1)
             core::assert(vm.stack[0] == 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470)
         }
         state.finish(commit: true, gas_spent: gas)
@@ -45,7 +45,7 @@ fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
     var call = default_call_env()
     call.gas_limit = 53
     vm.run(Program::copy_from(bytes, len: index), empty_bytes(), call, default_block_env(), mut state)
-    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 1)
+    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack.len() == 1)
     core::assert(vm.stack[0] == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45)
     core::assert(vm.memory.len() == 32 && vm.memory[28] == 0)
     core::assert(vm.memory[29] == 97 && vm.memory[30] == 98 && vm.memory[31] == 99)

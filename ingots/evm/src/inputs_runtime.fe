@@ -15,7 +15,7 @@ pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     for _ in 0..2 {
         vm.run(program, input, default_call_env(), default_block_env(), mut tx)
-        core::assert(vm.status == OK && vm.sp == 2)
+        core::assert(vm.status == OK && vm.stack.len() == 2)
         core::assert(vm.stack[0] == (42 << 248) && vm.stack[1] == 9001)
     }
     tx.finish(commit: true, gas_spent: 0)
@@ -49,7 +49,7 @@ pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
     code[0] = 0x38
     vm.run(Program::new(InputData::new(code, status: OK)), empty_bytes(),
                  default_call_env(), default_block_env(), mut tx)
-    core::assert(vm.status == OK && vm.sp == 1 && vm.stack[0] == 8193)
+    core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 8193)
     core::assert(vm.gas_remaining == 999998)
     for into_push_data in [false, true] {
         var code = MemBuffer::empty()
@@ -67,7 +67,7 @@ pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
         if into_push_data {
             core::assert(vm.status == ERR_INVALID_JUMP && vm.gas_remaining == 0)
         } else {
-            core::assert(vm.status == OK && vm.sp == 1 && vm.stack[0] == 42)
+            core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 42)
             core::assert(vm.gas_remaining == 999985)
         }
     }

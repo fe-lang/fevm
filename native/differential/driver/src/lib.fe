@@ -70,7 +70,7 @@ pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
     if completed {
         write("[")
         var i: usize = 0
-        while i < vm.sp {
+        while i < vm.stack.len() {
             if i != 0 { write(",") }
             write("\"")
             write_hex_word(vm.stack[i])

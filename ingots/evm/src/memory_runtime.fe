@@ -40,7 +40,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     var call = default_call_env()
     call.gas_limit = 20
     vm.run(small, empty_bytes(), call, default_block_env(), mut state)
-    core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.sp == 0)
+    core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.stack.len() == 0)
     core::assert(vm.memory.len() == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
     core::assert(vm.output.capacity() == output_capacity)
@@ -98,7 +98,7 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     var call = default_call_env()
     call.gas_limit = 0
     vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
-    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.sp == 0)
+    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack.len() == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
     state.finish(commit: true, gas_spent: 0)
 }

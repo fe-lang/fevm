@@ -59,10 +59,10 @@ fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
 fn write_result(_ vm: Vm) uses (w: mut Write) {
     if vm.output_valid {
         write_hex_bytes(vm.output)
-    } else if vm.sp == 0 {
+    } else if vm.stack.len() == 0 {
         writeln("empty")
     } else {
-        write_hex_u256(vm.stack[vm.sp - 1])
+        write_hex_u256(vm.stack[vm.stack.len() - 1])
     }
 }
 

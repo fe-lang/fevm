@@ -4,8 +4,8 @@
 // The journal fixture uses FAIL_AT=1 and WATCH_SIZE=100352 to check atomic
 // growth failure and undo; the logs fixture watches entry and blob-hash growth.
 // The accounts fixture uses all three settings for code replacement and release.
-// WATCH_MIN additionally watches every allocation of at least that many bytes;
-// the calls fixture uses it to count child frame boxes.
+// The calls fixture sets WATCH_SIZE to a boxed child frame's size to count
+// the boxes.
 #define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>
@@ -35,9 +35,6 @@ typedef union {
 
 void *malloc(size_t size) {
     int watched = size == WATCH_SIZE || (WATCH_SIZE_EXTRA != 0 && size == WATCH_SIZE_EXTRA);
-#ifdef WATCH_MIN
-    watched = watched || size >= WATCH_MIN;
-#endif
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;

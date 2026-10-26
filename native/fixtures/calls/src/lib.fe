@@ -2,8 +2,8 @@ use fevm::{Program, Transaction, WorldState, OK, default_block_env, default_call
 use fevm::constants::ERR_HOST_ALLOCATION
 use fevm::vm::Vm
 
-// Relinked with the controlled allocator watching allocations of at least
-// 32,769 bytes: each boxed child frame. 0xaa calls 0xbb, which stores a
+// Relinked with the controlled allocator watching allocations of a boxed
+// child frame's size (FRAME_BOX_SIZE in cli.py). 0xaa calls 0xbb, which stores a
 // marker and calls 0xcc, which stores another. Frame storage grows with call
 // depth, so success allocates exactly two boxes.
 // Failing any of them stops the whole execution as a host failure and rolls
@@ -21,7 +21,7 @@ pub fn main() -> i32 {
     vm.run(Program::copy_from(ops, len: 9), empty_bytes(), call, default_block_env(), mut tx)
     let completed = vm.status == OK
     core::assert(completed || vm.status == ERR_HOST_ALLOCATION)
-    core::assert(!completed || (vm.sp == 1 && vm.stack[0] == 1))
+    core::assert(!completed || (vm.stack.len() == 1 && vm.stack[0] == 1))
     for address in [0xbb as u256, 0xcc] {
         core::assert(tx.storage_load(address, slot: 0) == if completed { 1 } else { 0 })
     }

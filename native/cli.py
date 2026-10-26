@@ -11,6 +11,8 @@ import time
 from arith.run import artifacts, command
 
 ROOT = Path(__file__).resolve().parent.parent
+# The bytes of a boxed child `Frame` (packed, with the stack on the heap).
+FRAME_BOX_SIZE = 445
 CASES = [
     ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata]\n'),
     ('empty', [''], 0, 'empty\n'),
@@ -149,12 +151,12 @@ def main():
                        '--report', '--report-out', calls_archive], timeout=args.build_timeout)
         calls.joinpath('build.log').write_bytes(log)
         artifacts(calls / 'fevm_calls', calls_archive, calls, object_name='fevm_calls.o')
-        # A depth-two CALL chain allocates one box per child. Fail each in
-        # turn; every success must be released.
+        # A depth-two CALL chain allocates one box per child, of the frame's
+        # packed size. Fail each in turn; every success must be released.
         for failure_at in [0, 1, 2]:
             controlled = calls / f'allocator-{failure_at}'
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
-                     '-DWATCH_MIN=32769', '-DSUCCESS_ALLOCS=2',
+                     f'-DWATCH_SIZE={FRAME_BOX_SIZE}', '-DSUCCESS_ALLOCS=2',
                      ROOT / 'native/fixtures/vm_allocator.c', calls / 'fevm_calls.o', '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
             passed = result.returncode == 0 and not result.stdout and not result.stderr
