@@ -1095,7 +1095,9 @@ impl Vm {
         var pc = self.pc
         var gas = self.gas_remaining
         while self.ok() {
-            let op = code.byte_at(pc) as i32
+            // `pc` never passes the padding: a PUSH ends at most 32 bytes
+            // past the code, and padding reads as STOP.
+            let op = unsafe { code.read_be_unchecked<u8>(pc) } as i32
             // `pc` stays within the code and its padding, far from overflow.
             pc = pc.wrapping_add(1)
             let cost = base_cost(op)
