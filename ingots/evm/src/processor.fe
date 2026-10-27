@@ -103,12 +103,25 @@ fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
 /// Calldata, creation, and access-list charges paid before execution.
 pub fn intrinsic_gas(_ request: TxRequest) -> u128 {
     let data = ref request.data()
-    var gas: u128 = 21000
+    let bytes = data.bytes()
+    let len = data.len()
+    var nonzero: u64 = 0
     var index: u64 = 0
-    while index < data.len() {
-        gas += if data.byte_at(index) == 0 { 4 } else { 16 }
+    // Eight bytes at a time: a byte's top bit marks it nonzero, and the
+    // multiplication sums the marks into the top byte.
+    while len - index >= 8 {
+        let word: u64 = unsafe { bytes.read_be_unchecked<u64>(index as usize) }
+        let low = (word & 0x7f7f7f7f7f7f7f7f).wrapping_add(0x7f7f7f7f7f7f7f7f)
+        let marks = ((low | word) & 0x8080808080808080) >> 7
+        nonzero += marks.wrapping_mul(0x0101010101010101) >> 56
+        index += 8
+    }
+    while index < len {
+        if bytes[index as usize] != 0 { nonzero += 1 }
         index += 1
     }
+    // Zero bytes cost 4 gas and the others 16.
+    var gas: u128 = 21000 + 4 * len as u128 + 12 * nonzero as u128
     if request.env.creates { gas += 32000 + 2 * words(data.len()) }
     let accounts: u128 = request.access_accounts.len().downcast_unchecked()
     let keys: u128 = request.access_keys.len().downcast_unchecked()
