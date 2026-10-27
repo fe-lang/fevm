@@ -1157,17 +1157,28 @@ impl Vm {
                     if self.ok() { self.push(state.blob_hash(index)) }
                 },
                 0x4a => self.push(block.blobbasefee),
+                // Jumps check the depth once and drop their operands together.
                 0x56 => {
-                    let dest = self.pop()
-                    if self.ok() {
+                    let depth = self.stack.len()
+                    if depth < 1 {
+                        self.fault(ERR_STACK_UNDERFLOW)
+                    } else {
+                        let dest = self.stack[depth - 1]
+                        self.stack.truncate(depth - 1)
                         if program.is_jumpdest(dest) { pc = dest.downcast_unchecked() } else { self.fault(ERR_INVALID_JUMP) }
                     }
                 },
                 0x57 => {
-                    let dest = self.pop()
-                    let condition = self.pop()
-                    if self.ok() && condition != 0 {
-                        if program.is_jumpdest(dest) { pc = dest.downcast_unchecked() } else { self.fault(ERR_INVALID_JUMP) }
+                    let depth = self.stack.len()
+                    if depth < 2 {
+                        self.fault(ERR_STACK_UNDERFLOW)
+                    } else {
+                        let dest = self.stack[depth - 1]
+                        let taken = self.stack[depth - 2] != 0
+                        self.stack.truncate(depth - 2)
+                        if taken {
+                            if program.is_jumpdest(dest) { pc = dest.downcast_unchecked() } else { self.fault(ERR_INVALID_JUMP) }
+                        }
                     }
                 },
                 0x58 => self.push((pc - 1) as u256),
