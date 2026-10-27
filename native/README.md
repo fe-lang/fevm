@@ -38,16 +38,18 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler is Fe
-[`0f2218d38091eefc9034e7bb91bb76ecda122252`](https://github.com/sbillig/fe/tree/0f2218d38091eefc9034e7bb91bb76ecda122252),
-branch `feat/owned-value-destruction` of `sbillig/fe` on Fe master `fa06c6cd5`.
-Its Cargo.lock pins Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`. The
+[`71ffd7ca42056acfe608c3b692552ebb7d16cc88`](https://github.com/sbillig/fe/tree/71ffd7ca42056acfe608c3b692552ebb7d16cc88),
+branch `feat/generic-byte-order` of `sbillig/fe` on Fe master `fa06c6cd5`.
+Its Cargo.lock pins Sonatina `bbbcafe35467ff05dde206f8397cce4d2c52a711`. The
 branch destroys owned values where their lifetime ends and replaces
 `std::native::ByteBuffer` and `FixedStack` with core's memory owners (`MemBuffer`,
-`MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap memory. It uses
+`MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap memory. It
+adds the byte-order reads, `swap_bytes`, unchecked span reads and
+`MemVec::push_unchecked` that the dispatch loop and Keccak use. It uses
 Rust 1.99.0; the default [`toolchain.json`](toolchain.json) records the exact
 revisions and lock hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 80 workspace tests, 38
+All seven native acceptance stages pass on x86_64 Linux: 82 workspace tests, 38
 CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at each
 of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
 simultaneous-fault reason differences per level. The Python harness's 13 tests
