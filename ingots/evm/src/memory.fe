@@ -6,6 +6,15 @@ const UNPAYABLE_EXTENT: u64 = 1 << 42
 
 pub struct MemoryExpansion { pub size: u64, pub gas: u64 }
 
+/// Below this many bytes, a memory size's quadratic gas fits u64 arithmetic.
+pub const SMALL_EXTENT: u64 = 1 << 32
+
+/// The gas for `size` bytes of word-rounded memory, below `SMALL_EXTENT`.
+pub fn small_memory_cost(_ size: u64) -> u64 {
+    let words = size / 32
+    3 * words + words * words / 512
+}
+
 fn required_extent(current: u64, offset: u256, len: u256) -> Option<u64> {
     if len == 0 {
         return Option::Some(current)
@@ -102,6 +111,16 @@ fn memory_rounding_and_quadratic_cost() {
     match memory_expansion(current: 736, offset: 0, len: 1) {
         Option::Some(plan,) => core::assert(plan.size == 736 && plan.gas == 0),
         Option::None => core::panic(),
+    }
+}
+
+#[test]
+fn small_memory_cost_matches_expansion() {
+    for size in [0, 32, 704, 736, 16384, SMALL_EXTENT - 32] {
+        match memory_expansion(current: 0, offset: 0, len: size as u256) {
+            Option::Some(plan,) => core::assert(plan.gas == small_memory_cost(size)),
+            Option::None => core::panic(),
+        }
     }
 }
 
