@@ -1,4 +1,4 @@
-use core::MemBuffer
+use core::{MemBuffer, Option}
 use std::io::{Write, write, write_char}
 use std::native::Arg
 use ingot::constants::{ERR_BAD_HEX, ERR_HOST_ALLOCATION, ERR_ODD_HEX, OK}
@@ -58,6 +58,27 @@ fn hex_value(_ byte: u8) -> i32 {
         return (byte as i32) - 87
     }
     0 - 1
+}
+
+pub fn parse_decimal(_ arg: Arg) -> Option<u64> {
+    if arg.len() == 0 {
+        return Option::None
+    }
+    var value: u64 = 0
+    var i: usize = 0
+    while i < arg.len() {
+        let byte = arg.byte_at(i)
+        if byte < 48 || byte > 57 {
+            return Option::None
+        }
+        let digit = (byte - 48) as u64
+        if value > (0xffffffffffffffff - digit) / 10 {
+            return Option::None
+        }
+        value = value * 10 + digit
+        i += 1
+    }
+    Option::Some(value)
 }
 
 pub fn parse_hex_program(_ arg: Arg) -> Program {

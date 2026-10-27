@@ -18,6 +18,10 @@ python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
 number of parallel cases and `--timeout` the per-case limit in seconds.
 `--executable` reuses an already built driver. Each output directory must be new.
 
+Given `RUNS [TRANSACT]` arguments, the driver repeats the case RUNS times
+before the reported run, skipping the transaction when TRANSACT is 0; the
+[benchmark runner](../bench/README.md) times the difference.
+
 A case passes when the transaction's validity matches `expectException`, the
 receipt's logs hash matches, and every account's balance, nonce, code and
 non-zero storage equals the fixture's post-state. Outcomes are:

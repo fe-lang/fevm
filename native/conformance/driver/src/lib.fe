@@ -1,8 +1,9 @@
 use std::io::{Read, Write, host, read_char, write, write_char}
-use core::MemBuffer
+use core::{MemBuffer, Option}
+use std::native::Args
 use keccak::Keccak256
 use fevm::{BlockEnv, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
-use fevm::hex::{write_hex_byte, write_hex_word}
+use fevm::hex::{parse_decimal, write_hex_byte, write_hex_word}
 
 // Reads one case: a version byte, the block, the pre-state accounts and the
 // transaction. Integers and lengths are big endian; see native/conformance/run.py.
@@ -204,97 +205,142 @@ fn capacity_failure() -> i32 {
     3
 }
 
-pub fn main() -> i32 {
+// With arguments `RUNS [TRANSACT]`, the driver first decodes the case and
+// builds its pre-state RUNS more times, applying the transaction to each one
+// unless TRANSACT is 0. native/bench/run.py times both modes and takes the
+// difference as the cost of the transactions.
+pub fn main(argc: i32, argv: **u8) -> i32 {
+    // Native main supplies live NUL-terminated arguments for this process.
+    let args = unsafe { Args::new(argc, argv) }
+    if args.len() > 3 {
+        return 2
+    }
+    var runs: u64 = 0
+    var execute = true
+    if args.len() > 1 {
+        match parse_decimal(args.get(1)) {
+            Option::Some(count) => runs = count,
+            Option::None => {
+                return 2
+            },
+        }
+    }
+    if args.len() == 3 {
+        match parse_decimal(args.get(2)) {
+            Option::Some(flag) => execute = flag != 0,
+            Option::None => {
+                return 2
+            },
+        }
+    }
     var data = MemBuffer::empty()
     with (Read = host()) { data = read_all() }
     var reader = Reader { data, position: 0 }
-    core::assert(reader.word(bytes: 1) == 1)
-    let block = BlockEnv {
-        coinbase: reader.word(bytes: 20),
-        number: reader.word(bytes: 32),
-        timestamp: reader.word(bytes: 32),
-        prevrandao: reader.word(bytes: 32),
-        gaslimit: reader.word(bytes: 32),
-        basefee: reader.word(bytes: 32),
-        blobbasefee: reader.word(bytes: 32),
-        chainid: reader.word(bytes: 32),
-    }
-    var world = WorldState::empty()
-    var number = if block.number > 256 { block.number - 256 } else { 0 }
-    while number < block.number {
-        core::assert(world.set_block_hash(number, test_block_hash(number)))
-        number += 1
-    }
-    var accounts = reader.count()
-    while accounts > 0 {
-        let address = reader.word(bytes: 20)
-        let balance = reader.word(bytes: 32)
-        let nonce = reader.word(bytes: 32)
-        let code = reader.input(len: reader.count())
-        let loaded = world.ensure_account(address) && world.set_balance(address, balance)
-            && world.set_nonce(address, nonce) && world.set_code(address, code) == OK
-        if !loaded {
-            return capacity_failure()
+    // Every repeated application must use the gas the reported one does.
+    var repeated_gas: u64 = 0
+    var repeated = false
+    while true {
+        reader.position = 0
+        core::assert(reader.word(bytes: 1) == 1)
+        let block = BlockEnv {
+            coinbase: reader.word(bytes: 20),
+            number: reader.word(bytes: 32),
+            timestamp: reader.word(bytes: 32),
+            prevrandao: reader.word(bytes: 32),
+            gaslimit: reader.word(bytes: 32),
+            basefee: reader.word(bytes: 32),
+            blobbasefee: reader.word(bytes: 32),
+            chainid: reader.word(bytes: 32),
         }
-        var slots = reader.count()
-        while slots > 0 {
-            let slot = reader.word(bytes: 32)
-            let value = reader.word(bytes: 32)
-            if !world.storage_store(address, slot, value) {
+        var world = WorldState::empty()
+        var number = if block.number > 256 { block.number - 256 } else { 0 }
+        while number < block.number {
+            core::assert(world.set_block_hash(number, test_block_hash(number)))
+            number += 1
+        }
+        var accounts = reader.count()
+        while accounts > 0 {
+            let address = reader.word(bytes: 20)
+            let balance = reader.word(bytes: 32)
+            let nonce = reader.word(bytes: 32)
+            let code = reader.input(len: reader.count())
+            let loaded = world.ensure_account(address) && world.set_balance(address, balance)
+                && world.set_nonce(address, nonce) && world.set_code(address, code) == OK
+            if !loaded {
                 return capacity_failure()
             }
-            slots -= 1
+            var slots = reader.count()
+            while slots > 0 {
+                let slot = reader.word(bytes: 32)
+                let value = reader.word(bytes: 32)
+                if !world.storage_store(address, slot, value) {
+                    return capacity_failure()
+                }
+                slots -= 1
+            }
+            accounts -= 1
         }
-        accounts -= 1
-    }
-    let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
-    let sender = reader.word(bytes: 20)
-    let creates = reader.word(bytes: 1) == 1
-    let env = TxEnv {
-        kind,
-        sender,
-        creates,
-        to: reader.word(bytes: 20),
-        nonce: reader.word(bytes: 32),
-        gas_limit: reader.word(bytes: 8).downcast_unchecked(),
-        gas_price: reader.word(bytes: 32),
-        max_priority_fee_per_gas: reader.word(bytes: 32),
-        max_fee_per_blob_gas: reader.word(bytes: 32),
-        value: reader.word(bytes: 32),
-    }
-    var request = TxRequest::new(env, data: reader.input(len: reader.count()))
-    var entries = reader.count()
-    while entries > 0 {
-        let address = reader.word(bytes: 20)
-        core::assert(request.add_access_account(address))
-        var keys = reader.count()
-        while keys > 0 {
-            core::assert(request.add_access_key(address, slot: reader.word(bytes: 32)))
-            keys -= 1
+        let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
+        let sender = reader.word(bytes: 20)
+        let creates = reader.word(bytes: 1) == 1
+        let env = TxEnv {
+            kind,
+            sender,
+            creates,
+            to: reader.word(bytes: 20),
+            nonce: reader.word(bytes: 32),
+            gas_limit: reader.word(bytes: 8).downcast_unchecked(),
+            gas_price: reader.word(bytes: 32),
+            max_priority_fee_per_gas: reader.word(bytes: 32),
+            max_fee_per_blob_gas: reader.word(bytes: 32),
+            value: reader.word(bytes: 32),
         }
-        entries -= 1
-    }
-    var blobs = reader.count()
-    while blobs > 0 {
-        core::assert(request.add_blob_hash(reader.word(bytes: 32)))
-        blobs -= 1
-    }
-    core::assert(reader.position == reader.data.len())
-    let applied = transact(world, request, block)
-    let receipt = applied.receipt
-    with (Write = host()) {
-        write("{\"invalid\":")
-        write_number(receipt.invalid.downcast_unchecked())
-        write(",\"status\":")
-        write_number(receipt.status.downcast_unchecked())
-        write(",\"gas_used\":")
-        write_number(receipt.gas_used)
-        write(",\"logs_hash\":\"")
-        write_hex_word(logs_hash(receipt.logs))
-        write("\"")
-        write_world(applied.state)
-        write("}")
-        write_char(10)
+        var request = TxRequest::new(env, data: reader.input(len: reader.count()))
+        var entries = reader.count()
+        while entries > 0 {
+            let address = reader.word(bytes: 20)
+            core::assert(request.add_access_account(address))
+            var keys = reader.count()
+            while keys > 0 {
+                core::assert(request.add_access_key(address, slot: reader.word(bytes: 32)))
+                keys -= 1
+            }
+            entries -= 1
+        }
+        var blobs = reader.count()
+        while blobs > 0 {
+            core::assert(request.add_blob_hash(reader.word(bytes: 32)))
+            blobs -= 1
+        }
+        core::assert(reader.position == reader.data.len())
+        if runs > 0 {
+            runs -= 1
+            if execute {
+                let gas = transact(world, request, block).receipt.gas_used
+                core::assert(!repeated || gas == repeated_gas)
+                repeated_gas = gas
+                repeated = true
+            }
+            continue
+        }
+        let applied = transact(world, request, block)
+        let receipt = applied.receipt
+        core::assert(!repeated || receipt.gas_used == repeated_gas)
+        with (Write = host()) {
+            write("{\"invalid\":")
+            write_number(receipt.invalid.downcast_unchecked())
+            write(",\"status\":")
+            write_number(receipt.status.downcast_unchecked())
+            write(",\"gas_used\":")
+            write_number(receipt.gas_used)
+            write(",\"logs_hash\":\"")
+            write_hex_word(logs_hash(receipt.logs))
+            write("\"")
+            write_world(applied.state)
+            write("}")
+            write_char(10)
+        }
+        return 0
     }
     0
 }
