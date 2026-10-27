@@ -6,6 +6,7 @@
 # Native harness build products and Python caches
 /native/out/
 /native/differential/reference/target/
+/native/bench/revm/target/
 # Retired local Keccak build artifacts (sources moved to fe-lang/keccak)
 /native/keccak/reference/target/
 __pycache__/

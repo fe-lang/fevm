@@ -1,0 +1,13 @@
+[package]
+name = "fevm-bench-revm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+revm = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d", default-features = false, features = ["std"] }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "abort"

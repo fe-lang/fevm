@@ -75,7 +75,8 @@ deletes self-destructed new accounts and touched accounts left empty, together
 with their storage, and returns the receipt's status, gas used, output and logs.
 Host failures (allocation), including during fee payment, return the pre-state
 with that status.
-The [Ethereum state-test runner](native/conformance/README.md) drives `transact`.
+The [Ethereum state-test runner](native/conformance/README.md) drives `transact`, and the
+[state-test benchmarks](native/bench/README.md) time it against revm and evmone.
 
 The reusable API exposes `Program`, `InputData`, `CallEnv`, `BlockEnv`, `WorldState`, `Transaction`, `Checkpoint`, `TransactionResult`, `LogBuffer`, `LogEntry`, and `ExecutionResult`. Code, calldata and output use owned growable buffers. Construct code with `Program::copy_from(source, len)`, move an `InputData` into `Program::new(input)`, or use `parse_hex_program`. Code remains immutable with its precomputed instruction-boundary jumpdest map. Truncated PUSH immediates are zero-padded while CODESIZE and CODECOPY retain the original code length. There is no fixed 4 KiB code/calldata cap; allocation failure is an operational error.
 
