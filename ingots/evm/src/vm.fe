@@ -171,10 +171,7 @@ impl Vm {
         if len != 0 {
             hash.update(self.memory, offset: offset.downcast_unchecked(), len: len.downcast_unchecked())
         }
-        let digest = hash.finish()
-        var value: u256 = 0
-        for byte in digest { value = (value << 8) | byte as u256 }
-        self.push(value)
+        self.push(hash.finish_word())
     }
 
     fn mload(mut self) {
@@ -1292,9 +1289,7 @@ impl Vm {
         } else {
             var hash = Keccak256::new()
             hash.update(self.memory, offset: start, len: count)
-            var code_hash: u256 = 0
-            for byte in hash.finish() { code_hash = (code_hash << 8) | byte as u256 }
-            create2_address(sender, salt, code_hash)
+            create2_address(sender, salt, code_hash: hash.finish_word())
         }
         let create_gas = self.gas_remaining - self.gas_remaining / 64
         self.gas_remaining -= create_gas

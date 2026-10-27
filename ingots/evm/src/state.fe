@@ -1,7 +1,7 @@
 use core::{MemBuffer, MemSpan}
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
-use keccak::{ByteSource, keccak256}
+use keccak::{ByteSource, keccak256_word}
 use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
@@ -214,9 +214,7 @@ impl WorldState {
                 self.code[(retained + 64 + i) as usize] = code.byte_at(i)
                 i += 1
             }
-            let digest = keccak256(code)
-            account.code_hash = 0
-            for byte in digest { account.code_hash = (account.code_hash << 8) | byte as u256 }
+            account.code_hash = keccak256_word(code)
         }
         self.code.truncate(new_size as usize)
         self.accounts.insert(address, account)

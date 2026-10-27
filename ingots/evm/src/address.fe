@@ -3,9 +3,7 @@ use keccak::Keccak256
 fn hashed_address<const N: usize>(_ preimage: [u8; N], len: u64) -> u256 {
     var hash = Keccak256::new()
     hash.update(preimage, offset: 0, len)
-    var value: u256 = 0
-    for byte in hash.finish() { value = (value << 8) | byte as u256 }
-    value & 0xffffffffffffffffffffffffffffffffffffffff
+    hash.finish_word() & 0xffffffffffffffffffffffffffffffffffffffff
 }
 
 fn put_word(_ bytes: mut [u8; 85], offset: u64, value: u256, width: u64) {

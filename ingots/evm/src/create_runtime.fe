@@ -1,5 +1,5 @@
 use core::MemBuffer
-use keccak::keccak256
+use keccak::keccak256_word
 use ingot::address::{create_address, create2_address}
 use ingot::constants::{ERR_PRECOMPILE, OK}
 use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact}
@@ -10,12 +10,6 @@ use ingot::vm::Vm
 
 // MSTORE8(0, first); RETURN(0, 1): deploys the one-byte code `first`.
 fn initcode(_ first: u8) -> [u8; 10] { [0x60, first, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3] }
-
-fn word(_ bytes: [u8; 32]) -> u256 {
-    var value: u256 = 0
-    for byte in bytes { value = (value << 8) | byte as u256 }
-    value
-}
 
 // PUSH10 initcode; MSTORE at 0 (bytes 22..32); then `tail` creates from it.
 fn creator<const N: usize>(_ init: [u8; 10], _ tail: [u8; N]) -> Program {
@@ -57,7 +51,7 @@ fn create_and_create2_deploy_code_endow_and_bump_nonces() {
     let vm = run_at(creator(initcode(0), [0x60, 10, 0x60, 22, 0x60, 7, 0xf0,
                                           0x60, 5, 0x60, 10, 0x60, 22, 0x60, 0, 0xf5]), address: 0xaa, mut tx)
     let first = create_address(sender: 0xaa, nonce: 0)
-    let second = create2_address(sender: 0xaa, salt: 5, code_hash: word(keccak256(initcode(0))))
+    let second = create2_address(sender: 0xaa, salt: 5, code_hash: keccak256_word(initcode(0)))
     core::assert(vm.status == OK && vm.stack.len() == 2 && vm.stack[0] == first && vm.stack[1] == second)
     core::assert(vm.return_data.len() == 0)
     core::assert(tx.nonce(0xaa) == 2 && tx.balance(0xaa) == 93)

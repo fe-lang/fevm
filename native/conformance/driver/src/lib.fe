@@ -38,12 +38,6 @@ fn read_all() -> MemBuffer uses (r: mut Read) {
     bytes
 }
 
-fn digest_word(_ hash: own Keccak256) -> u256 {
-    var value: u256 = 0
-    for byte in hash.finish() { value = (value << 8) | byte as u256 }
-    value
-}
-
 // State tests define BLOCKHASH(n) as keccak256 of n's decimal digits.
 fn test_block_hash(_ number: u256) -> u256 {
     var digits: [u8; 80] = [0; 80]
@@ -63,7 +57,7 @@ fn test_block_hash(_ number: u256) -> u256 {
     }
     var hash = Keccak256::new()
     hash.update(ordered, offset: 0, len)
-    digest_word(hash)
+    hash.finish_word()
 }
 
 fn append(_ out: mut MemBuffer, _ byte: u8) {
@@ -147,7 +141,7 @@ fn logs_hash(_ logs: LogBuffer) -> u256 {
     }
     var hash = Keccak256::new()
     hash.update(out.span(), offset: 0, len: out.len().downcast_unchecked())
-    digest_word(hash)
+    hash.finish_word()
 }
 
 fn write_world(_ world: WorldState) uses (w: mut Write) {
