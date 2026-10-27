@@ -75,9 +75,8 @@ impl Vm {
             self.fault(ERR_STACK_OVERFLOW)
             return
         }
-        if self.stack.try_push(value).is_err() {
-            self.fault(ERR_HOST_ALLOCATION)
-        }
+        // `run_until_child` reserves room for `STACK_LIMIT` words.
+        unsafe { self.stack.push_unchecked(value) }
     }
 
     fn pop(mut self) -> u256 {
@@ -1083,6 +1082,11 @@ impl Vm {
     fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
                        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
                        depth: usize) -> Option<Frame> {
+        // Pushes skip the capacity check, so the stack holds its limit first.
+        if !self.stack.try_reserve(STACK_LIMIT - self.stack.len()) {
+            self.fault(ERR_HOST_ALLOCATION)
+            return Option::None
+        }
         // The code cannot change while the frame runs. `pc` and gas live in
         // locals here; `self` holds them only around calls that use them.
         // A frame enters unhalted, and the arms that halt leave the loop.
@@ -1109,7 +1113,7 @@ impl Vm {
                 0x60 | 0x61 | 0x62 | 0x63 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f => {
                     // Padding gives every immediate a whole word of code after it.
                     let n: usize = (op - 0x5f).downcast_unchecked()
-                    let word = code.read_word(pc)
+                    let word = unsafe { code.read_be_unchecked<u256>(pc) }
                     pc = pc.wrapping_add(n)
                     self.push(word >> ((32 - n) * 8) as u256)
                 },
