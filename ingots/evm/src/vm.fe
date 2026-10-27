@@ -328,20 +328,22 @@ impl Vm {
     fn calldataload(mut self, _ calldata: InputData) {
         let offset = self.pop()
         if !self.ok() { return }
-        let available: u256 = if offset < calldata.len() as u256 {
-            calldata.len() as u256 - offset
-        } else {
-            0
+        let len = calldata.len()
+        // Most loads read one whole word within the calldata.
+        if offset <= len as u256 && len as u256 - offset >= 32 {
+            self.push(calldata.bytes().read_word(offset.downcast_unchecked()))
+            return
         }
+        // Bytes past the end read as zero.
         var value: u256 = 0
-        var i: u256 = 0
-        while i < 32 {
-            value <<= 8
-            if i < available {
-                let index: u64 = (offset + i).downcast_unchecked()
-                value |= calldata.byte_at(index) as u256
+        if offset < len as u256 {
+            let start: u64 = offset.downcast_unchecked()
+            var index = start
+            while index < len {
+                value = (value << 8) | calldata.byte_at(index) as u256
+                index += 1
             }
-            i += 1
+            value <<= ((32 - (len - start)) * 8) as u256
         }
         self.push(value)
     }
