@@ -625,13 +625,15 @@ impl Vm {
 
     fn sload(mut self, _ call: CallEnv, _ state: mut Transaction) {
         let slot = self.pop()
-        if self.ok() {
-            let gas: u128 = if state.storage_is_warm(address: call.address, slot) { 100 } else { 2100 }
-            if self.charge(gas) {
-                self.fault(state.warm_slot(address: call.address, slot))
-                if self.ok() { self.push(state.storage_load(address: call.address, slot)) }
-            }
+        if !self.ok() { return }
+        // A warm slot needs no journal entry.
+        let warm = state.storage_is_warm(address: call.address, slot)
+        if !self.charge(if warm { 100 } else { 2100 }) { return }
+        if !warm {
+            self.fault(state.warm_slot(address: call.address, slot))
+            if !self.ok() { return }
         }
+        self.push(state.storage_load(address: call.address, slot))
     }
 
     fn sstore(mut self, _ call: CallEnv, _ state: mut Transaction) {
