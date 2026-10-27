@@ -29,6 +29,33 @@ use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, empty_bytes}
 use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 
+fn signed_less(_ lhs: u256, _ rhs: u256) -> bool {
+    let lhs: i256 = lhs.downcast_unchecked()
+    let rhs: i256 = rhs.downcast_unchecked()
+    lhs < rhs
+}
+
+fn signextend(byte_index: u256, value: u256) -> u256 {
+    if byte_index >= 31 {
+        return value
+    }
+    let bit_index = (byte_index * 8) + 7
+    let mask = (1 << (bit_index + 1)) - 1
+    if ((value >> bit_index) & 1) == 1 { value | !mask } else { value & mask }
+}
+
+fn sar(shift: u256, value: u256) -> u256 {
+    let signed = ((value >> 255) & 1) == 1
+    if shift == 0 {
+        value
+    } else if shift >= 256 {
+        if signed { !(0 as u256) } else { 0 }
+    } else {
+        let shifted = value >> shift
+        if signed { shifted | !((1 << (256 - shift)) - 1) } else { shifted }
+    }
+}
+
 pub struct Vm {
     pub memory: MemBuffer,
     pub output: MemBuffer,
@@ -79,6 +106,17 @@ impl Vm {
         }
         // `run_until_child` reserves room for `STACK_LIMIT` words.
         unsafe { self.stack.push_unchecked(value) }
+    }
+
+    // `push` for the dispatch loop, which stops when it fails.
+    #[inline(always)]
+    fn pushed(mut self, _ value: u256) -> bool {
+        if self.stack.len() >= STACK_LIMIT {
+            self.fault(ERR_STACK_OVERFLOW)
+            return false
+        }
+        unsafe { self.stack.push_unchecked(value) }
+        true
     }
 
     fn pop(mut self) -> u256 {
@@ -406,58 +444,15 @@ impl Vm {
         self.push(result)
     }
 
-    fn signextend(mut self, byte_index: u256, value: u256) {
-        if byte_index >= 31 {
-            self.push(value)
-            return
-        }
-
-        let bit_index = (byte_index * 8) + 7
-        let mask = (1 << (bit_index + 1)) - 1
-        if ((value >> bit_index) & 1) == 1 {
-            self.push(value | !mask)
-        } else {
-            self.push(value & mask)
-        }
-    }
-
-    fn byte(mut self, index: u256, value: u256) {
-        if index >= 32 {
-            self.push(0)
-            return
-        }
-
-        self.push((value >> ((31 - index) * 8)) & 255)
-    }
-
-    fn sar(mut self, shift: u256, value: u256) {
-        let signed = ((value >> 255) & 1) == 1
-        if shift == 0 {
-            self.push(value)
-        } else if shift >= 256 {
-            if signed {
-                self.push(!(0 as u256))
-            } else {
-                self.push(0)
-            }
-        } else {
-            let shifted = value >> shift
-            if signed {
-                self.push(shifted | !((1 << (256 - shift)) - 1))
-            } else {
-                self.push(shifted)
-            }
-        }
-    }
-
+    // The dispatch loop's arithmetic, which stops the loop when it fails.
     #[inline(always)]
-    fn binary_arith(mut self, _ op: i32) {
+    fn binary_arith(mut self, _ op: i32) -> bool {
         // The top item is the first EVM operand; the result replaces the
         // second, so the stack shrinks by one without a separate push.
         let len = self.stack.len()
         if len < 2 {
             self.fault(ERR_STACK_UNDERFLOW)
-            return
+            return false
         }
         let lhs = self.stack[len - 1]
         let rhs = self.stack[len - 2]
@@ -473,26 +468,29 @@ impl Vm {
             0x18 => lhs ^ rhs,
             0x1b => if lhs >= 256 { 0 } else { rhs << lhs },
             0x1c => if lhs >= 256 { 0 } else { rhs >> lhs },
+            0x12 => if signed_less(lhs, rhs) { 1 } else { 0 },
+            0x13 => if signed_less(rhs, lhs) { 1 } else { 0 },
+            0x1a => if lhs >= 32 { 0 } else { (rhs >> ((31 - lhs) * 8)) & 255 },
+            0x0b => signextend(byte_index: lhs, value: rhs),
+            0x1d => sar(shift: lhs, value: rhs),
             _ => {
-                self.binary_arith_general(op)
-                return
+                self.invalid(op)
+                return false
             },
         }
         self.stack.truncate(len - 1)
         self.stack[len - 2] = result
+        true
     }
 
+    // Division, modular arithmetic and EXP.
     fn binary_arith_general(mut self, _ op: i32) {
-        // The top item is the first EVM operand; some opcodes give it a
-        // different role (shift amount, byte index, or sign-extension index).
+        // The top item is the first EVM operand.
         let lhs = self.pop()
         let rhs = self.pop()
         if !self.ok() { return }
 
         match op {
-            0x01 => self.push(lhs.wrapping_add(rhs)),
-            0x02 => self.push(lhs.wrapping_mul(rhs)),
-            0x03 => self.push(lhs.wrapping_sub(rhs)),
             0x04 => if rhs == 0 {
                 self.push(0)
             } else {
@@ -544,46 +542,17 @@ impl Vm {
                 }
             },
             0x0a => self.exp(base: lhs, exponent: rhs),
-            0x0b => self.signextend(byte_index: lhs, value: rhs),
-            0x10 => self.push_bool(lhs < rhs),
-            0x11 => self.push_bool(lhs > rhs),
-            0x12 => {
-                let lhs_signed: i256 = lhs.downcast_unchecked()
-                let rhs_signed: i256 = rhs.downcast_unchecked()
-                self.push_bool(lhs_signed < rhs_signed)
-            },
-            0x13 => {
-                let lhs_signed: i256 = lhs.downcast_unchecked()
-                let rhs_signed: i256 = rhs.downcast_unchecked()
-                self.push_bool(lhs_signed > rhs_signed)
-            },
-            0x14 => self.push_bool(lhs == rhs),
-            0x16 => self.push(lhs & rhs),
-            0x17 => self.push(lhs | rhs),
-            0x18 => self.push(lhs ^ rhs),
-            0x1a => self.byte(index: lhs, value: rhs),
-            0x1b => if lhs >= 256 {
-                self.push(0)
-            } else {
-                self.push(rhs << lhs)
-            },
-            0x1c => if lhs >= 256 {
-                self.push(0)
-            } else {
-                self.push(rhs >> lhs)
-            },
-            0x1d => self.sar(shift: lhs, value: rhs),
             _ => self.invalid(op),
         }
     }
 
     #[inline(always)]
-    fn unary(mut self, _ op: i32) {
+    fn unary(mut self, _ op: i32) -> bool {
         // The result replaces the operand in place.
         let len = self.stack.len()
         if len < 1 {
             self.fault(ERR_STACK_UNDERFLOW)
-            return
+            return false
         }
         let value = self.stack[len - 1]
         self.stack[len - 1] = match op {
@@ -591,32 +560,32 @@ impl Vm {
             0x19 => !value,
             _ => {
                 self.invalid(op)
-                return
+                return false
             },
         }
+        true
     }
 
     #[inline(always)]
-    fn dup(mut self, _ index: usize) {
+    fn dup(mut self, _ index: usize) -> bool {
         let len = self.stack.len()
         if len < index {
             self.fault(ERR_STACK_UNDERFLOW)
-            return
+            return false
         }
-
         let value = self.stack[len - index]
-        self.push(value)
+        self.pushed(value)
     }
 
     #[inline(always)]
-    fn swap(mut self, _ index: usize) {
+    fn swap(mut self, _ index: usize) -> bool {
         let len = self.stack.len()
         if len <= index {
             self.fault(ERR_STACK_UNDERFLOW)
-            return
+            return false
         }
-
         self.stack.swap(len - 1, len - 1 - index)
+        true
     }
 
     fn invalid(mut self, _ op: i32) {
@@ -1109,210 +1078,275 @@ impl Vm {
         }
         // The code cannot change while the frame runs. `pc` and gas live in
         // locals here; `self` holds them only around calls that use them.
-        // A frame enters unhalted, and the arms that halt leave the loop.
-        // Padding stops a frame that runs off the end, so only faults end the loop.
+        // Every arm that can fault or halt leaves the loop itself, so the
+        // loop checks no status per opcode. Padding stops a frame that runs
+        // off the end.
         let code = program.padded()
         var pc = self.pc
         var gas = self.gas_remaining
-        while self.ok() {
-            // `pc` never passes the padding: a PUSH ends at most 32 bytes
-            // past the code, and padding reads as STOP.
-            let op = unsafe { code.read_be_unchecked<u8>(pc) } as i32
-            // `pc` stays within the code and its padding, far from overflow.
-            pc = pc.wrapping_add(1)
-            let cost = base_cost(op)
-            if cost > gas {
-                self.fault(ERR_OUT_OF_GAS)
-                break
-            }
-            gas -= cost
-            match op {
-                0x00 => {
-                    self.halted = true
+        if self.ok() {
+            while true {
+                // `pc` never passes the padding: a PUSH ends at most 32 bytes
+                // past the code, and padding reads as STOP.
+                let op = unsafe { code.read_be_unchecked<u8>(pc) } as i32
+                // `pc` stays within the code and its padding, far from overflow.
+                pc = pc.wrapping_add(1)
+                let cost = base_cost(op)
+                if cost > gas {
+                    self.fault(ERR_OUT_OF_GAS)
                     break
-                },
-                0x5f => self.push(0),
-                0x60 | 0x61 | 0x62 | 0x63 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f => {
-                    // Padding gives every immediate a whole word of code after it.
-                    let n: usize = (op - 0x5f).downcast_unchecked()
-                    let word = unsafe { code.read_be_unchecked<u256>(pc) }
-                    pc = pc.wrapping_add(n)
-                    self.push(word >> ((32 - n) * 8) as u256)
-                },
-                // Stack and arithmetic opcodes use neither pc nor gas beyond
-                // the base cost, so they skip syncing them through `self`.
-                0x50 => { let _ = self.pop() },
-                0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => self.dup((op - 0x7f).downcast_unchecked()),
-                0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => self.swap((op - 0x8f).downcast_unchecked()),
-                0x15 | 0x19 => self.unary(op),
-                0x01 | 0x02 | 0x03 | 0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0b | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17 | 0x18 | 0x1a | 0x1b | 0x1c | 0x1d => self.binary_arith(op),
-                0x30 => self.push(call.address),
-                0x32 => self.push(call.origin),
-                0x33 => self.push(call.caller),
-                0x34 => self.push(call.callvalue),
-                0x35 => self.calldataload(calldata),
-                0x36 => self.push(calldata.len() as u256),
-                0x38 => self.push(program.len() as u256),
-                0x3a => self.push(call.gasprice),
-                0x3d => self.push(self.return_data.len() as u256),
-                0x40 => {
-                    let number = self.pop()
-                    if self.ok() {
-                        let hash = if number < block.number && block.number - number <= 256 {
-                            state.block_hash(number)
-                        } else { 0 }
-                        self.push(hash)
-                    }
-                },
-                0x41 => self.push(block.coinbase),
-                0x42 => self.push(block.timestamp),
-                0x43 => self.push(block.number),
-                0x44 => self.push(block.prevrandao),
-                0x45 => self.push(block.gaslimit),
-                0x46 => self.push(block.chainid),
-                0x47 => self.push(state.balance(call.address)),
-                0x48 => self.push(block.basefee),
-                0x49 => {
-                    let index = self.pop()
-                    if self.ok() { self.push(state.blob_hash(index)) }
-                },
-                0x4a => self.push(block.blobbasefee),
-                // Jumps check the depth once and drop their operands together.
-                0x56 => {
-                    let depth = self.stack.len()
-                    if depth < 1 {
-                        self.fault(ERR_STACK_UNDERFLOW)
-                    } else {
+                }
+                gas -= cost
+                match op {
+                    0x00 => {
+                        self.halted = true
+                        break
+                    },
+                    0x5f => if !self.pushed(0) { break },
+                    0x60 | 0x61 | 0x62 | 0x63 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f => {
+                        // Padding gives every immediate a whole word of code after it.
+                        let n: usize = (op - 0x5f).downcast_unchecked()
+                        let word = unsafe { code.read_be_unchecked<u256>(pc) }
+                        pc = pc.wrapping_add(n)
+                        if !self.pushed(word >> ((32 - n) * 8) as u256) { break }
+                    },
+                    0x50 => {
+                        let len = self.stack.len()
+                        if len < 1 {
+                            self.fault(ERR_STACK_UNDERFLOW)
+                            break
+                        }
+                        self.stack.truncate(len - 1)
+                    },
+                    0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => if !self.dup((op - 0x7f).downcast_unchecked()) { break },
+                    0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => if !self.swap((op - 0x8f).downcast_unchecked()) { break },
+                    0x15 | 0x19 => if !self.unary(op) { break },
+                    0x01 | 0x02 | 0x03 | 0x0b | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17 | 0x18 | 0x1a | 0x1b | 0x1c | 0x1d => if !self.binary_arith(op) { break },
+                    0x30 => if !self.pushed(call.address) { break },
+                    0x32 => if !self.pushed(call.origin) { break },
+                    0x33 => if !self.pushed(call.caller) { break },
+                    0x34 => if !self.pushed(call.callvalue) { break },
+                    0x36 => if !self.pushed(calldata.len() as u256) { break },
+                    0x38 => if !self.pushed(program.len() as u256) { break },
+                    0x3a => if !self.pushed(call.gasprice) { break },
+                    0x3d => if !self.pushed(self.return_data.len() as u256) { break },
+                    0x41 => if !self.pushed(block.coinbase) { break },
+                    0x42 => if !self.pushed(block.timestamp) { break },
+                    0x43 => if !self.pushed(block.number) { break },
+                    0x44 => if !self.pushed(block.prevrandao) { break },
+                    0x45 => if !self.pushed(block.gaslimit) { break },
+                    0x46 => if !self.pushed(block.chainid) { break },
+                    0x48 => if !self.pushed(block.basefee) { break },
+                    0x4a => if !self.pushed(block.blobbasefee) { break },
+                    // Accesses within active memory need no growth or extra gas;
+                    // the others run out of line.
+                    0x51 => {
+                        let len = self.stack.len()
+                        if len < 1 {
+                            self.fault(ERR_STACK_UNDERFLOW)
+                            break
+                        }
+                        let offset = self.stack[len - 1]
+                        if self.in_memory(offset, len: 32) {
+                            self.stack[len - 1] = self.memory.read_word(offset.downcast_unchecked())
+                        } else {
+                            self.gas_remaining = gas
+                            self.mload()
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        }
+                    },
+                    0x52 => {
+                        let len = self.stack.len()
+                        if len < 2 {
+                            self.fault(ERR_STACK_UNDERFLOW)
+                            break
+                        }
+                        let offset = self.stack[len - 1]
+                        if self.in_memory(offset, len: 32) {
+                            self.memory.span().write_word(offset: offset.downcast_unchecked(), value: self.stack[len - 2])
+                            self.stack.truncate(len - 2)
+                        } else {
+                            self.gas_remaining = gas
+                            self.mstore(byte_only: false)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        }
+                    },
+                    // Jumps check the depth once and drop their operands together.
+                    0x56 => {
+                        let depth = self.stack.len()
+                        if depth < 1 {
+                            self.fault(ERR_STACK_UNDERFLOW)
+                            break
+                        }
                         let dest = self.stack[depth - 1]
                         self.stack.truncate(depth - 1)
-                        if program.is_jumpdest(dest) { pc = dest.downcast_unchecked() } else { self.fault(ERR_INVALID_JUMP) }
-                    }
-                },
-                0x57 => {
-                    let depth = self.stack.len()
-                    if depth < 2 {
-                        self.fault(ERR_STACK_UNDERFLOW)
-                    } else {
+                        if !program.is_jumpdest(dest) {
+                            self.fault(ERR_INVALID_JUMP)
+                            break
+                        }
+                        pc = dest.downcast_unchecked()
+                    },
+                    0x57 => {
+                        let depth = self.stack.len()
+                        if depth < 2 {
+                            self.fault(ERR_STACK_UNDERFLOW)
+                            break
+                        }
                         let dest = self.stack[depth - 1]
                         let taken = self.stack[depth - 2] != 0
                         self.stack.truncate(depth - 2)
                         if taken {
-                            if program.is_jumpdest(dest) { pc = dest.downcast_unchecked() } else { self.fault(ERR_INVALID_JUMP) }
+                            if !program.is_jumpdest(dest) {
+                                self.fault(ERR_INVALID_JUMP)
+                                break
+                            }
+                            pc = dest.downcast_unchecked()
                         }
-                    }
-                },
-                0x58 => self.push((pc - 1) as u256),
-                0x59 => self.push(self.memory.len() as u256),
-                0x5a => self.push(gas as u256),
-                0x5b => {},
-                0x5c => self.tload(call, state),
-                0x5d => self.tstore(call, mut state),
-                // These charge gas beyond the base cost, through `self`.
-                0x0a => {
-                    self.gas_remaining = gas
-                    self.binary_arith(op)
-                    gas = self.gas_remaining
-                },
-                0x20 => {
-                    self.gas_remaining = gas
-                    self.sha3()
-                    gas = self.gas_remaining
-                },
-                0x31 | 0x3b | 0x3f => {
-                    self.gas_remaining = gas
-                    self.account_field(op, mut state)
-                    gas = self.gas_remaining
-                },
-                0x37 => {
-                    self.gas_remaining = gas
-                    self.calldatacopy(calldata)
-                    gas = self.gas_remaining
-                },
-                0x39 => {
-                    self.gas_remaining = gas
-                    self.codecopy(program)
-                    gas = self.gas_remaining
-                },
-                0x3c => {
-                    self.gas_remaining = gas
-                    self.extcodecopy(mut state)
-                    gas = self.gas_remaining
-                },
-                0x3e => {
-                    self.gas_remaining = gas
-                    self.returndatacopy()
-                    gas = self.gas_remaining
-                },
-                0x51 => {
-                    self.gas_remaining = gas
-                    self.mload()
-                    gas = self.gas_remaining
-                },
-                0x52 => {
-                    self.gas_remaining = gas
-                    self.mstore(byte_only: false)
-                    gas = self.gas_remaining
-                },
-                0x53 => {
-                    self.gas_remaining = gas
-                    self.mstore(byte_only: true)
-                    gas = self.gas_remaining
-                },
-                0x54 => {
-                    self.gas_remaining = gas
-                    self.sload(call, mut state)
-                    gas = self.gas_remaining
-                },
-                0x55 => {
-                    self.gas_remaining = gas
-                    self.sstore(call, mut state)
-                    gas = self.gas_remaining
-                },
-                0x5e => {
-                    self.gas_remaining = gas
-                    self.mcopy()
-                    gas = self.gas_remaining
-                },
-                0xa0 | 0xa1 | 0xa2 | 0xa3 | 0xa4 => {
-                    self.gas_remaining = gas
-                    self.log((op - 0xa0).downcast_unchecked(), call, mut state)
-                    gas = self.gas_remaining
-                },
-                0xf3 => {
-                    self.gas_remaining = gas
-                    self.finish_from_memory(OK)
-                    gas = self.gas_remaining
-                    break
-                },
-                0xfd => {
-                    self.gas_remaining = gas
-                    self.finish_from_memory(ERR_REVERT)
-                    gas = self.gas_remaining
-                    break
-                },
-                0xff => {
-                    self.gas_remaining = gas
-                    self.selfdestruct(call, mut state)
-                    gas = self.gas_remaining
-                    break
-                },
-                0xf0 | 0xf1 | 0xf2 | 0xf4 | 0xf5 | 0xfa => {
-                    self.pc = pc
-                    self.gas_remaining = gas
-                    let child = if op == 0xf0 || op == 0xf5 {
-                        self.start_create(op, call, mut state, depth)
-                    } else {
-                        self.start_call(op, call, mut state, depth)
-                    }
-                    match child {
-                        Option::Some(frame) => return Option::Some(frame),
-                        Option::None => {},
-                    }
-                    pc = self.pc
-                    gas = self.gas_remaining
-                },
-                // INVALID (0xfe) and every undefined byte are exceptional halts.
-                _ => self.invalid(op),
+                    },
+                    0x58 => if !self.pushed((pc - 1) as u256) { break },
+                    0x59 => if !self.pushed(self.memory.len() as u256) { break },
+                    0x5a => if !self.pushed(gas as u256) { break },
+                    0x5b => {},
+                    // Arms that call out charge gas beyond the base cost through `self`.
+                    0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0a => {
+                        self.gas_remaining = gas
+                        self.binary_arith_general(op)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x20 => {
+                        self.gas_remaining = gas
+                        self.sha3()
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x31 | 0x3b | 0x3f => {
+                        self.gas_remaining = gas
+                        self.account_field(op, mut state)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x35 => {
+                        self.calldataload(calldata)
+                        if !self.ok() { break }
+                    },
+                    0x37 => {
+                        self.gas_remaining = gas
+                        self.calldatacopy(calldata)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x39 => {
+                        self.gas_remaining = gas
+                        self.codecopy(program)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x3c => {
+                        self.gas_remaining = gas
+                        self.extcodecopy(mut state)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x3e => {
+                        self.gas_remaining = gas
+                        self.returndatacopy()
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x40 => {
+                        let number = self.pop()
+                        if !self.ok() { break }
+                        let hash = if number < block.number && block.number - number <= 256 {
+                            state.block_hash(number)
+                        } else { 0 }
+                        if !self.pushed(hash) { break }
+                    },
+                    0x47 => if !self.pushed(state.balance(call.address)) { break },
+                    0x49 => {
+                        let index = self.pop()
+                        if !self.ok() || !self.pushed(state.blob_hash(index)) { break }
+                    },
+                    0x53 => {
+                        self.gas_remaining = gas
+                        self.mstore(byte_only: true)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x54 => {
+                        self.gas_remaining = gas
+                        self.sload(call, mut state)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x55 => {
+                        self.gas_remaining = gas
+                        self.sstore(call, mut state)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0x5c => {
+                        self.tload(call, state)
+                        if !self.ok() { break }
+                    },
+                    0x5d => {
+                        self.tstore(call, mut state)
+                        if !self.ok() { break }
+                    },
+                    0x5e => {
+                        self.gas_remaining = gas
+                        self.mcopy()
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0xa0 | 0xa1 | 0xa2 | 0xa3 | 0xa4 => {
+                        self.gas_remaining = gas
+                        self.log((op - 0xa0).downcast_unchecked(), call, mut state)
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    0xf3 => {
+                        self.gas_remaining = gas
+                        self.finish_from_memory(OK)
+                        gas = self.gas_remaining
+                        break
+                    },
+                    0xfd => {
+                        self.gas_remaining = gas
+                        self.finish_from_memory(ERR_REVERT)
+                        gas = self.gas_remaining
+                        break
+                    },
+                    0xff => {
+                        self.gas_remaining = gas
+                        self.selfdestruct(call, mut state)
+                        gas = self.gas_remaining
+                        break
+                    },
+                    0xf0 | 0xf1 | 0xf2 | 0xf4 | 0xf5 | 0xfa => {
+                        self.pc = pc
+                        self.gas_remaining = gas
+                        let child = if op == 0xf0 || op == 0xf5 {
+                            self.start_create(op, call, mut state, depth)
+                        } else {
+                            self.start_call(op, call, mut state, depth)
+                        }
+                        match child {
+                            Option::Some(frame) => return Option::Some(frame),
+                            Option::None => {},
+                        }
+                        pc = self.pc
+                        gas = self.gas_remaining
+                        if !self.ok() { break }
+                    },
+                    // INVALID (0xfe) and every undefined byte are exceptional halts.
+                    _ => {
+                        self.invalid(op)
+                        break
+                    },
+                }
             }
         }
         // A fault that halts exceptionally leaves no gas.
