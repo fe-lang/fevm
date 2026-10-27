@@ -15,26 +15,38 @@ pub struct Program {
     pub status: i32,
 }
 
+/// The bytes of the instruction-boundary JUMPDEST bitmap of `len` bytes of code.
+pub fn jumpdest_map_len(_ len: u64) -> u64 {
+    (len + 7) / 8
+}
+
+/// Sets the bit of each JUMPDEST of `code` at an instruction boundary in
+/// `jumpdests`, a zeroed bitmap of `jumpdest_map_len(code.len())` bytes.
+pub fn mark_jumpdests<T: ByteSource>(_ code: T, _ jumpdests: mut MemSpan) {
+    let len = code.len()
+    var pc: u64 = 0
+    while pc < len {
+        let op = code.byte_at(pc)
+        if op == 0x5b {
+            let bit: u8 = (pc % 8).downcast_unchecked()
+            jumpdests[(pc / 8) as usize] |= 1 << bit
+        } else if op >= 0x60 && op <= 0x7f {
+            pc += (op as u64) - 0x5f
+        }
+        pc += 1
+    }
+}
+
 impl Program {
     pub fn new(_ input: own InputData) -> Self {
         var status = input.status
         let len = input.len()
         var jumpdests = MemBuffer::empty()
         if status == OK {
-            if !jumpdests.try_resize(((len + 7) / 8) as usize) {
+            if !jumpdests.try_resize(jumpdest_map_len(len) as usize) {
                 status = ERR_HOST_ALLOCATION
             } else {
-                var pc: u64 = 0
-                while pc < len {
-                    let op = input.byte_at(pc)
-                    if op == 0x5b {
-                        let bit: u8 = (pc % 8).downcast_unchecked()
-                        jumpdests[(pc / 8) as usize] |= 1 << bit
-                    } else if op >= 0x60 && op <= 0x7f {
-                        pc += (op as u64) - 0x5f
-                    }
-                    pc += 1
-                }
+                mark_jumpdests(input.bytes(), mut jumpdests.span())
             }
         }
         var bytes = input.bytes
@@ -46,6 +58,20 @@ impl Program {
     pub fn copy_from<T: ByteSource>(_ source: T, len: usize) -> Self {
         core::assert((len as u256) <= source.len() as u256)
         Self::new(InputData::copy_from(source, offset: 0, len: len.downcast_unchecked()))
+    }
+    /// A copy of `code` whose `mark_jumpdests` bitmap is `jumpdests`.
+    pub fn analyzed(_ code: MemSpan, jumpdests: MemSpan) -> Self {
+        let len = code.len()
+        var bytes = MemBuffer::empty()
+        var map = MemBuffer::empty()
+        // Reserving the padding first copies the code only once.
+        if !bytes.try_reserve(len + CODE_PADDING as usize) || !map.try_reserve(jumpdests.len()) {
+            return Self { bytes, len: 0, jumpdests: map, status: ERR_HOST_ALLOCATION }
+        }
+        bytes.extend_from(code)
+        map.extend_from(jumpdests)
+        core::assert(bytes.try_resize(len + CODE_PADDING as usize))
+        Self { bytes, len, jumpdests: map, status: OK }
     }
     pub fn len(self) -> usize {
         self.len

@@ -808,7 +808,7 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
 
 /// Copy an account's code into an analyzed program.
 pub fn load_program(_ state: Transaction, address: u256) -> Program {
-    Program::new(InputData::copy_bytes(state.code(address)))
+    Program::analyzed(state.code(address), jumpdests: state.jumpdests(address))
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation

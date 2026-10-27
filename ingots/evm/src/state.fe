@@ -3,6 +3,7 @@ use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 use keccak::{ByteSource, keccak256_word}
 use ingot::constants::{ERR_HOST_ALLOCATION, OK}
+use ingot::types::{jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
@@ -53,9 +54,15 @@ impl SwissKey for StorageKey {
     }
 }
 
+// An arena record's bytes for `len` bytes of code.
+fn record_len(_ len: u64) -> u64 {
+    64 + len + jumpdest_map_len(len)
+}
+
 pub struct WorldState {
     accounts: SwissTable<u256, Account>,
-    // Packed [address:32, length:32, code:length] records. Replacements compact
+    // Packed [address:32, length:32, code:length, jumpdests] records, where
+    // `jumpdests` is the code's `mark_jumpdests` bitmap. Replacements compact
     // the arena, so retained storage is bounded by the peak live code extent.
     code: MemBuffer,
     storage: SwissTable<StorageKey, u256>,
@@ -170,6 +177,12 @@ impl WorldState {
         let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 }
         self.code.slice(offset: offset as usize, len: account.code_len as usize)
     }
+    // The code's JUMPDEST bitmap, computed when the code was set.
+    pub fn jumpdests(self, _ address: u256) -> ref MemSpan {
+        let account = self.accounts.get(address_word(address)).value
+        let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 + account.code_len }
+        self.code.slice(offset: offset as usize, len: jumpdest_map_len(account.code_len) as usize)
+    }
     // Host-side database initialization. Execution cannot mutate code until
     // CREATE's account lifecycle and code-deposit rules are implemented.
     pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
@@ -181,13 +194,14 @@ impl WorldState {
         if !previous.found && !self.accounts.try_reserve(1) { return ERR_HOST_ALLOCATION }
         var account = previous.value
         let old_size: u64 = self.code.len().downcast_unchecked()
-        let removed = if account.code_len == 0 { 0 } else { 64 + account.code_len }
+        let removed = if account.code_len == 0 { 0 } else { record_len(account.code_len) }
         let retained = old_size - removed
-        // Bound before addition and before ByteSource traversal/allocation.
-        if len != 0 && (retained > 0x7fffffffffffffff - 64 || len > 0x7fffffffffffffff - 64 - retained) {
+        // Bound before addition and before ByteSource traversal/allocation,
+        // leaving room for the bitmap, an eighth of the code.
+        if len != 0 && (retained > 0x3fffffffffffffff - 64 || len > 0x3fffffffffffffff - 64 - retained) {
             return ERR_HOST_ALLOCATION
         }
-        let new_size = retained + if len == 0 { 0 } else { 64 + len }
+        let new_size = retained + if len == 0 { 0 } else { record_len(len) }
         if new_size > old_size && !self.code.try_resize(new_size as usize) { return ERR_HOST_ALLOCATION }
         if removed != 0 {
             let start = account.code_offset
@@ -200,7 +214,7 @@ impl WorldState {
                 var moved = self.accounts.get(key).value
                 moved.code_offset = cursor
                 self.accounts.insert(key, moved)
-                cursor += 64 + size
+                cursor += record_len(size)
             }
         }
         account.code_offset = retained
@@ -214,6 +228,11 @@ impl WorldState {
                 self.code[(retained + 64 + i) as usize] = code.byte_at(i)
                 i += 1
             }
+            // Compaction can leave old bytes where the bitmap goes.
+            let map = (retained + 64 + len) as usize
+            let map_len = jumpdest_map_len(len) as usize
+            self.code.slice(offset: map, len: map_len).zero()
+            mark_jumpdests(code, mut self.code.slice(offset: map, len: map_len))
             account.code_hash = keccak256_word(code)
         }
         self.code.truncate(new_size as usize)
