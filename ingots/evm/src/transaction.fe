@@ -5,6 +5,7 @@ use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::gas::{StorageCharge, storage_charge}
+use fevm_precompiles::is_precompile
 
 const BALANCE: u8 = 0
 const NONCE: u8 = 1
@@ -55,8 +56,9 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
+        // Precompiles are always warm, without entries.
         var warm_accounts = SwissTable<u256, bool>::empty()
-        for address in [sender, destination, coinbase, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+        for address in [sender, destination, coinbase] {
             warm_accounts.insert(address_word(address), true)
         }
         Self {
@@ -124,7 +126,8 @@ impl Transaction {
     }
 
     pub fn account_is_warm(self, _ address: u256) -> bool {
-        self.warm_accounts.contains(address_word(address))
+        let address = address_word(address)
+        is_precompile(address) || self.warm_accounts.contains(address)
     }
 
     pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
@@ -134,7 +137,7 @@ impl Transaction {
     // Journaled set membership: warm accounts and slots, touched and doomed accounts.
     fn marked(self, kind: u8, address: u256, slot: u256) -> bool {
         match kind {
-            WARM_ACCOUNT => self.warm_accounts.contains(address),
+            WARM_ACCOUNT => is_precompile(address) || self.warm_accounts.contains(address),
             WARM_STORAGE => self.warm_storage.contains(StorageKey { address, slot }),
             TOUCHED => self.touched.contains(address),
             _ => self.doomed.contains(address),
