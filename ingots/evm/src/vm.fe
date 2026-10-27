@@ -262,6 +262,18 @@ impl Vm {
         size >= len && offset <= (size - len) as u256
     }
 
+    // The word-rounded size covering a range that `in_memory` rejected, when
+    // the buffer already holds it and the offset is below SMALL_EXTENT, or zero.
+    #[inline(always)]
+    fn buffered_growth(self, _ offset: u256, len: u64) -> u64 {
+        if offset >= SMALL_EXTENT as u256 {
+            return 0
+        }
+        let start: u64 = offset.downcast_unchecked()
+        let size = (start + len + 31) / 32 * 32
+        if size as usize > self.memory.len() { 0 } else { size }
+    }
+
     // Grows memory to cover a range that `in_memory` rejected. Below
     // SMALL_EXTENT the range also ends past active memory, and both sizes'
     // gas needs only u64 arithmetic.
@@ -1365,7 +1377,19 @@ impl Vm {
                             break
                         }
                         let offset = self.stack[len - 1]
-                        if self.in_memory(offset, len: 32) {
+                        var fits = self.in_memory(offset, len: 32)
+                        if !fits {
+                            let size = self.buffered_growth(offset, len: 32)
+                            if size != 0 {
+                                if !spend(mut gas, small_memory_cost(size) - small_memory_cost(self.memory_size)) {
+                                    self.fault(ERR_OUT_OF_GAS)
+                                    break
+                                }
+                                self.memory_size = size
+                                fits = true
+                            }
+                        }
+                        if fits {
                             self.stack[len - 1] = self.memory.read_word(offset.downcast_unchecked())
                         } else {
                             self.gas_remaining = gas
@@ -1385,7 +1409,19 @@ impl Vm {
                             break
                         }
                         let offset = self.stack[len - 1]
-                        if self.in_memory(offset, len: 32) {
+                        var fits = self.in_memory(offset, len: 32)
+                        if !fits {
+                            let size = self.buffered_growth(offset, len: 32)
+                            if size != 0 {
+                                if !spend(mut gas, small_memory_cost(size) - small_memory_cost(self.memory_size)) {
+                                    self.fault(ERR_OUT_OF_GAS)
+                                    break
+                                }
+                                self.memory_size = size
+                                fits = true
+                            }
+                        }
+                        if fits {
                             self.memory.span().write_word(offset: offset.downcast_unchecked(), value: self.stack[len - 2])
                             self.stack.truncate(len - 2)
                         } else {
