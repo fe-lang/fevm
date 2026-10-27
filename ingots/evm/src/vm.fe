@@ -29,6 +29,16 @@ use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, empty_bytes}
 use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 
+// Charges `cost` against `gas`, or fails without charging.
+#[inline(always)]
+fn spend(_ gas: mut u64, _ cost: u64) -> bool {
+    if cost > gas {
+        return false
+    }
+    gas -= cost
+    true
+}
+
 fn signed_less(_ lhs: u256, _ rhs: u256) -> bool {
     let lhs: i256 = lhs.downcast_unchecked()
     let rhs: i256 = rhs.downcast_unchecked()
@@ -1123,47 +1133,71 @@ impl Vm {
                 let op = unsafe { code.read_be_unchecked<u8>(pc) } as i32
                 // `pc` stays within the code and its padding, far from overflow.
                 pc = pc.wrapping_add(1)
-                let cost = base_cost(op)
-                if cost > gas {
-                    self.fault(ERR_OUT_OF_GAS)
-                    break
-                }
-                gas -= cost
                 match op {
                     0x00 => {
                         self.halted = true
                         break
                     },
-                    0x5f => if !self.pushed(0) { break },
+                    0x5f => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(0) { break }
+                    },
                     // The common widths read just their immediate; padding gives
                     // every immediate a whole word of code after it.
                     0x60 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let value = unsafe { code.read_be_unchecked<u8>(pc) }
                         pc = pc.wrapping_add(1)
                         if !self.pushed(value as u256) { break }
                     },
                     0x61 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let value = unsafe { code.read_be_unchecked<u16>(pc) }
                         pc = pc.wrapping_add(2)
                         if !self.pushed(value as u256) { break }
                     },
                     0x63 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let value = unsafe { code.read_be_unchecked<u32>(pc) }
                         pc = pc.wrapping_add(4)
                         if !self.pushed(value as u256) { break }
                     },
                     0x7f => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let value = unsafe { code.read_be_unchecked<u256>(pc) }
                         pc = pc.wrapping_add(32)
                         if !self.pushed(value) { break }
                     },
                     0x62 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let n: usize = (op - 0x5f).downcast_unchecked()
                         let word = unsafe { code.read_be_unchecked<u256>(pc) }
                         pc = pc.wrapping_add(n)
                         if !self.pushed(word >> ((32 - n) * 8) as u256) { break }
                     },
                     0x50 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let len = self.stack.len()
                         if len < 1 {
                             self.fault(ERR_STACK_UNDERFLOW)
@@ -1171,29 +1205,160 @@ impl Vm {
                         }
                         self.stack.truncate(len - 1)
                     },
-                    0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => if !self.dup((op - 0x7f).downcast_unchecked()) { break },
-                    0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => if !self.swap((op - 0x8f).downcast_unchecked()) { break },
-                    0x15 | 0x19 => if !self.unary(op) { break },
-                    0x01 | 0x02 | 0x03 | 0x0b | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17 | 0x18 | 0x1a | 0x1b | 0x1c | 0x1d => if !self.binary_arith(op) { break },
-                    0x30 => if !self.pushed(call.address) { break },
-                    0x32 => if !self.pushed(call.origin) { break },
-                    0x33 => if !self.pushed(call.caller) { break },
-                    0x34 => if !self.pushed(call.callvalue) { break },
-                    0x36 => if !self.pushed(calldata.len() as u256) { break },
-                    0x38 => if !self.pushed(program.len() as u256) { break },
-                    0x3a => if !self.pushed(call.gasprice) { break },
-                    0x3d => if !self.pushed(self.return_data.len() as u256) { break },
-                    0x41 => if !self.pushed(block.coinbase) { break },
-                    0x42 => if !self.pushed(block.timestamp) { break },
-                    0x43 => if !self.pushed(block.number) { break },
-                    0x44 => if !self.pushed(block.prevrandao) { break },
-                    0x45 => if !self.pushed(block.gaslimit) { break },
-                    0x46 => if !self.pushed(block.chainid) { break },
-                    0x48 => if !self.pushed(block.basefee) { break },
-                    0x4a => if !self.pushed(block.blobbasefee) { break },
+                    0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.dup((op - 0x7f).downcast_unchecked()) { break }
+                    },
+                    0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.swap((op - 0x8f).downcast_unchecked()) { break }
+                    },
+                    0x15 | 0x19 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.unary(op) { break }
+                    },
+                    0x01 | 0x03 | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17 | 0x18 | 0x1a | 0x1b | 0x1c | 0x1d => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.binary_arith(op) { break }
+                    },
+                    0x02 | 0x0b => {
+                        if !spend(mut gas, 5) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.binary_arith(op) { break }
+                    },
+                    0x30 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(call.address) { break }
+                    },
+                    0x32 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(call.origin) { break }
+                    },
+                    0x33 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(call.caller) { break }
+                    },
+                    0x34 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(call.callvalue) { break }
+                    },
+                    0x36 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(calldata.len() as u256) { break }
+                    },
+                    0x38 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(program.len() as u256) { break }
+                    },
+                    0x3a => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(call.gasprice) { break }
+                    },
+                    0x3d => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(self.return_data.len() as u256) { break }
+                    },
+                    0x41 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.coinbase) { break }
+                    },
+                    0x42 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.timestamp) { break }
+                    },
+                    0x43 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.number) { break }
+                    },
+                    0x44 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.prevrandao) { break }
+                    },
+                    0x45 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.gaslimit) { break }
+                    },
+                    0x46 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.chainid) { break }
+                    },
+                    0x48 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.basefee) { break }
+                    },
+                    0x4a => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(block.blobbasefee) { break }
+                    },
                     // Accesses within active memory need no growth or extra gas;
                     // the others run out of line.
                     0x51 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let len = self.stack.len()
                         if len < 1 {
                             self.fault(ERR_STACK_UNDERFLOW)
@@ -1210,6 +1375,10 @@ impl Vm {
                         }
                     },
                     0x52 => {
+                        if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let len = self.stack.len()
                         if len < 2 {
                             self.fault(ERR_STACK_UNDERFLOW)
@@ -1228,6 +1397,10 @@ impl Vm {
                     },
                     // Jumps check the depth once and drop their operands together.
                     0x56 => {
+                        if !spend(mut gas, 8) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let depth = self.stack.len()
                         if depth < 1 {
                             self.fault(ERR_STACK_UNDERFLOW)
@@ -1242,6 +1415,10 @@ impl Vm {
                         pc = dest.downcast_unchecked()
                     },
                     0x57 => {
+                        if !spend(mut gas, 10) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
                         let depth = self.stack.len()
                         if depth < 2 {
                             self.fault(ERR_STACK_UNDERFLOW)
@@ -1258,146 +1435,178 @@ impl Vm {
                             pc = dest.downcast_unchecked()
                         }
                     },
-                    0x58 => if !self.pushed((pc - 1) as u256) { break },
-                    0x59 => if !self.pushed(self.memory_size as u256) { break },
-                    0x5a => if !self.pushed(gas as u256) { break },
-                    0x5b => {},
-                    // Arms that call out charge gas beyond the base cost through `self`.
-                    0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0a => {
-                        self.gas_remaining = gas
-                        self.binary_arith_general(op)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x20 => {
-                        self.gas_remaining = gas
-                        self.sha3()
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x31 | 0x3b | 0x3f => {
-                        self.gas_remaining = gas
-                        self.account_field(op, mut state)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x35 => {
-                        self.calldataload(calldata)
-                        if !self.ok() { break }
-                    },
-                    0x37 => {
-                        self.gas_remaining = gas
-                        self.calldatacopy(calldata)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x39 => {
-                        self.gas_remaining = gas
-                        self.codecopy(program)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x3c => {
-                        self.gas_remaining = gas
-                        self.extcodecopy(mut state)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x3e => {
-                        self.gas_remaining = gas
-                        self.returndatacopy()
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x40 => {
-                        let number = self.pop()
-                        if !self.ok() { break }
-                        let hash = if number < block.number && block.number - number <= 256 {
-                            state.block_hash(number)
-                        } else { 0 }
-                        if !self.pushed(hash) { break }
-                    },
-                    0x47 => if !self.pushed(state.balance(call.address)) { break },
-                    0x49 => {
-                        let index = self.pop()
-                        if !self.ok() || !self.pushed(state.blob_hash(index)) { break }
-                    },
-                    0x53 => {
-                        self.gas_remaining = gas
-                        self.mstore8()
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x54 => {
-                        self.gas_remaining = gas
-                        self.sload(call, mut state)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x55 => {
-                        self.gas_remaining = gas
-                        self.sstore(call, mut state)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0x5c => {
-                        self.tload(call, state)
-                        if !self.ok() { break }
-                    },
-                    0x5d => {
-                        self.tstore(call, mut state)
-                        if !self.ok() { break }
-                    },
-                    0x5e => {
-                        self.gas_remaining = gas
-                        self.mcopy()
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0xa0 | 0xa1 | 0xa2 | 0xa3 | 0xa4 => {
-                        self.gas_remaining = gas
-                        self.log((op - 0xa0).downcast_unchecked(), call, mut state)
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
-                    },
-                    0xf3 => {
-                        self.gas_remaining = gas
-                        self.finish_from_memory(OK)
-                        gas = self.gas_remaining
-                        break
-                    },
-                    0xfd => {
-                        self.gas_remaining = gas
-                        self.finish_from_memory(ERR_REVERT)
-                        gas = self.gas_remaining
-                        break
-                    },
-                    0xff => {
-                        self.gas_remaining = gas
-                        self.selfdestruct(call, mut state)
-                        gas = self.gas_remaining
-                        break
-                    },
-                    0xf0 | 0xf1 | 0xf2 | 0xf4 | 0xf5 | 0xfa => {
-                        self.pc = pc
-                        self.gas_remaining = gas
-                        let child = if op == 0xf0 || op == 0xf5 {
-                            self.start_create(op, call, mut state, depth)
-                        } else {
-                            self.start_call(op, call, mut state, depth)
+                    0x58 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
                         }
-                        match child {
-                            Option::Some(frame) => return Option::Some(frame),
-                            Option::None => {},
-                        }
-                        pc = self.pc
-                        gas = self.gas_remaining
-                        if !self.ok() { break }
+                        if !self.pushed((pc - 1) as u256) { break }
                     },
-                    // INVALID (0xfe) and every undefined byte are exceptional halts.
+                    0x59 => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(self.memory_size as u256) { break }
+                    },
+                    0x5a => {
+                        if !spend(mut gas, 2) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.pushed(gas as u256) { break }
+                    },
+                    0x5b => {
+                        if !spend(mut gas, 1) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+},
+                    // The rest charge their base cost from the table and dispatch
+                    // again; those that call out charge more through `self`.
                     _ => {
-                        self.invalid(op)
-                        break
+                        if !spend(mut gas, base_cost(op)) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        match op {
+                        0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0a => {
+                            self.gas_remaining = gas
+                            self.binary_arith_general(op)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x20 => {
+                            self.gas_remaining = gas
+                            self.sha3()
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x31 | 0x3b | 0x3f => {
+                            self.gas_remaining = gas
+                            self.account_field(op, mut state)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x35 => {
+                            self.calldataload(calldata)
+                            if !self.ok() { break }
+                        },
+                        0x37 => {
+                            self.gas_remaining = gas
+                            self.calldatacopy(calldata)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x39 => {
+                            self.gas_remaining = gas
+                            self.codecopy(program)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x3c => {
+                            self.gas_remaining = gas
+                            self.extcodecopy(mut state)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x3e => {
+                            self.gas_remaining = gas
+                            self.returndatacopy()
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x40 => {
+                            let number = self.pop()
+                            if !self.ok() { break }
+                            let hash = if number < block.number && block.number - number <= 256 {
+                                state.block_hash(number)
+                            } else { 0 }
+                            if !self.pushed(hash) { break }
+                        },
+                        0x47 => if !self.pushed(state.balance(call.address)) { break },
+                        0x49 => {
+                            let index = self.pop()
+                            if !self.ok() || !self.pushed(state.blob_hash(index)) { break }
+                        },
+                        0x53 => {
+                            self.gas_remaining = gas
+                            self.mstore8()
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x54 => {
+                            self.gas_remaining = gas
+                            self.sload(call, mut state)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x55 => {
+                            self.gas_remaining = gas
+                            self.sstore(call, mut state)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0x5c => {
+                            self.tload(call, state)
+                            if !self.ok() { break }
+                        },
+                        0x5d => {
+                            self.tstore(call, mut state)
+                            if !self.ok() { break }
+                        },
+                        0x5e => {
+                            self.gas_remaining = gas
+                            self.mcopy()
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0xa0 | 0xa1 | 0xa2 | 0xa3 | 0xa4 => {
+                            self.gas_remaining = gas
+                            self.log((op - 0xa0).downcast_unchecked(), call, mut state)
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        0xf3 => {
+                            self.gas_remaining = gas
+                            self.finish_from_memory(OK)
+                            gas = self.gas_remaining
+                            break
+                        },
+                        0xfd => {
+                            self.gas_remaining = gas
+                            self.finish_from_memory(ERR_REVERT)
+                            gas = self.gas_remaining
+                            break
+                        },
+                        0xff => {
+                            self.gas_remaining = gas
+                            self.selfdestruct(call, mut state)
+                            gas = self.gas_remaining
+                            break
+                        },
+                        0xf0 | 0xf1 | 0xf2 | 0xf4 | 0xf5 | 0xfa => {
+                            self.pc = pc
+                            self.gas_remaining = gas
+                            let child = if op == 0xf0 || op == 0xf5 {
+                                self.start_create(op, call, mut state, depth)
+                            } else {
+                                self.start_call(op, call, mut state, depth)
+                            }
+                            match child {
+                                Option::Some(frame) => return Option::Some(frame),
+                                Option::None => {},
+                            }
+                            pc = self.pc
+                            gas = self.gas_remaining
+                            if !self.ok() { break }
+                        },
+                        // INVALID (0xfe) and every undefined byte are exceptional halts.
+                        _ => {
+                            self.invalid(op)
+                            break
+                        },
+                        }
                     },
                 }
             }
