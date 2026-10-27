@@ -174,16 +174,23 @@ impl Vm {
         self.push(hash.finish_word())
     }
 
+    // An access within active memory needs no charge or growth.
+    fn in_memory(self, _ offset: u256, len: u64) -> bool {
+        let size = self.memory_size()
+        size >= len && offset <= (size - len) as u256
+    }
+
+    fn grow_memory(mut self, _ offset: u256, len: u64) -> bool {
+        match self.plan_memory(offset, len: len as u256, copying: false) {
+            Option::Some(plan,) => self.expand_memory(plan.size),
+            Option::None => false,
+        }
+    }
+
     fn mload(mut self) {
         let offset = self.pop()
-        if !self.ok() { return }
-        match self.plan_memory(offset, len: 32, copying: false) {
-            Option::Some(plan,) => if !self.expand_memory(plan.size) {
-                return
-            },
-            Option::None => {
-                return
-            },
+        if !self.ok() || !self.in_memory(offset, len: 32) && !self.grow_memory(offset, len: 32) {
+            return
         }
         let value = self.memory.read_word(offset.downcast_unchecked())
         self.push(value)
@@ -194,13 +201,8 @@ impl Vm {
         let value = self.pop()
         if !self.ok() { return }
         let len: u64 = if byte_only { 1 } else { 32 }
-        match self.plan_memory(offset, len: len as u256, copying: false) {
-            Option::Some(plan,) => if !self.expand_memory(plan.size) {
-                return
-            },
-            Option::None => {
-                return
-            },
+        if !self.in_memory(offset, len) && !self.grow_memory(offset, len) {
+            return
         }
         let start: usize = offset.downcast_unchecked()
         if byte_only {
