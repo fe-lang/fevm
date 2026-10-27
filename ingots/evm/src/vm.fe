@@ -35,13 +35,30 @@ fn signed_less(_ lhs: u256, _ rhs: u256) -> bool {
     lhs < rhs
 }
 
+// Extends the sign of byte `byte_index`, counting from the least significant,
+// within the 64-bit limb that holds it, so every shift is by a constant or
+// within an i64.
 fn signextend(byte_index: u256, value: u256) -> u256 {
     if byte_index >= 31 {
         return value
     }
-    let bit_index = (byte_index * 8) + 7
-    let mask = (1 << (bit_index + 1)) - 1
-    if ((value >> bit_index) & 1) == 1 { value | !mask } else { value & mask }
+    let index: u64 = byte_index.downcast_unchecked()
+    let shift: i64 = ((7 - index % 8) * 8).downcast_unchecked()
+    match index / 8 {
+        0 => extend_limb(value, shift),
+        1 => (extend_limb(value >> 64, shift) << 64) | (value & 0xffffffffffffffff),
+        2 => (extend_limb(value >> 128, shift) << 128) | (value & 0xffffffffffffffffffffffffffffffff),
+        _ => (extend_limb(value >> 192, shift) << 192) | (value & 0xffffffffffffffffffffffffffffffffffffffffffffffff),
+    }
+}
+
+// The low limb of `word` with bits from `63 - shift` up set to that bit,
+// widened to 256 bits.
+fn extend_limb(_ word: u256, _ shift: i64) -> u256 {
+    let low: u64 = word.downcast_truncate()
+    let narrow: i64 = low.downcast_unchecked()
+    let extended: i256 = ((narrow << shift) >> shift) as i256
+    extended.downcast_unchecked()
 }
 
 fn sar(shift: u256, value: u256) -> u256 {
