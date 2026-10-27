@@ -26,7 +26,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     core::assert(
         vm.status == OK && vm.gas_remaining == 998985,
     )
-    core::assert(vm.memory.len() == 9024 && vm.output.len() == 9000)
+    core::assert(vm.memory_size == 9024 && vm.output.len() == 9000)
     core::assert(vm.output[8999 as usize] == 0xab)
     let memory_capacity = vm.memory.capacity()
     let output_capacity = vm.output.capacity()
@@ -41,7 +41,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     call.gas_limit = 20
     vm.run(small, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.stack.len() == 0)
-    core::assert(vm.memory.len() == 32 && vm.output.len() == 32)
+    core::assert(vm.memory_size == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
     core::assert(vm.output.capacity() == output_capacity)
 
@@ -61,7 +61,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     )
     core::assert(vm.status == OK && vm.gas_remaining == 998994)
     core::assert(
-        vm.memory.len() == 9024 && vm.memory.capacity() == memory_capacity,
+        vm.memory_size == 9024 && vm.memory.capacity() == memory_capacity,
     )
     let result = vm.into_result()
     core::assert(result.output_valid && result.output.len() == 9000)
@@ -91,7 +91,7 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
         mut state,
     )
     core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0)
-    core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
+    core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
     core::assert(vm.output.len() == 0 && vm.output.capacity() == 0)
 
     let stop = Program::copy_from([0 as u8], len: 1)
@@ -99,6 +99,6 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     call.gas_limit = 0
     vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack.len() == 0)
-    core::assert(vm.halted && !vm.output_valid && vm.memory.len() == 0)
+    core::assert(vm.halted && !vm.output_valid && vm.memory_size == 0)
     state.finish(commit: true, gas_spent: 0)
 }

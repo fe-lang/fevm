@@ -84,7 +84,7 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
             var call = default_call_env()
             call.gas_limit = gas
             vm.run(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx)
-            core::assert(vm.memory.len() == 0 && vm.memory.capacity() == 0)
+            core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
             if gas < cost {
                 core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
             } else {

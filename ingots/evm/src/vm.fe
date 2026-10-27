@@ -57,7 +57,10 @@ fn sar(shift: u256, value: u256) -> u256 {
 }
 
 pub struct Vm {
+    // EVM memory is the first `memory_size` bytes of `memory`, whose bytes
+    // past it stay zero, so most growth only moves the size.
     pub memory: MemBuffer,
+    pub memory_size: u64,
     pub output: MemBuffer,
     pub return_data: MemBuffer,
     pub gas_remaining: u64,
@@ -75,6 +78,7 @@ impl Vm {
     pub fn new() -> Self {
         Vm {
             memory: MemBuffer::empty(),
+            memory_size: 0,
             output: MemBuffer::empty(),
             return_data: MemBuffer::empty(),
             gas_remaining: 0,
@@ -145,7 +149,7 @@ impl Vm {
     // Plan and charge before converting EVM words or touching host allocation.
     fn plan_memory(mut self, offset: u256, len: u256, copying: bool) -> Option<MemoryExpansion> {
         // A range within active memory grows nothing; only copy gas applies.
-        let size = self.memory_size()
+        let size = self.memory_size
         let plan = if len <= size as u256 && self.in_memory(offset, len: len.downcast_unchecked()) {
             MemoryExpansion { size, gas: 0 }
         } else {
@@ -179,16 +183,19 @@ impl Vm {
         self.memory.slice(offset: from as usize, len: (to - from) as usize).zero()
     }
 
-    // Gas bounds EVM memory far below 2**64 bytes.
-    fn memory_size(self) -> u64 {
-        self.memory.len().downcast_unchecked()
-    }
-
+    // Grows memory to a planned size, at least its current one. A buffer
+    // too small doubles, or takes just the size if doubling fails.
     fn expand_memory(mut self, _ size: u64) -> bool {
-        if !self.memory.try_resize(size as usize) {
-            self.fault(ERR_HOST_ALLOCATION)
-            return false
+        let len: u64 = self.memory.len().downcast_unchecked()
+        if size > len {
+            let doubled = 2 * len
+            if !(doubled > size && self.memory.try_resize(doubled as usize))
+                && !self.memory.try_resize(size as usize) {
+                self.fault(ERR_HOST_ALLOCATION)
+                return false
+            }
         }
+        self.memory_size = size
         true
     }
 
@@ -197,11 +204,11 @@ impl Vm {
         let len = self.pop()
         if !self.ok() { return }
         // A range within active memory pays only the per-word gas.
-        if len <= self.memory_size() as u256 && self.in_memory(offset, len: len.downcast_unchecked()) {
+        if len <= self.memory_size as u256 && self.in_memory(offset, len: len.downcast_unchecked()) {
             let words: u64 = (len / 32 + if len % 32 == 0 { 0 } else { 1 }).downcast_unchecked()
             if !self.charge(words as u128 * 6) { return }
         } else {
-            match memory_expansion(current: self.memory_size(), offset, len) {
+            match memory_expansion(current: self.memory_size, offset, len) {
                 Option::Some(plan,) => {
                     // A successful plan bounds every nonempty range below 2^42.
                     // Charge the whole operation before allocating or narrowing offsets.
@@ -224,7 +231,7 @@ impl Vm {
 
     // An access within active memory needs no charge or growth.
     fn in_memory(self, _ offset: u256, len: u64) -> bool {
-        let size = self.memory_size()
+        let size = self.memory_size
         size >= len && offset <= (size - len) as u256
     }
 
@@ -235,7 +242,7 @@ impl Vm {
         if offset < SMALL_EXTENT as u256 {
             let start: u64 = offset.downcast_unchecked()
             let size = (start + len + 31) / 32 * 32
-            let gas = small_memory_cost(size) - small_memory_cost(self.memory_size())
+            let gas = small_memory_cost(size) - small_memory_cost(self.memory_size)
             return self.charge(gas as u128) && self.expand_memory(size)
         }
         match self.plan_memory(offset, len: len as u256, copying: false) {
@@ -243,6 +250,7 @@ impl Vm {
             Option::None => false,
         }
     }
+
 
     fn mload(mut self) {
         let offset = self.pop()
@@ -253,20 +261,23 @@ impl Vm {
         self.push(value)
     }
 
-    fn mstore(mut self, byte_only: bool) {
+    fn mstore(mut self) {
         let offset = self.pop()
         let value = self.pop()
-        if !self.ok() { return }
-        let len: u64 = if byte_only { 1 } else { 32 }
-        if !self.in_memory(offset, len) && !self.grow_memory(offset, len) {
+        if !self.ok() || !self.in_memory(offset, len: 32) && !self.grow_memory(offset, len: 32) {
+            return
+        }
+        self.memory.span().write_word(offset: offset.downcast_unchecked(), value)
+    }
+
+    fn mstore8(mut self) {
+        let offset = self.pop()
+        let value = self.pop()
+        if !self.ok() || !self.in_memory(offset, len: 1) && !self.grow_memory(offset, len: 1) {
             return
         }
         let start: usize = offset.downcast_unchecked()
-        if byte_only {
-            self.memory[start] = (value & 255).downcast_unchecked()
-        } else {
-            self.memory.span().write_word(offset: start, value)
-        }
+        self.memory[start] = (value & 255).downcast_unchecked()
     }
 
     fn codecopy(mut self, _ program: Program) {
@@ -304,7 +315,7 @@ impl Vm {
         let source = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        match copy_expansion(current: self.memory_size(), dest, source, len) {
+        match copy_expansion(current: self.memory_size, dest, source, len) {
             Option::Some(plan,) => {
                 if !self.charge_expansion(plan, len, copying: true)
                     || !self.expand_memory(plan.size) {
@@ -678,7 +689,7 @@ impl Vm {
         let offset = self.pop()
         let len = self.pop()
         if !self.ok() { return }
-        let plan = match memory_expansion(current: self.memory_size(), offset, len) {
+        let plan = match memory_expansion(current: self.memory_size, offset, len) {
             Option::Some(plan) => plan,
             Option::None => {
                 self.fault(ERR_OUT_OF_GAS)
@@ -1170,7 +1181,7 @@ impl Vm {
                             self.stack.truncate(len - 2)
                         } else {
                             self.gas_remaining = gas
-                            self.mstore(byte_only: false)
+                            self.mstore()
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         }
@@ -1208,7 +1219,7 @@ impl Vm {
                         }
                     },
                     0x58 => if !self.pushed((pc - 1) as u256) { break },
-                    0x59 => if !self.pushed(self.memory.len() as u256) { break },
+                    0x59 => if !self.pushed(self.memory_size as u256) { break },
                     0x5a => if !self.pushed(gas as u256) { break },
                     0x5b => {},
                     // Arms that call out charge gas beyond the base cost through `self`.
@@ -1273,7 +1284,7 @@ impl Vm {
                     },
                     0x53 => {
                         self.gas_remaining = gas
-                        self.mstore(byte_only: true)
+                        self.mstore8()
                         gas = self.gas_remaining
                         if !self.ok() { break }
                     },
@@ -1413,6 +1424,7 @@ impl Vm {
     fn run_root(mut self, _ program: Program, _ calldata: InputData,
                 _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, creates: bool) {
         self.memory.clear()
+        self.memory_size = 0
         self.output.clear()
         self.return_data.clear()
         self.output_valid = false

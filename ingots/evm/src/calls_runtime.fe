@@ -78,7 +78,7 @@ pub fn call_variants_preserve_environment_and_value() {
             mut tx,
         )
         core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 1)
-        core::assert(vm.return_data.len() == 128 && vm.memory.len() == 128)
+        core::assert(vm.return_data.len() == 128 && vm.memory_size == 128)
         core::assert(
             vm.memory[31] == if op == 0xf2 || op == 0xf4 {
                     0xaa

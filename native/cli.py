@@ -12,7 +12,7 @@ from arith.run import artifacts, command
 
 ROOT = Path(__file__).resolve().parent.parent
 # The bytes of a boxed child `Frame` (packed, with the stack on the heap).
-FRAME_BOX_SIZE = 453
+FRAME_BOX_SIZE = 461
 CASES = [
     ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata]\n'),
     ('empty', [''], 0, 'empty\n'),
