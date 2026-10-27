@@ -104,17 +104,20 @@ impl Vm {
 
     // Plan and charge before converting EVM words or touching host allocation.
     fn plan_memory(mut self, offset: u256, len: u256, copying: bool) -> Option<MemoryExpansion> {
-        match memory_expansion(current: self.memory_size(), offset, len) {
-            Option::Some(plan,) => if self.charge_expansion(plan, len, copying) {
-                Option::Some(plan)
-            } else {
-                Option::None
-            },
-            Option::None => {
-                self.fault(ERR_OUT_OF_GAS)
-                Option::None
-            },
+        // A range within active memory grows nothing; only copy gas applies.
+        let size = self.memory_size()
+        let plan = if len <= size as u256 && self.in_memory(offset, len: len.downcast_unchecked()) {
+            MemoryExpansion { size, gas: 0 }
+        } else {
+            match memory_expansion(current: size, offset, len) {
+                Option::Some(plan,) => plan,
+                Option::None => {
+                    self.fault(ERR_OUT_OF_GAS)
+                    return Option::None
+                },
+            }
         }
+        if self.charge_expansion(plan, len, copying) { Option::Some(plan) } else { Option::None }
     }
 
     fn charge_expansion(mut self, _ plan: MemoryExpansion, len: u256, copying: bool) -> bool {
