@@ -727,21 +727,6 @@ impl Vm {
     }
 }
 
-/// A PUSH immediate within a word of the end of the code, read byte by
-/// byte; bytes past the end read as zero.
-fn read_push_value(_ vm: mut Vm, _ program: Program, _ len: usize) -> u256 {
-    var value: u256 = 0
-    var i: usize = 0
-    while i < len {
-        value = value << 8
-        if vm.pc < program.len() {
-            value |= program.byte_at(vm.pc) as u256
-        }
-        vm.pc += 1
-        i += 1
-    }
-    value
-}
 
 // The root is depth zero; at most 1024 child frames may execute beneath it.
 pub const CALL_DEPTH_LIMIT: usize = 1024
@@ -1101,13 +1086,14 @@ impl Vm {
         // The code cannot change while the frame runs. `pc` and gas live in
         // locals here; `self` holds them only around calls that use them.
         // A frame enters unhalted, and the arms that halt leave the loop.
-        let code = program.bytes()
-        let len = code.len()
+        // Padding stops a frame that runs off the end, so only faults end the loop.
+        let code = program.padded()
         var pc = self.pc
         var gas = self.gas_remaining
-        while pc < len && self.ok() {
+        while self.ok() {
             let op = code.byte_at(pc) as i32
-            pc += 1
+            // `pc` stays within the code and its padding, far from overflow.
+            pc = pc.wrapping_add(1)
             let cost = base_cost(op)
             if cost > gas {
                 self.fault(ERR_OUT_OF_GAS)
@@ -1121,20 +1107,11 @@ impl Vm {
                 },
                 0x5f => self.push(0),
                 0x60 | 0x61 | 0x62 | 0x63 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f => {
+                    // Padding gives every immediate a whole word of code after it.
                     let n: usize = (op - 0x5f).downcast_unchecked()
-                    let value = if pc + 32 <= len {
-                        // An immediate with a whole word of code after it is
-                        // one big-endian read.
-                        let word = code.read_word(pc)
-                        pc += n
-                        word >> ((32 - n) * 8) as u256
-                    } else {
-                        self.pc = pc
-                        let value = read_push_value(mut self, program, n)
-                        pc = self.pc
-                        value
-                    }
-                    self.push(value)
+                    let word = code.read_word(pc)
+                    pc = pc.wrapping_add(n)
+                    self.push(word >> ((32 - n) * 8) as u256)
                 },
                 // Stack and arithmetic opcodes use neither pc nor gas beyond
                 // the base cost, so they skip syncing them through `self`.

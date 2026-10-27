@@ -2,9 +2,15 @@ use core::{MemBuffer, MemSpan, Option}
 use keccak::ByteSource
 use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 
+// Zero bytes after the code: execution that runs off the end reads STOP, and
+// a PUSH32 at the last byte reads its zero-padded immediate in one word, so
+// the dispatch loop checks neither against the code's length.
+const CODE_PADDING: u64 = 33
+
 // Code and its instruction-boundary analysis stay immutable together.
 pub struct Program {
     bytes: MemBuffer,
+    len: usize,
     jumpdests: MemBuffer,
     pub status: i32,
 }
@@ -31,23 +37,31 @@ impl Program {
                 }
             }
         }
-        Self { bytes: input.bytes, jumpdests, status }
+        var bytes = input.bytes
+        if status == OK && !bytes.try_resize((len + CODE_PADDING) as usize) {
+            status = ERR_HOST_ALLOCATION
+        }
+        Self { bytes, len: len as usize, jumpdests, status }
     }
     pub fn copy_from<T: ByteSource>(_ source: T, len: usize) -> Self {
         core::assert((len as u256) <= source.len() as u256)
         Self::new(InputData::copy_from(source, offset: 0, len: len.downcast_unchecked()))
     }
     pub fn len(self) -> usize {
-        self.bytes.len()
+        self.len
     }
     pub fn byte_at(self, _ index: usize) -> u8 {
         self.bytes[index]
     }
     pub fn bytes(self) -> ref MemSpan {
+        self.bytes.slice(offset: 0, len: self.len)
+    }
+    /// The code and the zero padding after it.
+    pub fn padded(self) -> ref MemSpan {
         self.bytes.span()
     }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
-        if self.status != OK || destination >= self.bytes.len() as u256 {
+        if self.status != OK || destination >= self.len as u256 {
             return false
         }
         let pc: usize = destination.downcast_unchecked()
