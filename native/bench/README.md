@@ -20,7 +20,8 @@ more and prints the outcome. The time of a transaction is the CPU time of RUNS
 applications minus that of RUNS setups, divided by RUNS. `--target` sets the
 CPU seconds RUNS aims for and `--repeat` how many timed runs of each mode to
 take the least of. The runner disables glibc heap trimming, which would charge
-setup-only runs for regrowing the heap.
+setup-only runs for regrowing the heap, and serves allocations up to 32 MiB
+from the heap rather than fresh mappings, as a long-running process would.
 
 A case matches when every engine reports the same validity, status (success,
 revert or halt), gas used and logs hash, and the logs hash equals the

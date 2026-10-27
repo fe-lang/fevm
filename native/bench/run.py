@@ -86,8 +86,10 @@ def main():
     parser.add_argument('--select', nargs='*', default=[], help='run cases whose label contains any of these')
     args = parser.parse_args()
     # Freed setup memory would otherwise return to the OS after every run, and
-    # setup-only runs would pay to grow the heap again.
-    os.environ['MALLOC_TRIM_THRESHOLD_'] = str(1 << 40)
+    # setup-only runs would pay to grow the heap again. Fixing the trim
+    # threshold also fixes glibc's otherwise adaptive mmap threshold; at 32 MiB
+    # it keeps large buffers on the heap, reused as in a long-running process.
+    os.environ |= {'MALLOC_TRIM_THRESHOLD_': str(1 << 40), 'MALLOC_MMAP_THRESHOLD_': str(32 << 20)}
     if (args.fe is None) == (args.executable is None):
         parser.error('pass exactly one of --fe and --executable')
     fevm = args.executable
