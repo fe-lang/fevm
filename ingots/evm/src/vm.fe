@@ -1755,6 +1755,8 @@ impl Vm {
         self.next(code, pc.wrapping_add(1), gas, self.stack.len())
     }
 
+    // Growth within the buffer runs inline: past the offset's high limbs,
+    // only its low limb, the sizes and the charge stay live.
     fn op_mstore(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
@@ -1764,29 +1766,23 @@ impl Vm {
         }
         let base = self.stack.ptr()
         let offset = unsafe { *slot(base, depth - 1) }
-        if !self.in_memory(offset, len: 32) {
-            return self.op_mstore_grow(code, pc, gas - 3, depth)
+        if offset >= SMALL_EXTENT as u256 {
+            return self.op_mstore_slow(code, pc, gas - 3, depth)
         }
-        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *slot(base, depth - 2)) }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2)
-    }
-
-    // Growth within the buffer, out of line so the common path keeps fewer
-    // values live. `op_mstore` checked the stack.
-    fn op_mstore_grow(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
-        let base = self.stack.ptr()
-        let offset = unsafe { *slot(base, depth.wrapping_sub(1)) }
-        let size = self.buffered_growth(offset, len: 32)
-        if size == 0 {
-            return self.op_mstore_slow(code, pc, gas, depth)
+        let start: u64 = offset.downcast_unchecked()
+        var gas = gas - 3
+        if start + 32 > self.memory_size {
+            let size = (start + 63) / 32 * 32
+            if size as usize > self.memory.len() {
+                return self.op_mstore_slow(code, pc, gas, depth)
+            }
+            if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+                return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            }
+            self.memory_size = size
         }
-        var gas = gas
-        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
-        }
-        self.memory_size = size
-        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *slot(base, depth.wrapping_sub(2))) }
-        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2))
+        unsafe { self.memory.span().write_be_unchecked(offset: start as usize, value: *slot(base, depth - 2)) }
+        self.next(code, pc.wrapping_add(1), gas, depth - 2)
     }
 
     // Growth past the buffer and offsets past memory, out of line so the
