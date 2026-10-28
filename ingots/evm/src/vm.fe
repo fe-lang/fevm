@@ -1215,8 +1215,38 @@ impl Vm {
             0x7f => self.op_push32(code, pc, gas, depth),
             0x62 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e => self.op_push_wide(code, pc, gas, depth),
             0x50 => self.op_pop(code, pc, gas, depth),
-            0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => self.op_dup(code, pc, gas, depth),
-            0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => self.op_swap(code, pc, gas, depth),
+            0x80 => self.op_dup1(code, pc, gas, depth),
+            0x81 => self.op_dup2(code, pc, gas, depth),
+            0x82 => self.op_dup3(code, pc, gas, depth),
+            0x83 => self.op_dup4(code, pc, gas, depth),
+            0x84 => self.op_dup5(code, pc, gas, depth),
+            0x85 => self.op_dup6(code, pc, gas, depth),
+            0x86 => self.op_dup7(code, pc, gas, depth),
+            0x87 => self.op_dup8(code, pc, gas, depth),
+            0x88 => self.op_dup9(code, pc, gas, depth),
+            0x89 => self.op_dup10(code, pc, gas, depth),
+            0x8a => self.op_dup11(code, pc, gas, depth),
+            0x8b => self.op_dup12(code, pc, gas, depth),
+            0x8c => self.op_dup13(code, pc, gas, depth),
+            0x8d => self.op_dup14(code, pc, gas, depth),
+            0x8e => self.op_dup15(code, pc, gas, depth),
+            0x8f => self.op_dup16(code, pc, gas, depth),
+            0x90 => self.op_swap1(code, pc, gas, depth),
+            0x91 => self.op_swap2(code, pc, gas, depth),
+            0x92 => self.op_swap3(code, pc, gas, depth),
+            0x93 => self.op_swap4(code, pc, gas, depth),
+            0x94 => self.op_swap5(code, pc, gas, depth),
+            0x95 => self.op_swap6(code, pc, gas, depth),
+            0x96 => self.op_swap7(code, pc, gas, depth),
+            0x97 => self.op_swap8(code, pc, gas, depth),
+            0x98 => self.op_swap9(code, pc, gas, depth),
+            0x99 => self.op_swap10(code, pc, gas, depth),
+            0x9a => self.op_swap11(code, pc, gas, depth),
+            0x9b => self.op_swap12(code, pc, gas, depth),
+            0x9c => self.op_swap13(code, pc, gas, depth),
+            0x9d => self.op_swap14(code, pc, gas, depth),
+            0x9e => self.op_swap15(code, pc, gas, depth),
+            0x9f => self.op_swap16(code, pc, gas, depth),
             0x01 => self.op_add(code, pc, gas, depth),
             0x02 => self.op_mul(code, pc, gas, depth),
             0x03 => self.op_sub(code, pc, gas, depth),
@@ -1478,12 +1508,76 @@ impl Vm {
         self.next(code, pc.wrapping_add(1), gas - 2, depth - 1)
     }
 
-    fn op_dup(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+    fn op_dup1(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 1)
+    }
+
+    fn op_dup2(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 2)
+    }
+
+    fn op_dup3(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 3)
+    }
+
+    fn op_dup4(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 4)
+    }
+
+    fn op_dup5(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 5)
+    }
+
+    fn op_dup6(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 6)
+    }
+
+    fn op_dup7(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 7)
+    }
+
+    fn op_dup8(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 8)
+    }
+
+    fn op_dup9(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 9)
+    }
+
+    fn op_dup10(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 10)
+    }
+
+    fn op_dup11(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 11)
+    }
+
+    fn op_dup12(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 12)
+    }
+
+    fn op_dup13(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 13)
+    }
+
+    fn op_dup14(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 14)
+    }
+
+    fn op_dup15(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 15)
+    }
+
+    fn op_dup16(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_dup_n(code, pc, gas, depth, n: 16)
+    }
+
+    // Each DUP and SWAP has a handler of its own, so its depth is a constant.
+    #[inline(always)]
+    fn op_dup_n(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, n: usize) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
-        // The low nibble of DUP1..DUP16 is the depth less one.
-        let n = ((unsafe { read_code<u8>(code, pc) } & 0x0f) + 1) as usize
         if depth < n {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
         }
@@ -1491,11 +1585,75 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(1), gas - 3, depth, value)
     }
 
-    fn op_swap(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+    fn op_swap1(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 1)
+    }
+
+    fn op_swap2(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 2)
+    }
+
+    fn op_swap3(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 3)
+    }
+
+    fn op_swap4(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 4)
+    }
+
+    fn op_swap5(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 5)
+    }
+
+    fn op_swap6(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 6)
+    }
+
+    fn op_swap7(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 7)
+    }
+
+    fn op_swap8(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 8)
+    }
+
+    fn op_swap9(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 9)
+    }
+
+    fn op_swap10(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 10)
+    }
+
+    fn op_swap11(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 11)
+    }
+
+    fn op_swap12(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 12)
+    }
+
+    fn op_swap13(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 13)
+    }
+
+    fn op_swap14(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 14)
+    }
+
+    fn op_swap15(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 15)
+    }
+
+    fn op_swap16(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_swap_n(code, pc, gas, depth, n: 16)
+    }
+
+    #[inline(always)]
+    fn op_swap_n(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, n: usize) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
-        let n = ((unsafe { read_code<u8>(code, pc) } & 0x0f) + 1) as usize
         if depth <= n {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
         }
