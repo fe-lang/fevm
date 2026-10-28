@@ -6,7 +6,7 @@ use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, T
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, InputData, Program, default_block_env, default_call_env, empty_bytes}
-use ingot::vm::Vm
+use ingot::vm::{FrameBuffers, Vm}
 
 // MSTORE8(0, first); RETURN(0, 1): deploys the one-byte code `first`.
 fn initcode(_ first: u8) -> [u8; 10] { [0x60, first, 0x60, 0, 0x53, 0x60, 1, 0x60, 0, 0xf3] }
@@ -112,7 +112,8 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
         gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 5,
     }
     let request = TxRequest::new(env, data: empty_bytes())
-    let applied = transact(world, request, block)
+    var buffers = FrameBuffers::new()
+    let applied = transact(world, request, block, mut buffers)
     // 21,000 intrinsic plus PUSH1, PUSH0 and a cold zero-to-nonzero SSTORE.
     let used: u64 = 21000 + 3 + 2 + 22100
     let receipt = applied.receipt
@@ -124,7 +125,7 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     core::assert(state.balance(0xc0) == used as u256 * 2)
     env.nonce = 0
     let replay = TxRequest::new(env, data: empty_bytes())
-    let rejected = transact(state, replay, block)
+    let rejected = transact(state, replay, block, mut buffers)
     core::assert(rejected.receipt.invalid == INVALID_NONCE && rejected.state.nonce(0x1000) == 1)
 }
 
@@ -140,14 +141,16 @@ fn transact_calls_accounts_without_code_in_a_world_without_code() {
         gas_price: 1, max_priority_fee_per_gas: 1, max_fee_per_blob_gas: 0, value: 5,
     }
     let request = TxRequest::new(env, data: empty_bytes())
-    let applied = transact(world, request, block)
+    var buffers = FrameBuffers::new()
+    let applied = transact(world, request, block, mut buffers)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
     core::assert(applied.receipt.gas_used == 21000 && applied.state.balance(0xdd) == 5)
     core::assert(applied.state.balance(0x1000) == 1_000_000 - 21000 - 5)
 }
 
 fn send(_ world: own WorldState, _ env: TxEnv, _ block: BlockEnv) -> Applied {
-    transact(world, TxRequest::new(env, data: empty_bytes()), block)
+    var buffers = FrameBuffers::new()
+    transact(world, TxRequest::new(env, data: empty_bytes()), block, mut buffers)
 }
 
 #[test]
@@ -162,7 +165,8 @@ fn transact_rejects_blob_hashes_outside_blob_transactions() {
     }
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_blob_hash((1 as u256) << 248))
-    let rejected = transact(world, request, block)
+    var buffers = FrameBuffers::new()
+    let rejected = transact(world, request, block, mut buffers)
     core::assert(rejected.receipt.invalid == INVALID_TX_TYPE)
     core::assert(rejected.state.balance(0x1000) == 1_000_000_000_000 && rejected.state.nonce(0x1000) == 0)
 }

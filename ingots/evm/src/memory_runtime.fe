@@ -2,7 +2,7 @@ use ingot::transaction::Transaction
 use ingot::constants::{ERR_OUT_OF_GAS, OK}
 use ingot::state::WorldState
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
-use ingot::vm::Vm
+use ingot::vm::{Vm, execute, execute_vm}
 
 #[test]
 fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
@@ -63,7 +63,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     core::assert(
         vm.memory_size == 9024 && vm.memory.capacity() == memory_capacity,
     )
-    let result = vm.into_result()
+    let result = vm.into_result(mut state.frame_buffers())
     core::assert(result.output_valid && result.output.len() == 9000)
     for byte in result.output.span() {
         core::assert(byte == 0)
@@ -100,5 +100,24 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack.len() == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory_size == 0)
+    state.finish(commit: true, gas_spent: 0)
+}
+
+#[test]
+fn frames_take_over_finished_frames_memory_zeroed() {
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    // PUSH1 0x2a PUSH0 MSTORE: leaves a nonzero word in memory.
+    let store = Program::copy_from([0x60 as u8, 0x2a, 0x5f, 0x52], len: 4)
+    let stored = execute(store, empty_bytes(), default_call_env(), default_block_env(), mut state)
+    core::assert(stored.status == OK)
+    // STOP: a frame that touches no memory still holds the first one's buffer.
+    let stop = Program::copy_from([0 as u8], len: 1)
+    let vm = execute_vm(stop, empty_bytes(), default_call_env(), default_block_env(), mut state)
+    core::assert(vm.memory_size == 0 && vm.memory.capacity() != 0 && vm.stack.capacity() != 0)
+    vm.into_result(mut state.frame_buffers())
+    // PUSH0 MLOAD: the reused memory reads zero.
+    let load = Program::copy_from([0x5f as u8, 0x51], len: 2)
+    let loaded = execute(load, empty_bytes(), default_call_env(), default_block_env(), mut state)
+    core::assert(loaded.status == OK && loaded.stack_top == 0)
     state.finish(commit: true, gas_spent: 0)
 }

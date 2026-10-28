@@ -2,7 +2,7 @@ use std::io::{Read, Write, host, read_char, write, write_char}
 use core::{MemBuffer, Option}
 use std::native::Args
 use keccak::Keccak256
-use fevm::{BlockEnv, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{BlockEnv, FrameBuffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
 use fevm::hex::{parse_decimal, write_hex_byte, write_hex_word}
 
 // Reads one case: a version byte, the block, the pre-state accounts and the
@@ -239,6 +239,8 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     // Every repeated application must use the gas the reported one does.
     var repeated_gas: u64 = 0
     var repeated = false
+    // Repeated applications reuse the frames' memory and stacks.
+    var buffers = FrameBuffers::new()
     while true {
         reader.position = 0
         core::assert(reader.word(bytes: 1) == 1)
@@ -316,14 +318,14 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
         if runs > 0 {
             runs -= 1
             if execute {
-                let gas = transact(world, request, block).receipt.gas_used
+                let gas = transact(world, request, block, mut buffers).receipt.gas_used
                 core::assert(!repeated || gas == repeated_gas)
                 repeated_gas = gas
                 repeated = true
             }
             continue
         }
-        let applied = transact(world, request, block)
+        let applied = transact(world, request, block, mut buffers)
         let receipt = applied.receipt
         core::assert(!repeated || receipt.gas_used == repeated_gas)
         with (Write = host()) {

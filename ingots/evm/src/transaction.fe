@@ -5,6 +5,7 @@ use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::gas::{StorageCharge, storage_charge}
+use ingot::vm::FrameBuffers
 use fevm_precompiles::is_precompile
 
 const BALANCE: u8 = 0
@@ -52,6 +53,8 @@ pub struct Transaction {
     started: bool,
     depth: usize,
     is_static: bool,
+    // Lent by the caller for the transaction's frames.
+    frame_buffers: FrameBuffers,
 }
 
 impl Transaction {
@@ -77,7 +80,17 @@ impl Transaction {
             started: false,
             depth: 0,
             is_static: false,
+            frame_buffers: FrameBuffers::new(),
         }
+    }
+
+    pub fn frame_buffers(mut self) -> mut FrameBuffers { mut self.frame_buffers }
+
+    /// Exchanges the frame buffers with `buffers`: lends the caller's pool to
+    /// the transaction's frames, and a second exchange returns it.
+    pub fn swap_frame_buffers(mut self, _ buffers: mut FrameBuffers) {
+        let lent = core::mem::replace(mut buffers, FrameBuffers::new())
+        buffers = core::mem::replace(mut self.frame_buffers, lent)
     }
 
     pub fn logs(self) -> ref LogBuffer { ref self.logs }

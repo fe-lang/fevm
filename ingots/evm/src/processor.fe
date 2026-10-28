@@ -5,7 +5,7 @@ use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program}
-use ingot::vm::{Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
+use ingot::vm::{FrameBuffers, Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
 use fevm_precompiles::is_precompile
 
 // Transaction envelope kinds.
@@ -224,7 +224,7 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         var vm = Vm::new()
         vm.create(program, call, block, mut tx)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-        return vm.into_result()
+        return vm.into_result(mut tx.frame_buffers())
     }
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
@@ -242,13 +242,14 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
     var vm = Vm::new()
     vm.run(program, request.data(), call, block, mut tx)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-    vm.into_result()
+    vm.into_result(mut tx.frame_buffers())
 }
 
 /// Validate and execute one Cancun transaction against `world`. Valid
 /// transactions pay for gas, run their message, refund unused and refunded gas
 /// to the sender, pay the priority fee to the coinbase, and settle deletions.
-pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv) -> Applied {
+/// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
+pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ buffers: mut FrameBuffers) -> Applied {
     let env = request.env
     let invalid = validate(world, request, block)
     if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
@@ -257,12 +258,14 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
     let intrinsic: u64 = intrinsic_gas(request).downcast_unchecked()
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
+    tx.swap_frame_buffers(mut buffers)
     let prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
         gasprice: price, gas_limit: env.gas_limit - intrinsic, is_static: false,
     }
     let result = if prepared == OK { execute_message(mut tx, request, call, block) } else { status_result(prepared) }
+    tx.swap_frame_buffers(mut buffers)
     if !is_evm_outcome(result.status) && result.status != ERR_ADDRESS_COLLISION {
         return host_failure(tx, status: result.status)
     }

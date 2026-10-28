@@ -1,5 +1,5 @@
 use std::native::Args
-use fevm::{OK, WorldState, default_block_env, empty_bytes}
+use fevm::{FrameBuffers, OK, WorldState, default_block_env, empty_bytes}
 use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, VALID, transact}
 
 // Runs the given number of transactions against one world in one process.
@@ -27,12 +27,13 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     var nonce: u256 = 0
+    var buffers = FrameBuffers::new()
     while nonce < count {
         let env = TxEnv {
             kind: TX_LEGACY, sender: 0x1000, to: 0xaa, creates: false, nonce, gas_limit: 1_000_000,
             gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
         }
-        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block)
+        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block, mut buffers)
         core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
         core::assert(applied.receipt.logs.len() == 1)
         world = applied.state

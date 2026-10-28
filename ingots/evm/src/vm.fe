@@ -173,6 +173,21 @@ fn sar(shift: u256, value: u256) -> u256 {
     }
 }
 
+/// Memory and stacks of finished frames, which later frames take over with
+/// the capacity they grew. Frames nest, so each call depth tends to get back
+/// its last frame's buffers, and a caller that keeps the pool across
+/// transactions allocates them once.
+pub struct FrameBuffers {
+    memories: MemVec<MemBuffer>,
+    stacks: MemVec<MemVec<u256>>,
+}
+
+impl FrameBuffers {
+    pub fn new() -> Self {
+        FrameBuffers { memories: MemVec::new(), stacks: MemVec::new() }
+    }
+}
+
 pub struct Vm {
     // EVM memory is the first `memory_size` bytes of `memory`, whose bytes
     // past it stay zero, so most growth only moves the size.
@@ -217,6 +232,23 @@ impl Vm {
 
     fn ok(self) -> bool {
         self.status == OK
+    }
+
+    // A frame that has allocated nothing takes over a finished frame's
+    // memory and stack, which hold no bytes or words.
+    fn adopt(mut self, _ buffers: mut FrameBuffers) {
+        if self.memory.capacity() == 0 {
+            match buffers.memories.pop() {
+                Option::Some(memory) => self.memory = memory,
+                Option::None => {},
+            }
+        }
+        if self.stack.capacity() == 0 {
+            match buffers.stacks.pop() {
+                Option::Some(stack) => self.stack = stack,
+                Option::None => {},
+            }
+        }
     }
 
     fn fault(mut self, _ status: i32) {
@@ -858,7 +890,7 @@ impl Frame {
         if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         if self.vm.status == OK { state.commit(self.checkpoint) }
         else { state.revert(self.checkpoint) }
-        ChildResult { result: self.vm.into_result(), offset: self.output_offset, len: self.output_len, creates, address }
+        ChildResult { result: self.vm.into_result(mut state.frame_buffers()), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
     fn abort(own self, _ state: mut Transaction) {
@@ -2423,6 +2455,8 @@ impl Vm {
         while true {
             match next {
                 Option::Some(frame) => {
+                    var frame = frame
+                    frame.vm.adopt(mut state.frame_buffers())
                     let unstored = match Box::try_new(frame) {
                         Result::Ok(boxed) => match frames.try_push(boxed) {
                             Result::Ok(()) => Option::None,
@@ -2469,6 +2503,7 @@ impl Vm {
 
     fn run_root(mut self, _ program: Program, _ calldata: InputData,
                 _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, creates: bool) {
+        self.adopt(mut state.frame_buffers())
         self.memory.clear()
         self.memory_size = 0
         self.output.clear()
@@ -2499,12 +2534,22 @@ impl Vm {
             state.revert(checkpoint)
         }
     }
-    pub fn into_result(own self) -> ExecutionResult {
+    /// The frame's result. Its memory and stack, emptied, go to `buffers`.
+    pub fn into_result(var own self, _ buffers: mut FrameBuffers) -> ExecutionResult {
         let stack_len = self.stack.len()
         let stack_top: u256 = if stack_len == 0 {
             0
         } else {
             self.stack[stack_len - 1]
+        }
+        self.memory.clear()
+        self.stack.clear()
+        // A pool that cannot grow drops them.
+        if self.memory.capacity() != 0 {
+            let _ = buffers.memories.try_push(core::mem::replace(mut self.memory, MemBuffer::empty()))
+        }
+        if self.stack.capacity() != 0 {
+            let _ = buffers.stacks.try_push(core::mem::replace(mut self.stack, MemVec::new()))
         }
         ExecutionResult {
             status: self.status,
@@ -2538,5 +2583,5 @@ pub fn execute(
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> ExecutionResult {
-    execute_vm(program, calldata, call, block, mut state).into_result()
+    execute_vm(program, calldata, call, block, mut state).into_result(mut state.frame_buffers())
 }
