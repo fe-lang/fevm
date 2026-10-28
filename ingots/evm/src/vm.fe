@@ -1,7 +1,9 @@
 use core::{Box, MemBuffer, MemVec, Option, Result}
+use core::num::{IntWord, from_be}
+use core::ptr::{cast, offset_bytes}
 use keccak::Keccak256
 use ingot::memory::{
-    MemoryExpansion, SMALL_EXTENT, memory_expansion, copy_expansion, copy_gas, small_memory_cost,
+    MemoryExpansion, SMALL_EXTENT, memory_expansion, copy_expansion, copy_gas, small_growth_cost,
 }
 use ingot::gas::base_cost
 use ingot::state::address_word
@@ -37,6 +39,53 @@ fn spend(_ gas: mut u64, _ cost: u64) -> bool {
     }
     gas -= cost
     true
+}
+
+/// The big-endian `T` at `offset` bytes into `code`, which holds all of it.
+#[inline(always)]
+unsafe fn read_code<T: IntWord>(_ code: *u8, _ offset: usize) -> T {
+    from_be(*cast<u8, T>(offset_bytes(code, offset)))
+}
+
+/// Binary opcode `op`'s result, or `None` for other opcodes.
+#[inline(always)]
+fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
+    Option::Some(match op {
+        0x01 => lhs.wrapping_add(rhs),
+        0x02 => lhs.wrapping_mul(rhs),
+        0x03 => lhs.wrapping_sub(rhs),
+        0x10 => if lhs < rhs { 1 } else { 0 },
+        0x11 => if lhs > rhs { 1 } else { 0 },
+        0x14 => if lhs == rhs { 1 } else { 0 },
+        0x16 => lhs & rhs,
+        0x17 => lhs | rhs,
+        0x18 => lhs ^ rhs,
+        0x1b => if lhs >= 256 { 0 } else { rhs << lhs },
+        0x1c => if lhs >= 256 { 0 } else { rhs >> lhs },
+        0x12 => if signed_less(lhs, rhs) { 1 } else { 0 },
+        0x13 => if signed_less(rhs, lhs) { 1 } else { 0 },
+        0x1a => if lhs >= 32 { 0 } else { (rhs >> ((31 - lhs) * 8)) & 255 },
+        0x0b => signextend(byte_index: lhs, value: rhs),
+        0x1d => sar(shift: lhs, value: rhs),
+        _ => return Option::None,
+    })
+}
+
+/// Unary opcode `op`'s result, or `None` for other opcodes.
+#[inline(always)]
+fn unary_result(_ op: i32, _ value: u256) -> Option<u256> {
+    match op {
+        0x15 => Option::Some(if value == 0 { 1 } else { 0 }),
+        0x19 => Option::Some(!value),
+        _ => Option::None,
+    }
+}
+
+/// Word `index` of the handlers' stack, which stays below its reserved
+/// `STACK_LIMIT` words.
+#[inline(always)]
+fn slot(_ base: *u256, _ index: usize) -> *u256 {
+    offset_bytes(base, index.wrapping_mul(32))
 }
 
 fn signed_less(_ lhs: u256, _ rhs: u256) -> bool {
@@ -99,6 +148,10 @@ pub struct Vm {
     pub status: i32,
     pub halted: bool,
     pub unsupported_opcode: i32,
+    // The running code's JUMPDEST bitmap and the length it covers, which
+    // `run_until_child` sets for the opcode handlers.
+    jumpdests: *u8,
+    jump_limit: usize,
 }
 
 impl Vm {
@@ -116,6 +169,8 @@ impl Vm {
             status: OK,
             halted: false,
             unsupported_opcode: 0,
+            jumpdests: (0 as usize) as *u8,
+            jump_limit: 0,
         }
     }
 
@@ -281,7 +336,7 @@ impl Vm {
         if offset < SMALL_EXTENT as u256 {
             let start: u64 = offset.downcast_unchecked()
             let size = (start + len + 31) / 32 * 32
-            let gas = small_memory_cost(size) - small_memory_cost(self.memory_size)
+            let gas = small_growth_cost(current: self.memory_size, size)
             return self.charge(gas as u128) && self.expand_memory(size)
         }
         match self.plan_memory(offset, len: len as u256, copying: false) {
@@ -506,32 +561,22 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let lhs = self.stack[len - 1]
-        let rhs = self.stack[len - 2]
-        let result: u256 = match op {
-            0x01 => lhs.wrapping_add(rhs),
-            0x02 => lhs.wrapping_mul(rhs),
-            0x03 => lhs.wrapping_sub(rhs),
-            0x10 => if lhs < rhs { 1 } else { 0 },
-            0x11 => if lhs > rhs { 1 } else { 0 },
-            0x14 => if lhs == rhs { 1 } else { 0 },
-            0x16 => lhs & rhs,
-            0x17 => lhs | rhs,
-            0x18 => lhs ^ rhs,
-            0x1b => if lhs >= 256 { 0 } else { rhs << lhs },
-            0x1c => if lhs >= 256 { 0 } else { rhs >> lhs },
-            0x12 => if signed_less(lhs, rhs) { 1 } else { 0 },
-            0x13 => if signed_less(rhs, lhs) { 1 } else { 0 },
-            0x1a => if lhs >= 32 { 0 } else { (rhs >> ((31 - lhs) * 8)) & 255 },
-            0x0b => signextend(byte_index: lhs, value: rhs),
-            0x1d => sar(shift: lhs, value: rhs),
-            _ => {
+        // `len` covers both operands.
+        let lhs = unsafe { self.stack.get_unchecked(len - 1) }
+        let rhs = unsafe { self.stack.get_unchecked(len - 2) }
+        let result = match binary_result(op, lhs, rhs) {
+            Option::Some(result) => result,
+            Option::None => {
                 self.invalid(op)
                 return false
             },
         }
-        self.stack.truncate(len - 1)
-        self.stack[len - 2] = result
+        // The result is stored before the stack shrinks, so no store comes
+        // between the operands' loads and the operation that reads them.
+        unsafe {
+            self.stack.set_unchecked(len - 2, result)
+            self.stack.truncate_unchecked(len - 1)
+        }
         true
     }
 
@@ -606,15 +651,15 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let value = self.stack[len - 1]
-        self.stack[len - 1] = match op {
-            0x15 => if value == 0 { 1 } else { 0 },
-            0x19 => !value,
-            _ => {
+        let value = unsafe { self.stack.get_unchecked(len - 1) }
+        let result = match unary_result(op, value) {
+            Option::Some(result) => result,
+            Option::None => {
                 self.invalid(op)
                 return false
             },
         }
+        unsafe { self.stack.set_unchecked(len - 1, result) }
         true
     }
 
@@ -625,7 +670,7 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let value = self.stack[len - index]
+        let value = unsafe { self.stack.get_unchecked(len - index) }
         self.pushed(value)
     }
 
@@ -636,7 +681,13 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        self.stack.swap(len - 1, len - 1 - index)
+        unsafe {
+            let top = self.stack.get_unchecked(len.wrapping_sub(1))
+            // `len` exceeds `index`, so neither subtraction wraps.
+            let other = self.stack.get_unchecked(len.wrapping_sub(1).wrapping_sub(index))
+            self.stack.set_unchecked(len.wrapping_sub(1), other)
+            self.stack.set_unchecked(len.wrapping_sub(1).wrapping_sub(index), top)
+        }
         true
     }
 
@@ -1122,6 +1173,491 @@ impl Vm {
         if self.ok() { self.halted = true }
     }
 
+    // Opcodes that need nothing but the stack, memory and the code run as
+    // handlers, each of which ends by dispatching the next opcode itself, so
+    // dispatch is one indirect tail call and `pc`, gas and the stack depth
+    // stay in argument registers instead of a loop body Cranelift spills
+    // them across. Each handler gets the opcode's own `pc`. `self.stack`'s
+    // length is stale while they run: they keep `depth` words initialized
+    // from `self.stack.ptr()` up, and store it with `pc` and gas when the
+    // frame stops, reaches an opcode `run_until_child` runs, or calls code
+    // that uses the stack. `pc` stays within the code and its padding, far
+    // from overflow.
+    #[inline(never)]
+    fn dispatch(mut self, _ code: *u8, _ pc: usize, _ gas: u64) {
+        self.next(code, pc, gas, self.stack.len())
+    }
+
+    // Every arm tail-calls a handler with the same arguments, which Sonatina
+    // turns into a table of handlers.
+    #[inline(always)]
+    fn next(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        let op = unsafe { read_code<u8>(code, pc) } as i32
+        match op {
+            0x00 => self.op_stop(code, pc, gas, depth),
+            0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0a => self.op_general(code, pc, gas, depth),
+            0x5f => self.op_push0(code, pc, gas, depth),
+            0x60 => self.op_push1(code, pc, gas, depth),
+            0x61 => self.op_push2(code, pc, gas, depth),
+            0x63 => self.op_push4(code, pc, gas, depth),
+            0x7f => self.op_push32(code, pc, gas, depth),
+            0x62 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e => self.op_push_wide(code, pc, gas, depth),
+            0x50 => self.op_pop(code, pc, gas, depth),
+            0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87 | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f => self.op_dup(code, pc, gas, depth),
+            0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f => self.op_swap(code, pc, gas, depth),
+            0x01 => self.op_add(code, pc, gas, depth),
+            0x02 => self.op_mul(code, pc, gas, depth),
+            0x03 => self.op_sub(code, pc, gas, depth),
+            0x0b => self.op_signextend(code, pc, gas, depth),
+            0x10 => self.op_lt(code, pc, gas, depth),
+            0x11 => self.op_gt(code, pc, gas, depth),
+            0x12 => self.op_slt(code, pc, gas, depth),
+            0x13 => self.op_sgt(code, pc, gas, depth),
+            0x14 => self.op_eq(code, pc, gas, depth),
+            0x15 => self.op_iszero(code, pc, gas, depth),
+            0x16 => self.op_and(code, pc, gas, depth),
+            0x17 => self.op_or(code, pc, gas, depth),
+            0x18 => self.op_xor(code, pc, gas, depth),
+            0x19 => self.op_not(code, pc, gas, depth),
+            0x1a => self.op_byte(code, pc, gas, depth),
+            0x1b => self.op_shl(code, pc, gas, depth),
+            0x1c => self.op_shr(code, pc, gas, depth),
+            0x1d => self.op_sar(code, pc, gas, depth),
+            0x51 => self.op_mload(code, pc, gas, depth),
+            0x52 => self.op_mstore(code, pc, gas, depth),
+            0x56 => self.op_jump(code, pc, gas, depth),
+            0x57 => self.op_jumpi(code, pc, gas, depth),
+            0x58 => self.op_pc(code, pc, gas, depth),
+            0x59 => self.op_msize(code, pc, gas, depth),
+            0x5a => self.op_gas(code, pc, gas, depth),
+            0x5b => self.op_jumpdest(code, pc, gas, depth),
+            _ => self.op_other(code, pc, gas, depth),
+        }
+    }
+
+    // The handlers that leave stay out of line, so every arm of `next` is a
+    // tail call.
+    #[inline(never)]
+    fn op_stop(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.halted = true
+        self.stopped_at(pc.wrapping_add(1), gas, depth)
+    }
+
+    // Leaves the opcode to `run_until_child`.
+    #[inline(never)]
+    fn op_other(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.stopped_at(pc, gas, depth)
+    }
+
+    fn op_add(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x01)
+    }
+
+    fn op_mul(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x02)
+    }
+
+    fn op_sub(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x03)
+    }
+
+    fn op_signextend(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x0b)
+    }
+
+    fn op_lt(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x10)
+    }
+
+    fn op_gt(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x11)
+    }
+
+    fn op_slt(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x12)
+    }
+
+    fn op_sgt(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x13)
+    }
+
+    fn op_eq(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x14)
+    }
+
+    fn op_and(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x16)
+    }
+
+    fn op_or(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x17)
+    }
+
+    fn op_xor(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x18)
+    }
+
+    fn op_byte(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x1a)
+    }
+
+    fn op_shl(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x1b)
+    }
+
+    fn op_shr(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x1c)
+    }
+
+    fn op_sar(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 3, op: 0x1d)
+    }
+
+    fn op_iszero(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_unary(code, pc, gas, depth, op: 0x15)
+    }
+
+    fn op_not(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_unary(code, pc, gas, depth, op: 0x19)
+    }
+
+    // Division, modular arithmetic and EXP call out, but stay in the
+    // handlers rather than returning to `run_until_child` for each opcode.
+    fn op_general(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        let op = unsafe { read_code<u8>(code, pc) } as i32
+        let cost = base_cost(op)
+        if gas < cost {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.gas_remaining = gas - cost
+        unsafe { self.stack.set_len(depth) }
+        self.binary_arith_general(op)
+        let gas = self.gas_remaining
+        if !self.ok() {
+            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
+        }
+        self.next(code, pc.wrapping_add(1), gas, self.stack.len())
+    }
+
+    fn stopped_at(mut self, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.pc = pc
+        self.gas_remaining = gas
+        // The handlers kept `depth` words initialized, within the reserved
+        // `STACK_LIMIT`.
+        unsafe { self.stack.set_len(depth) }
+    }
+
+    fn faulted_at(mut self, _ status: i32, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.fault(status)
+        self.stopped_at(pc, gas, depth)
+    }
+
+    // Pushes `value` and runs the opcode at `pc`, the one after the push.
+    #[inline(always)]
+    fn push_next(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ value: u256) {
+        if depth >= STACK_LIMIT {
+            return self.faulted_at(ERR_STACK_OVERFLOW, pc, gas, depth)
+        }
+        unsafe { *slot(self.stack.ptr(), depth) = value }
+        self.next(code, pc, gas, depth + 1)
+    }
+
+    fn op_push0(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, 0)
+    }
+
+    // The common widths read just their immediate; padding gives every
+    // immediate a whole word of code after it.
+    fn op_push1(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let value = unsafe { read_code<u8>(code, pc.wrapping_add(1)) }
+        self.push_next(code, pc.wrapping_add(2), gas - 3, depth, value as u256)
+    }
+
+    fn op_push2(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let value = unsafe { read_code<u16>(code, pc.wrapping_add(1)) }
+        self.push_next(code, pc.wrapping_add(3), gas - 3, depth, value as u256)
+    }
+
+    fn op_push4(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let value = unsafe { read_code<u32>(code, pc.wrapping_add(1)) }
+        self.push_next(code, pc.wrapping_add(5), gas - 3, depth, value as u256)
+    }
+
+    fn op_push32(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let value = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
+        self.push_next(code, pc.wrapping_add(33), gas - 3, depth, value)
+    }
+
+    fn op_push_wide(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let op = unsafe { read_code<u8>(code, pc) }
+        let n: usize = (op.wrapping_sub(0x5f) & 0x1f) as usize
+        let word = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
+        self.push_next(code, pc.wrapping_add(1 + n), gas - 3, depth, word >> ((32 - n) * 8) as u256)
+    }
+
+    fn op_pop(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 2, depth)
+        }
+        self.next(code, pc.wrapping_add(1), gas - 2, depth - 1)
+    }
+
+    fn op_dup(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        // The low nibble of DUP1..DUP16 is the depth less one.
+        let n = ((unsafe { read_code<u8>(code, pc) } & 0x0f) + 1) as usize
+        if depth < n {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let value = unsafe { *slot(self.stack.ptr(), depth - n) }
+        self.push_next(code, pc.wrapping_add(1), gas - 3, depth, value)
+    }
+
+    fn op_swap(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        let n = ((unsafe { read_code<u8>(code, pc) } & 0x0f) + 1) as usize
+        if depth <= n {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let base = self.stack.ptr()
+        unsafe {
+            let top = slot(base, depth - 1)
+            let other = slot(base, depth - 1 - n)
+            let value = *top
+            *top = *other
+            *other = value
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth)
+    }
+
+    #[inline(always)]
+    fn op_unary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, op: i32) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let top = slot(self.stack.ptr(), depth - 1)
+        match unary_result(op, unsafe { *top }) {
+            Option::Some(result) => unsafe { *top = result },
+            Option::None => {},
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth)
+    }
+
+    // Each binary and unary opcode has a handler of its own, which inlines
+    // its one operation.
+    #[inline(always)]
+    fn op_binary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, cost: u64, op: i32) {
+        if gas < cost {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - cost, depth)
+        }
+        // The top word is the first operand; the result replaces the second.
+        let second = slot(self.stack.ptr(), depth - 2)
+        unsafe {
+            match binary_result(op, *offset_bytes(second, 32), *second) {
+                Option::Some(result) => *second = result,
+                Option::None => {},
+            }
+        }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 1)
+    }
+
+    fn op_mload(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let top = slot(self.stack.ptr(), depth - 1)
+        let offset = unsafe { *top }
+        if !self.in_memory(offset, len: 32) {
+            return self.op_mload_grow(code, pc, gas - 3, depth)
+        }
+        unsafe { *top = self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth)
+    }
+
+    // Growth within the buffer, out of line so the common path keeps fewer
+    // values live. `op_mload` checked the stack.
+    fn op_mload_grow(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        let top = slot(self.stack.ptr(), depth.wrapping_sub(1))
+        let offset = unsafe { *top }
+        let size = self.buffered_growth(offset, len: 32)
+        if size == 0 {
+            return self.op_mload_slow(code, pc, gas, depth)
+        }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.memory_size = size
+        unsafe { *top = self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) }
+        self.next(code, pc.wrapping_add(1), gas, depth)
+    }
+
+    // Growth past the buffer and offsets past memory, out of line so the
+    // common path keeps no frame.
+    fn op_mload_slow(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.gas_remaining = gas
+        unsafe { self.stack.set_len(depth) }
+        self.mload()
+        let gas = self.gas_remaining
+        if !self.ok() {
+            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
+        }
+        self.next(code, pc.wrapping_add(1), gas, self.stack.len())
+    }
+
+    fn op_mstore(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let base = self.stack.ptr()
+        let offset = unsafe { *slot(base, depth - 1) }
+        if !self.in_memory(offset, len: 32) {
+            return self.op_mstore_grow(code, pc, gas - 3, depth)
+        }
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *slot(base, depth - 2)) }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2)
+    }
+
+    // Growth within the buffer, out of line so the common path keeps fewer
+    // values live. `op_mstore` checked the stack.
+    fn op_mstore_grow(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        let base = self.stack.ptr()
+        let offset = unsafe { *slot(base, depth.wrapping_sub(1)) }
+        let size = self.buffered_growth(offset, len: 32)
+        if size == 0 {
+            return self.op_mstore_slow(code, pc, gas, depth)
+        }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.memory_size = size
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *slot(base, depth.wrapping_sub(2))) }
+        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2))
+    }
+
+    // Growth past the buffer and offsets past memory, out of line so the
+    // common path keeps no frame.
+    fn op_mstore_slow(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.gas_remaining = gas
+        unsafe { self.stack.set_len(depth) }
+        self.mstore()
+        let gas = self.gas_remaining
+        if !self.ok() {
+            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
+        }
+        self.next(code, pc.wrapping_add(1), gas, self.stack.len())
+    }
+
+    fn op_jump(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 8 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 8, depth)
+        }
+        let dest = unsafe { *slot(self.stack.ptr(), depth - 1) }
+        if !self.jump_ok(dest) {
+            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), gas - 8, depth - 1)
+        }
+        self.next(code, dest.downcast_unchecked(), gas - 8, depth - 1)
+    }
+
+    fn op_jumpi(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 10 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 10, depth)
+        }
+        let base = self.stack.ptr()
+        let dest = unsafe { *slot(base, depth - 1) }
+        if unsafe { *slot(base, depth - 2) } == 0 {
+            return self.next(code, pc.wrapping_add(1), gas - 10, depth - 2)
+        }
+        if !self.jump_ok(dest) {
+            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), gas - 10, depth - 2)
+        }
+        self.next(code, dest.downcast_unchecked(), gas - 10, depth - 2)
+    }
+
+    fn op_pc(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, pc as u256)
+    }
+
+    fn op_msize(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, self.memory_size as u256)
+    }
+
+    fn op_gas(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, (gas - 2) as u256)
+    }
+
+    fn op_jumpdest(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        if gas < 1 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.next(code, pc.wrapping_add(1), gas - 1, depth)
+    }
+
+    // As `Program::is_jumpdest`, from the bitmap `run_until_child` keeps in
+    // `self`.
+    fn jump_ok(self, _ destination: u256) -> bool {
+        if destination >= self.jump_limit as u256 {
+            return false
+        }
+        let pc: usize = destination.downcast_unchecked()
+        let bit: u8 = (pc % 8).downcast_unchecked()
+        let byte = unsafe { *offset_bytes(self.jumpdests, pc / 8) }
+        byte & (1 << bit) != 0
+    }
+
     fn run_until_child(mut self, _ program: Program, _ calldata: InputData,
                        _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
                        depth: usize) -> Option<Frame> {
@@ -1136,6 +1672,8 @@ impl Vm {
         // loop checks no status per opcode. Padding stops a frame that runs
         // off the end.
         let code = program.padded()
+        self.jumpdests = program.jumpdest_map()
+        self.jump_limit = program.jump_limit()
         var pc = self.pc
         var gas = self.gas_remaining
         if self.ok() {
@@ -1376,12 +1914,12 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let offset = self.stack[len - 1]
+                        let offset = unsafe { self.stack.get_unchecked(len - 1) }
                         var fits = self.in_memory(offset, len: 32)
                         if !fits {
                             let size = self.buffered_growth(offset, len: 32)
                             if size != 0 {
-                                if !spend(mut gas, small_memory_cost(size) - small_memory_cost(self.memory_size)) {
+                                if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
                                     self.fault(ERR_OUT_OF_GAS)
                                     break
                                 }
@@ -1390,7 +1928,7 @@ impl Vm {
                             }
                         }
                         if fits {
-                            self.stack[len - 1] = self.memory.read_word(offset.downcast_unchecked())
+                            unsafe { self.stack.set_unchecked(len - 1, self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked())) }
                         } else {
                             self.gas_remaining = gas
                             self.mload()
@@ -1408,12 +1946,12 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let offset = self.stack[len - 1]
+                        let offset = unsafe { self.stack.get_unchecked(len - 1) }
                         var fits = self.in_memory(offset, len: 32)
                         if !fits {
                             let size = self.buffered_growth(offset, len: 32)
                             if size != 0 {
-                                if !spend(mut gas, small_memory_cost(size) - small_memory_cost(self.memory_size)) {
+                                if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
                                     self.fault(ERR_OUT_OF_GAS)
                                     break
                                 }
@@ -1422,7 +1960,7 @@ impl Vm {
                             }
                         }
                         if fits {
-                            self.memory.span().write_word(offset: offset.downcast_unchecked(), value: self.stack[len - 2])
+                            unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: self.stack.get_unchecked(len - 2)) }
                             self.stack.truncate(len - 2)
                         } else {
                             self.gas_remaining = gas
@@ -1442,7 +1980,7 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let dest = self.stack[depth - 1]
+                        let dest = unsafe { self.stack.get_unchecked(depth - 1) }
                         self.stack.truncate(depth - 1)
                         if !program.is_jumpdest(dest) {
                             self.fault(ERR_INVALID_JUMP)
@@ -1460,8 +1998,8 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let dest = self.stack[depth - 1]
-                        let taken = self.stack[depth - 2] != 0
+                        let dest = unsafe { self.stack.get_unchecked(depth - 1) }
+                        let taken = unsafe { self.stack.get_unchecked(depth - 2) } != 0
                         self.stack.truncate(depth - 2)
                         if taken {
                             if !program.is_jumpdest(dest) {
