@@ -92,7 +92,9 @@ impl Program {
         }
         let pc: usize = destination.downcast_unchecked()
         let bit: u8 = (pc % 8).downcast_unchecked()
-        self.jumpdests[pc / 8] & (1 << bit) != 0
+        // The bitmap has a bit for every byte of the code.
+        let byte = unsafe { self.jumpdests.span().read_be_unchecked<u8>(pc / 8) }
+        byte & (1 << bit) != 0
     }
 }
 

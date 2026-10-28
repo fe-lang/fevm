@@ -506,8 +506,9 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let lhs = self.stack[len - 1]
-        let rhs = self.stack[len - 2]
+        // `len` covers both operands.
+        let lhs = unsafe { self.stack.get_unchecked(len - 1) }
+        let rhs = unsafe { self.stack.get_unchecked(len - 2) }
         let result: u256 = match op {
             0x01 => lhs.wrapping_add(rhs),
             0x02 => lhs.wrapping_mul(rhs),
@@ -531,7 +532,7 @@ impl Vm {
             },
         }
         self.stack.truncate(len - 1)
-        self.stack[len - 2] = result
+        unsafe { self.stack.set_unchecked(len - 2, result) }
         true
     }
 
@@ -606,8 +607,8 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let value = self.stack[len - 1]
-        self.stack[len - 1] = match op {
+        let value = unsafe { self.stack.get_unchecked(len - 1) }
+        let result: u256 = match op {
             0x15 => if value == 0 { 1 } else { 0 },
             0x19 => !value,
             _ => {
@@ -615,6 +616,7 @@ impl Vm {
                 return false
             },
         }
+        unsafe { self.stack.set_unchecked(len - 1, result) }
         true
     }
 
@@ -625,7 +627,7 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        let value = self.stack[len - index]
+        let value = unsafe { self.stack.get_unchecked(len - index) }
         self.pushed(value)
     }
 
@@ -636,7 +638,13 @@ impl Vm {
             self.fault(ERR_STACK_UNDERFLOW)
             return false
         }
-        self.stack.swap(len - 1, len - 1 - index)
+        unsafe {
+            let top = self.stack.get_unchecked(len.wrapping_sub(1))
+            // `len` exceeds `index`, so neither subtraction wraps.
+            let other = self.stack.get_unchecked(len.wrapping_sub(1).wrapping_sub(index))
+            self.stack.set_unchecked(len.wrapping_sub(1), other)
+            self.stack.set_unchecked(len.wrapping_sub(1).wrapping_sub(index), top)
+        }
         true
     }
 
@@ -1376,7 +1384,7 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let offset = self.stack[len - 1]
+                        let offset = unsafe { self.stack.get_unchecked(len - 1) }
                         var fits = self.in_memory(offset, len: 32)
                         if !fits {
                             let size = self.buffered_growth(offset, len: 32)
@@ -1390,7 +1398,7 @@ impl Vm {
                             }
                         }
                         if fits {
-                            self.stack[len - 1] = self.memory.read_word(offset.downcast_unchecked())
+                            unsafe { self.stack.set_unchecked(len - 1, self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked())) }
                         } else {
                             self.gas_remaining = gas
                             self.mload()
@@ -1408,7 +1416,7 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let offset = self.stack[len - 1]
+                        let offset = unsafe { self.stack.get_unchecked(len - 1) }
                         var fits = self.in_memory(offset, len: 32)
                         if !fits {
                             let size = self.buffered_growth(offset, len: 32)
@@ -1422,7 +1430,7 @@ impl Vm {
                             }
                         }
                         if fits {
-                            self.memory.span().write_word(offset: offset.downcast_unchecked(), value: self.stack[len - 2])
+                            unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: self.stack.get_unchecked(len - 2)) }
                             self.stack.truncate(len - 2)
                         } else {
                             self.gas_remaining = gas
@@ -1442,7 +1450,7 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let dest = self.stack[depth - 1]
+                        let dest = unsafe { self.stack.get_unchecked(depth - 1) }
                         self.stack.truncate(depth - 1)
                         if !program.is_jumpdest(dest) {
                             self.fault(ERR_INVALID_JUMP)
@@ -1460,8 +1468,8 @@ impl Vm {
                             self.fault(ERR_STACK_UNDERFLOW)
                             break
                         }
-                        let dest = self.stack[depth - 1]
-                        let taken = self.stack[depth - 2] != 0
+                        let dest = unsafe { self.stack.get_unchecked(depth - 1) }
+                        let taken = unsafe { self.stack.get_unchecked(depth - 2) } != 0
                         self.stack.truncate(depth - 2)
                         if taken {
                             if !program.is_jumpdest(dest) {
