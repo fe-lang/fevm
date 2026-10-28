@@ -54,6 +54,10 @@ fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
         0x01 => lhs.wrapping_add(rhs),
         0x02 => lhs.wrapping_mul(rhs),
         0x03 => lhs.wrapping_sub(rhs),
+        0x04 => if rhs == 0 { 0 } else { lhs / rhs },
+        0x05 => sdiv(lhs, rhs),
+        0x06 => if rhs == 0 { 0 } else { lhs % rhs },
+        0x07 => smod(lhs, rhs),
         0x10 => if lhs < rhs { 1 } else { 0 },
         0x11 => if lhs > rhs { 1 } else { 0 },
         0x14 => if lhs == rhs { 1 } else { 0 },
@@ -69,6 +73,33 @@ fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
         0x1d => sar(shift: lhs, value: rhs),
         _ => return Option::None,
     })
+}
+
+/// SDIV: the quotient of two's complement words, rounded toward zero, with a
+/// zero divisor giving zero and `MIN / -1` wrapping to `MIN`.
+#[inline(always)]
+fn sdiv(_ lhs: u256, _ rhs: u256) -> u256 {
+    if rhs == 0 {
+        return 0
+    }
+    let lhs_signed: i256 = lhs.downcast_unchecked()
+    let rhs_signed: i256 = rhs.downcast_unchecked()
+    if lhs_signed == I256_MIN && rhs_signed == -1 {
+        return lhs
+    }
+    (lhs_signed / rhs_signed).downcast_unchecked()
+}
+
+/// SMOD: the remainder of two's complement words, taking the dividend's
+/// sign, with a zero divisor giving zero.
+#[inline(always)]
+fn smod(_ lhs: u256, _ rhs: u256) -> u256 {
+    let lhs_signed: i256 = lhs.downcast_unchecked()
+    let rhs_signed: i256 = rhs.downcast_unchecked()
+    if rhs == 0 || rhs_signed == -1 {
+        return 0
+    }
+    (lhs_signed % rhs_signed).downcast_unchecked()
 }
 
 /// Unary opcode `op`'s result, or `None` for other opcodes.
@@ -598,44 +629,6 @@ impl Vm {
         if !self.ok() { return }
 
         match op {
-            0x04 => if rhs == 0 {
-                self.push(0)
-            } else {
-                self.push(lhs / rhs)
-            },
-            0x05 => {
-                if rhs == 0 {
-                    self.push(0)
-                } else {
-                    let lhs_signed: i256 = lhs.downcast_unchecked()
-                    let rhs_signed: i256 = rhs.downcast_unchecked()
-                    if lhs_signed == I256_MIN && rhs_signed == -1 {
-                        self.push(lhs)
-                    } else {
-                        let result: u256 = (lhs_signed / rhs_signed).downcast_unchecked()
-                        self.push(result)
-                    }
-                }
-            },
-            0x06 => if rhs == 0 {
-                self.push(0)
-            } else {
-                self.push(lhs % rhs)
-            },
-            0x07 => {
-                if rhs == 0 {
-                    self.push(0)
-                } else {
-                    let lhs_signed: i256 = lhs.downcast_unchecked()
-                    let rhs_signed: i256 = rhs.downcast_unchecked()
-                    if rhs_signed == -1 {
-                        self.push(0)
-                    } else {
-                        let result: u256 = (lhs_signed % rhs_signed).downcast_unchecked()
-                        self.push(result)
-                    }
-                }
-            },
             0x08 => {
                 let modulus = self.pop()
                 if self.ok() {
@@ -649,7 +642,10 @@ impl Vm {
                 }
             },
             0x0a => self.exp(base: lhs, exponent: rhs),
-            _ => self.invalid(op),
+            _ => match binary_result(op, lhs, rhs) {
+                Option::Some(result) => self.push(result),
+                Option::None => self.invalid(op),
+            },
         }
     }
 
@@ -1205,7 +1201,13 @@ impl Vm {
         let op = unsafe { read_code<u8>(code, pc) } as i32
         match op {
             0x00 => self.op_stop(code, pc, gas, depth),
-            0x04 | 0x05 | 0x06 | 0x07 | 0x08 | 0x09 | 0x0a => self.op_general(code, pc, gas, depth),
+            0x04 => self.op_div(code, pc, gas, depth),
+            0x05 => self.op_sdiv(code, pc, gas, depth),
+            0x06 => self.op_mod(code, pc, gas, depth),
+            0x07 => self.op_smod(code, pc, gas, depth),
+            0x08 => self.op_addmod(code, pc, gas, depth),
+            0x09 => self.op_mulmod(code, pc, gas, depth),
+            0x0a => self.op_general(code, pc, gas, depth),
             0x5f => self.op_push0(code, pc, gas, depth),
             0x60 => self.op_push1(code, pc, gas, depth),
             0x61 => self.op_push2(code, pc, gas, depth),
@@ -1331,8 +1333,51 @@ impl Vm {
         self.op_unary(code, pc, gas, depth, op: 0x19)
     }
 
-    // Division, modular arithmetic and EXP call out, but stay in the
-    // handlers rather than returning to `run_until_child` for each opcode.
+    fn op_div(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x04)
+    }
+
+    fn op_sdiv(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x05)
+    }
+
+    fn op_mod(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x06)
+    }
+
+    fn op_smod(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_binary(code, pc, gas, depth, cost: 5, op: 0x07)
+    }
+
+    fn op_addmod(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_modular(code, pc, gas, depth, op: 0x08)
+    }
+
+    fn op_mulmod(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_modular(code, pc, gas, depth, op: 0x09)
+    }
+
+    // ADDMOD and MULMOD: the top two words' sum or product modulo the third
+    // replaces the third.
+    #[inline(always)]
+    fn op_modular(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, op: i32) {
+        if gas < 8 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 3 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 8, depth)
+        }
+        let third = slot(self.stack.ptr(), depth - 3)
+        unsafe {
+            let lhs = *offset_bytes(third, 64)
+            let rhs = *offset_bytes(third, 32)
+            *third = if op == 0x08 { addmod(lhs, rhs, *third) } else { mulmod(lhs, rhs, *third) }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 8, depth - 2)
+    }
+
+    // EXP calls out, but stays in the handlers rather than returning to
+    // `run_until_child`.
     fn op_general(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
         let op = unsafe { read_code<u8>(code, pc) } as i32
         let cost = base_cost(op)
