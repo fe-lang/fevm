@@ -545,8 +545,12 @@ impl Vm {
                 return false
             },
         }
-        self.stack.truncate(len - 1)
-        unsafe { self.stack.set_unchecked(len - 2, result) }
+        // The result is stored before the stack shrinks, so no store comes
+        // between the operands' loads and the operation that reads them.
+        unsafe {
+            self.stack.set_unchecked(len - 2, result)
+            self.stack.truncate_unchecked(len - 1)
+        }
         true
     }
 
