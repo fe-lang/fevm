@@ -86,6 +86,14 @@ impl Program {
     pub fn padded(self) -> ref MemSpan {
         self.bytes.span()
     }
+    /// The JUMPDEST bitmap, with a bit for each byte below `jump_limit()`.
+    pub fn jumpdest_map(self) -> *u8 {
+        self.jumpdests.ptr()
+    }
+    /// The bytes of code a jump may land in: none when analysis failed.
+    pub fn jump_limit(self) -> usize {
+        if self.status == OK { self.len } else { 0 }
+    }
     pub fn is_jumpdest(self, _ destination: u256) -> bool {
         if self.status != OK || destination >= self.len as u256 {
             return false
