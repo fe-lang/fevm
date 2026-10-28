@@ -1452,28 +1452,33 @@ impl Vm {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
         }
-        var gas = gas - 3
         let len = self.stack.len()
         if len < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3)
         }
         let offset = unsafe { self.stack.get_unchecked(len - 1) }
-        var fits = self.in_memory(offset, len: 32)
-        if !fits {
-            let size = self.buffered_growth(offset, len: 32)
-            if size != 0 {
-                if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-                    return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
-                }
-                self.memory_size = size
-                fits = true
-            }
+        if !self.in_memory(offset, len: 32) {
+            return self.op_mload_grow(code, pc, gas - 3)
         }
-        if fits {
-            unsafe { self.stack.set_unchecked(len - 1, self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked())) }
-        } else {
+        unsafe { self.stack.set_unchecked(len - 1, self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked())) }
+        self.next(code, pc.wrapping_add(1), gas - 3)
+    }
+
+    // Growth within the buffer, out of line so the common path keeps fewer
+    // values live.
+    fn op_mload_grow(mut self, _ code: *u8, _ pc: usize, _ gas: u64) {
+        let len = self.stack.len()
+        let offset = unsafe { self.stack.get_unchecked(len - 1) }
+        let size = self.buffered_growth(offset, len: 32)
+        if size == 0 {
             return self.op_mload_slow(code, pc, gas)
         }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
+        }
+        self.memory_size = size
+        unsafe { self.stack.set_unchecked(len - 1, self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked())) }
         self.next(code, pc.wrapping_add(1), gas)
     }
 
@@ -1493,28 +1498,38 @@ impl Vm {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
         }
-        var gas = gas - 3
         let len = self.stack.len()
         if len < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3)
         }
         let offset = unsafe { self.stack.get_unchecked(len - 1) }
-        var fits = self.in_memory(offset, len: 32)
-        if !fits {
-            let size = self.buffered_growth(offset, len: 32)
-            if size != 0 {
-                if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-                    return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
-                }
-                self.memory_size = size
-                fits = true
-            }
+        if !self.in_memory(offset, len: 32) {
+            return self.op_mstore_grow(code, pc, gas - 3)
         }
-        if fits {
-            unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: self.stack.get_unchecked(len - 2)) }
-            self.stack.truncate(len - 2)
-        } else {
+        unsafe {
+            self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: self.stack.get_unchecked(len - 2))
+            self.stack.truncate_unchecked(len - 2)
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3)
+    }
+
+    // Growth within the buffer, out of line so the common path keeps fewer
+    // values live.
+    fn op_mstore_grow(mut self, _ code: *u8, _ pc: usize, _ gas: u64) {
+        let len = self.stack.len()
+        let offset = unsafe { self.stack.get_unchecked(len - 1) }
+        let size = self.buffered_growth(offset, len: 32)
+        if size == 0 {
             return self.op_mstore_slow(code, pc, gas)
+        }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas)
+        }
+        self.memory_size = size
+        unsafe {
+            self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: self.stack.get_unchecked(len - 2))
+            self.stack.truncate_unchecked(len - 2)
         }
         self.next(code, pc.wrapping_add(1), gas)
     }
