@@ -4,4 +4,4 @@ version = "0.1.0"
 
 [dependencies]
 fevm = true
-keccak = { source = "https://github.com/fe-lang/keccak", rev = "2b80ec924f8e64eb1ed812e094a960f13fb644a4" }
+keccak = { path = "../../../../keccak-proto", allow_unsafe = true }

@@ -171,10 +171,7 @@ impl Vm {
         if len != 0 {
             hash.update(self.memory, offset: offset.downcast_unchecked(), len: len.downcast_unchecked())
         }
-        let digest = hash.finish()
-        var value: u256 = 0
-        for byte in digest { value = (value << 8) | byte as u256 }
-        self.push(value)
+        self.push(hash.finish_word())
     }
 
     fn mload(mut self) {
