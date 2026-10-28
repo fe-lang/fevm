@@ -1,4 +1,5 @@
 use core::Option
+use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 
 // At 2^42 bytes, the quadratic term alone exceeds a u64 frame gas budget.
 // Affordable ranges therefore fit u64 before any host allocation is attempted.
@@ -11,8 +12,15 @@ pub const SMALL_EXTENT: u64 = 1 << 32
 
 /// The gas for `size` bytes of word-rounded memory, below `SMALL_EXTENT`.
 pub fn small_memory_cost(_ size: u64) -> u64 {
+    // Below `SMALL_EXTENT`, `words` is below 2^27, so nothing overflows.
     let words = size / 32
-    3 * words + words * words / 512
+    words.wrapping_mul(3).wrapping_add(words.wrapping_mul(words) / 512)
+}
+
+/// The gas to grow word-rounded memory from `current` bytes to a larger
+/// `size` below `SMALL_EXTENT`.
+pub fn small_growth_cost(current: u64, size: u64) -> u64 {
+    small_memory_cost(size).wrapping_sub(small_memory_cost(current))
 }
 
 fn required_extent(current: u64, offset: u256, len: u256) -> Option<u64> {
