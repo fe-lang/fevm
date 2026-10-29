@@ -1,6 +1,6 @@
 use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
-use ingot::address::create_address
+use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, OK}
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word}
@@ -263,32 +263,16 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
     tx.set_balance(address: sender, value: tx.balance(sender) - fee)
 }
 
-// The RLP of `value` as an integer, written at `len`; returns the new length.
-fn rlp_integer(_ out: mut [u8; 64], len: usize, _ value: u256) -> usize {
-    if value != 0 && value < 0x80 {
-        out[len] = value.downcast_truncate()
-        return len + 1
-    }
-    var bytes: usize = 0
-    while bytes < 32 && value >> (bytes * 8) as u256 != 0 { bytes += 1 }
-    out[len] = (0x80 + bytes).downcast_truncate()
-    for i in 0..bytes { out[len + 1 + i] = (value >> ((bytes - 1 - i) * 8) as u256).downcast_truncate() }
-    len + 1 + bytes
-}
-
 // What an authority signs: keccak256(0x05 || rlp([chain_id, address, nonce])).
 fn authorization_hash(_ authorization: Authorization) -> u256 {
-    // At most 33 + 21 + 9 bytes, with the nonce below 2^64.
-    var payload: [u8; 64] = [0; 64]
-    var len = rlp_integer(mut payload, len: 0, authorization.chain_id)
-    payload[len] = 0x94
-    for i in 0..20 { payload[len + 1 + i] = (authorization.address >> ((19 - i) * 8) as u256).downcast_truncate() }
-    len = rlp_integer(mut payload, len: len + 21, authorization.nonce)
+    // At most 33 + 21 + 9 bytes, with the nonce below 2^64, so the list
+    // header is one byte or two.
+    let payload = (rlp_integer_len(authorization.chain_id) + 21 + rlp_integer_len(authorization.nonce)) as u256
     var hash = Keccak256::new()
-    let header: [u8; 3] = if len < 56 { [0x05, (0xc0 + len).downcast_truncate(), 0] }
-        else { [0x05, 0xf8, len.downcast_truncate()] }
-    hash.update(header, offset: 0, len: if len < 56 { 2 } else { 3 })
-    hash.update(payload, offset: 0, len: len.downcast_unchecked())
+    if payload < 56 { hash.update_word(0x05c0 + payload, len: 2) } else { hash.update_word(0x05f800 + payload, len: 3) }
+    update_rlp_integer(mut hash, authorization.chain_id)
+    hash.update_word((0x94 << 160) | address_word(authorization.address), len: 21)
+    update_rlp_integer(mut hash, authorization.nonce)
     hash.finish_word()
 }
 

@@ -59,14 +59,14 @@ fn rotate_left(_ value: u32, by: u32) -> u32 {
 
 // Both hashes consume 64-byte blocks followed by 0x80, zero padding and a
 // 64-bit bit count; SHA-256 stores the count big endian, RIPEMD-160 little endian.
-fn padded_block<T: ByteSource>(_ input: T, block_index: usize, blocks: usize, big_endian: bool) -> [u8; 64] {
+fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_index: usize, blocks: usize,
+                                big_endian: bool) -> [u8; 64] {
     var block: [u8; 64] = [0; 64]
-    let len = input.len()
     let start = block_index * 64
     for i in 0..64 {
         let position = start + i
         if position < len {
-            block[i] = input.byte_at(position)
+            block[i] = input.byte_at(offset + position)
         } else if position == len {
             block[i] = 0x80
         }
@@ -138,13 +138,12 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     state[7] = state[7].wrapping_add(h)
 }
 
-pub fn sha256<T: ByteSource>(_ input: T) -> [u8; 32] {
+/// The SHA-256 digest of `len` bytes of `input` from `offset`.
+pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> [u8; 32] {
     var state = SHA256_IV
-    let blocks = padded_blocks(input.len())
-    var index: usize = 0
-    while index < blocks {
-        sha256_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: true))
-        index += 1
+    let blocks = padded_blocks(len)
+    for index in 0..blocks {
+        sha256_compress(mut state, padded_block(input, offset, len, block_index: index, blocks, big_endian: true))
     }
     var digest: [u8; 32] = [0; 32]
     var i: u64 = 0
@@ -217,10 +216,8 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
 pub fn ripemd160<T: ByteSource>(_ input: T) -> [u8; 20] {
     var state = RIPEMD_IV
     let blocks = padded_blocks(input.len())
-    var index: usize = 0
-    while index < blocks {
-        ripemd_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: false))
-        index += 1
+    for index in 0..blocks {
+        ripemd_compress(mut state, padded_block(input, offset: 0, len: input.len(), block_index: index, blocks, big_endian: false))
     }
     var digest: [u8; 20] = [0; 20]
     var i: u64 = 0

@@ -14,13 +14,13 @@ fn word_at<const N: usize>(_ bytes: [u8; N], offset: usize) -> u256 {
 #[test]
 fn sha256_known_answers() {
     let empty: [u8; 0] = []
-    core::assert(word_at(sha256(empty), offset: 0)
+    core::assert(word_at(sha256(empty, offset: 0, len: 0), offset: 0)
         == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
-    core::assert(word_at(sha256([0x61 as u8, 0x62, 0x63]), offset: 0)
+    core::assert(word_at(sha256([0x61 as u8, 0x62, 0x63], offset: 0, len: 3), offset: 0)
         == 0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad)
     // 56 bytes: the padding spills into a second block.
     var long: [u8; 56] = [0x61; 56]
-    core::assert(word_at(sha256(long), offset: 0)
+    core::assert(word_at(sha256(long, offset: 0, len: 56), offset: 0)
         == 0xb35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a)
 }
 

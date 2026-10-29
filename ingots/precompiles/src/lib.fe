@@ -1,5 +1,5 @@
 use core::{MemBuffer, Option}
-use keccak::{ByteSource, keccak256_word}
+use keccak::{ByteSource, Keccak256}
 pub use hashes::{ripemd160, sha256}
 
 /// The call returned output and consumed `gas_used`.
@@ -52,15 +52,10 @@ fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
 /// recovery id of 0 or 1 and 0 < r, s < n; none when no key recovers.
 pub fn recover_signer(hash: u256, recovery_id: u256, r: u256, s: u256) -> Option<u256> {
     let Option::Some(key) = secp256k1::recover(hash, recovery_id, r, s) else { return Option::None }
-    var preimage: [u8; 64] = [0; 64]
-    var i: u64 = 0
-    while i < 32 {
-        let shift = ((31 - i) * 8) as u256
-        preimage[i as usize] = (key.x >> shift).downcast_truncate()
-        preimage[(32 + i) as usize] = (key.y >> shift).downcast_truncate()
-        i += 1
-    }
-    Option::Some(keccak256_word(preimage) & 0xffffffffffffffffffffffffffffffffffffffff)
+    var digest = Keccak256::new()
+    digest.update_word(key.x, len: 32)
+    digest.update_word(key.y, len: 32)
+    Option::Some(digest.finish_word() & 0xffffffffffffffffffffffffffffffffffffffff)
 }
 
 // Recover the signer address of (hash, v, r, s). Malformed or unrecoverable
@@ -101,7 +96,7 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         let cost = base + per_word * words(len)
         if cost > gas as u128 { return failure(gas) }
         let used: u64 = cost.downcast_unchecked()
-        return if address == 2 { copied(sha256(input), gas_used: used) }
+        return if address == 2 { copied(sha256(input, offset: 0, len), gas_used: used) }
             else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
             else { copied(input, gas_used: used) }
     }
