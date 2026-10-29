@@ -69,7 +69,7 @@ struct Case
 Case decode(const bytes& data)
 {
     Reader reader{data};
-    if (reader.word(1) != 3)
+    if (reader.word(1) != 4)
         std::abort();
     Case result;
     auto& block = result.block;
@@ -81,6 +81,8 @@ Case decode(const bytes& data)
     block.base_fee = static_cast<uint64_t>(reader.word(32));
     block.blob_base_fee = reader.word(32);
     block.chain_id = static_cast<uint64_t>(reader.word(32));
+    // evmone applies the EIP-7825 cap from Osaka, and this runner executes Cancun.
+    reader.word(8);
     for (auto accounts = reader.count(); accounts != 0; --accounts)
     {
         auto& account = result.pre[reader.addr()];

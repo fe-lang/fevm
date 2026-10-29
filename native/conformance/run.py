@@ -64,10 +64,10 @@ def tx_kind(transaction):
     return 1 if 'accessLists' in transaction else 0
 
 
-def encode(test, indexes):
+def encode(test, indexes, tx_gas_limit_cap=2**24):
     """The driver's binary case format; integers and lengths are big endian."""
     env, tx = test['env'], test['transaction']
-    out = bytearray([3])
+    out = bytearray([4])
     out += be(env['currentCoinbase'], 20)
     out += be(env['currentNumber'], 32)
     out += be(env['currentTimestamp'], 32)
@@ -78,6 +78,7 @@ def encode(test, indexes):
     fraction = number(schedule.get('baseFeeUpdateFraction', BLOB_BASE_FEE_UPDATE_FRACTION))
     out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0')), fraction).to_bytes(32, 'big')
     out += be(test.get('config', {}).get('chainid', '0x1'), 32)
+    out += tx_gas_limit_cap.to_bytes(8, 'big')
     pre = test['pre']
     out += len(pre).to_bytes(4, 'big')
     for address, account in pre.items():

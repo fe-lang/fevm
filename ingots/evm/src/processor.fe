@@ -40,8 +40,6 @@ pub const INVALID_NO_AUTHORIZATIONS: i32 = 18
 
 const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const MAX_INITCODE_SIZE: u64 = 49152
-// EIP-7825: the transaction gas limit cap.
-const MAX_TX_GAS_LIMIT: u64 = 16_777_216
 const GAS_PER_BLOB: u256 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
@@ -197,7 +195,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
-    if env.gas_limit > MAX_TX_GAS_LIMIT { return INVALID_GAS_LIMIT_CAP }
+    if env.gas_limit > block.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
     if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }

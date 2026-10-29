@@ -154,6 +154,9 @@ pub struct CallEnv {
 
 impl Copy for CallEnv {}
 
+// EIP-7825's cap on a transaction's gas limit.
+pub const TX_GAS_LIMIT_CAP: u64 = 16_777_216
+
 pub struct BlockEnv {
     pub coinbase: u256,
     pub timestamp: u256,
@@ -163,6 +166,9 @@ pub struct BlockEnv {
     pub chainid: u256,
     pub basefee: u256,
     pub blobbasefee: u256,
+    // The largest valid transaction gas limit: TX_GAS_LIMIT_CAP, unless a host
+    // that runs larger transactions, such as benchmarks or tests, raises it.
+    pub tx_gas_limit_cap: u64,
 }
 
 pub struct ExecutionResult {
@@ -194,5 +200,6 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
+        tx_gas_limit_cap: TX_GAS_LIMIT_CAP,
     }
 }

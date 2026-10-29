@@ -10,6 +10,7 @@ pub use types::{
     CallEnv,
     ExecutionResult,
     Program,
+    TX_GAS_LIMIT_CAP,
     default_block_env,
     default_call_env,
     empty_bytes,

@@ -293,6 +293,12 @@ fn transact_caps_the_gas_limit() {
     env.gas_limit = 16_777_216
     let applied = send(rejected.state, env, block)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.gas_used == 21_000)
+    // A host may raise the cap.
+    block.tx_gas_limit_cap = 0xffffffffffffffff
+    env.nonce = 1
+    env.gas_limit = 50_000_000
+    let raised = send(applied.state, env, block)
+    core::assert(raised.receipt.invalid == VALID && raised.receipt.gas_used == 21_000)
 }
 
 #[test]

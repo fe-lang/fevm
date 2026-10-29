@@ -62,6 +62,9 @@ Every owner, from results and logs to the world, frees its memory when it goes
 out of scope or is overwritten; nothing is released by hand.
 
 Complete Osaka transactions go through `fevm::transact(world, request, block)`.
+`BlockEnv` holds the block's values, the chain ID and `tx_gas_limit_cap`:
+EIP-7825's 2^24 by default, which a host that runs larger transactions, such as
+benchmarks or tests, may raise.
 A `TxRequest` holds a `TxEnv` (envelope kind, signed chain ID, recovered sender,
 recipient or creation flag, nonce, gas limit and fee fields, value) together with
 owned calldata or initcode, access-list entries, versioned blob hashes and EIP-7702

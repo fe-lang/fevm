@@ -54,13 +54,14 @@ struct Account {
 struct Case {
     block: BlockEnv,
     chain_id: u64,
+    tx_gas_limit_cap: u64,
     accounts: Vec<Account>,
     tx: TxEnv,
 }
 
 fn decode(data: &[u8]) -> Case {
     let mut reader = Reader { data, position: 0 };
-    assert_eq!(reader.word(1), U256::from(3));
+    assert_eq!(reader.word(1), U256::from(4));
     let beneficiary = reader.address();
     let number = reader.word(32);
     let timestamp = reader.word(32);
@@ -69,6 +70,7 @@ fn decode(data: &[u8]) -> Case {
     let basefee = reader.word(32).to();
     let blob_gasprice = reader.word(32).to();
     let chain_id = reader.word(32).to();
+    let tx_gas_limit_cap = reader.word(8).to();
     let block = BlockEnv {
         number,
         beneficiary,
@@ -171,6 +173,7 @@ fn decode(data: &[u8]) -> Case {
     Case {
         block,
         chain_id,
+        tx_gas_limit_cap,
         accounts,
         tx,
     }
@@ -194,6 +197,7 @@ fn run(data: &[u8], execute: bool) -> Option<Option<ExecutionResult>> {
         .modify_cfg_chained(|cfg| {
             cfg.spec = SpecId::CANCUN;
             cfg.chain_id = case.chain_id;
+            cfg.tx_gas_limit_cap = Some(case.tx_gas_limit_cap);
         })
         .build_mainnet();
     if !execute {
