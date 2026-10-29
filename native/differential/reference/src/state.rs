@@ -261,7 +261,7 @@ impl Runner<'_> {
                             ..InputsImpl::default()
                         },
                         inherited_static || *is_static,
-                        SpecId::CANCUN,
+                        SpecId::OSAKA,
                         *gas_limit,
                     );
                     let result = interpreter
@@ -330,7 +330,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
     }
     let mut results = Vec::new();
     for transaction in &case.transactions {
-        let mut host = StateHost::new(database, SpecId::CANCUN);
+        let mut host = StateHost::new(database, SpecId::OSAKA);
         host.block.beneficiary = transaction.coinbase;
         host.block.number = transaction.block_number;
         host.tx.caller = transaction.sender;
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn cancun_net_storage_metering_vectors() {
-        // EIP-2200 sequence vectors with Cancun's cold charge and refund schedule.
+        // EIP-2200 sequence vectors with Osaka's cold charge and refund schedule.
         for (original, values, spent, refund) in [
             (0, &[0, 0][..], 2312, 0),
             (0, &[0, 1], 22212, 0),

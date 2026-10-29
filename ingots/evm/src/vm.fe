@@ -8,6 +8,7 @@ use ingot::memory::{
 use ingot::gas::base_cost
 use ingot::state::address_word
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
+use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{
     ERR_BALANCE_OVERFLOW,
@@ -108,6 +109,7 @@ fn unary_result(_ op: i32, _ value: u256) -> Option<u256> {
     match op {
         0x15 => Option::Some(if value == 0 { 1 } else { 0 }),
         0x19 => Option::Some(!value),
+        0x1e => Option::Some(leading_zeros(value)),
         _ => Option::None,
     }
 }
@@ -1293,6 +1295,7 @@ impl Vm {
             0x17 => self.op_or(code, pc, gas, depth),
             0x18 => self.op_xor(code, pc, gas, depth),
             0x19 => self.op_not(code, pc, gas, depth),
+            0x1e => self.op_clz(code, pc, gas, depth),
             0x1a => self.op_byte(code, pc, gas, depth),
             0x1b => self.op_shl(code, pc, gas, depth),
             0x1c => self.op_shr(code, pc, gas, depth),
@@ -1388,11 +1391,15 @@ impl Vm {
     }
 
     fn op_iszero(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.op_unary(code, pc, gas, depth, op: 0x15)
+        self.op_unary(code, pc, gas, depth, cost: 3, op: 0x15)
     }
 
     fn op_not(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.op_unary(code, pc, gas, depth, op: 0x19)
+        self.op_unary(code, pc, gas, depth, cost: 3, op: 0x19)
+    }
+
+    fn op_clz(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_unary(code, pc, gas, depth, cost: 5, op: 0x1e)
     }
 
     fn op_div(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
@@ -1704,19 +1711,19 @@ impl Vm {
     }
 
     #[inline(always)]
-    fn op_unary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, op: i32) {
-        if gas < 3 {
+    fn op_unary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, cost: u64, op: i32) {
+        if gas < cost {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - cost, depth)
         }
         let top = slot(self.stack.ptr(), depth - 1)
         match unary_result(op, unsafe { *top }) {
             Option::Some(result) => unsafe { *top = result },
             Option::None => {},
         }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth)
+        self.next(code, pc.wrapping_add(1), gas - cost, depth)
     }
 
     // Each binary and unary opcode has a handler of its own, which inlines
@@ -2026,6 +2033,13 @@ impl Vm {
                     },
                     0x15 | 0x19 => {
                         if !spend(mut gas, 3) {
+                            self.fault(ERR_OUT_OF_GAS)
+                            break
+                        }
+                        if !self.unary(op) { break }
+                    },
+                    0x1e => {
+                        if !spend(mut gas, 5) {
                             self.fault(ERR_OUT_OF_GAS)
                             break
                         }

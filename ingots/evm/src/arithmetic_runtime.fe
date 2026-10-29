@@ -1,0 +1,40 @@
+use ingot::constants::{ERR_OUT_OF_GAS, OK}
+use ingot::{Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+
+// PUSH32 `value`, CLZ: 3 + 5 gas.
+fn clz(_ value: u256, gas_limit: u64) -> (i32, u256, u64) {
+    var bytes: [u8; 34] = [0; 34]
+    bytes[0] = 0x7f
+    var index: usize = 0
+    while index < 32 {
+        bytes[index + 1] = (value >> ((31 - index) * 8) as u256).downcast_truncate()
+        index += 1
+    }
+    bytes[33] = 0x1e
+    var call = default_call_env()
+    call.gas_limit = gas_limit
+    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, default_block_env(), mut transaction)
+    transaction.finish(commit: result.status == OK, gas_spent: gas_limit - result.gas_remaining)
+    (result.status, result.stack_top, result.gas_remaining)
+}
+
+#[test]
+fn clz_counts_leading_zero_bits() {
+    let max = !(0 as u256)
+    for (value, zeros) in [
+        (0, 256), (1, 255), (2, 254), (0xff, 248), ((1 << 64) - 1, 192), (1 << 64, 191),
+        (1 << 128, 127), ((1 << 192) + 1, 63), (1 << 255, 0), (max, 0), (max >> 1, 1),
+    ] {
+        let (status, top, remaining) = clz(value, gas_limit: 10)
+        core::assert(status == OK && top == zeros && remaining == 2)
+    }
+}
+
+#[test]
+fn clz_costs_five_gas() {
+    let (status, _, remaining) = clz(1, gas_limit: 8)
+    core::assert(status == OK && remaining == 0)
+    let (status, _, remaining) = clz(1, gas_limit: 7)
+    core::assert(status == ERR_OUT_OF_GAS && remaining == 0)
+}

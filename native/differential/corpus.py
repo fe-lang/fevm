@@ -1,4 +1,4 @@
-"""Deterministic, terminating Cancun frames for the first interpreter slice."""
+"""Deterministic, terminating Osaka frames for the first interpreter slice."""
 import random
 
 MASK = (1 << 256) - 1
@@ -72,13 +72,13 @@ def cases():
     pairs += [(b, a) for a, b in pairs]
     pairs += [(rng.getrandbits(256), rng.getrandbits(256)) for _ in range(64)]
     binary = [*range(1, 8), 0x0a, 0x0b, *range(0x10, 0x15), *range(0x16, 0x19), *range(0x1a, 0x1e)]
-    for op in [*binary, 0x08, 0x09, 0x15, 0x19]:
+    for op in [*binary, 0x08, 0x09, 0x15, 0x19, 0x1e]:
         operations = []
         for a, b in pairs:
             if op in (0x08, 0x09):
                 for modulus in [0, 1, 7, (1 << 128) + 1, MASK]:
                     operations.append(push(modulus) + push(b) + push(a) + bytes([op]))
-            elif op in (0x15, 0x19):
+            elif op in (0x15, 0x19, 0x1e):
                 operations.append(push(a) + bytes([op]))
             else:
                 operations.append(push(b) + push(a) + bytes([op]))
@@ -135,8 +135,8 @@ def cases():
             expected=exceptional('stack_underflow'))
         add(f'swap-underflow-{depth}', 'stack', b'\x5f' * depth + bytes([0x8f + depth]),
             expected=exceptional('stack_underflow'))
-    for op in [*binary, 0x08, 0x09, 0x15, 0x19, 0x50, 0x56, 0x57]:
-        arity = 3 if op in (8, 9) else 1 if op in (0x15, 0x19, 0x50, 0x56) else 2
+    for op in [*binary, 0x08, 0x09, 0x15, 0x19, 0x1e, 0x50, 0x56, 0x57]:
+        arity = 3 if op in (8, 9) else 1 if op in (0x15, 0x19, 0x1e, 0x50, 0x56) else 2
         for available in range(arity):
             add(f'underflow-{op:02x}-{available}', 'stack', b'\x5f' * available + bytes([op]),
                 expected=exceptional('stack_underflow'))

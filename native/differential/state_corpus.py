@@ -1,4 +1,4 @@
-"""Deterministic Cancun state-access sequences and their native wire encoding."""
+"""Deterministic Osaka state-access sequences and their native wire encoding."""
 from itertools import product
 import random
 
@@ -50,7 +50,7 @@ def case(name, category, transactions, original=0, anchors=None):
 
 def cases():
     rows = []
-    # EIP-2200 sequence anchors adjusted for EIP-2929/3529 Cancun constants.
+    # EIP-2200 sequence anchors adjusted for EIP-2929/3529 Osaka constants.
     # Use PUSH1 even for zero here to retain the specification vectors' bytecode.
     vectors = [
         (0, [0, 0], 2312, 0), (0, [0, 1], 22212, 0), (0, [1, 0], 22212, 19900),
@@ -202,7 +202,7 @@ def account_code_cases():
     row['storage'] = [dict(address=address(44), slot=word(0), value=word(9))]
     rows.append(row)
 
-    # Sender, destination, coinbase and every Cancun precompile start warm.
+    # Sender, destination, coinbase and every Osaka precompile start warm.
     for target in [0, *range(1, 14), 44, 45]:
         row = case(f'extcode-initial-warm-{target}', 'account-code-warmth',
                    [transaction([frame(push(target) + '3f')])],
