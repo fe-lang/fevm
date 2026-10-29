@@ -36,9 +36,11 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current compiler is Fe master
-[`3587ff99982ca3dd5e0eaa93e8d143cacf64ee40`](https://github.com/argotorg/fe/tree/3587ff99982ca3dd5e0eaa93e8d143cacf64ee40).
-Its Cargo.lock pins Sonatina `92df01a623ec87927452d884131d93589a711c3d`. Fe
+The current compiler is Fe
+[`7540ec5c615b0bd33b0be8d4ee841e1f09d11cf3`](https://github.com/argotorg/fe/tree/7540ec5c615b0bd33b0be8d4ee841e1f09d11cf3)
+(branch `perf/native-clz` on master `e572b31ac`), which lowers `leading_zeros` to a
+native count. Its Cargo.lock pins Sonatina `197ea8537c86af86d27cd0db3f1d0b7e1e663a2e`
+([fe-lang/sonatina#464](https://github.com/fe-lang/sonatina/pull/464)). Fe
 destroys owned values where their lifetime ends and provides core's memory owners
 (`MemBuffer`, `MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap
 memory, and the byte-order reads, `swap_bytes` and unchecked span and `MemVec`
