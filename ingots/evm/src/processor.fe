@@ -367,7 +367,7 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
     tx.swap_frame_buffers(mut buffers)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
-    if prepared == OK { prepared = authorize(mut tx, request, chain_id: block.chainid) }
+    if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
         gasprice: price, gas_limit: env.gas_limit - intrinsic.regular.downcast_unchecked(), is_static: false,
