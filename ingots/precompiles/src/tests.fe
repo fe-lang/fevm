@@ -180,3 +180,57 @@ fn ecrecover_known_signatures_and_rejections() {
     let padded = run(address: 1, input: truncated, gas: 3000)
     core::assert(padded.status == SUCCESS && padded.output.len() == 0)
 }
+
+fn p256_input(hash: u256, r: u256, s: u256, x: u256, y: u256) -> [u8; 160] {
+    var input: [u8; 160] = [0; 160]
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        input[i as usize] = (hash >> shift).downcast_truncate()
+        input[(32 + i) as usize] = (r >> shift).downcast_truncate()
+        input[(64 + i) as usize] = (s >> shift).downcast_truncate()
+        input[(96 + i) as usize] = (x >> shift).downcast_truncate()
+        input[(128 + i) as usize] = (y >> shift).downcast_truncate()
+        i += 1
+    }
+    input
+}
+
+// Verification succeeds with the word 1; any rejection succeeds with nothing.
+fn p256_verifies<const N: usize>(_ input: [u8; N]) -> bool {
+    let result = run(address: 0x100, input, gas: 6900)
+    core::assert(result.status == SUCCESS && result.gas_used == 6900)
+    if result.output.len() == 0 { return false }
+    core::assert(result.output.len() == 32)
+    var value: u256 = 0
+    for i in 0..32 { value = (value << 8) | result.output[i] as u256 }
+    core::assert(value == 1)
+    true
+}
+
+#[test]
+fn p256verify_known_signature_and_rejections() {
+    // Signed by Python's `cryptography` with the SHA-256 digest of "fevm p256verify".
+    let hash = 0xecee5c5ea2fc5190cc080e82f5bf1e49cd7aaa8a3590d255f0163ff9e5756afc
+    let r = 0xbcb24510422611d27b32d883cc1e49c7c699f3291c93aba133e70e70473a7bd7
+    let s = 0x7c7f9023f0bd6745e4b9baeb0c4a80473996dba928440be18659951d75d58c64
+    let x = 0x60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6
+    let y = 0x7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299
+    let n = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+    let p = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+    core::assert(p256_verifies(p256_input(hash, r, s, x, y)))
+    // P-256 signatures are malleable: n - s verifies too.
+    core::assert(p256_verifies(p256_input(hash, r, s: n - s, x, y)))
+    core::assert(!p256_verifies(p256_input(hash: hash + 1, r, s, x, y)))
+    core::assert(!p256_verifies(p256_input(hash, r, s, x, y: y + 1)))
+    core::assert(!p256_verifies(p256_input(hash, r: 0, s, x, y)))
+    core::assert(!p256_verifies(p256_input(hash, r: n, s, x, y)))
+    core::assert(!p256_verifies(p256_input(hash, r, s: n, x, y)))
+    core::assert(!p256_verifies(p256_input(hash, r, s, x: p, y)))
+    core::assert(!p256_verifies(p256_input(hash, r, s, x: 0, y: 0)))
+    // Only exactly 160 bytes are an input.
+    let short: [u8; 159] = [1; 159]
+    core::assert(!p256_verifies(short))
+    let out_of_gas = run(address: 0x100, input: p256_input(hash, r, s, x, y), gas: 6899)
+    core::assert(out_of_gas.status == FAILURE && out_of_gas.gas_used == 6899)
+}

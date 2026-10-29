@@ -12,8 +12,8 @@ pub const HOST_ALLOCATION: u8 = 2
 
 pub struct Output { pub status: u8, pub gas_used: u64, pub output: MemBuffer }
 
-/// Cancun precompiles occupy addresses 0x01 through 0x0a.
-pub fn is_precompile(_ address: u256) -> bool { address >= 1 && address <= 10 }
+/// Osaka precompiles occupy addresses 0x01 through 0x0a, and 0x100.
+pub fn is_precompile(_ address: u256) -> bool { (address >= 1 && address <= 10) || address == 0x100 }
 
 fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
 
@@ -131,6 +131,18 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         let rounds = blake2f::rounds(input)
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
         return copied(blake2f::compress(input), gas_used: rounds)
+    }
+    if address == 0x100 {
+        // P256VERIFY (EIP-7951): an invalid input or signature returns nothing.
+        if gas < 6900 { return failure(gas) }
+        let valid = len == 160 && p256::verify(
+            hash: word_at(input, offset: 0), r: word_at(input, offset: 32), s: word_at(input, offset: 64),
+            x: word_at(input, offset: 96), y: word_at(input, offset: 128),
+        )
+        if !valid { return Output { status: SUCCESS, gas_used: 6900, output: MemBuffer::empty() } }
+        var result: [u8; 32] = [0; 32]
+        result[31] = 1
+        return copied(result, gas_used: 6900)
     }
     // Address 10: KZG point evaluation (EIP-4844).
     if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }

@@ -354,6 +354,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
             .warm_coinbase_account(transaction.coinbase);
         host.journaled_state.warm_precompiles(
             (1_u64..=10)
+                .chain([0x100])
                 .map(|value| Address::from_word(U256::from(value).into()))
                 .collect(),
         );
