@@ -52,11 +52,9 @@ fn tau_g2() -> Point<Fp2> {
 /// precompile input; the versioned hash must match the commitment.
 pub fn verify<T: ByteSource>(_ input: T) -> bool {
     core::assert(input.len() == INPUT_LEN)
-    let digest = sha256(input, offset: 96, len: 48)
-    if input.byte_at(0) != 0x01 { return false }
-    for i in 1..32 {
-        if input.byte_at(i) != digest[i] { return false }
-    }
+    // The versioned hash is 0x01 followed by the commitment digest's last 31 bytes.
+    let versioned = (1 << 248) | (sha256(input, offset: 96, len: 48) & ((1 << 248) - 1))
+    if word(input, offset: 0) != versioned { return false }
     let z = word(input, offset: 32)
     let y = word(input, offset: 64)
     if z >= BLS_MODULUS || y >= BLS_MODULUS { return false }

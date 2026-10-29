@@ -15,7 +15,7 @@ pub struct Output { pub status: u8, pub gas_used: u64, pub output: MemBuffer }
 /// Osaka precompiles occupy addresses 0x01 through 0x11, and 0x100.
 pub fn is_precompile(_ address: u256) -> bool { (address >= 1 && address <= 0x11) || address == 0x100 }
 
-fn words(_ len: usize) -> u128 {
+fn word_count(_ len: usize) -> u128 {
     let len: u128 = len.downcast_unchecked()
     (len + 31) / 32
 }
@@ -24,18 +24,19 @@ pub(ingot) fn failure(_ gas: u64) -> Output {
     Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() }
 }
 
+// An output of `source`'s bytes.
 fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
-    right_aligned(source, len: source.len(), gas_used)
+    var output = MemBuffer::empty()
+    if !output.try_resize(source.len()) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    for i in 0..source.len() { output[i] = source.byte_at(i) }
+    Output { status: SUCCESS, gas_used, output }
 }
 
-// Copy `source` into a zero-filled output of `len` bytes, ending at its last byte.
-fn right_aligned<T: ByteSource>(_ source: T, len: usize, gas_used: u64) -> Output {
+// An output of big-endian words.
+fn words<const N: usize>(_ values: [u256; N], gas_used: u64) -> Output {
     var output = MemBuffer::empty()
-    if !output.try_resize(len) {
-        return Output { status: HOST_ALLOCATION, gas_used, output }
-    }
-    let offset = len - source.len()
-    for i in 0..source.len() { output[offset + i] = source.byte_at(i) }
+    if !output.try_resize(N * 32) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    for i in 0..N { output.write_word(offset: i * 32, value: values[i]) }
     Output { status: SUCCESS, gas_used, output }
 }
 
@@ -68,15 +69,7 @@ fn ecrecover<T: ByteSource>(_ input: T) -> Output {
     let malformed = (v != 27 && v != 28) || r == 0 || r >= secp256k1::N || s == 0 || s >= secp256k1::N
     let signer = if malformed { Option::None } else { recover_signer(hash, recovery_id: v - 27, r, s) }
     match signer {
-        Option::Some(address) => {
-            var output: [u8; 32] = [0; 32]
-            var i: u64 = 12
-            while i < 32 {
-                output[i as usize] = (address >> ((31 - i) * 8) as u256).downcast_truncate()
-                i += 1
-            }
-            copied(output, gas_used: 3000)
-        },
+        Option::Some(address) => words([address], gas_used: 3000),
         Option::None => Output { status: SUCCESS, gas_used: 3000, output: MemBuffer::empty() },
     }
 }
@@ -93,11 +86,11 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
     if address == 2 || address == 3 || address == 4 {
         let (base, per_word): (u128, u128) = if address == 2 { (60, 12) }
             else if address == 3 { (600, 120) } else { (15, 3) }
-        let cost = base + per_word * words(len)
+        let cost = base + per_word * word_count(len)
         if cost > gas as u128 { return failure(gas) }
         let used: u64 = cost.downcast_unchecked()
-        return if address == 2 { copied(sha256(input, offset: 0, len), gas_used: used) }
-            else if address == 3 { right_aligned(ripemd160(input), len: 32, gas_used: used) }
+        return if address == 2 { words([sha256(input, offset: 0, len)], gas_used: used) }
+            else if address == 3 { words([ripemd160(input)], gas_used: used) }
             else { copied(input, gas_used: used) }
     }
     if address == 5 { return modexp::run(input, gas) }
@@ -107,7 +100,7 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         if cost > gas { return failure(gas) }
         let point = if address == 6 { bn254::add(input) } else { bn254::mul(input) }
         return match point {
-            Option::Some(encoded) => copied(encoded, gas_used: cost),
+            Option::Some(point) => words(point, gas_used: cost),
             Option::None => failure(gas),
         }
     }
@@ -116,11 +109,7 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         let cost = 45000 + 34000 * pairs
         if cost > gas as u128 { return failure(gas) }
         return match bn254::pairing(input) {
-            Option::Some(holds) => {
-                var result: [u8; 32] = [0; 32]
-                if holds { result[31] = 1 }
-                copied(result, gas_used: cost.downcast_unchecked())
-            },
+            Option::Some(holds) => words([if holds { 1 } else { 0 }], gas_used: cost.downcast_unchecked()),
             Option::None => failure(gas),
         }
     }
@@ -128,7 +117,11 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         if len != blake2f::INPUT_LEN { return failure(gas) }
         let rounds = blake2f::rounds(input)
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
-        return copied(blake2f::compress(input), gas_used: rounds)
+        let state = blake2f::compress(input)
+        var output = MemBuffer::empty()
+        if !output.try_resize(64) { return Output { status: HOST_ALLOCATION, gas_used: rounds, output } }
+        for i in 0..8 { output.write_le<u64>(offset: i * 8, value: state[i]) }
+        return Output { status: SUCCESS, gas_used: rounds, output }
     }
     if address >= 0x0b && address <= 0x11 { return bls::run(address, input, gas) }
     if address == 0x100 {
@@ -139,19 +132,9 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
             x: word_at(input, offset: 96), y: word_at(input, offset: 128),
         )
         if !valid { return Output { status: SUCCESS, gas_used: 6900, output: MemBuffer::empty() } }
-        var result: [u8; 32] = [0; 32]
-        result[31] = 1
-        return copied(result, gas_used: 6900)
+        return words([1], gas_used: 6900)
     }
     // Address 10: KZG point evaluation (EIP-4844).
     if len != kzg::INPUT_LEN || kzg::GAS > gas || !kzg::verify(input) { return failure(gas) }
-    var result: [u8; 64] = [0; 64]
-    var i: u64 = 0
-    while i < 32 {
-        let shift = ((31 - i) * 8) as u256
-        result[i as usize] = (kzg::FIELD_ELEMENTS_PER_BLOB >> shift).downcast_truncate()
-        result[(32 + i) as usize] = (kzg::BLS_MODULUS >> shift).downcast_truncate()
-        i += 1
-    }
-    copied(result, gas_used: kzg::GAS)
+    words([kzg::FIELD_ELEMENTS_PER_BLOB, kzg::BLS_MODULUS], gas_used: kzg::GAS)
 }

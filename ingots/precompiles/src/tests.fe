@@ -14,34 +14,21 @@ fn word_at<const N: usize>(_ bytes: [u8; N], offset: usize) -> u256 {
 #[test]
 fn sha256_known_answers() {
     let empty: [u8; 0] = []
-    core::assert(word_at(sha256(empty, offset: 0, len: 0), offset: 0)
+    core::assert(sha256(empty, offset: 0, len: 0)
         == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
-    core::assert(word_at(sha256([0x61 as u8, 0x62, 0x63], offset: 0, len: 3), offset: 0)
+    core::assert(sha256([0x61 as u8, 0x62, 0x63], offset: 0, len: 3)
         == 0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad)
     // 56 bytes: the padding spills into a second block.
     var long: [u8; 56] = [0x61; 56]
-    core::assert(word_at(sha256(long, offset: 0, len: 56), offset: 0)
+    core::assert(sha256(long, offset: 0, len: 56)
         == 0xb35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a)
 }
 
 #[test]
 fn ripemd160_known_answers() {
     let empty: [u8; 0] = []
-    var padded: [u8; 32] = [0; 32]
-    var i: usize = 0
-    let digest = ripemd160(empty)
-    while i < 20 {
-        padded[12 + i] = digest[i]
-        i += 1
-    }
-    core::assert(word_at(padded, offset: 0) == 0x9c1185a5c5e9fc54612808977ee8f548b2258d31)
-    let abc = ripemd160([0x61 as u8, 0x62, 0x63])
-    i = 0
-    while i < 20 {
-        padded[12 + i] = abc[i]
-        i += 1
-    }
-    core::assert(word_at(padded, offset: 0) == 0x8eb208f7e05d987a9b044a8e98c6b087f15a0bfc)
+    core::assert(ripemd160(empty) == 0x9c1185a5c5e9fc54612808977ee8f548b2258d31)
+    core::assert(ripemd160([0x61 as u8, 0x62, 0x63]) == 0x8eb208f7e05d987a9b044a8e98c6b087f15a0bfc)
 }
 
 #[test]

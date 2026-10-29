@@ -1,3 +1,4 @@
+use core::num::swap_bytes
 use core::ops::WrappingAdd
 use keccak::ByteSource
 
@@ -138,20 +139,15 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     state[7] = state[7].wrapping_add(h)
 }
 
-/// The SHA-256 digest of `len` bytes of `input` from `offset`.
-pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> [u8; 32] {
+/// The SHA-256 digest of `len` bytes of `input` from `offset`, as a big-endian word.
+pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> u256 {
     var state = SHA256_IV
     let blocks = padded_blocks(len)
     for index in 0..blocks {
         sha256_compress(mut state, padded_block(input, offset, len, block_index: index, blocks, big_endian: true))
     }
-    var digest: [u8; 32] = [0; 32]
-    var i: u64 = 0
-    while i < 32 {
-        let shift: u32 = ((3 - i % 4) * 8).downcast_unchecked()
-        digest[i as usize] = (state[(i / 4) as usize] >> shift).downcast_truncate()
-        i += 1
-    }
+    var digest: u256 = 0
+    for word in state { digest = (digest << 32) | word as u256 }
     digest
 }
 
@@ -213,18 +209,15 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
     state[0] = t
 }
 
-pub fn ripemd160<T: ByteSource>(_ input: T) -> [u8; 20] {
+/// The RIPEMD-160 digest of `input`, as a big-endian 160-bit word.
+pub fn ripemd160<T: ByteSource>(_ input: T) -> u256 {
     var state = RIPEMD_IV
     let blocks = padded_blocks(input.len())
     for index in 0..blocks {
         ripemd_compress(mut state, padded_block(input, offset: 0, len: input.len(), block_index: index, blocks, big_endian: false))
     }
-    var digest: [u8; 20] = [0; 20]
-    var i: u64 = 0
-    while i < 20 {
-        let shift: u32 = ((i % 4) * 8).downcast_unchecked()
-        digest[i as usize] = (state[(i / 4) as usize] >> shift).downcast_truncate()
-        i += 1
-    }
+    // Each state word holds its four digest bytes little-endian.
+    var digest: u256 = 0
+    for word in state { digest = (digest << 32) | swap_bytes(word) as u256 }
     digest
 }
