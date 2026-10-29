@@ -1,9 +1,10 @@
-use core::{MemSpan, MemVec}
+use core::{MemSpan, MemVec, Option}
 use ingot::logs::LogBuffer
 use swisstable::SwissTable
 use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
-use ingot::state::{StorageKey, WorldState, address_word}
+use ingot::state::{StorageKey, WorldState, address_word, designator}
+use ingot::types::Program
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::FrameBuffers
 use fevm_precompiles::is_precompile
@@ -17,6 +18,8 @@ const WARM_STORAGE: u8 = 5
 const CODE: u8 = 6
 const TOUCHED: u8 = 7
 const DOOMED: u8 = 8
+// An EIP-7702 delegation: `slot` is 1 when the code was a designator to `previous`.
+const DELEGATION: u8 = 9
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
@@ -112,6 +115,7 @@ impl Transaction {
     }
 
     pub fn refund(self) -> i128 { self.refund }
+    pub fn add_refund(mut self, _ amount: i128) { self.refund += amount }
 
     // EIP-3529: positive refunds are capped at one fifth of the gas spent.
     pub fn capped_refund(self, gas_spent: u64) -> u64 {
@@ -258,6 +262,12 @@ impl Transaction {
                     let empty: [u8; 0] = []
                     self.state.set_code(address: change.address, code: empty) == OK
                 },
+                DELEGATION => if change.slot == 1 {
+                    self.state.set_code(address: change.address, code: designator(change.previous)) == OK
+                } else {
+                    let empty: [u8; 0] = []
+                    self.state.set_code(address: change.address, code: empty) == OK
+                },
                 TOUCHED => self.touched.remove(change.address),
                 DOOMED => self.doomed.remove(change.address),
                 _ => core::panic(),
@@ -265,7 +275,9 @@ impl Transaction {
             // Reverse replay restores entries the tables held before. A table
             // that cannot allocate to hold one again is a fatal host failure.
             core::assert(restored)
-            if !change.existed && (change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE || change.kind == CODE) {
+            let account_write = change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE
+                || change.kind == CODE || change.kind == DELEGATION
+            if !change.existed && account_write {
                 core::assert(self.state.remove_empty_account(change.address))
             }
         }
@@ -277,11 +289,12 @@ impl Transaction {
     pub fn deployable(self, _ address: u256) -> bool {
         self.state.nonce(address) == 0 && self.state.code_size(address) == 0 && !self.state.has_storage(address)
     }
-    pub fn code_size(self, _ address: u256) -> u64 { self.state.code_size(address) }
+    pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
-    pub fn code_byte(self, address: u256, index: u64) -> u8 { self.state.code_byte(address, index) }
+    pub fn code_byte(self, address: u256, index: usize) -> u8 { self.state.code_byte(address, index) }
     pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
-    pub fn jumpdests(self, _ address: u256) -> ref MemSpan { self.state.jumpdests(address) }
+    pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
+    pub fn program(self, _ address: u256) -> Program { self.state.program(address) }
     pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
     pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {
@@ -357,6 +370,27 @@ impl Transaction {
             return ERR_HOST_ALLOCATION
         }
         let written = self.state.set_code(address, code)
+        if written != OK { let _ = self.journal.pop() }
+        written
+    }
+    // EIP-7702: point an authority's code at `delegate`, or clear it for zero.
+    // The code must be empty or a designator, which the journal can restore.
+    pub fn delegate_code(mut self, address: u256, delegate: u256) -> i32 {
+        self.started = true
+        let address = address_word(address)
+        let previous = self.state.delegate(address)
+        core::assert(self.state.code_size(address) == 0 || previous.is_some())
+        let status = self.touch(address)
+        if status != OK { return status }
+        let (was_delegated, previous_delegate): (u256, u256) = match previous {
+            Option::Some(previous) => (1, previous),
+            Option::None => (0, 0),
+        }
+        let change = Change { kind: DELEGATION, address, slot: was_delegated, previous: previous_delegate, existed: self.state.exists(address) }
+        if !self.journal.append(change) { return ERR_HOST_ALLOCATION }
+        let empty: [u8; 0] = []
+        let written = if delegate == 0 { self.state.set_code(address, code: empty) }
+            else { self.state.set_code(address, code: designator(delegate)) }
         if written != OK { let _ = self.journal.pop() }
         written
     }

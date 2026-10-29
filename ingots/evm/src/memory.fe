@@ -80,7 +80,7 @@ pub fn copy_expansion(current: u64, dest: u256, source: u256, len: u256) -> Opti
     }
 }
 
-/// Cancun's three gas per copied word, excluding opcode and expansion charges.
+/// Three gas per copied word, excluding opcode and expansion charges.
 pub fn copy_gas(_ len: u256) -> Option<u64> {
     let words = len / 32 + if len % 32 == 0 { 0 } else { 1 }
     // Even the maximum EVM length needs fewer than 2^252 words.

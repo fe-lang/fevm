@@ -1,9 +1,9 @@
-# Cancun frame differential corpus
+# Osaka frame differential corpus
 
 This runner compares FeVM's single-frame execution with `revm-interpreter`
 **31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
-explicitly configured for **Cancun**. Cargo.lock pins the reference and its
-dependencies. The corpus includes 1,840 frames: arithmetic batches, all PUSH
+explicitly configured for **Osaka**. Cargo.lock pins the reference and its
+dependencies. The corpus includes 1,845 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
 remaining gas, Keccak ranges/padding/gas, code/calldata beyond 4 KiB, and
 returned/reverted bytes. A looping program checks gas exhaustion.
@@ -92,7 +92,7 @@ frame instructions. Each case supplies its gas limit; the usual budget is
 uses two-byte lengths for individual fields; it no longer imposes a 4 KiB total
 packet limit. The stateless corpus excludes external state and nested calls. The additional
 stateful corpus below covers implemented state access, refunds and checkpoint
-rollback. Neither corpus establishes full Cancun conformance, CALL/CREATE
+rollback. Neither corpus establishes full Osaka conformance, CALL/CREATE
 execution, resident allocation reclamation or performance.
 
 The specification pin is
@@ -115,7 +115,7 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 1,142 deterministic cases. Its reference uses the pinned
+The stateful corpus has 1,149 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,
@@ -124,7 +124,7 @@ Transaction results also compare committed state, logs, capped refunds and net g
 transactions share persistent state but start fresh transient/access/refund state.
 The reference observes its journal directly so inspection does not warm a key.
 
-Cases include the EIP-2200 storage sequences adjusted to Cancun, cold/warm gas
+Cases include the EIP-2200 storage sequences adjusted to Osaka, cold/warm gas
 boundaries, upfront sender/destination/coinbase/precompile warming, duplicate
 access lists, high-bit BALANCE aliases, negative frame refund contributions,
 static writes, child commit/revert, parent rollback, transaction abort/reuse, and

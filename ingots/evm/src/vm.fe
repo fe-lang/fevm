@@ -8,6 +8,7 @@ use ingot::memory::{
 use ingot::gas::base_cost
 use ingot::state::address_word
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
+use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{
     ERR_BALANCE_OVERFLOW,
@@ -108,6 +109,7 @@ fn unary_result(_ op: i32, _ value: u256) -> Option<u256> {
     match op {
         0x15 => Option::Some(if value == 0 { 1 } else { 0 }),
         0x19 => Option::Some(!value),
+        0x1e => Option::Some(leading_zeros(value)),
         _ => Option::None,
     }
 }
@@ -515,12 +517,8 @@ impl Vm {
         // Bytes past the end read as zero.
         var value: u256 = 0
         if offset < len as u256 {
-            let start: u64 = offset.downcast_unchecked()
-            var index = start
-            while index < len {
-                value = (value << 8) | calldata.byte_at(index) as u256
-                index += 1
-            }
+            let start: usize = offset.downcast_unchecked()
+            for index in start..len { value = (value << 8) | calldata.byte_at(index) as u256 }
             value <<= ((32 - (len - start)) * 8) as u256
         }
         self.push(value)
@@ -918,11 +916,6 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
     state.set_balance(address: to, value: state.balance(to) + value)
 }
 
-/// Copy an account's code into an analyzed program.
-pub fn load_program(_ state: Transaction, address: u256) -> Program {
-    Program::analyzed(state.code(address), jumpdests: state.jumpdests(address))
-}
-
 /// Open a contract creation's checkpoint and apply its prologue: the creation
 /// mark, the new account's first nonce and its endowment. Initcode failure or a
 /// rejected deposit reverts all of it.
@@ -1047,7 +1040,19 @@ impl Vm {
             self.fault(access_status)
             return Option::None
         }
-        let extra: u128 = (if cold { 2500 } else { 0 }) + if op == 0xf1 && has_value && empty { 25000 } else { 0 }
+        // EIP-7702: a delegated account runs its delegate's code, whose access is charged too.
+        let delegate = state.delegate(code_address)
+        var delegate_access: u128 = 0
+        if let Option::Some(delegate) = delegate {
+            delegate_access = if state.account_is_warm(delegate) { 100 } else { 2600 }
+            let warmed = state.warm_account(address: delegate)
+            if warmed != OK {
+                self.fault(warmed)
+                return Option::None
+            }
+        }
+        let extra: u128 = (if cold { 2500 } else { 0 }) + delegate_access
+            + if op == 0xf1 && has_value && empty { 25000 } else { 0 }
         if !self.charge(extra) { return Option::None }
         let cap = self.gas_remaining - self.gas_remaining / 64
         let forwarded: u64 = if requested < cap as u256 { requested.downcast_unchecked() } else { cap }
@@ -1081,20 +1086,22 @@ impl Vm {
             state.revert(checkpoint)
             return Option::None
         }
-        if is_precompile(code_address) {
+        if delegate.is_none() && is_precompile(code_address) {
             let result = run_precompile(address: code_address, input: calldata, gas: child_gas)
             if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
             self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })
             return Option::None
         }
-        let code_len = state.code_size(code_address)
+        // A delegate that is a precompile runs nothing.
+        let program_address = match delegate { Option::Some(delegate) => delegate, Option::None => code_address }
+        let code_len = if delegate.is_some() && is_precompile(program_address) { 0 } else { state.code_size(program_address) }
         if code_len == 0 {
             state.commit(checkpoint)
             self.gas_remaining += child_gas
             self.push(1)
             return Option::None
         }
-        let program = load_program(state, address: code_address)
+        let program = state.program(program_address)
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
@@ -1130,8 +1137,8 @@ impl Vm {
             self.fault(ERR_OUT_OF_GAS)
             return Option::None
         }
-        let count: u64 = len.downcast_unchecked()
-        let start: u64 = if count == 0 { 0 } else { offset.downcast_unchecked() }
+        let count: usize = len.downcast_unchecked()
+        let start: usize = if count == 0 { 0 } else { offset.downcast_unchecked() }
         let sender = address_word(call.address)
         let address = if op == 0xf0 {
             create_address(sender, nonce: state.nonce(sender))
@@ -1169,7 +1176,7 @@ impl Vm {
                 return Option::None
             },
         }
-        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start as usize, len: count as usize)))
+        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start, len: count)))
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
@@ -1293,6 +1300,7 @@ impl Vm {
             0x17 => self.op_or(code, pc, gas, depth),
             0x18 => self.op_xor(code, pc, gas, depth),
             0x19 => self.op_not(code, pc, gas, depth),
+            0x1e => self.op_clz(code, pc, gas, depth),
             0x1a => self.op_byte(code, pc, gas, depth),
             0x1b => self.op_shl(code, pc, gas, depth),
             0x1c => self.op_shr(code, pc, gas, depth),
@@ -1388,11 +1396,15 @@ impl Vm {
     }
 
     fn op_iszero(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.op_unary(code, pc, gas, depth, op: 0x15)
+        self.op_unary(code, pc, gas, depth, cost: 3, op: 0x15)
     }
 
     fn op_not(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.op_unary(code, pc, gas, depth, op: 0x19)
+        self.op_unary(code, pc, gas, depth, cost: 3, op: 0x19)
+    }
+
+    fn op_clz(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
+        self.op_unary(code, pc, gas, depth, cost: 5, op: 0x1e)
     }
 
     fn op_div(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize) {
@@ -1704,19 +1716,19 @@ impl Vm {
     }
 
     #[inline(always)]
-    fn op_unary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, op: i32) {
-        if gas < 3 {
+    fn op_unary(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, cost: u64, op: i32) {
+        if gas < cost {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - cost, depth)
         }
         let top = slot(self.stack.ptr(), depth - 1)
         match unary_result(op, unsafe { *top }) {
             Option::Some(result) => unsafe { *top = result },
             Option::None => {},
         }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth)
+        self.next(code, pc.wrapping_add(1), gas - cost, depth)
     }
 
     // Each binary and unary opcode has a handler of its own, which inlines
@@ -2304,6 +2316,9 @@ impl Vm {
                             self.binary_arith_general(op)
                             gas = self.gas_remaining
                             if !self.ok() { break }
+                        },
+                        0x1e => {
+                            if !self.unary(op) { break }
                         },
                         0x20 => {
                             self.gas_remaining = gas

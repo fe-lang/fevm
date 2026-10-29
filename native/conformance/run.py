@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Ethereum execution-spec state tests (Cancun) against native FeVM."""
+"""Run Ethereum execution-spec state tests (Osaka) against native FeVM."""
 import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -14,14 +14,18 @@ import time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-FORK = 'Cancun'
-BLOB_BASE_FEE_UPDATE_FRACTION = 3338477
+FORK = 'Osaka'
+# BPO2's, for fixtures without a blob schedule.
+BLOB_BASE_FEE_UPDATE_FRACTION = 11684671
 # Execution statuses defined by the EVM (see ingots/evm/src/constants.fe);
 # every other driver status is a host failure.
 EVM_STATUSES = {0: 'success', 19: 'revert', 10: 'stack_underflow', 11: 'stack_overflow',
                 15: 'out_of_gas', 16: 'invalid_jump', 17: 'invalid_opcode', 18: 'return_data_oob',
                 23: 'static_write', 24: 'code_prefix', 25: 'precompile_failure', 27: 'address_collision'}
 HOST_STATUSES = {21: 'host_allocation', 26: 'balance_overflow'}
+# FeVM takes a transaction's recovered sender; rejecting a malformed signature
+# belongs to the host that decodes the signed transaction.
+SIGNATURE_EXCEPTION = 'TransactionException.INVALID_SIGNATURE_VRS'
 
 
 def digest(path):
@@ -36,14 +40,14 @@ def be(value, width):
     return number(value).to_bytes(width, 'big')
 
 
-def blob_base_fee(excess):
+def blob_base_fee(excess, fraction):
     # EIP-4844 fake_exponential(MIN_BLOB_GASPRICE, excess, UPDATE_FRACTION).
-    output, accumulator, i = 0, BLOB_BASE_FEE_UPDATE_FRACTION, 1
+    output, accumulator, i = 0, fraction, 1
     while accumulator > 0:
         output += accumulator
-        accumulator = accumulator * excess // (BLOB_BASE_FEE_UPDATE_FRACTION * i)
+        accumulator = accumulator * excess // (fraction * i)
         i += 1
-    return output // BLOB_BASE_FEE_UPDATE_FRACTION
+    return output // fraction
 
 
 def blob(value):
@@ -60,18 +64,21 @@ def tx_kind(transaction):
     return 1 if 'accessLists' in transaction else 0
 
 
-def encode(test, indexes):
+def encode(test, indexes, tx_gas_limit_cap=2**24):
     """The driver's binary case format; integers and lengths are big endian."""
     env, tx = test['env'], test['transaction']
-    out = bytearray([1])
+    out = bytearray([4])
     out += be(env['currentCoinbase'], 20)
     out += be(env['currentNumber'], 32)
     out += be(env['currentTimestamp'], 32)
     out += be(env.get('currentRandom', env.get('currentDifficulty', '0x0')), 32)
     out += be(env['currentGasLimit'], 32)
     out += be(env.get('currentBaseFee', '0x0'), 32)
-    out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0'))).to_bytes(32, 'big')
+    schedule = test.get('config', {}).get('blobSchedule', {}).get(FORK, {})
+    fraction = number(schedule.get('baseFeeUpdateFraction', BLOB_BASE_FEE_UPDATE_FRACTION))
+    out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0')), fraction).to_bytes(32, 'big')
     out += be(test.get('config', {}).get('chainid', '0x1'), 32)
+    out += tx_gas_limit_cap.to_bytes(8, 'big')
     pre = test['pre']
     out += len(pre).to_bytes(4, 'big')
     for address, account in pre.items():
@@ -82,7 +89,7 @@ def encode(test, indexes):
         for slot, value in storage:
             out += be(slot, 32) + be(value, 32)
     kind = tx_kind(tx)
-    out += bytes([kind]) + be(tx['sender'], 20)
+    out += bytes([kind, 'chainId' in tx]) + be(tx.get('chainId', '0x0'), 32) + be(tx['sender'], 20)
     creates = tx['to'] in ('', '0x')
     out += bytes([1 if creates else 0]) + (bytes(20) if creates else be(tx['to'], 20))
     out += be(tx['nonce'], 32) + be(tx['gasLimit'][indexes['gas']], 8)
@@ -98,6 +105,11 @@ def encode(test, indexes):
         out += b''.join(be(key, 32) for key in entry['storageKeys'])
     hashes = tx.get('blobVersionedHashes', [])
     out += len(hashes).to_bytes(4, 'big') + b''.join(be(value, 32) for value in hashes)
+    authorizations = tx.get('authorizationList', [])
+    out += len(authorizations).to_bytes(4, 'big')
+    for entry in authorizations:
+        out += be(entry['chainId'], 32) + be(entry['address'], 20) + be(entry['nonce'], 32)
+        out += be(entry.get('yParity', entry.get('v')), 32) + be(entry['r'], 32) + be(entry['s'], 32)
     return bytes(out)
 
 
@@ -147,6 +159,8 @@ def cases(fixtures, selection):
 
 def check(executable, case, timeout):
     post = case['post']
+    if SIGNATURE_EXCEPTION in post.get('expectException', ''):
+        return 'signature', [], 0.0
     started = time.perf_counter()
     try:
         observed = subprocess.run([str(executable)], input=encode(case['test'], post['indexes']),
@@ -228,7 +242,7 @@ def main():
                'groups': {group: dict(counts) for group, counts in sorted(groups.items())}}
     (out / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report['totals']))
-    sys.exit(0 if totals['passed'] == len(selected) else 1)
+    sys.exit(0 if totals['passed'] + totals['signature'] == len(selected) else 1)
 
 
 if __name__ == '__main__':

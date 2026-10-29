@@ -1,8 +1,11 @@
-use core::MemBuffer
+use core::{MemBuffer, Option}
 use keccak::keccak256_word
 use ingot::address::{create_address, create2_address}
 use ingot::constants::{ERR_PRECOMPILE, OK}
-use ingot::processor::{Applied, INVALID_NONCE, INVALID_TX_TYPE, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact}
+use ingot::processor::{
+    Applied, INVALID_BLOB_COUNT, INVALID_CHAIN_ID, INVALID_GAS_LIMIT_CAP, INVALID_INTRINSIC_GAS, INVALID_NONCE, INVALID_TX_TYPE,
+    TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact,
+}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, InputData, Program, default_block_env, default_call_env, empty_bytes}
@@ -108,8 +111,8 @@ fn transact_charges_fees_and_rejects_bad_nonces() {
     block.basefee = 7
     block.coinbase = 0xc0
     var env = TxEnv {
-        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
-        gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 5,
+        kind: TX_FEE_MARKET, chain_id: Option::None, sender: 0x1000, to: 0xbb, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 5,
     }
     let request = TxRequest::new(env, data: empty_bytes())
     var buffers = FrameBuffers::new()
@@ -137,8 +140,8 @@ fn transact_calls_accounts_without_code_in_a_world_without_code() {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     let env = TxEnv {
-        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xdd, creates: false, nonce: 0, gas_limit: 21_000,
-        gas_price: 1, max_priority_fee_per_gas: 1, max_fee_per_blob_gas: 0, value: 5,
+        kind: TX_FEE_MARKET, chain_id: Option::None, sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 21_000, gas_price: 1, max_priority_fee_per_gas: 1, max_fee_per_blob_gas: 0, value: 5,
     }
     let request = TxRequest::new(env, data: empty_bytes())
     var buffers = FrameBuffers::new()
@@ -160,8 +163,8 @@ fn transact_rejects_blob_hashes_outside_blob_transactions() {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     let env = TxEnv {
-        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
-        gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+        kind: TX_FEE_MARKET, chain_id: Option::None, sender: 0x1000, to: 0xbb, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
     }
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_blob_hash((1 as u256) << 248))
@@ -183,8 +186,8 @@ fn transact_deletes_empty_call_targets_unless_the_call_fails() {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     var env = TxEnv {
-        kind: TX_LEGACY, sender: 0x1000, to: 0xaa, creates: false, nonce: 0, gas_limit: 100_000,
-        gas_price: 10, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+        kind: TX_LEGACY, chain_id: Option::None, sender: 0x1000, to: 0xaa, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 10, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
     let called = send(world, env, block)
     core::assert(called.receipt.invalid == VALID && called.receipt.status == OK)
@@ -216,8 +219,8 @@ fn transact_deletes_the_storage_of_empty_touched_accounts() {
     block.basefee = 7
     block.coinbase = 0xc0
     let env = TxEnv {
-        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
-        gas_price: 7, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+        kind: TX_FEE_MARKET, chain_id: Option::None, sender: 0x1000, to: 0xbb, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 7, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
     }
     let applied = send(world, env, block)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
@@ -241,8 +244,8 @@ fn transact_grows_the_account_table_to_pay_the_coinbase() {
     block.basefee = 7
     block.coinbase = 0x2000
     let env = TxEnv {
-        kind: TX_FEE_MARKET, sender: 0x1000, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
-        gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
+        kind: TX_FEE_MARKET, chain_id: Option::None, sender: 0x1000, to: 0xbb, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 10, max_priority_fee_per_gas: 2, max_fee_per_blob_gas: 0, value: 0,
     }
     let applied = send(world, env, block)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK && applied.receipt.gas_used == 21000)
@@ -250,4 +253,100 @@ fn transact_grows_the_account_table_to_pay_the_coinbase() {
     let world = applied.state
     core::assert(world.balance(0x1000) == 1_000_000_000_000 - 21000 * 9 && world.nonce(0x1000) == 1)
     core::assert(world.balance(0x2000) == 21000 * 2)
+}
+
+#[test]
+fn transact_charges_at_least_the_calldata_floor() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    // 100 nonzero bytes are 400 tokens: 22,600 intrinsic gas, a 25,000 floor.
+    var env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::None, sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 24_999, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let data = [0xff as u8; 100]
+    var buffers = FrameBuffers::new()
+    let request = TxRequest::new(env, data: InputData::copy_from(data, offset: 0, len: 100))
+    let short = transact(world, request, block, mut buffers)
+    core::assert(short.receipt.invalid == INVALID_INTRINSIC_GAS)
+    env.gas_limit = 30_000
+    let request = TxRequest::new(env, data: InputData::copy_from(data, offset: 0, len: 100))
+    let applied = transact(short.state, request, block, mut buffers)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK && applied.receipt.gas_used == 25_000)
+    core::assert(applied.state.balance(0x1000) == 1_000_000_000 - 25_000)
+}
+
+#[test]
+fn transact_caps_the_gas_limit() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000))
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    var env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::None, sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 16_777_217, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let rejected = send(world, env, block)
+    core::assert(rejected.receipt.invalid == INVALID_GAS_LIMIT_CAP)
+    env.gas_limit = 16_777_216
+    let applied = send(rejected.state, env, block)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.gas_used == 21_000)
+    // A host may raise the cap.
+    block.tx_gas_limit_cap = 0xffffffffffffffff
+    env.nonce = 1
+    env.gas_limit = 50_000_000
+    let raised = send(applied.state, env, block)
+    core::assert(raised.receipt.invalid == VALID && raised.receipt.gas_used == 21_000)
+}
+
+#[test]
+fn transact_limits_blobs_per_transaction() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    block.blobbasefee = 1
+    var env = TxEnv {
+        kind: TX_BLOB, chain_id: Option::None, sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 21_000, gas_price: 1, max_priority_fee_per_gas: 1, max_fee_per_blob_gas: 1, value: 0,
+    }
+    var seven = TxRequest::new(env, data: empty_bytes())
+    var six = TxRequest::new(env, data: empty_bytes())
+    for index in 0..7 {
+        let hash = ((1 as u256) << 248) + index as u256
+        core::assert(seven.add_blob_hash(hash))
+        if index < 6 { core::assert(six.add_blob_hash(hash)) }
+    }
+    var buffers = FrameBuffers::new()
+    let rejected = transact(world, seven, block, mut buffers)
+    core::assert(rejected.receipt.invalid == INVALID_BLOB_COUNT)
+    let applied = transact(rejected.state, six, block, mut buffers)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    // Gas and six blobs of 131,072 blob gas at one wei each.
+    core::assert(applied.state.balance(0x1000) == 1_000_000_000 - 21_000 - 6 * 131_072)
+}
+
+#[test]
+fn transact_checks_the_signed_chain_id() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000))
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    block.chainid = 1
+    var env = TxEnv {
+        kind: TX_FEE_MARKET, chain_id: Option::Some(2), sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 21_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    let rejected = send(world, env, block)
+    core::assert(rejected.receipt.invalid == INVALID_CHAIN_ID)
+    env.chain_id = Option::Some(1)
+    let applied = send(rejected.state, env, block)
+    core::assert(applied.receipt.invalid == VALID)
+    // A legacy transaction signed before EIP-155 is valid on any chain.
+    env.kind = TX_LEGACY
+    env.chain_id = Option::None
+    env.nonce = 1
+    core::assert(send(applied.state, env, block).receipt.invalid == VALID)
 }

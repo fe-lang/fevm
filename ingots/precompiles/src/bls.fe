@@ -1,0 +1,210 @@
+use core::{MemBuffer, Option}
+use keccak::ByteSource
+use ingot::{HOST_ALLOCATION, Output, SUCCESS, failure}
+use ingot::bls_curve::{Affine, Point, on_g1, on_g2}
+use ingot::bls_field::{Field, Fp}
+use ingot::bls_map::{map_to_g1, map_to_g2}
+use ingot::bls_pairing::{final_exponentiation, miller_loop}
+use ingot::bls_tower::{Fp12, Fp2}
+
+// EIP-2537's BLS12-381 precompiles at 0x0b through 0x11. A field element is 64
+// big-endian bytes below p, so its top 16 bytes are zero; a G1 point is (x, y)
+// and a G2 point (x0, x1, y0, y1), each on its curve, with all zeros for the
+// identity. Malformed input is an exceptional failure.
+
+// MSM discounts per mille for k = 1..128 pairs; larger k use the last.
+const G1_DISCOUNT: [u16; 128] = [
+    1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677,
+    673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627,
+    625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598,
+    596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576,
+    575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559,
+    558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544,
+    543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531,
+    530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519,
+]
+
+const G2_DISCOUNT: [u16; 128] = [
+    1000, 1000, 923, 884, 855, 832, 812, 796, 782, 770, 759, 749, 740, 732, 724, 717,
+    711, 704, 699, 693, 688, 683, 679, 674, 670, 666, 663, 659, 655, 652, 649, 646,
+    643, 640, 637, 634, 632, 629, 627, 624, 622, 620, 618, 615, 613, 611, 609, 607,
+    606, 604, 602, 600, 598, 597, 595, 593, 592, 590, 589, 587, 586, 584, 583, 582,
+    580, 579, 578, 576, 575, 574, 573, 571, 570, 569, 568, 567, 566, 565, 563, 562,
+    561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 552, 551, 550, 549, 548, 547,
+    546, 545, 545, 544, 543, 542, 541, 541, 540, 539, 538, 537, 537, 536, 535, 535,
+    534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524,
+]
+
+fn fp_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp> {
+    for i in 0..16 {
+        if input.byte_at(offset + i) != 0 { return Option::None }
+    }
+    Fp::from_be_bytes(input, offset: offset + 16, masked: false)
+}
+
+fn fp2_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp2> {
+    let c0 = fp_at(input, offset)
+    let c1 = fp_at(input, offset: offset + 64)
+    if c0.is_none() || c1.is_none() { return Option::None }
+    Option::Some(Fp2::new(c0: c0.unwrap(), c1: c1.unwrap()))
+}
+
+// A G1 point, optionally required to be in the order-r subgroup.
+fn g1_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Affine<Fp>> {
+    let x = fp_at(input, offset)
+    let y = fp_at(input, offset: offset + 64)
+    if x.is_none() || y.is_none() { return Option::None }
+    let point = Affine { x: x.unwrap(), y: y.unwrap(), infinity: false }
+    if point.x.is_zero() && point.y.is_zero() { return Option::Some(Affine { x: point.x, y: point.y, infinity: true }) }
+    if !on_g1(x: point.x, y: point.y) || (subgroup && !Point::from_affine(point).in_subgroup()) { return Option::None }
+    Option::Some(point)
+}
+
+fn g2_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Affine<Fp2>> {
+    let x = fp2_at(input, offset)
+    let y = fp2_at(input, offset: offset + 128)
+    if x.is_none() || y.is_none() { return Option::None }
+    let point = Affine { x: x.unwrap(), y: y.unwrap(), infinity: false }
+    if point.x.is_zero() && point.y.is_zero() { return Option::Some(Affine { x: point.x, y: point.y, infinity: true }) }
+    if !on_g2(x: point.x, y: point.y) || (subgroup && !Point::from_affine(point).in_subgroup()) { return Option::None }
+    Option::Some(point)
+}
+
+// Write `value` as 64 big-endian bytes at `offset`.
+fn write_fp(_ out: mut MemBuffer, offset: usize, _ value: Fp) {
+    let limbs = value.to_canonical()
+    var i: u64 = 0
+    while i < 48 {
+        out[offset + 16 + i as usize] = (limbs[((47 - i) / 8) as usize] >> (((47 - i) % 8) * 8)).downcast_truncate()
+        i += 1
+    }
+}
+
+fn g1_output(_ point: Point<Fp>, gas_used: u64) -> Output {
+    var output = MemBuffer::empty()
+    if !output.try_resize(128) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let affine = point.to_affine()
+    if !affine.infinity {
+        write_fp(mut output, offset: 0, affine.x)
+        write_fp(mut output, offset: 64, affine.y)
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+fn g2_output(_ point: Point<Fp2>, gas_used: u64) -> Output {
+    var output = MemBuffer::empty()
+    if !output.try_resize(256) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let affine = point.to_affine()
+    if !affine.infinity {
+        write_fp(mut output, offset: 0, affine.x.c0)
+        write_fp(mut output, offset: 64, affine.x.c1)
+        write_fp(mut output, offset: 128, affine.y.c0)
+        write_fp(mut output, offset: 192, affine.y.c1)
+    }
+    Output { status: SUCCESS, gas_used, output }
+}
+
+// k pairs at `per` gas each, discounted per mille.
+fn msm_gas(_ k: usize, per: u128, _ discounts: [u16; 128]) -> u128 {
+    let discount = discounts[if k < 128 { k } else { 128 } - 1] as u128
+    let pairs: u128 = k.downcast_unchecked()
+    pairs * per * discount / 1000
+}
+
+fn g1_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
+    let len = input.len()
+    let k = len / 160
+    if len == 0 || len % 160 != 0 || msm_gas(k, per: 12000, G1_DISCOUNT) > gas as u128 { return failure(gas) }
+    var sum = Point<Fp>::identity()
+    for i in 0..k {
+        let point = g1_at(input, offset: 160 * i, subgroup: true)
+        if point.is_none() { return failure(gas) }
+        sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 160 * i + 128)))
+    }
+    g1_output(sum, gas_used: msm_gas(k, per: 12000, G1_DISCOUNT).downcast_unchecked())
+}
+
+fn g2_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
+    let len = input.len()
+    let k = len / 288
+    if len == 0 || len % 288 != 0 || msm_gas(k, per: 22500, G2_DISCOUNT) > gas as u128 { return failure(gas) }
+    var sum = Point<Fp2>::identity()
+    for i in 0..k {
+        let point = g2_at(input, offset: 288 * i, subgroup: true)
+        if point.is_none() { return failure(gas) }
+        sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 288 * i + 256)))
+    }
+    g2_output(sum, gas_used: msm_gas(k, per: 22500, G2_DISCOUNT).downcast_unchecked())
+}
+
+// The word 1 if the product of the pairings of k (G1, G2) pairs is one, else 0.
+fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
+    let len = input.len()
+    let k = len / 384
+    let pairs: u128 = k.downcast_unchecked()
+    let cost = 32600 * pairs + 37700
+    if len == 0 || len % 384 != 0 || cost > gas as u128 { return failure(gas) }
+    // Miller loops run two pairs at a time; a last odd pair goes with the
+    // identity, which contributes one.
+    var f = Fp12::one()
+    var held = Affine { x: Fp::zero(), y: Fp::zero(), infinity: true }
+    var held_twist = Affine { x: Fp2::zero(), y: Fp2::zero(), infinity: true }
+    for i in 0..k {
+        let p = g1_at(input, offset: 384 * i, subgroup: true)
+        let q = g2_at(input, offset: 384 * i + 128, subgroup: true)
+        if p.is_none() || q.is_none() { return failure(gas) }
+        if i % 2 == 0 {
+            held = p.unwrap()
+            held_twist = q.unwrap()
+        } else {
+            f = f.mul(miller_loop(held, held_twist, p.unwrap(), q.unwrap()))
+        }
+    }
+    if k % 2 == 1 {
+        let identity = Affine { x: Fp::zero(), y: Fp::zero(), infinity: true }
+        let twist_identity = Affine { x: Fp2::zero(), y: Fp2::zero(), infinity: true }
+        f = f.mul(miller_loop(held, held_twist, identity, twist_identity))
+    }
+    var output = MemBuffer::empty()
+    let used: u64 = cost.downcast_unchecked()
+    if !output.try_resize(32) { return Output { status: HOST_ALLOCATION, gas_used: used, output } }
+    if final_exponentiation(f).is_one() { output[31] = 1 }
+    Output { status: SUCCESS, gas_used: used, output }
+}
+
+fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
+    var value: u256 = 0
+    for i in 0..32 { value = (value << 8) | input.byte_at(offset + i) as u256 }
+    value
+}
+
+/// Run BLS12-381 precompile `address` (0x0b through 0x11) with `gas`.
+pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
+    let len = input.len()
+    if address == 0x0c { return g1_msm(input, gas) }
+    if address == 0x0e { return g2_msm(input, gas) }
+    if address == 0x0f { return pairing(input, gas) }
+    if address == 0x0b {
+        if len != 256 || gas < 375 { return failure(gas) }
+        let p = g1_at(input, offset: 0, subgroup: false)
+        let q = g1_at(input, offset: 128, subgroup: false)
+        if p.is_none() || q.is_none() { return failure(gas) }
+        return g1_output(Point::from_affine(p.unwrap()).add(Point::from_affine(q.unwrap())), gas_used: 375)
+    }
+    if address == 0x0d {
+        if len != 512 || gas < 600 { return failure(gas) }
+        let p = g2_at(input, offset: 0, subgroup: false)
+        let q = g2_at(input, offset: 256, subgroup: false)
+        if p.is_none() || q.is_none() { return failure(gas) }
+        return g2_output(Point::from_affine(p.unwrap()).add(Point::from_affine(q.unwrap())), gas_used: 600)
+    }
+    if address == 0x10 {
+        let u = if len == 64 { fp_at(input, offset: 0) } else { Option::None }
+        if gas < 5500 || u.is_none() { return failure(gas) }
+        return g1_output(map_to_g1(u.unwrap()), gas_used: 5500)
+    }
+    // 0x11: MAP_FP2_TO_G2.
+    let u = if len == 128 { fp2_at(input, offset: 0) } else { Option::None }
+    if gas < 23800 || u.is_none() { return failure(gas) }
+    g2_output(map_to_g2(u.unwrap()), gas_used: 23800)
+}

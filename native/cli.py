@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and smoke-test the native FeVM CLI; this is not Cancun conformance."""
+"""Build and smoke-test the native FeVM CLI; this is not conformance."""
 import argparse
 import hashlib
 import json
@@ -48,7 +48,7 @@ def main():
     compiler = args.fe.resolve()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    record = {'schema': 1, 'scope': 'native FeVM CLI smoke, not Cancun conformance',
+    record = {'schema': 1, 'scope': 'native FeVM CLI smoke, not conformance',
               'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
               'host': platform.platform(), 'build_timeout_seconds': args.build_timeout,
               'complete': False, 'builds': []}

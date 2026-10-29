@@ -1,0 +1,153 @@
+use core::Option
+use ingot::constants::{ERR_REVERT, OK}
+use ingot::processor::{
+    Applied, Authorization, INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest,
+    VALID, transact,
+}
+use ingot::state::{WorldState, designator}
+use ingot::types::{BlockEnv, default_block_env, empty_bytes}
+use ingot::vm::FrameBuffers
+
+// Execution-specs fixture authorizations for any chain, with their signers.
+const SIGNER: u256 = 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b
+const DELEGATE: u256 = 0xcf896bba480167831b94b3bbf9285b1f211e6963
+const OTHER_SIGNER: u256 = 0x95d1be958d22adf294428c13cc71d89ff320bfd3
+
+fn signed(nonce: u256) -> Authorization {
+    Authorization {
+        chain_id: 0, address: DELEGATE, nonce, y_parity: 0,
+        r: 0xf598b61e7af84cd79d8330c99045cbe716f6760544ae632e46f9bac2ac6aa7af,
+        s: 0x21e950d1fe577941382f20c8dccd0d299ab829bee97a995b2803a5fb3f762711,
+    }
+}
+
+fn other_signed() -> Authorization {
+    Authorization {
+        chain_id: 0, address: 0xd64d5b56749107eb98eabdc6174fc5dc95e32c91, nonce: 0, y_parity: 1,
+        r: 0x6463d0e9523dcd1d7bbd82c45add520b59466d1c2fb3985bba49fe42799f5399,
+        s: 0x7dff0ff999e944ef5436bc8446022598e24c759a07178637a6ad9fba0f0186d9,
+    }
+}
+
+fn world() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1000, 1_000_000_000))
+    // The delegate: SSTORE(0, 1), then REVERT(0, 0) if slot 1 is set.
+    let code = [0x60 as u8, 1, 0x5f, 0x55, 0x60, 1, 0x54, 0x60, 13, 0x57, 0x00, 0x00, 0x00, 0x5b, 0x5f, 0x5f, 0xfd]
+    core::assert(world.set_code(address: DELEGATE, code) == OK)
+    world
+}
+
+fn delegates(_ state: WorldState, authority: u256, to: u256) -> bool {
+    match state.delegate(authority) {
+        Option::Some(delegate) => delegate == to,
+        Option::None => false,
+    }
+}
+
+fn block() -> BlockEnv {
+    var block = default_block_env()
+    block.gaslimit = 30_000_000
+    block.chainid = 1
+    block
+}
+
+fn set_code(_ world: own WorldState, to: u256, nonce: u256, authorizations: [Authorization; 2], count: usize) -> Applied {
+    let env = TxEnv {
+        kind: TX_SET_CODE, chain_id: Option::Some(1), sender: 0x1000, to, creates: false, nonce,
+        gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var request = TxRequest::new(env, data: empty_bytes())
+    for index in 0..count { core::assert(request.add_authorization(authorizations[index])) }
+    var buffers = FrameBuffers::new()
+    transact(world, request, block(), mut buffers)
+}
+
+#[test]
+fn set_code_delegates_and_runs_the_delegate_in_the_authority() {
+    let applied = set_code(world(), to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), other_signed()], count: 2)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    // Two authorizations of 25,000, then PUSH1, PUSH0, a cold SSTORE, PUSH1, a
+    // cold SLOAD, PUSH1, JUMPI and STOP; the delegate's access is free here.
+    core::assert(applied.receipt.gas_used == 21000 + 2 * 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10)
+    let state = applied.state
+    for (authority, delegate) in [(SIGNER, DELEGATE), (OTHER_SIGNER, 0xd64d5b56749107eb98eabdc6174fc5dc95e32c91)] {
+        core::assert(delegates(state, authority, to: delegate) && state.nonce(authority) == 1)
+    }
+    core::assert(state.code_size(SIGNER) == 23 && state.storage_load(SIGNER, 0) == 1)
+}
+
+#[test]
+fn set_code_survives_a_reverted_call_and_refunds_existing_authorities() {
+    var world = world()
+    // The authority exists, and slot 1 makes the delegate revert.
+    core::assert(world.set_balance(SIGNER, 1) && world.storage_store(SIGNER, 1, 1))
+    let applied = set_code(world, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == ERR_REVERT)
+    let state = applied.state
+    core::assert(delegates(state, authority: SIGNER, to: DELEGATE) && state.nonce(SIGNER) == 1)
+    core::assert(state.storage_load(SIGNER, 0) == 0)
+    // 12,500 of the authorization's 25,000 is refunded, within a fifth of the gas spent.
+    let spent: u64 = 21000 + 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10 + 1 + 2 + 2
+    core::assert(applied.receipt.gas_used == spent - 12500)
+}
+
+#[test]
+fn set_code_skips_invalid_authorizations() {
+    // An authorization altered after signing recovers some other account,
+    // whose nonce does not match; the valid one applies.
+    let applied = set_code(world(), to: 0xdd, nonce: 0, authorizations: [signed(nonce: 1), signed(nonce: 0)], count: 2)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    core::assert(delegates(applied.state, authority: SIGNER, to: DELEGATE) && applied.state.nonce(SIGNER) == 1)
+    // Replayed, it no longer matches the authority's nonce.
+    let repeated = set_code(applied.state, to: 0xdd, nonce: 1, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
+    core::assert(repeated.receipt.invalid == VALID && repeated.state.nonce(SIGNER) == 1)
+    // An authorization for another chain is ignored.
+    var foreign = signed(nonce: 0)
+    foreign.chain_id = 2
+    let ignored = set_code(world(), to: 0xdd, nonce: 0, authorizations: [foreign, foreign], count: 1)
+    core::assert(ignored.receipt.invalid == VALID && ignored.state.delegate(SIGNER).is_none())
+}
+
+#[test]
+fn set_code_transactions_need_authorizations_and_a_recipient() {
+    let empty = set_code(world(), to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 0)
+    core::assert(empty.receipt.invalid == INVALID_NO_AUTHORIZATIONS)
+    let env = TxEnv {
+        kind: TX_SET_CODE, chain_id: Option::Some(1), sender: 0x1000, to: 0, creates: true, nonce: 0,
+        gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var request = TxRequest::new(env, data: empty_bytes())
+    core::assert(request.add_authorization(signed(nonce: 0)))
+    var buffers = FrameBuffers::new()
+    core::assert(transact(empty.state, request, block(), mut buffers).receipt.invalid == INVALID_CREATE)
+}
+
+#[test]
+fn delegated_accounts_send_and_calls_run_their_delegates() {
+    var world = world()
+    // A delegated sender is allowed (EIP-3607 exception).
+    core::assert(world.set_code(address: 0x1000, code: designator(DELEGATE)) == OK)
+    // CALL(gas, SIGNER, 0, 0, 0, 0, 0) from 0xaa, where SIGNER delegates to DELEGATE.
+    let caller = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x73]
+    var code: [u8; 29] = [0; 29]
+    for i in 0..6 { code[i] = caller[i] }
+    for i in 0..20 { code[6 + i] = (SIGNER >> ((19 - i) * 8) as u256).downcast_truncate() }
+    code[26] = 0x5a
+    code[27] = 0xf1
+    code[28] = 0x00
+    core::assert(world.set_code(address: 0xaa, code) == OK)
+    core::assert(world.set_code(address: SIGNER, code: designator(DELEGATE)) == OK)
+    let env = TxEnv {
+        kind: TX_FEE_MARKET, chain_id: Option::Some(1), sender: 0x1000, to: 0xaa, creates: false, nonce: 0,
+        gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var buffers = FrameBuffers::new()
+    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), mut buffers)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    core::assert(applied.state.storage_load(SIGNER, 0) == 1 && applied.state.storage_load(DELEGATE, 0) == 0)
+    // Five PUSH0, PUSH20, GAS, CALL with a cold target and a cold delegate,
+    // then the delegate's code and STOP.
+    let delegate_gas: u64 = 3 + 2 + 22100 + 3 + 2100 + 3 + 10
+    core::assert(applied.receipt.gas_used == 21000 + 5 * 2 + 3 + 2 + 2600 + 2600 + delegate_gas)
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare bounded Cancun frames with a pinned revm interpreter at O0/O1/O2."""
+"""Compare bounded Osaka frames with a pinned revm interpreter at O0/O1/O2."""
 import argparse
 from collections import Counter
 import hashlib
@@ -83,7 +83,7 @@ def main():
     compiler = args.fe.resolve()
     sources = source_files()
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
-    report = {'schema': 2, 'fork': 'Cancun', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '
+    report = {'schema': 2, 'fork': 'Osaka', 'scope': 'outcome, remaining gas, output, completed stack/active memory; '
               'simultaneous-fault reasons retained separately; external state is not compared', 'complete': False,
               'host': platform.platform(), 'build_timeout_seconds': args.build_timeout, 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
               'compiler_version': subprocess.check_output([compiler, '--version'], text=True).strip(),
@@ -157,7 +157,7 @@ def main():
                 row['passed'] += 1
             row['complete'] = True
             save()
-            print(f'Cancun frames O{level}: {row["passed"]} passed', flush=True)
+            print(f'Osaka frames O{level}: {row["passed"]} passed', flush=True)
         if hashes != {str(path.relative_to(ROOT)): digest(path) for path in sources}:
             raise RuntimeError('sources changed during the differential run')
         report['complete'] = True

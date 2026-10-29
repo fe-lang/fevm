@@ -24,7 +24,8 @@ def cases(benchmarks, fork, selection):
                 index = post['indexes']['data']
                 label = f'{name}/{labels.get(str(index), index)}'
                 if not selection or any(part in label for part in selection):
-                    yield label, conformance.encode(test, post['indexes']), post
+                    # Benchmarks exceed EIP-7825's cap, so the host lifts it.
+                    yield label, conformance.encode(test, post['indexes'], tx_gas_limit_cap=2**64 - 1), post
 
 
 def outcome(command, payload, statuses):

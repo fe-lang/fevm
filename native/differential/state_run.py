@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare Cancun state gas, refunds and journal boundaries against pinned revm."""
+"""Compare Osaka state gas, refunds and journal boundaries against pinned revm."""
 import argparse
 from collections import Counter
 import json
@@ -32,7 +32,7 @@ def main():
     sources = source_files()
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sources}
     report = {
-        'schema': 1, 'fork': 'Cancun', 'complete': False,
+        'schema': 1, 'fork': 'Osaka', 'complete': False,
         'scope': 'frame results, watched persistent/transient/original state, warmness, signed refunds, '
                  'nested checkpoints and transaction settlement; signed envelopes and CALL/CREATE are excluded',
         'host': platform.platform(), 'build_timeout_seconds': args.build_timeout, 'source_sha256': hashes, 'compiler_sha256': digest(compiler),
@@ -101,7 +101,7 @@ def main():
                 row['passed'] += 1
             row['complete'] = True
             save()
-            print(f'Cancun state O{level}: {row["passed"]} passed', flush=True)
+            print(f'Osaka state O{level}: {row["passed"]} passed', flush=True)
         if hashes != {str(path.relative_to(ROOT)): digest(path) for path in sources}:
             raise RuntimeError('sources changed during the state differential run')
         report['complete'] = True

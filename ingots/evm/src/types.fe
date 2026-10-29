@@ -5,7 +5,7 @@ use ingot::constants::{ERR_HOST_ALLOCATION, OK}
 // Zero bytes after the code: execution that runs off the end reads STOP, and
 // a PUSH32 at the last byte reads its zero-padded immediate in one word, so
 // the dispatch loop checks neither against the code's length.
-const CODE_PADDING: u64 = 33
+const CODE_PADDING: usize = 33
 
 // Code and its instruction-boundary analysis stay immutable together.
 pub struct Program {
@@ -16,7 +16,7 @@ pub struct Program {
 }
 
 /// The bytes of the instruction-boundary JUMPDEST bitmap of `len` bytes of code.
-pub fn jumpdest_map_len(_ len: u64) -> u64 {
+pub fn jumpdest_map_len(_ len: usize) -> usize {
     (len + 7) / 8
 }
 
@@ -24,14 +24,14 @@ pub fn jumpdest_map_len(_ len: u64) -> u64 {
 /// `jumpdests`, a zeroed bitmap of `jumpdest_map_len(code.len())` bytes.
 pub fn mark_jumpdests<T: ByteSource>(_ code: T, _ jumpdests: mut MemSpan) {
     let len = code.len()
-    var pc: u64 = 0
+    var pc: usize = 0
     while pc < len {
         let op = code.byte_at(pc)
         if op == 0x5b {
             let bit: u8 = (pc % 8).downcast_unchecked()
-            jumpdests[(pc / 8) as usize] |= 1 << bit
+            jumpdests[pc / 8] |= 1 << bit
         } else if op >= 0x60 && op <= 0x7f {
-            pc += (op as u64) - 0x5f
+            pc += (op as usize) - 0x5f
         }
         pc += 1
     }
@@ -43,21 +43,21 @@ impl Program {
         let len = input.len()
         var jumpdests = MemBuffer::empty()
         if status == OK {
-            if !jumpdests.try_resize(jumpdest_map_len(len) as usize) {
+            if !jumpdests.try_resize(jumpdest_map_len(len)) {
                 status = ERR_HOST_ALLOCATION
             } else {
                 mark_jumpdests(input.bytes(), mut jumpdests.span())
             }
         }
         var bytes = input.bytes
-        if status == OK && !bytes.try_resize((len + CODE_PADDING) as usize) {
+        if status == OK && !bytes.try_resize(len + CODE_PADDING) {
             status = ERR_HOST_ALLOCATION
         }
-        Self { bytes, len: len as usize, jumpdests, status }
+        Self { bytes, len, jumpdests, status }
     }
     pub fn copy_from<T: ByteSource>(_ source: T, len: usize) -> Self {
-        core::assert((len as u256) <= source.len() as u256)
-        Self::new(InputData::copy_from(source, offset: 0, len: len.downcast_unchecked()))
+        core::assert(len <= source.len())
+        Self::new(InputData::copy_from(source, offset: 0, len))
     }
     /// A copy of `code` whose `mark_jumpdests` bitmap is `jumpdests`.
     pub fn analyzed(_ code: MemSpan, jumpdests: MemSpan) -> Self {
@@ -65,12 +65,12 @@ impl Program {
         var bytes = MemBuffer::empty()
         var map = MemBuffer::empty()
         // Reserving the padding first copies the code only once.
-        if !bytes.try_reserve(len + CODE_PADDING as usize) || !map.try_reserve(jumpdests.len()) {
+        if !bytes.try_reserve(len + CODE_PADDING) || !map.try_reserve(jumpdests.len()) {
             return Self { bytes, len: 0, jumpdests: map, status: ERR_HOST_ALLOCATION }
         }
         bytes.extend_from(code)
         map.extend_from(jumpdests)
-        core::assert(bytes.try_resize(len + CODE_PADDING as usize))
+        core::assert(bytes.try_resize(len + CODE_PADDING))
         Self { bytes, len, jumpdests: map, status: OK }
     }
     pub fn len(self) -> usize {
@@ -112,17 +112,13 @@ pub struct InputData { bytes: MemBuffer, pub status: i32 }
 
 impl InputData {
     pub fn new(_ bytes: own MemBuffer, status: i32) -> Self { Self { bytes, status } }
-    pub fn copy_from<T: ByteSource>(_ source: T, offset: u64, len: u64) -> Self {
+    pub fn copy_from<T: ByteSource>(_ source: T, offset: usize, len: usize) -> Self {
         core::assert(offset <= source.len() && len <= source.len() - offset)
         var bytes = MemBuffer::empty()
-        if !bytes.try_resize(len as usize) {
+        if !bytes.try_resize(len) {
             return Self { bytes, status: ERR_HOST_ALLOCATION }
         }
-        var index: u64 = 0
-        while index < len {
-            bytes[index as usize] = source.byte_at(offset + index)
-            index += 1
-        }
+        for index in 0..len { bytes[index] = source.byte_at(offset + index) }
         Self { bytes, status: OK }
     }
     // One bulk copy, such as call input from frame memory.
@@ -133,13 +129,14 @@ impl InputData {
         }
     }
     pub fn bytes(self) -> ref MemSpan { self.bytes.span() }
-    pub fn len(self) -> u64 { self.bytes.len().downcast_unchecked() }
-    pub fn byte_at(self, _ index: u64) -> u8 { self.bytes[index as usize] }
+    pub fn len(self) -> usize { self.bytes.len() }
+    pub fn byte_at(self, _ index: usize) -> u8 { self.bytes[index] }
 }
 
 impl ByteSource for InputData {
-    fn len(self) -> u64 { InputData::len(self) }
-    fn byte_at(self, _ index: u64) -> u8 { InputData::byte_at(self, index) }
+    fn len(self) -> usize { InputData::len(self) }
+    fn byte_at(self, _ index: usize) -> u8 { InputData::byte_at(self, index) }
+    fn lane_at(self, _ index: usize) -> u64 { self.bytes.read_le<u64>(index) }
 }
 
 pub struct CallEnv {
@@ -154,6 +151,9 @@ pub struct CallEnv {
 
 impl Copy for CallEnv {}
 
+// EIP-7825's cap on a transaction's gas limit.
+pub const TX_GAS_LIMIT_CAP: u64 = 16_777_216
+
 pub struct BlockEnv {
     pub coinbase: u256,
     pub timestamp: u256,
@@ -163,6 +163,9 @@ pub struct BlockEnv {
     pub chainid: u256,
     pub basefee: u256,
     pub blobbasefee: u256,
+    // The largest valid transaction gas limit: TX_GAS_LIMIT_CAP, unless a host
+    // that runs larger transactions, such as benchmarks or tests, raises it.
+    pub tx_gas_limit_cap: u64,
 }
 
 pub struct ExecutionResult {
@@ -194,5 +197,6 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
+        tx_gas_limit_cap: TX_GAS_LIMIT_CAP,
     }
 }

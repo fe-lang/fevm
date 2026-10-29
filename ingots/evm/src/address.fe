@@ -1,49 +1,39 @@
+use core::num::leading_zeros
 use keccak::Keccak256
 
-fn hashed_address<const N: usize>(_ preimage: [u8; N], len: u64) -> u256 {
-    var hash = Keccak256::new()
-    hash.update(preimage, offset: 0, len)
-    hash.finish_word() & 0xffffffffffffffffffffffffffffffffffffffff
-}
+const ADDRESS_MASK: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
-fn put_word(_ bytes: mut [u8; 85], offset: u64, value: u256, width: u64) {
-    var i: u64 = 0
-    while i < width {
-        bytes[(offset + i) as usize] = (value >> ((width - 1 - i) * 8) as u256).downcast_truncate()
-        i += 1
-    }
+// The bytes of `value`'s minimal big-endian encoding.
+fn byte_len(_ value: u256) -> usize { ((256 - leading_zeros(value) + 7) / 8).downcast_unchecked() }
+
+/// The length of an integer's RLP: the integer itself below 0x80, otherwise a
+/// length byte and its minimal big-endian bytes (none for zero).
+pub fn rlp_integer_len(_ value: u256) -> usize { if value != 0 && value < 0x80 { 1 } else { 1 + byte_len(value) } }
+
+/// Absorb an integer's RLP into `hash`.
+pub fn update_rlp_integer(_ hash: mut Keccak256, _ value: u256) {
+    if value != 0 && value < 0x80 { return hash.update_word(value, len: 1) }
+    let len = byte_len(value)
+    hash.update_word(((0x80 + len as u256) << (len * 8) as u256) | value, len: 1 + len)
 }
 
 /// CREATE: the low 160 bits of keccak256(rlp([sender, nonce])).
 pub fn create_address(sender: u256, nonce: u256) -> u256 {
     core::assert(nonce <= 0xffffffffffffffff)
-    var nonce_len: u64 = 0
-    while nonce >> (nonce_len * 8) as u256 != 0 { nonce_len += 1 }
-    // RLP encodes zero as the empty string and a byte below 0x80 as itself.
-    let encoded_len = if nonce < 0x80 { 1 } else { 1 + nonce_len }
-    var rlp: [u8; 85] = [0; 85]
-    rlp[0] = (0xc0 + 21 + encoded_len).downcast_unchecked()
-    rlp[1] = 0x94
-    put_word(mut rlp, offset: 2, value: sender, width: 20)
-    if nonce == 0 {
-        rlp[22] = 0x80
-    } else if nonce < 0x80 {
-        rlp[22] = nonce.downcast_unchecked()
-    } else {
-        rlp[22] = (0x80 + nonce_len).downcast_unchecked()
-        put_word(mut rlp, offset: 23, value: nonce, width: nonce_len)
-    }
-    hashed_address(rlp, len: 22 + encoded_len)
+    var hash = Keccak256::new()
+    let list = 0xc0 + 21 + rlp_integer_len(nonce) as u256
+    hash.update_word((list << 168) | (0x94 << 160) | sender, len: 22)
+    update_rlp_integer(mut hash, nonce)
+    hash.finish_word() & ADDRESS_MASK
 }
 
 /// CREATE2 (EIP-1014): the low 160 bits of keccak256(0xff ++ sender ++ salt ++ code_hash).
 pub fn create2_address(sender: u256, salt: u256, code_hash: u256) -> u256 {
-    var preimage: [u8; 85] = [0; 85]
-    preimage[0] = 0xff
-    put_word(mut preimage, offset: 1, value: sender, width: 20)
-    put_word(mut preimage, offset: 21, value: salt, width: 32)
-    put_word(mut preimage, offset: 53, value: code_hash, width: 32)
-    hashed_address(preimage, len: 85)
+    var hash = Keccak256::new()
+    hash.update_word((0xff << 160) | sender, len: 21)
+    hash.update_word(salt, len: 32)
+    hash.update_word(code_hash, len: 32)
+    hash.finish_word() & ADDRESS_MASK
 }
 
 #[test]

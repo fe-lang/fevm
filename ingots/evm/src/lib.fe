@@ -10,12 +10,13 @@ pub use types::{
     CallEnv,
     ExecutionResult,
     Program,
+    TX_GAS_LIMIT_CAP,
     default_block_env,
     default_call_env,
     empty_bytes,
 }
 pub use vm::{self, FrameBuffers, execute}
-pub use processor::{self, Applied, Receipt, TxEnv, TxRequest, transact}
+pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, transact}
 
 pub fn main(argc: i32, argv: **u8) -> i32 {
     // Native main supplies live NUL-terminated arguments for this process.

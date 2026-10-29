@@ -6,8 +6,8 @@ use ingot::transaction_runtime::checkpoint
 
 struct OversizedCode {}
 impl ByteSource for OversizedCode {
-    fn len(self) -> u64 { 0xffffffffffffffff }
-    fn byte_at(self, _ index: u64) -> u8 { core::panic() }
+    fn len(self) -> usize { 0xffffffffffffffff }
+    fn byte_at(self, _ index: usize) -> u8 { core::panic() }
 }
 
 #[test]
@@ -38,20 +38,29 @@ fn account_code_replacement_compacts_and_preserves_other_accounts() {
     core::assert(!world.exists(44))
 }
 
+// The account program's code length and JUMPDEST bit mask.
+fn jumpdests(_ world: WorldState, _ address: u256) -> (usize, u256) {
+    let program = world.program(address)
+    var mask: u256 = 0
+    for pc in 0..program.len() {
+        if program.is_jumpdest(pc as u256) { mask |= 1 << pc as u256 }
+    }
+    (program.len(), mask)
+}
+
 #[test]
 fn account_code_jumpdests_follow_compaction() {
     var world = WorldState::empty()
     // PUSH1 hides the middle 0x5b; the first and last are JUMPDESTs.
     core::assert(world.set_code(address: 1, code: [0x5b as u8, 0x60, 0x5b, 0x5b]) == OK)
     core::assert(world.set_code(address: 2, code: [0 as u8, 0, 0, 0, 0, 0, 0, 0, 0x5b, 0x5b]) == OK)
-    core::assert(world.jumpdests(1).len() == 1 && world.jumpdests(1)[0] == 0b1001)
+    core::assert(jumpdests(world, 1) == (4, 0b1001))
     // Replacing the first record moves the second down, and the new record
     // lands on the second's old code bytes.
     core::assert(world.set_code(address: 1, code: [0x60 as u8]) == OK)
-    core::assert(world.jumpdests(1).len() == 1 && world.jumpdests(1)[0] == 0)
-    core::assert(world.jumpdests(2).len() == 2 && world.jumpdests(2)[0] == 0 && world.jumpdests(2)[1] == 0b11)
+    core::assert(jumpdests(world, 1) == (1, 0) && jumpdests(world, 2) == (10, 0b11 << 8))
     core::assert(world.set_code(address: 2, code: [0 as u8; 0]) == OK)
-    core::assert(world.jumpdests(2).len() == 0)
+    core::assert(jumpdests(world, 2) == (0, 0))
 }
 
 #[test]

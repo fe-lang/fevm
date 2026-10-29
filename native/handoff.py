@@ -75,11 +75,11 @@ python3 native/accept.py --build native/out/linux-toolchain/build.json \\
 ```
 
 Return `build.json`, `acceptance.json`, `arithmetic/results.json`, `cli/results.json`,
-`cancun-frames/results.json`, `cancun-state/results.json`, and the acceptance logs. For performance measurements, use an idle host and omit
+`osaka-frames/results.json`, `osaka-state/results.json`, and the acceptance logs. For performance measurements, use an idle host and omit
 `--check-only`; retain all samples, emitted IR, objects and disassembly.
 A failing command must remain a failure in the report. This validates the native
-workspace tests, CLI smoke, Cancun frame/state results, numeric kernels;
-full Cancun conformance remains pending.
+workspace tests, CLI smoke, Osaka frame/state results and numeric kernels;
+state-test conformance runs separately.
 ''')
     print(out / 'README.md')
 

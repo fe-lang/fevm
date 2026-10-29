@@ -7,20 +7,24 @@ use ingot::vm::execute
 
 #[test]
 fn upfront_warming_and_access_lists_survive_revert() {
-    var tx = Transaction::new(WorldState::empty(), sender: 11, destination: 12, coinbase: 13)
-    for address in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] {
+    var tx = Transaction::new(WorldState::empty(), sender: 0x21, destination: 0x22, coinbase: 0x23)
+    // The precompiles, the sender, the destination and the coinbase.
+    var address: u256 = 1
+    while address <= 0x11 {
         core::assert(tx.account_is_warm(address))
+        address += 1
     }
-    core::assert(!tx.account_is_warm(14))
-    core::assert(tx.access_list_account(address: 14))
-    core::assert(tx.access_list_slot(address: 15, slot: 9))
+    for address in [0x100, 0x21, 0x22, 0x23] { core::assert(tx.account_is_warm(address)) }
+    core::assert(!tx.account_is_warm(0x12) && !tx.account_is_warm(0x24))
+    core::assert(tx.access_list_account(address: 0x24))
+    core::assert(tx.access_list_slot(address: 0x25, slot: 9))
     let point = checkpoint(mut tx, is_static: false)
-    core::assert(tx.warm_account(address: 16) == OK)
-    core::assert(tx.warm_slot(address: 15, slot: 10) == OK)
+    core::assert(tx.warm_account(address: 0x26) == OK)
+    core::assert(tx.warm_slot(address: 0x25, slot: 10) == OK)
     tx.revert(point)
-    core::assert(tx.account_is_warm(14) && tx.account_is_warm(15))
-    core::assert(tx.storage_is_warm(address: 15, slot: 9))
-    core::assert(!tx.account_is_warm(16) && !tx.storage_is_warm(address: 15, slot: 10))
+    core::assert(tx.account_is_warm(0x24) && tx.account_is_warm(0x25))
+    core::assert(tx.storage_is_warm(address: 0x25, slot: 9))
+    core::assert(!tx.account_is_warm(0x26) && !tx.storage_is_warm(address: 0x25, slot: 10))
     tx.finish(commit: true, gas_spent: 0)
 }
 
@@ -165,14 +169,15 @@ fn transaction_boundaries_reset_original_storage_and_access_state() {
 fn access_cache_grows_and_rolls_back() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let point = checkpoint(mut tx, is_static: false)
-    var address: u256 = 11
+    // Above the precompiles at 0x01 through 0x11.
+    var address: u256 = 0x12
     while address < 1000 {
         core::assert(tx.warm_account(address) == OK)
         address += 1
     }
     core::assert(tx.account_is_warm(999))
     tx.revert(point)
-    core::assert(tx.account_is_warm(10) && !tx.account_is_warm(11) && !tx.account_is_warm(999))
+    core::assert(tx.account_is_warm(0x11) && !tx.account_is_warm(0x12) && !tx.account_is_warm(999))
     core::assert(tx.warm_account(address: 256) == OK)
     tx.finish(commit: true, gas_spent: 0)
 }

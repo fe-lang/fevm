@@ -1,14 +1,14 @@
 # Ethereum state tests
 
-`run.py` runs the Cancun cases of an
-[execution-spec-tests](https://github.com/ethereum/execution-spec-tests) fixture
+`run.py` runs the Osaka cases of an
+[execution-specs](https://github.com/ethereum/execution-specs) test fixture
 release through FeVM's `transact`. Each case starts a fresh native
 `fevm_conformance` process, which reads one binary-encoded case from stdin and
 prints the transaction outcome, the logs hash and the complete post-state.
 
 ```sh
-gh release download v5.4.0 -R ethereum/execution-spec-tests -p fixtures_stable.tar.gz
-tar -xzf fixtures_stable.tar.gz
+gh release download tests@v21.0.1 -R ethereum/execution-specs -p fixtures.tar.gz
+tar -xzf fixtures.tar.gz fixtures/state_tests
 python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
   --fixtures fixtures/state_tests --out native/out/conformance-run
 ```
@@ -27,6 +27,9 @@ receipt's logs hash matches, and every account's balance, nonce, code and
 non-zero storage equals the fixture's post-state. Outcomes are:
 
 - `passed`
+- `signature`: the transaction's signature is malformed. FeVM takes a recovered
+  sender, so rejecting the signature is the host's part of decoding it; the
+  case is not run.
 - `failed`: a validity, logs or state mismatch, listed in `cases.jsonl`
 - `host_error`: FeVM stopped with a host status (allocation failure, balance
   overflow) instead of an EVM outcome
@@ -34,12 +37,15 @@ non-zero storage equals the fixture's post-state. Outcomes are:
 
 The runner encodes the environment, pre-state and the transaction selected by
 the case's data/gas/value indexes; it derives the blob base fee from
-`currentExcessBlobGas` and the transaction type from its fields. As in other
+`currentExcessBlobGas` with the fixture's Osaka blob schedule (BPO2's update
+fraction when a fixture has none) and the transaction type from its fields. As in other
 state-test clients, `BLOCKHASH(n)` for the previous 256 blocks is the Keccak-256
 hash of `n`'s decimal digits. The driver checks the post-state directly instead
 of recomputing the state root.
 
-The [first complete run](../reports/cancun-conformance-20261019/README.md) passes
-16,800 of 16,847 Cancun cases; the rest exceed FeVM's former 256-entry state
+The [Osaka run](../reports/osaka-20261029/README.md) passes all 14,693 runnable
+cases of `tests@v21.0.1`; 23 are `signature`. Before the Osaka cutover, the
+[first complete run](../reports/cancun-conformance-20261019/README.md) passed
+16,800 of 16,847 Cancun cases of v5.4.0; the rest exceeded FeVM's former 256-entry state
 tables. With growable tables, the
-[owned-memory run](../reports/owned-memory-20261020/README.md) passes all 16,847.
+[owned-memory run](../reports/owned-memory-20261020/README.md) passed all 16,847.

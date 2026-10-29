@@ -1,3 +1,4 @@
+use core::Option
 use ingot::bls_field::{Field, Fp}
 
 // The BLS12-381 tower used by the zkcrypto bls12_381 crate:
@@ -6,6 +7,8 @@ use ingot::bls_field::{Field, Fp}
 const FROBENIUS_V_C1: [u64; 6] = [0xcd03c9e48671f071, 0x5dab22461fcda5d2, 0x587042afd3851b95, 0x8eb60ebe01bacb9e, 0x03f97d6e83d050d2, 0x18f0206554638741]
 const FROBENIUS_V2_C0: [u64; 6] = [0x890dc9e4867545c3, 0x2af322533285a5d5, 0x50880866309b7e2c, 0xa20d1b8c7e881024, 0x14e4f04fe2db9068, 0x14e56d3f1564853a]
 const FROBENIUS_W_C0: [u64; 6] = [0x07089552b319d465, 0xc6695f92b50a8313, 0x97e83cccd117228f, 0xa35baecab2dc29ee, 0x1ce393ea5daace4d, 0x08f2220fb0fb66eb]
+// (p + 1) / 2, the inverse of 2.
+const HALF: [u64; 6] = [0x1804000000015554, 0x855000053ab00001, 0x633cb57c253c276f, 0x6e22d1ec31ebb502, 0xd3916126f2d14ca2, 0x17fbb8571a006596]
 const FROBENIUS_W_C1: [u64; 6] = [0xb2f66aad4ce5d646, 0x5842a06bfc497cec, 0xcf4895d42599d394, 0xc11b9cba40a8e8d0, 0x2e3813cbe5a0de89, 0x110eefda88847faf]
 
 pub struct Fp2 { pub c0: Fp, pub c1: Fp }
@@ -18,6 +21,38 @@ impl Fp2 {
     // Multiply by the sextic non-residue u + 1.
     pub fn mul_by_nonresidue(self) -> Fp2 { Fp2 { c0: self.c0.sub(self.c1), c1: self.c0.add(self.c1) } }
     pub fn mul_fp(self, _ scalar: Fp) -> Fp2 { Fp2 { c0: self.c0.mul(scalar), c1: self.c1.mul(scalar) } }
+
+    /// RFC 9380's sgn0 for m = 2: the parity of c0, or of c1 when c0 is zero.
+    pub fn sgn0(self) -> bool { self.c0.sgn0() || (self.c0.is_zero() && self.c1.sgn0()) }
+
+    /// A square root, if one exists: with norm n = c0^2 + c1^2 and a = sqrt(n),
+    /// x0^2 = (c0 +- a) / 2 and x1 = c1 / (2 x0).
+    pub fn sqrt(self) -> Option<Fp2> {
+        if self.c1.is_zero() {
+            // An element of Fp is c0 or -c0 = (c1 u)^2 for a root of -c0.
+            return match self.c0.sqrt() {
+                Option::Some(root) => Option::Some(Fp2 { c0: root, c1: Fp::zero() }),
+                Option::None => match self.c0.neg().sqrt() {
+                    Option::Some(root) => Option::Some(Fp2 { c0: Fp::zero(), c1: root }),
+                    Option::None => Option::None,
+                },
+            }
+        }
+        let alpha = match self.c0.square().add(self.c1.square()).sqrt() {
+            Option::Some(alpha) => alpha,
+            Option::None => return Option::None,
+        }
+        let half = Fp::from_montgomery(HALF)
+        // With c1 nonzero, c0 +- alpha is nonzero, so x0 is too.
+        let x0 = match self.c0.add(alpha).mul(half).sqrt() {
+            Option::Some(x0) => x0,
+            Option::None => match self.c0.sub(alpha).mul(half).sqrt() {
+                Option::Some(x0) => x0,
+                Option::None => return Option::None,
+            },
+        }
+        Option::Some(Fp2 { c0: x0, c1: self.c1.mul(x0.double().invert()) })
+    }
 }
 
 impl Field for Fp2 {

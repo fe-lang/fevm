@@ -25,8 +25,11 @@ from the heap rather than fresh mappings, as a long-running process would.
 
 A case matches when every engine reports the same validity, status (success,
 revert or halt), gas used and logs hash, and the logs hash equals the
-fixture's. The fixtures were filled for London; all engines execute them with
-Cancun rules, and nothing checks the post-state root.
+fixture's. The fixtures were filled for London, and nothing checks the
+post-state root. Every fixture's gas limit exceeds EIP-7825's cap, so the runner
+encodes cases with the cap lifted (`BlockEnv.tx_gas_limit_cap`). FeVM executes
+Osaka rules and the revm and evmone runners Cancun rules; all 27 cases use the
+same gas under both.
 
 The timed work is transaction validation, execution and the result's state
 changes. FeVM and evmone analyze code for jump destinations on every call;

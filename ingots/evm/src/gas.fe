@@ -1,10 +1,10 @@
-// Cancun base charges for the implemented frame instructions. Memory/copy and
+// Osaka base charges for the implemented frame instructions. Memory/copy and
 // exponent charges are added by the instruction before allocation/execution.
 // State-access charges depend on the transaction and are computed separately.
 // The static gas of each opcode.
 const BASE_COSTS: [u8; 256] = [
     0, 3, 5, 3, 5, 5, 5, 5, 8, 8, 10, 5, 0, 0, 0, 0,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5, 0,
     30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     2, 0, 2, 2, 2, 3, 2, 3, 2, 3, 2, 0, 0, 2, 3, 0,
     20, 2, 2, 2, 2, 2, 2, 5, 2, 3, 2, 0, 0, 0, 0, 0,
