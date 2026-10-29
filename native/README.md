@@ -37,10 +37,10 @@ compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
 The current compiler is Fe
-[`7540ec5c615b0bd33b0be8d4ee841e1f09d11cf3`](https://github.com/argotorg/fe/tree/7540ec5c615b0bd33b0be8d4ee841e1f09d11cf3)
-(branch `perf/native-clz` on master `e572b31ac`), which lowers `leading_zeros` to a
-native count. Its Cargo.lock pins Sonatina `197ea8537c86af86d27cd0db3f1d0b7e1e663a2e`
-([fe-lang/sonatina#464](https://github.com/fe-lang/sonatina/pull/464)). Fe
+[`5e882e0a215af088156fdc12cefec09d80d8c1bf`](https://github.com/argotorg/fe/tree/5e882e0a215af088156fdc12cefec09d80d8c1bf)
+([argotorg/fe#1895](https://github.com/argotorg/fe/pull/1895) on master `e572b31ac`),
+which lowers `leading_zeros` to a native count. Its Cargo.lock pins Sonatina main
+`c30e6b22e57ab5315e634539a5e072ee41c67b17`. Fe
 destroys owned values where their lifetime ends and provides core's memory owners
 (`MemBuffer`, `MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap
 memory, and the byte-order reads, `swap_bytes` and unchecked span and `MemVec`
