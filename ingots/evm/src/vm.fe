@@ -2043,13 +2043,6 @@ impl Vm {
                         }
                         if !self.unary(op) { break }
                     },
-                    0x1e => {
-                        if !spend(mut gas, 5) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.unary(op) { break }
-                    },
                     0x01 | 0x03 | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x16 | 0x17 | 0x18 | 0x1a | 0x1b | 0x1c | 0x1d => {
                         if !spend(mut gas, 3) {
                             self.fault(ERR_OUT_OF_GAS)
@@ -2323,6 +2316,9 @@ impl Vm {
                             self.binary_arith_general(op)
                             gas = self.gas_remaining
                             if !self.ok() { break }
+                        },
+                        0x1e => {
+                            if !self.unary(op) { break }
                         },
                         0x20 => {
                             self.gas_remaining = gas
