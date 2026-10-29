@@ -3,10 +3,10 @@ use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, OK}
 use ingot::logs::LogBuffer
-use ingot::state::{StorageKey, WorldState, address_word}
+use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program, empty_bytes}
-use ingot::vm::{FrameBuffers, Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
+use ingot::vm::{FrameBuffers, Vm, begin_create, is_evm_outcome, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
 
@@ -332,22 +332,19 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         return status_result(moved)
     }
     // A delegated account runs its delegate's code, never a precompile (EIP-7702).
-    let delegate = tx.delegate(target)
-    if delegate.is_none() && is_precompile(target) {
+    if is_precompile(target) && tx.delegate(target).is_none() {
         let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }
-    let program = match delegate {
-        Option::Some(address) => {
-            let warmed = tx.warm_account(address)
-            if warmed != OK {
-                tx.revert(checkpoint)
-                return status_result(warmed)
-            }
-            if is_precompile(address) { Program::new(empty_bytes()) } else { load_program(tx, address) }
-        },
-        Option::None => load_program(tx, address: target),
+    var program = tx.program(target)
+    if let Option::Some(address) = delegation(program.bytes()) {
+        let warmed = tx.warm_account(address)
+        if warmed != OK {
+            tx.revert(checkpoint)
+            return status_result(warmed)
+        }
+        program = if is_precompile(address) { Program::new(empty_bytes()) } else { tx.program(address) }
     }
     var vm = Vm::new()
     vm.run(program, request.data(), call, block, mut tx)

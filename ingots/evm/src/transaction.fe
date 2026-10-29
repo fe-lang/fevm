@@ -4,6 +4,7 @@ use swisstable::SwissTable
 use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word, designator}
+use ingot::types::Program
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::FrameBuffers
 use fevm_precompiles::is_precompile
@@ -293,7 +294,7 @@ impl Transaction {
     pub fn code_byte(self, address: u256, index: usize) -> u8 { self.state.code_byte(address, index) }
     pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
     pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
-    pub fn jumpdests(self, _ address: u256) -> ref MemSpan { self.state.jumpdests(address) }
+    pub fn program(self, _ address: u256) -> Program { self.state.program(address) }
     pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
     pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {

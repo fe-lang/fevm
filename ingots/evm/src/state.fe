@@ -3,7 +3,7 @@ use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 use keccak::{ByteSource, keccak256_word}
 use ingot::constants::{ERR_HOST_ALLOCATION, OK}
-use ingot::types::{jumpdest_map_len, mark_jumpdests}
+use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
@@ -31,6 +31,14 @@ pub fn designator(_ delegate: u256) -> [u8; 23] {
     code[1] = 0x01
     for i in 0..20 { code[3 + i] = (delegate >> ((19 - i) * 8) as u256).downcast_truncate() }
     code
+}
+
+/// The account an EIP-7702 delegation designator delegates to, if `code` is one.
+pub fn delegation(_ code: MemSpan) -> Option<u256> {
+    if code.len() != 23 || code[0] != 0xef || code[1] != 0x01 || code[2] != 0 { return Option::None }
+    var delegate: u256 = 0
+    for i in 3..23 { delegate = (delegate << 8) | code[i] as u256 }
+    Option::Some(delegate)
 }
 
 pub struct StorageKey { pub address: u256, pub slot: u256 }
@@ -188,18 +196,14 @@ impl WorldState {
     }
     /// The account an EIP-7702 delegation designator delegates to, if that is
     /// the account's code.
-    pub fn delegate(self, _ address: u256) -> Option<u256> {
-        let code = self.code(address)
-        if code.len() != 23 || code[0] != 0xef || code[1] != 0x01 || code[2] != 0 { return Option::None }
-        var delegate: u256 = 0
-        for i in 3..23 { delegate = (delegate << 8) | code[i] as u256 }
-        Option::Some(delegate)
-    }
-    // The code's JUMPDEST bitmap, computed when the code was set.
-    pub fn jumpdests(self, _ address: u256) -> ref MemSpan {
+    pub fn delegate(self, _ address: u256) -> Option<u256> { delegation(self.code(address)) }
+    /// The account's code, with the JUMPDEST bitmap computed when the code was set.
+    pub fn program(self, _ address: u256) -> Program {
         let account = self.accounts.get(address_word(address)).value
-        let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 + account.code_len }
-        self.code.slice(offset, len: jumpdest_map_len(account.code_len))
+        let len = account.code_len
+        let offset = if len == 0 { 0 } else { account.code_offset + 64 }
+        let jumpdests = self.code.slice(offset: offset + len, len: jumpdest_map_len(len))
+        Program::analyzed(self.code.slice(offset, len), jumpdests)
     }
     // Host-side database initialization. Execution cannot mutate code until
     // CREATE's account lifecycle and code-deposit rules are implemented.

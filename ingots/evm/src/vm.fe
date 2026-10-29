@@ -916,11 +916,6 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
     state.set_balance(address: to, value: state.balance(to) + value)
 }
 
-/// Copy an account's code into an analyzed program.
-pub fn load_program(_ state: Transaction, address: u256) -> Program {
-    Program::analyzed(state.code(address), jumpdests: state.jumpdests(address))
-}
-
 /// Open a contract creation's checkpoint and apply its prologue: the creation
 /// mark, the new account's first nonce and its endowment. Initcode failure or a
 /// rejected deposit reverts all of it.
@@ -1106,7 +1101,7 @@ impl Vm {
             self.push(1)
             return Option::None
         }
-        let program = load_program(state, address: program_address)
+        let program = state.program(program_address)
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
