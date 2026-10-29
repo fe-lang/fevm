@@ -48,14 +48,16 @@ handlers' calls to each other as native tail calls. It uses Rust 1.99.0; the
 default [`toolchain.json`](toolchain.json) records the exact revisions and lock
 hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 82 workspace tests, 38
-CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at each
-of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
-simultaneous-fault reason differences per level. The Python harness's 13 tests
-and the Rust reference's nine tests pass. See the
-[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md),
-and the [owned-memory report](reports/owned-memory-20261020/README.md) for the
-port itself; this compiler has not run on AArch64 macOS. The
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 83
+workspace tests, 38 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
+comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
+three declared simultaneous-fault reason differences per level. The Python
+harness's 13 tests and the Rust reference's nine tests pass. See the
+[tail-call dispatch report](reports/tail-call-dispatch-20261029/README.md), which
+also times evm-benchmarks against FeVM main, revm and evmone; the
+[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md)
+and the [owned-memory report](reports/owned-memory-20261020/README.md) cover the
+port to core's memory owners. The
 [Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe
 master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
 on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)

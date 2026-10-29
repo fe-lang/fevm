@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "3587ff99982ca3dd5e0eaa93e8d143cacf64ee40",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "92df01a623ec87927452d884131d93589a711c3d",
+    "cargo_lock_sha256": "81569f127dd7afcd2ea2b96dd2c79c2e67d5c52263018dfe9111a2bf8ee712ff",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "x86_64-unknown-linux-gnu",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/home/sean/perf-out/accept-master-lindog/toolchain/fe",
+  "sonatina_source_directory": "/home/sean/perf-out/accept-master-lindog/toolchain/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v22.22.1",
+  "npm": "9.2.0",
+  "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "target_directory": "/home/sean/perf-out/accept-master-lindog/toolchain/target",
+  "complete": true,
+  "compiler_build_seconds": 199.69687162000628,
+  "compiler": "/home/sean/perf-out/accept-master-lindog/toolchain/bin/fe",
+  "compiler_sha256": "c4a29e427e46204ecf7a69e2ea86bc1e7d4944290083c0dfc2b7322dc54c834d",
+  "compiler_version": "fe 26.5.0 (3587ff999)"
+}
