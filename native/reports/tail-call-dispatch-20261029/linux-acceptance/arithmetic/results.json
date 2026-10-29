@@ -1,0 +1,866 @@
+{
+  "schema": 1,
+  "complete": true,
+  "created_utc": "2026-10-29T18:14:28.888349+00:00",
+  "runner_sha256": "27ca58b865a2af069f9363c8c33f4e609c2ecb32df425bee98e9efa9bc3d2ec7",
+  "host": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+    "cpu": [
+      "processor\t: 0",
+      "vendor_id\t: AuthenticAMD",
+      "cpu family\t: 26",
+      "model\t\t: 68",
+      "model name\t: AMD Ryzen 5 9600X 6-Core Processor",
+      "stepping\t: 0",
+      "microcode\t: 0xb404023",
+      "cpu MHz\t\t: 5359.338",
+      "cache size\t: 1024 KB",
+      "physical id\t: 0",
+      "siblings\t: 12",
+      "core id\t\t: 0",
+      "cpu cores\t: 6",
+      "apicid\t\t: 0",
+      "initial apicid\t: 0",
+      "fpu\t\t: yes",
+      "fpu_exception\t: yes",
+      "cpuid level\t: 16",
+      "wp\t\t: yes",
+      "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx_vnni avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect movdiri movdir64b overflow_recov succor smca fsrm avx512_vp2intersect flush_l1d amd_lbr_pmc_freeze",
+      "bugs\t\t: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass srso spectre_v2_user vmscape",
+      "bogomips\t: 7784.86",
+      "TLB size\t: 192 4K pages",
+      "clflush size\t: 64",
+      "cache_alignment\t: 64"
+    ],
+    "clock_ticks_per_second": 1000000,
+    "cc": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+  },
+  "compiler": {
+    "path": "/home/sean/perf-out/accept-master-lindog/toolchain/bin/fe",
+    "version": "fe 26.5.0 (3587ff999)",
+    "sha256": "c4a29e427e46204ecf7a69e2ea86bc1e7d4944290083c0dfc2b7322dc54c834d"
+  },
+  "harness_revision": "e49014034d58f28b41d36b3a3af7f121ef08b4c1",
+  "harness_dirty": false,
+  "timing": "process CPU clock, input/output and startup excluded; dependent op/xor loop; build includes compiler startup, link and report; relink measured separately",
+  "results": [
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.12819044999196194
+      ],
+      "median_build_seconds": 0.12819044999196194,
+      "object_bytes": 11720,
+      "text_bytes": 6792,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.007053435998386703,
+      "executable_sha256": "d520e66c3cf7c64fe76d7825e72a2a99fef69ab63cfdc9fa966278bb0a8cbdf7",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.1462562730011996
+      ],
+      "median_build_seconds": 0.1462562730011996,
+      "object_bytes": 3776,
+      "text_bytes": 1792,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006992351991357282,
+      "executable_sha256": "dbf366bb1a50c0305dba801292b33490885b43ae4897a9a6b694b21f4b2e0096",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "94cb5d74e44f39b7360ab1e5149a560cffc6e2302cd6008279cef5cd8e13d520",
+      "build_seconds": [
+        0.14991509899846278
+      ],
+      "median_build_seconds": 0.14991509899846278,
+      "object_bytes": 3776,
+      "text_bytes": 1792,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006988744004047476,
+      "executable_sha256": "dbf366bb1a50c0305dba801292b33490885b43ae4897a9a6b694b21f4b2e0096",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.12888315199234057
+      ],
+      "median_build_seconds": 0.12888315199234057,
+      "object_bytes": 11728,
+      "text_bytes": 6824,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.007218526996439323,
+      "executable_sha256": "c5e4ba39c1da065b68f57f7e6711c9cfefbeb8b8a8605a6a8831ce9a3b18c1f0",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.15051043800485786
+      ],
+      "median_build_seconds": 0.15051043800485786,
+      "object_bytes": 4160,
+      "text_bytes": 2176,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007162059991969727,
+      "executable_sha256": "75bd686d6785df3d04036ddfd1593c41d1cc4561fa19017c409eb9ffa04e5ff2",
+      "measurements": []
+    },
+    {
+      "operation": "add",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "54585e9d4b91e2c76c552df8a0cc7a004f5b14fabf32030982704721c09cc20a",
+      "build_seconds": [
+        0.14827401499496773
+      ],
+      "median_build_seconds": 0.14827401499496773,
+      "object_bytes": 4160,
+      "text_bytes": 2176,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007433218997903168,
+      "executable_sha256": "75bd686d6785df3d04036ddfd1593c41d1cc4561fa19017c409eb9ffa04e5ff2",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.1307760089985095
+      ],
+      "median_build_seconds": 0.1307760089985095,
+      "object_bytes": 11816,
+      "text_bytes": 6888,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.007000846992013976,
+      "executable_sha256": "6717b5efd635c153019579c152062e669feadaa8ffc2c3ae230ec5144a183912",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.14312067998980638
+      ],
+      "median_build_seconds": 0.14312067998980638,
+      "object_bytes": 3968,
+      "text_bytes": 1984,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006901070009917021,
+      "executable_sha256": "6fc9dc043b1e046428befb6940add84bd4e8f795d1e3db532ff5c379fe074b0c",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "9b42dddb738f6154ac438950d1291ed7c35ec5d4b98fabcd55a19859497024e4",
+      "build_seconds": [
+        0.14881546300603077
+      ],
+      "median_build_seconds": 0.14881546300603077,
+      "object_bytes": 3968,
+      "text_bytes": 1984,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006888446005177684,
+      "executable_sha256": "6fc9dc043b1e046428befb6940add84bd4e8f795d1e3db532ff5c379fe074b0c",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.1304077969980426
+      ],
+      "median_build_seconds": 0.1304077969980426,
+      "object_bytes": 12320,
+      "text_bytes": 7272,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.006888696996611543,
+      "executable_sha256": "0fa69ec4eac0872996d50aec723428898c1795172d3ec60feb5336824402e393",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.14653906399325933
+      ],
+      "median_build_seconds": 0.14653906399325933,
+      "object_bytes": 4384,
+      "text_bytes": 2400,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007203147004474886,
+      "executable_sha256": "0e0b94c52c180da298195c717c023b7f77279eaaec5c2f870e2360462737f4f5",
+      "measurements": []
+    },
+    {
+      "operation": "mul",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "d3a6cf1da706281edecd7edf7a27a7fddb9fcac8c3caa67f5b08f5dc0a39b8f7",
+      "build_seconds": [
+        0.15089893800904974
+      ],
+      "median_build_seconds": 0.15089893800904974,
+      "object_bytes": 4384,
+      "text_bytes": 2400,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007158092994359322,
+      "executable_sha256": "0e0b94c52c180da298195c717c023b7f77279eaaec5c2f870e2360462737f4f5",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.13180493300023954
+      ],
+      "median_build_seconds": 0.13180493300023954,
+      "object_bytes": 17728,
+      "text_bytes": 12152,
+      "executable_bytes": 29888,
+      "relink_seconds": 0.0070229289995040745,
+      "executable_sha256": "897a9864b53b4e8bb60ce31e069c3205328e6bac44462422844909d2c6957023",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.1459534940076992
+      ],
+      "median_build_seconds": 0.1459534940076992,
+      "object_bytes": 10784,
+      "text_bytes": 8152,
+      "executable_bytes": 24384,
+      "relink_seconds": 0.007347880004090257,
+      "executable_sha256": "bd63729add160f2ba470803be4fb8fcafbeb8e64f3a953897c73b34beaf56f31",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "8090287228c67291501869d5a005e99669bb34b272658a3d9c47e728a6cd37a3",
+      "build_seconds": [
+        0.15396250599587802
+      ],
+      "median_build_seconds": 0.15396250599587802,
+      "object_bytes": 10784,
+      "text_bytes": 8152,
+      "executable_bytes": 24384,
+      "relink_seconds": 0.006950092007173225,
+      "executable_sha256": "bd63729add160f2ba470803be4fb8fcafbeb8e64f3a953897c73b34beaf56f31",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.1313112460047705
+      ],
+      "median_build_seconds": 0.1313112460047705,
+      "object_bytes": 12528,
+      "text_bytes": 7464,
+      "executable_bytes": 21688,
+      "relink_seconds": 0.007043848003377207,
+      "executable_sha256": "a6807d18f049ef46b9dd9d070800fe056064c310b48d80517f740d5b17203ede",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.15195474299252965
+      ],
+      "median_build_seconds": 0.15195474299252965,
+      "object_bytes": 5056,
+      "text_bytes": 2976,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.007012027999735437,
+      "executable_sha256": "0de62ef389815f8aefc53b49c62e791d863dfc1853508612a518a49fc669d675",
+      "measurements": []
+    },
+    {
+      "operation": "div",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "9d5b3d8e1963a95bc8babfbceeebbc00aa7f1d367a6827b27c8fb11bfc610109",
+      "build_seconds": [
+        0.15908482299710158
+      ],
+      "median_build_seconds": 0.15908482299710158,
+      "object_bytes": 5056,
+      "text_bytes": 2976,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.007231531009892933,
+      "executable_sha256": "0de62ef389815f8aefc53b49c62e791d863dfc1853508612a518a49fc669d675",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.13133518998802174
+      ],
+      "median_build_seconds": 0.13133518998802174,
+      "object_bytes": 17760,
+      "text_bytes": 12184,
+      "executable_bytes": 29888,
+      "relink_seconds": 0.0073731169977691025,
+      "executable_sha256": "f3c1ffdc02e557c32769f259d11144e20e6746efc79ed6ec42e6d17802d3f16f",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.15110685900435783
+      ],
+      "median_build_seconds": 0.15110685900435783,
+      "object_bytes": 10912,
+      "text_bytes": 8280,
+      "executable_bytes": 24384,
+      "relink_seconds": 0.007168803000240587,
+      "executable_sha256": "a30ff619e9d1c9fce97698d0bd3face2cdaeff93c24c05156cadc569773ddf96",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "1458b44c26979c0949fb54170f8f48bf5a81f9fd28aeb1d765848fff59cca4c6",
+      "build_seconds": [
+        0.15181605200632475
+      ],
+      "median_build_seconds": 0.15181605200632475,
+      "object_bytes": 10912,
+      "text_bytes": 8280,
+      "executable_bytes": 24384,
+      "relink_seconds": 0.007196724996902049,
+      "executable_sha256": "a30ff619e9d1c9fce97698d0bd3face2cdaeff93c24c05156cadc569773ddf96",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.1310461969987955
+      ],
+      "median_build_seconds": 0.1310461969987955,
+      "object_bytes": 12560,
+      "text_bytes": 7496,
+      "executable_bytes": 21688,
+      "relink_seconds": 0.00729320700338576,
+      "executable_sha256": "ce8ffc912d46e888d622a2a1d4527c29bf183f29aeb54e97b033ff265bdb6c09",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.14989281799353193
+      ],
+      "median_build_seconds": 0.14989281799353193,
+      "object_bytes": 4768,
+      "text_bytes": 2688,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.00701948200003244,
+      "executable_sha256": "dae8a8f83a4d63a50d6391ec000e9e4146c320f917d0f73575d7a4b61bb4f71f",
+      "measurements": []
+    },
+    {
+      "operation": "rem",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1421,
+      "source_sha256": "d80570b87b73e7c11bee62eccf087263987b42e4248cb36e0464464436a67017",
+      "build_seconds": [
+        0.15849190899461973
+      ],
+      "median_build_seconds": 0.15849190899461973,
+      "object_bytes": 4768,
+      "text_bytes": 2688,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.0072012239979812875,
+      "executable_sha256": "dae8a8f83a4d63a50d6391ec000e9e4146c320f917d0f73575d7a4b61bb4f71f",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.12817593300133012
+      ],
+      "median_build_seconds": 0.12817593300133012,
+      "object_bytes": 11944,
+      "text_bytes": 7016,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.007012359012151137,
+      "executable_sha256": "d053516b49c2bf0dcfc6b1c594c40e49cb9135485a5f7cb0f6bea261f9c10468",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.14373336201242637
+      ],
+      "median_build_seconds": 0.14373336201242637,
+      "object_bytes": 4064,
+      "text_bytes": 2080,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.0070200930058490485,
+      "executable_sha256": "da5181a6ab35fa238288eab51da9cec32a953c639dde4f7b2fa6c2586505004d",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "a086d38ee512ea7dc2b3c41312165173f318a8f7e48803eefae93a787005d1c6",
+      "build_seconds": [
+        0.15250670901150443
+      ],
+      "median_build_seconds": 0.15250670901150443,
+      "object_bytes": 4064,
+      "text_bytes": 2080,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007138606000808068,
+      "executable_sha256": "da5181a6ab35fa238288eab51da9cec32a953c639dde4f7b2fa6c2586505004d",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.12928260299668182
+      ],
+      "median_build_seconds": 0.12928260299668182,
+      "object_bytes": 11264,
+      "text_bytes": 6504,
+      "executable_bytes": 21576,
+      "relink_seconds": 0.00709687800554093,
+      "executable_sha256": "27c52716f6ce24e762f9dce8cdeba11a80040234d27597f082e822f49d42c745",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.14586252300068736
+      ],
+      "median_build_seconds": 0.14586252300068736,
+      "object_bytes": 4672,
+      "text_bytes": 2592,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.0070819899992784485,
+      "executable_sha256": "2fc8b323be7a2d334407f2aa645f897235387b21dcfd2c13afa0e1e990991357",
+      "measurements": []
+    },
+    {
+      "operation": "shl",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "ee86fcc97743902fe99de7671cd53466693018916559fca8bc93c52f1ad5375c",
+      "build_seconds": [
+        0.15451849100645632
+      ],
+      "median_build_seconds": 0.15451849100645632,
+      "object_bytes": 4672,
+      "text_bytes": 2592,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.007119079004041851,
+      "executable_sha256": "2fc8b323be7a2d334407f2aa645f897235387b21dcfd2c13afa0e1e990991357",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.12682488399150316
+      ],
+      "median_build_seconds": 0.12682488399150316,
+      "object_bytes": 11976,
+      "text_bytes": 7048,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.0070989910018397495,
+      "executable_sha256": "19dbe90d2e6341b037e53ef2882a7667b2d5d2a1142f6dd1b7173584219214ac",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.14652341499458998
+      ],
+      "median_build_seconds": 0.14652341499458998,
+      "object_bytes": 4032,
+      "text_bytes": 2048,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007668071004445665,
+      "executable_sha256": "6cf0ff255d06479db821b5569ef74b945bd4348f3b74c9b3ff6cd98437b53757",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "5210b3e9d372ea59aafd9a593f47de0c1392b34c124d74fc38bd9dbecfd47a28",
+      "build_seconds": [
+        0.14769240200985223
+      ],
+      "median_build_seconds": 0.14769240200985223,
+      "object_bytes": 4032,
+      "text_bytes": 2048,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007187879004050046,
+      "executable_sha256": "6cf0ff255d06479db821b5569ef74b945bd4348f3b74c9b3ff6cd98437b53757",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.1290978949982673
+      ],
+      "median_build_seconds": 0.1290978949982673,
+      "object_bytes": 11264,
+      "text_bytes": 6504,
+      "executable_bytes": 21576,
+      "relink_seconds": 0.00711173600575421,
+      "executable_sha256": "6910e998e0d3e6b0b7554a6abdda4e23ea9d39148f50840e5e181e823fd1ae7b",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.14731535300961696
+      ],
+      "median_build_seconds": 0.14731535300961696,
+      "object_bytes": 4512,
+      "text_bytes": 2432,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.0069847970007685944,
+      "executable_sha256": "3062a50143bad1e063e2f5b9463ea3110309452876ff2f39d5d167b8d712ef3c",
+      "measurements": []
+    },
+    {
+      "operation": "shr",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1888,
+      "source_sha256": "5be2b0a94661d38df10c7aa701ec71bc3ca87845a88223d9d6e0dcfb6d8dc1e5",
+      "build_seconds": [
+        0.15083914599381387
+      ],
+      "median_build_seconds": 0.15083914599381387,
+      "object_bytes": 4512,
+      "text_bytes": 2432,
+      "executable_bytes": 16168,
+      "relink_seconds": 0.007388055004412308,
+      "executable_sha256": "3062a50143bad1e063e2f5b9463ea3110309452876ff2f39d5d167b8d712ef3c",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.12770698199165054
+      ],
+      "median_build_seconds": 0.12770698199165054,
+      "object_bytes": 11720,
+      "text_bytes": 6792,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.00735544299823232,
+      "executable_sha256": "122dabfc453e68ec27149997d299f015d70cdd2224aad21df26ecb085764d382",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.14374364099057857
+      ],
+      "median_build_seconds": 0.14374364099057857,
+      "object_bytes": 3680,
+      "text_bytes": 1696,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007093541993526742,
+      "executable_sha256": "0b43d215fe5be47ab3bbddd1f0fd06f6adbea0238f9e971d403afbb9c31fd8c3",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "4dbc00bbb6a8ff29a4388b44f8d7c5364c2fa836b98690a850b274331a6ad6bb",
+      "build_seconds": [
+        0.1488462909910595
+      ],
+      "median_build_seconds": 0.1488462909910595,
+      "object_bytes": 3680,
+      "text_bytes": 1696,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007266827000421472,
+      "executable_sha256": "0b43d215fe5be47ab3bbddd1f0fd06f6adbea0238f9e971d403afbb9c31fd8c3",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.1297408840036951
+      ],
+      "median_build_seconds": 0.1297408840036951,
+      "object_bytes": 10512,
+      "text_bytes": 5928,
+      "executable_bytes": 21504,
+      "relink_seconds": 0.007079285001964308,
+      "executable_sha256": "c3890f9912457a4ab3449304c80a859ffb20876c0a6876ea30d5caa166426681",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.14299217899679206
+      ],
+      "median_build_seconds": 0.14299217899679206,
+      "object_bytes": 3872,
+      "text_bytes": 1888,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006916839993209578,
+      "executable_sha256": "e9914eec202803ce93ea57d5d9701f4654ae152ddd0645db7c6cc20b2e8b71b4",
+      "measurements": []
+    },
+    {
+      "operation": "lt",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "7fd53c166dccb93bcfec88f56471894b0c258a879dca0a5ab151eb018751f91f",
+      "build_seconds": [
+        0.1517176569905132
+      ],
+      "median_build_seconds": 0.1517176569905132,
+      "object_bytes": 3872,
+      "text_bytes": 1888,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007074845998431556,
+      "executable_sha256": "e9914eec202803ce93ea57d5d9701f4654ae152ddd0645db7c6cc20b2e8b71b4",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.12811052000324707
+      ],
+      "median_build_seconds": 0.12811052000324707,
+      "object_bytes": 12552,
+      "text_bytes": 7624,
+      "executable_bytes": 21632,
+      "relink_seconds": 0.007072723004966974,
+      "executable_sha256": "6076516e2365799eb5e34a5209980e0cec834e75cd6651e1226010e21aafcb40",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.14836289201048203
+      ],
+      "median_build_seconds": 0.14836289201048203,
+      "object_bytes": 4608,
+      "text_bytes": 2624,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.007083193006110378,
+      "executable_sha256": "b0a9707f41a623a7db6c320a227ea88b46680c3a785c9ec95333e4bfc1d0c0e5",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "builtin",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "5972c7cd79a25158ee689320c1abf2a7b8aacaff85cc20dfb36c8fd2c3dc7ffd",
+      "build_seconds": [
+        0.15276409400394186
+      ],
+      "median_build_seconds": 0.15276409400394186,
+      "object_bytes": 4608,
+      "text_bytes": 2624,
+      "executable_bytes": 16128,
+      "relink_seconds": 0.006986640000832267,
+      "executable_sha256": "b0a9707f41a623a7db6c320a227ea88b46680c3a785c9ec95333e4bfc1d0c0e5",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "0",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.13602826998976525
+      ],
+      "median_build_seconds": 0.13602826998976525,
+      "object_bytes": 13576,
+      "text_bytes": 8168,
+      "executable_bytes": 25888,
+      "relink_seconds": 0.007008942004176788,
+      "executable_sha256": "f1ae3753e353eac66a5937e911e054c8327d2d466d867a7b64f24bc79c36dae4",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "1",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.1512993100041058
+      ],
+      "median_build_seconds": 0.1512993100041058,
+      "object_bytes": 5888,
+      "text_bytes": 3808,
+      "executable_bytes": 20264,
+      "relink_seconds": 0.007130500001949258,
+      "executable_sha256": "81e45016d2bf192488e9e47c1aafb8674a439ac0c08ad1260426b1cbeb70ea1e",
+      "measurements": []
+    },
+    {
+      "operation": "pow",
+      "representation": "limbs",
+      "level": "2",
+      "checked_cases": 1457,
+      "source_sha256": "cc55e5d95e5069347cb6dca836fe586075062728a699c8f53f66f70898cef644",
+      "build_seconds": [
+        0.15737964800791815
+      ],
+      "median_build_seconds": 0.15737964800791815,
+      "object_bytes": 5888,
+      "text_bytes": 3808,
+      "executable_bytes": 20264,
+      "relink_seconds": 0.006973765994189307,
+      "executable_sha256": "81e45016d2bf192488e9e47c1aafb8674a439ac0c08ad1260426b1cbeb70ea1e",
+      "measurements": []
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "schema": 1,
+    "fe_repository": "https://github.com/argotorg/fe",
+    "fe_revision": "3587ff99982ca3dd5e0eaa93e8d143cacf64ee40",
+    "sonatina_repository": "https://github.com/fe-lang/sonatina",
+    "sonatina_revision": "92df01a623ec87927452d884131d93589a711c3d",
+    "cargo_lock_sha256": "81569f127dd7afcd2ea2b96dd2c79c2e67d5c52263018dfe9111a2bf8ee712ff",
+    "rust_version": "1.99.0",
+    "features": [
+      "cranelift"
+    ],
+    "publication": "argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
+    "hosts": [
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "host": "aarch64-apple-darwin",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "source_directory": "/Users/sean/perf-out/accept-master/toolchain/fe",
+  "sonatina_source_directory": "/Users/sean/perf-out/accept-master/toolchain/sonatina",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "node": "v26.5.0",
+  "npm": "11.17.0",
+  "cc": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+  "target_directory": "/Users/sean/perf-out/accept-master/toolchain/target",
+  "complete": true,
+  "compiler_build_seconds": 145.36917654192075,
+  "compiler": "/Users/sean/perf-out/accept-master/toolchain/bin/fe",
+  "compiler_sha256": "ad2d5c98e28651bcd78ad0805aa75299ce391af4ac57bbbdeb736822efc9c586",
+  "compiler_version": "fe 26.5.0 (3587ff999)"
+}

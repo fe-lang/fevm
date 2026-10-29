@@ -37,26 +37,27 @@ use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
 compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
 version recorded in the manifest. No third-party Python packages are required.
 
-The current compiler is Fe
-[`71ffd7ca42056acfe608c3b692552ebb7d16cc88`](https://github.com/sbillig/fe/tree/71ffd7ca42056acfe608c3b692552ebb7d16cc88),
-branch `feat/generic-byte-order` of `sbillig/fe` on Fe master `fa06c6cd5`.
-Its Cargo.lock pins Sonatina `bbbcafe35467ff05dde206f8397cce4d2c52a711`. The
-branch destroys owned values where their lifetime ends and replaces
-`std::native::ByteBuffer` and `FixedStack` with core's memory owners (`MemBuffer`,
-`MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap memory. It
-adds the byte-order reads, `swap_bytes`, unchecked span reads and
-`MemVec::push_unchecked` that the dispatch loop and Keccak use. It uses
-Rust 1.99.0; the default [`toolchain.json`](toolchain.json) records the exact
-revisions and lock hash, and bootstrap fetches both from those repositories.
+The current compiler is Fe master
+[`3587ff99982ca3dd5e0eaa93e8d143cacf64ee40`](https://github.com/argotorg/fe/tree/3587ff99982ca3dd5e0eaa93e8d143cacf64ee40).
+Its Cargo.lock pins Sonatina `92df01a623ec87927452d884131d93589a711c3d`. Fe
+destroys owned values where their lifetime ends and provides core's memory owners
+(`MemBuffer`, `MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap
+memory, and the byte-order reads, `swap_bytes` and unchecked span and `MemVec`
+access that the dispatch loop and Keccak use. Sonatina compiles FeVM's opcode
+handlers' calls to each other as native tail calls. It uses Rust 1.99.0; the
+default [`toolchain.json`](toolchain.json) records the exact revisions and lock
+hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux: 82 workspace tests, 38
-CLI/allocator checks, 1,840 frame comparisons and 1,142 state comparisons at each
-of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
-simultaneous-fault reason differences per level. The Python harness's 13 tests
-and the Rust reference's nine tests pass. See the
-[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md),
-and the [owned-memory report](reports/owned-memory-20261020/README.md) for the
-port itself; this compiler has not run on AArch64 macOS. The
+All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 83
+workspace tests, 38 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
+comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
+three declared simultaneous-fault reason differences per level. The Python
+harness's 13 tests and the Rust reference's nine tests pass. See the
+[tail-call dispatch report](reports/tail-call-dispatch-20261029/README.md), which
+also times evm-benchmarks against FeVM main, revm and evmone; the
+[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md)
+and the [owned-memory report](reports/owned-memory-20261020/README.md) cover the
+port to core's memory owners. The
 [Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe
 master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
 on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)

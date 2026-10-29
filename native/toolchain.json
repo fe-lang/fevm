@@ -1,15 +1,15 @@
 {
   "schema": 1,
-  "fe_repository": "https://github.com/sbillig/fe",
-  "fe_revision": "71ffd7ca42056acfe608c3b692552ebb7d16cc88",
+  "fe_repository": "https://github.com/argotorg/fe",
+  "fe_revision": "3587ff99982ca3dd5e0eaa93e8d143cacf64ee40",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "bbbcafe35467ff05dde206f8397cce4d2c52a711",
-  "cargo_lock_sha256": "6a7ade5b24586ab8c9fa3c1c763ec804ae9124fedc4b251f99b84c7d64d261c5",
+  "sonatina_revision": "92df01a623ec87927452d884131d93589a711c3d",
+  "cargo_lock_sha256": "81569f127dd7afcd2ea2b96dd2c79c2e67d5c52263018dfe9111a2bf8ee712ff",
   "rust_version": "1.99.0",
   "features": [
     "cranelift"
   ],
-  "publication": "sbillig/fe branch feat/generic-byte-order (owned-value destruction, core memory owners, byte-order and unchecked reads); Sonatina revision pinned by its Cargo.lock",
+  "publication": "argotorg/fe master; Sonatina revision pinned by its Cargo.lock",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"
