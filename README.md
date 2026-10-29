@@ -121,11 +121,11 @@ its beneficiary and deletes the account only if this transaction created it.
 
 All ten Cancun precompiles live in the separate `fevm_precompiles` workspace
 ingot: ECRECOVER (secp256k1), SHA-256, RIPEMD-160, IDENTITY, MODEXP (EIP-198 with
-EIP-2565 gas), BN254 ECADD/ECMUL/ECPAIRING (EIP-196/197 with EIP-1108 gas),
-BLAKE2F (EIP-152) and KZG point evaluation (EIP-4844, BLS12-381 with the mainnet
-trusted setup's `[τ]G2`). Each charges its gas before doing work; invalid input
-or insufficient gas is an exceptional halt. MODEXP works on limb arrays sized for
-each call's modulus, so any affordable modulus is evaluated; failing to allocate
+EIP-7883 gas and EIP-7823's 1,024-byte length bounds), BN254 ECADD/ECMUL/ECPAIRING
+(EIP-196/197 with EIP-1108 gas), BLAKE2F (EIP-152) and KZG point evaluation
+(EIP-4844, BLS12-381 with the mainnet trusted setup's `[τ]G2`). Each charges its
+gas before doing work; invalid input or insufficient gas is an exceptional halt.
+MODEXP works on limb arrays sized for each call's modulus; failing to allocate
 them is a host error.
 
 `finish(commit, gas_spent)` consumes the transaction and returns persistent state,
