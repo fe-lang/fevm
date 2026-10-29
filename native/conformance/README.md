@@ -1,14 +1,14 @@
 # Ethereum state tests
 
-`run.py` runs the Cancun cases of an
-[execution-spec-tests](https://github.com/ethereum/execution-spec-tests) fixture
+`run.py` runs the Osaka cases of an
+[execution-specs](https://github.com/ethereum/execution-specs) test fixture
 release through FeVM's `transact`. Each case starts a fresh native
 `fevm_conformance` process, which reads one binary-encoded case from stdin and
 prints the transaction outcome, the logs hash and the complete post-state.
 
 ```sh
-gh release download v5.4.0 -R ethereum/execution-spec-tests -p fixtures_stable.tar.gz
-tar -xzf fixtures_stable.tar.gz
+gh release download tests@v21.0.1 -R ethereum/execution-specs -p fixtures.tar.gz
+tar -xzf fixtures.tar.gz fixtures/state_tests
 python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
   --fixtures fixtures/state_tests --out native/out/conformance-run
 ```
@@ -34,7 +34,8 @@ non-zero storage equals the fixture's post-state. Outcomes are:
 
 The runner encodes the environment, pre-state and the transaction selected by
 the case's data/gas/value indexes; it derives the blob base fee from
-`currentExcessBlobGas` and the transaction type from its fields. As in other
+`currentExcessBlobGas` with the fixture's Osaka blob schedule (BPO2's update
+fraction when a fixture has none) and the transaction type from its fields. As in other
 state-test clients, `BLOCKHASH(n)` for the previous 256 blocks is the Keccak-256
 hash of `n`'s decimal digits. The driver checks the post-state directly instead
 of recomputing the state root.

@@ -21,7 +21,7 @@ pub const INVALID_INITCODE_SIZE: i32 = 2
 pub const INVALID_NONCE_LIMIT: i32 = 3
 pub const INVALID_PRIORITY_FEE: i32 = 4
 pub const INVALID_GAS_LIMIT: i32 = 5
-pub const INVALID_BLOB_GAS_LIMIT: i32 = 6
+pub const INVALID_BLOB_COUNT: i32 = 6
 pub const INVALID_FEE_CAP: i32 = 7
 pub const INVALID_BLOB_CREATE: i32 = 8
 pub const INVALID_NO_BLOBS: i32 = 9
@@ -31,11 +31,16 @@ pub const INVALID_NONCE: i32 = 12
 pub const INVALID_BALANCE: i32 = 13
 pub const INVALID_SENDER_CODE: i32 = 14
 pub const INVALID_TX_TYPE: i32 = 15
+pub const INVALID_GAS_LIMIT_CAP: i32 = 16
 
 const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const MAX_INITCODE_SIZE: u64 = 49152
+// EIP-7825: the transaction gas limit cap.
+const MAX_TX_GAS_LIMIT: u64 = 16_777_216
 const GAS_PER_BLOB: u256 = 131072
-const MAX_BLOBS_PER_BLOCK: u64 = 6
+// EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
+// blob gas used across a block is the host's to track, as is its gas used.
+const MAX_BLOBS_PER_TX: u64 = 6
 
 pub struct TxEnv {
     pub kind: u8,
@@ -100,8 +105,12 @@ fn checked_add(_ a: u256, _ b: u256) -> Option<u256> {
 
 fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
 
-/// Calldata, creation, and access-list charges paid before execution.
-pub fn intrinsic_gas(_ request: TxRequest) -> u128 {
+/// The intrinsic charge paid before execution, and the EIP-7623 calldata floor
+/// on the gas a transaction uses.
+pub struct IntrinsicGas { pub regular: u128, pub floor: u128 }
+
+/// Calldata, creation, and access-list charges, and the calldata floor.
+pub fn intrinsic_gas(_ request: TxRequest) -> IntrinsicGas {
     let data = ref request.data()
     let bytes = data.bytes()
     let len = data.len()
@@ -120,12 +129,14 @@ pub fn intrinsic_gas(_ request: TxRequest) -> u128 {
         if bytes[index as usize] != 0 { nonzero += 1 }
         index += 1
     }
-    // Zero bytes cost 4 gas and the others 16.
-    var gas: u128 = 21000 + 4 * len as u128 + 12 * nonzero as u128
+    // A zero byte is one token and the others four; a token costs 4 gas, or
+    // 10 for the floor.
+    let tokens = len as u128 + 3 * nonzero as u128
+    var gas: u128 = 21000 + 4 * tokens
     if request.env.creates { gas += 32000 + 2 * words(data.len()) }
     let accounts: u128 = request.access_accounts.len().downcast_unchecked()
     let keys: u128 = request.access_keys.len().downcast_unchecked()
-    gas + 2400 * accounts + 1900 * keys
+    IntrinsicGas { regular: gas + 2400 * accounts + 1900 * keys, floor: 21000 + 10 * tokens }
 }
 
 fn fee_market(_ env: TxEnv) -> bool { env.kind == TX_FEE_MARKET || env.kind == TX_BLOB }
@@ -141,24 +152,27 @@ fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
     checked_mul(request.blob_count() as u256 * GAS_PER_BLOB, price)
 }
 
-/// The Cancun includability checks, in specification order.
+/// The Osaka includability checks, in specification order.
 pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_BLOB { return INVALID_TX_TYPE }
     // Only the blob envelope has versioned hashes.
     if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
-    if intrinsic_gas(request) > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
+    let intrinsic = intrinsic_gas(request)
+    let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
+    if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
+    if env.gas_limit > MAX_TX_GAS_LIMIT { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
     if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
-    if request.blob_count() > MAX_BLOBS_PER_BLOCK { return INVALID_BLOB_GAS_LIMIT }
     if env.gas_price < block.basefee { return INVALID_FEE_CAP }
     var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
     if env.kind == TX_BLOB {
         if env.creates { return INVALID_BLOB_CREATE }
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
+        if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
         for hash in request.blob_hashes {
             if hash >> 248 != 0x01 { return INVALID_BLOB_VERSION }
         }
@@ -245,7 +259,7 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
     vm.into_result(mut tx.frame_buffers())
 }
 
-/// Validate and execute one Cancun transaction against `world`. Valid
+/// Validate and execute one Osaka transaction against `world`. Valid
 /// transactions pay for gas, run their message, refund unused and refunded gas
 /// to the sender, pay the priority fee to the coinbase, and settle deletions.
 /// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
@@ -256,13 +270,13 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
     let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
-    let intrinsic: u64 = intrinsic_gas(request).downcast_unchecked()
+    let intrinsic = intrinsic_gas(request)
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
     tx.swap_frame_buffers(mut buffers)
     let prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
-        gasprice: price, gas_limit: env.gas_limit - intrinsic, is_static: false,
+        gasprice: price, gas_limit: env.gas_limit - intrinsic.regular.downcast_unchecked(), is_static: false,
     }
     let result = if prepared == OK { execute_message(mut tx, request, call, block) } else { status_result(prepared) }
     tx.swap_frame_buffers(mut buffers)
@@ -272,7 +286,10 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
     let gas_spent = env.gas_limit - gas_left
-    let gas_used = gas_spent - tx.capped_refund(gas_spent)
+    // EIP-7623: a transaction uses at least its calldata floor.
+    let refunded = gas_spent - tx.capped_refund(gas_spent)
+    let floor: u64 = intrinsic.floor.downcast_unchecked()
+    let gas_used = if refunded > floor { refunded } else { floor }
     var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
     let coinbase = address_word(block.coinbase)
     if paid == OK {

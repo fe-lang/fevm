@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Ethereum execution-spec state tests (Cancun) against native FeVM."""
+"""Run Ethereum execution-spec state tests (Osaka) against native FeVM."""
 import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -14,8 +14,9 @@ import time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-FORK = 'Cancun'
-BLOB_BASE_FEE_UPDATE_FRACTION = 3338477
+FORK = 'Osaka'
+# BPO2's, for fixtures without a blob schedule.
+BLOB_BASE_FEE_UPDATE_FRACTION = 11684671
 # Execution statuses defined by the EVM (see ingots/evm/src/constants.fe);
 # every other driver status is a host failure.
 EVM_STATUSES = {0: 'success', 19: 'revert', 10: 'stack_underflow', 11: 'stack_overflow',
@@ -36,14 +37,14 @@ def be(value, width):
     return number(value).to_bytes(width, 'big')
 
 
-def blob_base_fee(excess):
+def blob_base_fee(excess, fraction):
     # EIP-4844 fake_exponential(MIN_BLOB_GASPRICE, excess, UPDATE_FRACTION).
-    output, accumulator, i = 0, BLOB_BASE_FEE_UPDATE_FRACTION, 1
+    output, accumulator, i = 0, fraction, 1
     while accumulator > 0:
         output += accumulator
-        accumulator = accumulator * excess // (BLOB_BASE_FEE_UPDATE_FRACTION * i)
+        accumulator = accumulator * excess // (fraction * i)
         i += 1
-    return output // BLOB_BASE_FEE_UPDATE_FRACTION
+    return output // fraction
 
 
 def blob(value):
@@ -70,7 +71,9 @@ def encode(test, indexes):
     out += be(env.get('currentRandom', env.get('currentDifficulty', '0x0')), 32)
     out += be(env['currentGasLimit'], 32)
     out += be(env.get('currentBaseFee', '0x0'), 32)
-    out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0'))).to_bytes(32, 'big')
+    schedule = test.get('config', {}).get('blobSchedule', {}).get(FORK, {})
+    fraction = number(schedule.get('baseFeeUpdateFraction', BLOB_BASE_FEE_UPDATE_FRACTION))
+    out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0')), fraction).to_bytes(32, 'big')
     out += be(test.get('config', {}).get('chainid', '0x1'), 32)
     pre = test['pre']
     out += len(pre).to_bytes(4, 'big')
