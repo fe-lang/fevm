@@ -27,6 +27,9 @@ receipt's logs hash matches, and every account's balance, nonce, code and
 non-zero storage equals the fixture's post-state. Outcomes are:
 
 - `passed`
+- `signature`: the transaction's signature is malformed. FeVM takes a recovered
+  sender, so rejecting the signature is the host's part of decoding it; the
+  case is not run.
 - `failed`: a validity, logs or state mismatch, listed in `cases.jsonl`
 - `host_error`: FeVM stopped with a host status (allocation failure, balance
   overflow) instead of an EVM outcome

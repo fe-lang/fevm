@@ -68,7 +68,7 @@ struct Case
 Case decode(const bytes& data)
 {
     Reader reader{data};
-    if (reader.word(1) != 1)
+    if (reader.word(1) != 2)
         std::abort();
     Case result;
     auto& block = result.block;
@@ -95,6 +95,11 @@ Case decode(const bytes& data)
     }
     auto& tx = result.tx;
     tx.type = static_cast<state::Transaction::Type>(static_cast<uint8_t>(reader.word(1)));
+    const auto signed_chain = reader.word(1) == 1;
+    tx.chain_id = static_cast<uint64_t>(reader.word(32));
+    // evmone takes a legacy transaction's v of 35 or more as signing a chain ID.
+    if (signed_chain && tx.type == state::Transaction::Type::legacy)
+        tx.v = 35;
     tx.sender = reader.addr();
     const auto creates = reader.word(1) == 1;
     const auto to = reader.addr();
@@ -117,7 +122,6 @@ Case decode(const bytes& data)
     }
     for (auto blobs = reader.count(); blobs != 0; --blobs)
         tx.blob_hashes.push_back(reader.word32());
-    tx.chain_id = block.chain_id;
     if (reader.position != data.size())
         std::abort();
     return result;

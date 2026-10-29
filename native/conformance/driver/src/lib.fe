@@ -243,7 +243,7 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     var buffers = FrameBuffers::new()
     while true {
         reader.position = 0
-        core::assert(reader.word(bytes: 1) == 1)
+        core::assert(reader.word(bytes: 1) == 2)
         let block = BlockEnv {
             coinbase: reader.word(bytes: 20),
             number: reader.word(bytes: 32),
@@ -283,10 +283,13 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
             accounts -= 1
         }
         let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
+        let signed_chain = reader.word(bytes: 1) == 1
+        let chain_id = reader.word(bytes: 32)
         let sender = reader.word(bytes: 20)
         let creates = reader.word(bytes: 1) == 1
         let env = TxEnv {
             kind,
+            chain_id: if signed_chain { Option::Some(chain_id) } else { Option::None },
             sender,
             creates,
             to: reader.word(bytes: 20),

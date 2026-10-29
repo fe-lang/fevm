@@ -58,7 +58,7 @@ struct Case {
 
 fn decode(data: &[u8]) -> Case {
     let mut reader = Reader { data, position: 0 };
-    assert_eq!(reader.word(1), U256::from(1));
+    assert_eq!(reader.word(1), U256::from(2));
     let beneficiary = reader.address();
     let number = reader.word(32);
     let timestamp = reader.word(32);
@@ -99,6 +99,8 @@ fn decode(data: &[u8]) -> Case {
         })
         .collect();
     let tx_type = reader.word(1).to();
+    let signed_chain = reader.word(1) == U256::from(1);
+    let tx_chain_id = reader.word(32).to();
     let caller = reader.address();
     let creates = reader.word(1) == U256::from(1);
     let to = reader.address();
@@ -137,7 +139,7 @@ fn decode(data: &[u8]) -> Case {
         value,
         data,
         nonce,
-        chain_id: Some(chain_id),
+        chain_id: signed_chain.then_some(tx_chain_id),
         access_list,
         gas_priority_fee: (tx_type >= 2).then_some(priority_fee),
         blob_hashes,

@@ -23,6 +23,9 @@ EVM_STATUSES = {0: 'success', 19: 'revert', 10: 'stack_underflow', 11: 'stack_ov
                 15: 'out_of_gas', 16: 'invalid_jump', 17: 'invalid_opcode', 18: 'return_data_oob',
                 23: 'static_write', 24: 'code_prefix', 25: 'precompile_failure', 27: 'address_collision'}
 HOST_STATUSES = {21: 'host_allocation', 26: 'balance_overflow'}
+# FeVM takes a transaction's recovered sender; rejecting a malformed signature
+# belongs to the host that decodes the signed transaction.
+SIGNATURE_EXCEPTION = 'TransactionException.INVALID_SIGNATURE_VRS'
 
 
 def digest(path):
@@ -64,7 +67,7 @@ def tx_kind(transaction):
 def encode(test, indexes):
     """The driver's binary case format; integers and lengths are big endian."""
     env, tx = test['env'], test['transaction']
-    out = bytearray([1])
+    out = bytearray([2])
     out += be(env['currentCoinbase'], 20)
     out += be(env['currentNumber'], 32)
     out += be(env['currentTimestamp'], 32)
@@ -85,7 +88,7 @@ def encode(test, indexes):
         for slot, value in storage:
             out += be(slot, 32) + be(value, 32)
     kind = tx_kind(tx)
-    out += bytes([kind]) + be(tx['sender'], 20)
+    out += bytes([kind, 'chainId' in tx]) + be(tx.get('chainId', '0x0'), 32) + be(tx['sender'], 20)
     creates = tx['to'] in ('', '0x')
     out += bytes([1 if creates else 0]) + (bytes(20) if creates else be(tx['to'], 20))
     out += be(tx['nonce'], 32) + be(tx['gasLimit'][indexes['gas']], 8)
@@ -150,6 +153,8 @@ def cases(fixtures, selection):
 
 def check(executable, case, timeout):
     post = case['post']
+    if SIGNATURE_EXCEPTION in post.get('expectException', ''):
+        return 'signature', [], 0.0
     started = time.perf_counter()
     try:
         observed = subprocess.run([str(executable)], input=encode(case['test'], post['indexes']),
@@ -231,7 +236,7 @@ def main():
                'groups': {group: dict(counts) for group, counts in sorted(groups.items())}}
     (out / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report['totals']))
-    sys.exit(0 if totals['passed'] == len(selected) else 1)
+    sys.exit(0 if totals['passed'] + totals['signature'] == len(selected) else 1)
 
 
 if __name__ == '__main__':

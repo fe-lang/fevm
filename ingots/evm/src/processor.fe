@@ -32,6 +32,7 @@ pub const INVALID_BALANCE: i32 = 13
 pub const INVALID_SENDER_CODE: i32 = 14
 pub const INVALID_TX_TYPE: i32 = 15
 pub const INVALID_GAS_LIMIT_CAP: i32 = 16
+pub const INVALID_CHAIN_ID: i32 = 17
 
 const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const MAX_INITCODE_SIZE: u64 = 49152
@@ -44,6 +45,8 @@ const MAX_BLOBS_PER_TX: u64 = 6
 
 pub struct TxEnv {
     pub kind: u8,
+    // The signed chain ID; none for a legacy transaction signed before EIP-155.
+    pub chain_id: Option<u256>,
     pub sender: u256,
     pub to: u256,
     pub creates: bool,
@@ -167,6 +170,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
     if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
+    if let Option::Some(chain_id) = env.chain_id && chain_id != block.chainid { return INVALID_CHAIN_ID }
     if env.gas_price < block.basefee { return INVALID_FEE_CAP }
     var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
     if env.kind == TX_BLOB {
