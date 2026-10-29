@@ -1,23 +1,19 @@
 use keccak::Keccak256
 
-fn hashed_address<const N: usize>(_ preimage: [u8; N], len: u64) -> u256 {
+fn hashed_address<const N: usize>(_ preimage: [u8; N], len: usize) -> u256 {
     var hash = Keccak256::new()
     hash.update(preimage, offset: 0, len)
     hash.finish_word() & 0xffffffffffffffffffffffffffffffffffffffff
 }
 
-fn put_word(_ bytes: mut [u8; 85], offset: u64, value: u256, width: u64) {
-    var i: u64 = 0
-    while i < width {
-        bytes[(offset + i) as usize] = (value >> ((width - 1 - i) * 8) as u256).downcast_truncate()
-        i += 1
-    }
+fn put_word(_ bytes: mut [u8; 85], offset: usize, value: u256, width: usize) {
+    for i in 0..width { bytes[offset + i] = (value >> ((width - 1 - i) * 8) as u256).downcast_truncate() }
 }
 
 /// CREATE: the low 160 bits of keccak256(rlp([sender, nonce])).
 pub fn create_address(sender: u256, nonce: u256) -> u256 {
     core::assert(nonce <= 0xffffffffffffffff)
-    var nonce_len: u64 = 0
+    var nonce_len: usize = 0
     while nonce >> (nonce_len * 8) as u256 != 0 { nonce_len += 1 }
     // RLP encodes zero as the empty string and a byte below 0x80 as itself.
     let encoded_len = if nonce < 0x80 { 1 } else { 1 + nonce_len }

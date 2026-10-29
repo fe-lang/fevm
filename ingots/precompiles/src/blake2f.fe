@@ -19,20 +19,10 @@ const SIGMA: [u8; 160] = [
     10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
 ]
 
-pub const INPUT_LEN: u64 = 213
+pub const INPUT_LEN: usize = 213
 
 fn rotate_right(_ value: u64, by: u64) -> u64 {
     (value >> by) | (value << (64 - by))
-}
-
-fn read_le<T: ByteSource>(_ input: T, offset: u64) -> u64 {
-    var value: u64 = 0
-    var i: u64 = 0
-    while i < 8 {
-        value |= (input.byte_at(offset + i) as u64) << (i * 8)
-        i += 1
-    }
-    value
 }
 
 fn mix(_ v: mut [u64; 16], a: usize, b: usize, c: usize, d: usize, x: u64, y: u64) {
@@ -58,25 +48,15 @@ pub fn compress<T: ByteSource>(_ input: T) -> [u8; 64] {
     core::assert(input.len() == INPUT_LEN && input.byte_at(212) <= 1)
     var h: [u64; 8] = [0; 8]
     var m: [u64; 16] = [0; 16]
-    var i: u64 = 0
-    while i < 8 {
-        h[i as usize] = read_le(input, offset: 4 + i * 8)
-        i += 1
-    }
-    i = 0
-    while i < 16 {
-        m[i as usize] = read_le(input, offset: 68 + i * 8)
-        i += 1
-    }
+    for i in 0..8 { h[i] = input.lane_at(4 + i * 8) }
+    for i in 0..16 { m[i] = input.lane_at(68 + i * 8) }
     var v: [u64; 16] = [0; 16]
-    i = 0
-    while i < 8 {
-        v[i as usize] = h[i as usize]
-        v[(i + 8) as usize] = IV[i as usize]
-        i += 1
+    for i in 0..8 {
+        v[i] = h[i]
+        v[i + 8] = IV[i]
     }
-    v[12] ^= read_le(input, offset: 196)
-    v[13] ^= read_le(input, offset: 204)
+    v[12] ^= input.lane_at(196)
+    v[13] ^= input.lane_at(204)
     if input.byte_at(212) == 1 { v[14] = !v[14] }
     let total = rounds(input)
     var round: u64 = 0
@@ -93,11 +73,9 @@ pub fn compress<T: ByteSource>(_ input: T) -> [u8; 64] {
         round += 1
     }
     var output: [u8; 64] = [0; 64]
-    i = 0
-    while i < 64 {
-        let word = h[(i / 8) as usize] ^ v[(i / 8) as usize] ^ v[(i / 8 + 8) as usize]
-        output[i as usize] = (word >> ((i % 8) * 8)).downcast_truncate()
-        i += 1
+    for i in 0..64 {
+        let word = h[i / 8] ^ v[i / 8] ^ v[i / 8 + 8]
+        output[i] = (word >> ((i % 8) * 8).downcast_unchecked()).downcast_truncate()
     }
     output
 }

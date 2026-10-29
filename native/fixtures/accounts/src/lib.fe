@@ -4,8 +4,8 @@ use fevm::constants::ERR_HOST_ALLOCATION
 
 struct LargeCode {}
 impl ByteSource for LargeCode {
-    fn len(self) -> u64 { 65537 }
-    fn byte_at(self, _ index: u64) -> u8 { (index & 255).downcast_unchecked() }
+    fn len(self) -> usize { 65537 }
+    fn byte_at(self, _ index: usize) -> u8 { (index & 255).downcast_unchecked() }
 }
 
 // Relinked with the controlled allocator: the first or second world's arena

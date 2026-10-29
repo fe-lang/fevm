@@ -15,7 +15,10 @@ pub struct Output { pub status: u8, pub gas_used: u64, pub output: MemBuffer }
 /// Osaka precompiles occupy addresses 0x01 through 0x11, and 0x100.
 pub fn is_precompile(_ address: u256) -> bool { (address >= 1 && address <= 0x11) || address == 0x100 }
 
-fn words(_ len: u64) -> u128 { ((len as u128) + 31) / 32 }
+fn words(_ len: usize) -> u128 {
+    let len: u128 = len.downcast_unchecked()
+    (len + 31) / 32
+}
 
 pub(ingot) fn failure(_ gas: u64) -> Output {
     Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() }
@@ -26,28 +29,21 @@ fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
 }
 
 // Copy `source` into a zero-filled output of `len` bytes, ending at its last byte.
-fn right_aligned<T: ByteSource>(_ source: T, len: u64, gas_used: u64) -> Output {
+fn right_aligned<T: ByteSource>(_ source: T, len: usize, gas_used: u64) -> Output {
     var output = MemBuffer::empty()
-    if !output.try_resize(len as usize) {
+    if !output.try_resize(len) {
         return Output { status: HOST_ALLOCATION, gas_used, output }
     }
     let offset = len - source.len()
-    var i: u64 = 0
-    while i < source.len() {
-        output[(offset + i) as usize] = source.byte_at(i)
-        i += 1
-    }
+    for i in 0..source.len() { output[offset + i] = source.byte_at(i) }
     Output { status: SUCCESS, gas_used, output }
 }
 
 // The big-endian word at `offset`, zero-padded past the input as buffer_read.
-fn word_at<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
     var value: u256 = 0
-    var i: u64 = 0
-    while i < 32 {
-        let index = offset + i
+    for index in offset..offset + 32 {
         value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }
-        i += 1
     }
     value
 }
@@ -121,7 +117,8 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         }
     }
     if address == 8 {
-        let cost = 45000 + 34000 * (len / 192) as u128
+        let pairs: u128 = (len / 192).downcast_unchecked()
+        let cost = 45000 + 34000 * pairs
         if cost > gas as u128 { return failure(gas) }
         return match bn254::pairing(input) {
             Option::Some(holds) => {

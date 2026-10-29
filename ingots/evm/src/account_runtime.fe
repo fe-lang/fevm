@@ -6,8 +6,8 @@ use ingot::transaction_runtime::checkpoint
 
 struct OversizedCode {}
 impl ByteSource for OversizedCode {
-    fn len(self) -> u64 { 0xffffffffffffffff }
-    fn byte_at(self, _ index: u64) -> u8 { core::panic() }
+    fn len(self) -> usize { 0xffffffffffffffff }
+    fn byte_at(self, _ index: usize) -> u8 { core::panic() }
 }
 
 #[test]

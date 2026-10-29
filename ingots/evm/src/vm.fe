@@ -517,12 +517,8 @@ impl Vm {
         // Bytes past the end read as zero.
         var value: u256 = 0
         if offset < len as u256 {
-            let start: u64 = offset.downcast_unchecked()
-            var index = start
-            while index < len {
-                value = (value << 8) | calldata.byte_at(index) as u256
-                index += 1
-            }
+            let start: usize = offset.downcast_unchecked()
+            for index in start..len { value = (value << 8) | calldata.byte_at(index) as u256 }
             value <<= ((32 - (len - start)) * 8) as u256
         }
         self.push(value)
@@ -1146,8 +1142,8 @@ impl Vm {
             self.fault(ERR_OUT_OF_GAS)
             return Option::None
         }
-        let count: u64 = len.downcast_unchecked()
-        let start: u64 = if count == 0 { 0 } else { offset.downcast_unchecked() }
+        let count: usize = len.downcast_unchecked()
+        let start: usize = if count == 0 { 0 } else { offset.downcast_unchecked() }
         let sender = address_word(call.address)
         let address = if op == 0xf0 {
             create_address(sender, nonce: state.nonce(sender))
@@ -1185,7 +1181,7 @@ impl Vm {
                 return Option::None
             },
         }
-        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start as usize, len: count as usize)))
+        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start, len: count)))
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)

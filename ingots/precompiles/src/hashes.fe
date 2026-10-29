@@ -59,35 +59,31 @@ fn rotate_left(_ value: u32, by: u32) -> u32 {
 
 // Both hashes consume 64-byte blocks followed by 0x80, zero padding and a
 // 64-bit bit count; SHA-256 stores the count big endian, RIPEMD-160 little endian.
-fn padded_block<T: ByteSource>(_ input: T, block_index: u64, blocks: u64, big_endian: bool) -> [u8; 64] {
+fn padded_block<T: ByteSource>(_ input: T, block_index: usize, blocks: usize, big_endian: bool) -> [u8; 64] {
     var block: [u8; 64] = [0; 64]
     let len = input.len()
     let start = block_index * 64
-    var i: u64 = 0
-    while i < 64 {
+    for i in 0..64 {
         let position = start + i
         if position < len {
-            block[i as usize] = input.byte_at(position)
+            block[i] = input.byte_at(position)
         } else if position == len {
-            block[i as usize] = 0x80
+            block[i] = 0x80
         }
-        i += 1
     }
     if block_index == blocks - 1 {
         // Inputs are bounded by host memory, so the bit count fits 64 bits.
-        let bits = len * 8
-        i = 0
-        while i < 8 {
-            let shift = if big_endian { (7 - i) * 8 } else { i * 8 }
-            block[(56 + i) as usize] = (bits >> shift).downcast_truncate()
-            i += 1
+        let bits: u64 = (len * 8).downcast_unchecked()
+        for i in 0..8 {
+            let shift: u64 = (if big_endian { (7 - i) * 8 } else { i * 8 }).downcast_unchecked()
+            block[56 + i] = (bits >> shift).downcast_truncate()
         }
     }
     block
 }
 
 // One length byte (0x80) and eight count bytes follow the message.
-fn padded_blocks(_ len: u64) -> u64 { (len + 9 + 63) / 64 }
+fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
 
 fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     var w: [u32; 64] = [0; 64]
@@ -145,7 +141,7 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
 pub fn sha256<T: ByteSource>(_ input: T) -> [u8; 32] {
     var state = SHA256_IV
     let blocks = padded_blocks(input.len())
-    var index: u64 = 0
+    var index: usize = 0
     while index < blocks {
         sha256_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: true))
         index += 1
@@ -221,7 +217,7 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
 pub fn ripemd160<T: ByteSource>(_ input: T) -> [u8; 20] {
     var state = RIPEMD_IV
     let blocks = padded_blocks(input.len())
-    var index: u64 = 0
+    var index: usize = 0
     while index < blocks {
         ripemd_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: false))
         index += 1

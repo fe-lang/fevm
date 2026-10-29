@@ -128,17 +128,15 @@ pub fn g2_generator() -> Point<Fp2> {
 /// decompress_G1 does: the compression flag must be set; the infinity flag
 /// must agree with an all-zero x and excludes the sign flag; x must be below p
 /// and x^3 + 4 a square, and the sign flag selects the larger root.
-pub fn decompress_g1<T: ByteSource>(_ source: T, offset: u64) -> Option<Affine<Fp>> {
+pub fn decompress_g1<T: ByteSource>(_ source: T, offset: usize) -> Option<Affine<Fp>> {
     let flags = source.byte_at(offset)
     let compressed = flags & 0x80 != 0
     let infinity = flags & 0x40 != 0
     let largest = flags & 0x20 != 0
     if !compressed { return Option::None }
     var x_is_zero = flags & 0x1f == 0
-    var i: u64 = 1
-    while i < 48 {
+    for i in 1..48 {
         if source.byte_at(offset + i) != 0 { x_is_zero = false }
-        i += 1
     }
     if infinity != x_is_zero { return Option::None }
     if infinity {

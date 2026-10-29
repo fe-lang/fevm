@@ -35,16 +35,14 @@ const G2_DISCOUNT: [u16; 128] = [
     534, 533, 532, 532, 531, 530, 530, 529, 528, 528, 527, 526, 526, 525, 524, 524,
 ]
 
-fn fp_at<T: ByteSource>(_ input: T, offset: u64) -> Option<Fp> {
-    var i: u64 = 0
-    while i < 16 {
+fn fp_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp> {
+    for i in 0..16 {
         if input.byte_at(offset + i) != 0 { return Option::None }
-        i += 1
     }
     Fp::from_be_bytes(input, offset: offset + 16, masked: false)
 }
 
-fn fp2_at<T: ByteSource>(_ input: T, offset: u64) -> Option<Fp2> {
+fn fp2_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp2> {
     let c0 = fp_at(input, offset)
     let c1 = fp_at(input, offset: offset + 64)
     if c0.is_none() || c1.is_none() { return Option::None }
@@ -52,7 +50,7 @@ fn fp2_at<T: ByteSource>(_ input: T, offset: u64) -> Option<Fp2> {
 }
 
 // A G1 point, optionally required to be in the order-r subgroup.
-fn g1_at<T: ByteSource>(_ input: T, offset: u64, subgroup: bool) -> Option<Affine<Fp>> {
+fn g1_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Affine<Fp>> {
     let x = fp_at(input, offset)
     let y = fp_at(input, offset: offset + 64)
     if x.is_none() || y.is_none() { return Option::None }
@@ -62,7 +60,7 @@ fn g1_at<T: ByteSource>(_ input: T, offset: u64, subgroup: bool) -> Option<Affin
     Option::Some(point)
 }
 
-fn g2_at<T: ByteSource>(_ input: T, offset: u64, subgroup: bool) -> Option<Affine<Fp2>> {
+fn g2_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Affine<Fp2>> {
     let x = fp2_at(input, offset)
     let y = fp2_at(input, offset: offset + 128)
     if x.is_none() || y.is_none() { return Option::None }
@@ -107,9 +105,10 @@ fn g2_output(_ point: Point<Fp2>, gas_used: u64) -> Output {
 }
 
 // k pairs at `per` gas each, discounted per mille.
-fn msm_gas(_ k: u64, per: u128, _ discounts: [u16; 128]) -> u128 {
-    let discount = discounts[(if k < 128 { k } else { 128 } - 1) as usize] as u128
-    k as u128 * per * discount / 1000
+fn msm_gas(_ k: usize, per: u128, _ discounts: [u16; 128]) -> u128 {
+    let discount = discounts[if k < 128 { k } else { 128 } - 1] as u128
+    let pairs: u128 = k.downcast_unchecked()
+    pairs * per * discount / 1000
 }
 
 fn g1_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
@@ -117,12 +116,10 @@ fn g1_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let k = len / 160
     if len == 0 || len % 160 != 0 || msm_gas(k, per: 12000, G1_DISCOUNT) > gas as u128 { return failure(gas) }
     var sum = Point<Fp>::identity()
-    var i: u64 = 0
-    while i < k {
+    for i in 0..k {
         let point = g1_at(input, offset: 160 * i, subgroup: true)
         if point.is_none() { return failure(gas) }
         sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 160 * i + 128)))
-        i += 1
     }
     g1_output(sum, gas_used: msm_gas(k, per: 12000, G1_DISCOUNT).downcast_unchecked())
 }
@@ -132,12 +129,10 @@ fn g2_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let k = len / 288
     if len == 0 || len % 288 != 0 || msm_gas(k, per: 22500, G2_DISCOUNT) > gas as u128 { return failure(gas) }
     var sum = Point<Fp2>::identity()
-    var i: u64 = 0
-    while i < k {
+    for i in 0..k {
         let point = g2_at(input, offset: 288 * i, subgroup: true)
         if point.is_none() { return failure(gas) }
         sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 288 * i + 256)))
-        i += 1
     }
     g2_output(sum, gas_used: msm_gas(k, per: 22500, G2_DISCOUNT).downcast_unchecked())
 }
@@ -146,15 +141,15 @@ fn g2_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
 fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let len = input.len()
     let k = len / 384
-    let cost = 32600 * k as u128 + 37700
+    let pairs: u128 = k.downcast_unchecked()
+    let cost = 32600 * pairs + 37700
     if len == 0 || len % 384 != 0 || cost > gas as u128 { return failure(gas) }
     // Miller loops run two pairs at a time; a last odd pair goes with the
     // identity, which contributes one.
     var f = Fp12::one()
     var held = Affine { x: Fp::zero(), y: Fp::zero(), infinity: true }
     var held_twist = Affine { x: Fp2::zero(), y: Fp2::zero(), infinity: true }
-    var i: u64 = 0
-    while i < k {
+    for i in 0..k {
         let p = g1_at(input, offset: 384 * i, subgroup: true)
         let q = g2_at(input, offset: 384 * i + 128, subgroup: true)
         if p.is_none() || q.is_none() { return failure(gas) }
@@ -164,7 +159,6 @@ fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
         } else {
             f = f.mul(miller_loop(held, held_twist, p.unwrap(), q.unwrap()))
         }
-        i += 1
     }
     if k % 2 == 1 {
         let identity = Affine { x: Fp::zero(), y: Fp::zero(), infinity: true }
@@ -178,13 +172,9 @@ fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
     Output { status: SUCCESS, gas_used: used, output }
 }
 
-fn word_at<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
     var value: u256 = 0
-    var i: u64 = 0
-    while i < 32 {
-        value = (value << 8) | input.byte_at(offset + i) as u256
-        i += 1
-    }
+    for i in 0..32 { value = (value << 8) | input.byte_at(offset + i) as u256 }
     value
 }
 

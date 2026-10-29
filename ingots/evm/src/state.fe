@@ -10,8 +10,8 @@ pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82
 struct Account {
     balance: u256,
     nonce: u256,
-    code_offset: u64,
-    code_len: u64,
+    code_offset: usize,
+    code_len: usize,
     code_hash: u256,
 }
 impl Copy for Account {}
@@ -41,7 +41,7 @@ pub struct AccountEntry {
     pub address: u256,
     pub balance: u256,
     pub nonce: u256,
-    pub code_len: u64,
+    pub code_len: usize,
 }
 pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
 
@@ -64,7 +64,7 @@ impl SwissKey for StorageKey {
 }
 
 // An arena record's bytes for `len` bytes of code.
-fn record_len(_ len: u64) -> u64 {
+fn record_len(_ len: usize) -> usize {
     64 + len + jumpdest_map_len(len)
 }
 
@@ -164,7 +164,7 @@ impl WorldState {
         account.nonce = value
         self.accounts.try_insert(address, account)
     }
-    pub fn code_size(self, _ address: u256) -> u64 {
+    pub fn code_size(self, _ address: u256) -> usize {
         self.accounts.get(address_word(address)).value.code_len
     }
     // EIP-1052: even an explicitly present account hashes to zero if its
@@ -175,16 +175,16 @@ impl WorldState {
             0
         } else { account.code_hash }
     }
-    pub fn code_byte(self, address: u256, index: u64) -> u8 {
+    pub fn code_byte(self, address: u256, index: usize) -> u8 {
         let account = self.accounts.get(address_word(address)).value
         core::assert(index < account.code_len)
-        self.code[(account.code_offset + 64 + index) as usize]
+        self.code[account.code_offset + 64 + index]
     }
     // An account's code. One without code has no arena record to address.
     pub fn code(self, _ address: u256) -> ref MemSpan {
         let account = self.accounts.get(address_word(address)).value
         let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 }
-        self.code.slice(offset: offset as usize, len: account.code_len as usize)
+        self.code.slice(offset, len: account.code_len)
     }
     /// The account an EIP-7702 delegation designator delegates to, if that is
     /// the account's code.
@@ -199,7 +199,7 @@ impl WorldState {
     pub fn jumpdests(self, _ address: u256) -> ref MemSpan {
         let account = self.accounts.get(address_word(address)).value
         let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 + account.code_len }
-        self.code.slice(offset: offset as usize, len: jumpdest_map_len(account.code_len) as usize)
+        self.code.slice(offset, len: jumpdest_map_len(account.code_len))
     }
     // Host-side database initialization. Execution cannot mutate code until
     // CREATE's account lifecycle and code-deposit rules are implemented.
@@ -211,7 +211,7 @@ impl WorldState {
         // With room for the account, the final insertion cannot fail.
         if !previous.found && !self.accounts.try_reserve(1) { return ERR_HOST_ALLOCATION }
         var account = previous.value
-        let old_size: u64 = self.code.len().downcast_unchecked()
+        let old_size = self.code.len()
         let removed = if account.code_len == 0 { 0 } else { record_len(account.code_len) }
         let retained = old_size - removed
         // Bound before addition and before ByteSource traversal/allocation,
@@ -220,15 +220,15 @@ impl WorldState {
             return ERR_HOST_ALLOCATION
         }
         let new_size = retained + if len == 0 { 0 } else { record_len(len) }
-        if new_size > old_size && !self.code.try_resize(new_size as usize) { return ERR_HOST_ALLOCATION }
+        if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
         if removed != 0 {
             let start = account.code_offset
             let end = start + removed
-            self.code.span().copy_within(source: end as usize, dest: start as usize, len: (old_size - end) as usize)
+            self.code.span().copy_within(source: end, dest: start, len: old_size - end)
             var cursor = start
             while cursor < retained {
-                let key = self.code.read_word(cursor as usize)
-                let size: u64 = self.code.read_word((cursor + 32) as usize).downcast_unchecked()
+                let key = self.code.read_word(cursor)
+                let size: usize = self.code.read_word(cursor + 32).downcast_unchecked()
                 var moved = self.accounts.get(key).value
                 moved.code_offset = cursor
                 self.accounts.insert(key, moved)
@@ -239,21 +239,17 @@ impl WorldState {
         account.code_len = len
         account.code_hash = EMPTY_CODE_HASH
         if len != 0 {
-            self.code.span().write_word(offset: retained as usize, value: address)
-            self.code.span().write_word(offset: (retained + 32) as usize, value: len as u256)
-            var i: u64 = 0
-            while i < len {
-                self.code[(retained + 64 + i) as usize] = code.byte_at(i)
-                i += 1
-            }
+            self.code.span().write_word(offset: retained, value: address)
+            self.code.span().write_word(offset: retained + 32, value: len as u256)
+            for i in 0..len { self.code[retained + 64 + i] = code.byte_at(i) }
             // Compaction can leave old bytes where the bitmap goes.
-            let map = (retained + 64 + len) as usize
-            let map_len = jumpdest_map_len(len) as usize
+            let map = retained + 64 + len
+            let map_len = jumpdest_map_len(len)
             self.code.slice(offset: map, len: map_len).zero()
             mark_jumpdests(code, mut self.code.slice(offset: map, len: map_len))
             account.code_hash = keccak256_word(code)
         }
-        self.code.truncate(new_size as usize)
+        self.code.truncate(new_size)
         self.accounts.insert(address, account)
         OK
     }

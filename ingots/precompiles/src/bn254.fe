@@ -8,19 +8,16 @@ use ingot::bn254_pairing::{final_exponentiation, miller_loop, twist_b}
 const CURVE_ORDER: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
 
 // A big-endian word at `offset`; bytes past the input read as zero.
-fn word<T: ByteSource>(_ input: T, offset: u64) -> u256 {
+fn word<T: ByteSource>(_ input: T, offset: usize) -> u256 {
     var value: u256 = 0
-    var i: u64 = 0
-    while i < 32 {
-        let byte: u256 = if offset + i < input.len() { input.byte_at(offset + i) as u256 } else { 0 }
-        value = (value << 8) | byte
-        i += 1
+    for index in offset..offset + 32 {
+        value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }
     }
     value
 }
 
 // EIP-196 G1 encoding: (x, y) below p and on y^2 = x^3 + 3; (0, 0) is infinity.
-fn g1_point<T: ByteSource>(_ input: T, offset: u64) -> Option<Point<Fp>> {
+fn g1_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp>> {
     let x = word(input, offset)
     let y = word(input, offset: offset + 32)
     if x >= MODULUS || y >= MODULUS { return Option::None }
@@ -32,7 +29,7 @@ fn g1_point<T: ByteSource>(_ input: T, offset: u64) -> Option<Point<Fp>> {
 
 // EIP-197 G2 encoding: x = x0 * u + x1 and y = y0 * u + y1, each word below p,
 // on the twist; all zeros is infinity. Subgroup membership is checked separately.
-fn g2_point<T: ByteSource>(_ input: T, offset: u64) -> Option<Point<Fp2>> {
+fn g2_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp2>> {
     let x_im = word(input, offset)
     let x_re = word(input, offset: offset + 32)
     let y_im = word(input, offset: offset + 64)
@@ -82,7 +79,7 @@ pub fn pairing<T: ByteSource>(_ input: T) -> Option<bool> {
     let len = input.len()
     if len % 192 != 0 { return Option::None }
     var product = Fp12::one()
-    var offset: u64 = 0
+    var offset: usize = 0
     while offset < len {
         let p = match g1_point(input, offset) {
             Option::Some(p) => p,

@@ -42,20 +42,16 @@ fn read_all() -> MemBuffer uses (r: mut Read) {
 // State tests define BLOCKHASH(n) as keccak256 of n's decimal digits.
 fn test_block_hash(_ number: u256) -> u256 {
     var digits: [u8; 80] = [0; 80]
-    var len: u64 = 0
+    var len: usize = 0
     var rest = number
     while true {
-        digits[len as usize] = (48 + rest % 10).downcast_unchecked()
+        digits[len] = (48 + rest % 10).downcast_unchecked()
         len += 1
         rest /= 10
         if rest == 0 { break }
     }
     var ordered: [u8; 80] = [0; 80]
-    var i: u64 = 0
-    while i < len {
-        ordered[i as usize] = digits[(len - 1 - i) as usize]
-        i += 1
-    }
+    for i in 0..len { ordered[i] = digits[len - 1 - i] }
     var hash = Keccak256::new()
     hash.update(ordered, offset: 0, len)
     hash.finish_word()
@@ -161,10 +157,8 @@ fn write_world(_ world: WorldState) uses (w: mut Write) {
             write("\",\"")
             write_hex_word(account.nonce)
             write("\",\"0x")
-            var i: u64 = 0
-            while i < account.code_len {
+            for i in 0..account.code_len {
                 write_hex_byte(world.code_byte(address: account.address, index: i) as i32)
-                i += 1
             }
             write("\"]")
         }
