@@ -129,8 +129,10 @@ The precompiles live in the separate `fevm_precompiles` workspace ingot:
 ECRECOVER (secp256k1), SHA-256, RIPEMD-160, IDENTITY, MODEXP (EIP-198 with
 EIP-7883 gas and EIP-7823's 1,024-byte length bounds), BN254 ECADD/ECMUL/ECPAIRING
 (EIP-196/197 with EIP-1108 gas), BLAKE2F (EIP-152), KZG point evaluation
-(EIP-4844, BLS12-381 with the mainnet trusted setup's `[τ]G2`) and P256VERIFY
-(EIP-7951, secp256r1 at 0x100). Each charges its gas before doing work; invalid
+(EIP-4844, BLS12-381 with the mainnet trusted setup's `[τ]G2`), the seven
+BLS12-381 precompiles at 0x0b through 0x11 (EIP-2537: G1 and G2 addition and MSM,
+the pairing check, and RFC 9380 maps of field elements to G1 and G2) and
+P256VERIFY (EIP-7951, secp256r1 at 0x100). Each charges its gas before doing work; invalid
 input or insufficient gas is an exceptional halt, except that P256VERIFY returns
 nothing for an invalid input or signature.
 MODEXP works on limb arrays sized for each call's modulus; failing to allocate

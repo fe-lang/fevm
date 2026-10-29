@@ -70,6 +70,18 @@ impl<F> Point<F> where F: Field + Copy {
         Point { x, y, z }
     }
 
+    /// The product with a scalar of little-endian 64-bit limbs.
+    pub fn multiply_limbs<const N: usize>(self, _ limbs: [u64; N]) -> Point<F> {
+        var result = Point::identity()
+        var bit: u64 = (N * 64).downcast_unchecked()
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (limbs[(bit / 64) as usize] >> (bit % 64)) & 1 == 1 { result = result.add(self) }
+        }
+        result
+    }
+
     pub fn multiply(self, _ scalar: u256) -> Point<F> {
         var result = Point::identity()
         var bit: u64 = 256
@@ -89,6 +101,15 @@ impl<F> Point<F> where F: Field + Copy {
     }
 
     pub fn in_subgroup(self) -> bool { self.multiply(ORDER).is_identity() }
+}
+
+/// Whether affine (x, y) is on G1's curve y^2 = x^3 + 4.
+pub fn on_g1(x: Fp, y: Fp) -> bool { y.square().equals(x.square().mul(x).add(Fp::from_montgomery(B_G1))) }
+
+/// Whether affine (x, y) is on G2's twist y^2 = x^3 + 4(u + 1).
+pub fn on_g2(x: Fp2, y: Fp2) -> bool {
+    let four = Fp::from_montgomery(B_G1)
+    y.square().equals(x.square().mul(x).add(Fp2::new(c0: four, c1: four)))
 }
 
 pub fn g1_generator() -> Point<Fp> {

@@ -115,7 +115,7 @@ python3 native/differential/state_run.py --fe native/out/toolchain/bin/fe \
   --out native/out/cancun-state
 ```
 
-The stateful corpus has 1,144 deterministic cases. Its reference uses the pinned
+The stateful corpus has 1,149 deterministic cases. Its reference uses the pinned
 revm Context and real Journal over InMemoryDB. Both engines run the same recursive
 sequence of frames and explicit checkpoint scopes. Snapshots after each frame or
 scope compare balances, persistent/current/original storage, transient storage,

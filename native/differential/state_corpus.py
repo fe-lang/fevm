@@ -203,11 +203,11 @@ def account_code_cases():
     rows.append(row)
 
     # Sender (11), destination (12), coinbase (13) and every Osaka precompile start warm.
-    for target in [0, *range(1, 14), 0x100, 0x101, 44, 45]:
+    for target in [0, *range(1, 0x13), 0x100, 0x101, 44, 45]:
         row = case(f'extcode-initial-warm-{target}', 'account-code-warmth',
                    [transaction([frame(push(target) + '3f')])],
                    anchors={'0.steps.0.frame.gas_remaining': 1_000_000 - (2 if target == 0 else 3)
-                            - (100 if 1 <= target <= 13 or target == 0x100 else 2600)})
+                            - (100 if 1 <= target <= 0x11 or target == 0x100 else 2600)})
         rows.append(row)
 
     for op, warm, adjustment in product(['3b', '3f'], [False, True], [-1, 0, 1]):

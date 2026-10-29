@@ -110,6 +110,9 @@ impl Fp {
         result
     }
 
+    /// RFC 9380's sgn0: the parity of the canonical value.
+    pub fn sgn0(self) -> bool { self.to_canonical()[0] & 1 == 1 }
+
     /// A square root, if one exists.
     pub fn sqrt(self) -> Option<Fp> {
         let root = self.pow(SQRT_EXPONENT)
