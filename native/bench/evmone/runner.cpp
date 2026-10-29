@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -68,7 +69,7 @@ struct Case
 Case decode(const bytes& data)
 {
     Reader reader{data};
-    if (reader.word(1) != 2)
+    if (reader.word(1) != 3)
         std::abort();
     Case result;
     auto& block = result.block;
@@ -122,6 +123,21 @@ Case decode(const bytes& data)
     }
     for (auto blobs = reader.count(); blobs != 0; --blobs)
         tx.blob_hashes.push_back(reader.word32());
+    // Out-of-range nonces and y parities saturate, which keeps them invalid.
+    for (auto authorizations = reader.count(); authorizations != 0; --authorizations)
+    {
+        auto& auth = tx.authorization_list.emplace_back();
+        auth.chain_id = reader.word(32);
+        auth.addr = reader.addr();
+        const auto nonce = reader.word(32);
+        auth.nonce = nonce > std::numeric_limits<uint64_t>::max() ?
+                         std::numeric_limits<uint64_t>::max() :
+                         static_cast<uint64_t>(nonce);
+        const auto y_parity = reader.word(32);
+        auth.y_parity = y_parity > 0xff ? uint8_t{0xff} : static_cast<uint8_t>(y_parity);
+        auth.r = reader.word(32);
+        auth.s = reader.word(32);
+    }
     if (reader.position != data.size())
         std::abort();
     return result;

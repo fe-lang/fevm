@@ -1,5 +1,5 @@
 use core::{MemBuffer, Option}
-use keccak::{ByteSource, keccak256}
+use keccak::{ByteSource, keccak256_word}
 pub use hashes::{ripemd160, sha256}
 
 /// The call returned output and consumed `gas_used`.
@@ -52,6 +52,21 @@ fn word_at<T: ByteSource>(_ input: T, offset: u64) -> u256 {
     value
 }
 
+/// The address whose secp256k1 key signed `hash` as (recovery_id, r, s), for a
+/// recovery id of 0 or 1 and 0 < r, s < n; none when no key recovers.
+pub fn recover_signer(hash: u256, recovery_id: u256, r: u256, s: u256) -> Option<u256> {
+    let Option::Some(key) = secp256k1::recover(hash, recovery_id, r, s) else { return Option::None }
+    var preimage: [u8; 64] = [0; 64]
+    var i: u64 = 0
+    while i < 32 {
+        let shift = ((31 - i) * 8) as u256
+        preimage[i as usize] = (key.x >> shift).downcast_truncate()
+        preimage[(32 + i) as usize] = (key.y >> shift).downcast_truncate()
+        i += 1
+    }
+    Option::Some(keccak256_word(preimage) & 0xffffffffffffffffffffffffffffffffffffffff)
+}
+
 // Recover the signer address of (hash, v, r, s). Malformed or unrecoverable
 // signatures succeed with empty output.
 fn ecrecover<T: ByteSource>(_ input: T) -> Output {
@@ -60,25 +75,16 @@ fn ecrecover<T: ByteSource>(_ input: T) -> Output {
     let r = word_at(input, offset: 64)
     let s = word_at(input, offset: 96)
     let malformed = (v != 27 && v != 28) || r == 0 || r >= secp256k1::N || s == 0 || s >= secp256k1::N
-    let key = if malformed { Option::None } else { secp256k1::recover(hash, recovery_id: v - 27, r, s) }
-    match key {
-        Option::Some(key) => {
-            var preimage: [u8; 64] = [0; 64]
-            var i: u64 = 0
+    let signer = if malformed { Option::None } else { recover_signer(hash, recovery_id: v - 27, r, s) }
+    match signer {
+        Option::Some(address) => {
+            var output: [u8; 32] = [0; 32]
+            var i: u64 = 12
             while i < 32 {
-                let shift = ((31 - i) * 8) as u256
-                preimage[i as usize] = (key.x >> shift).downcast_truncate()
-                preimage[(32 + i) as usize] = (key.y >> shift).downcast_truncate()
+                output[i as usize] = (address >> ((31 - i) * 8) as u256).downcast_truncate()
                 i += 1
             }
-            let digest = keccak256(preimage)
-            var address: [u8; 32] = [0; 32]
-            i = 12
-            while i < 32 {
-                address[i as usize] = digest[i as usize]
-                i += 1
-            }
-            copied(address, gas_used: 3000)
+            copied(output, gas_used: 3000)
         },
         Option::None => Output { status: SUCCESS, gas_used: 3000, output: MemBuffer::empty() },
     }

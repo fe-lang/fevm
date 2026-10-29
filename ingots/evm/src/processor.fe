@@ -1,18 +1,21 @@
 use core::{MemBuffer, MemVec, Option, Result}
+use keccak::Keccak256
 use ingot::address::create_address
 use ingot::constants::{ERR_ADDRESS_COLLISION, ERR_HOST_ALLOCATION, ERR_REVERT, OK}
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word}
 use ingot::transaction::Transaction
-use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program}
+use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program, empty_bytes}
 use ingot::vm::{FrameBuffers, Vm, begin_create, is_evm_outcome, load_program, run_precompile, status_result, transfer}
-use fevm_precompiles::is_precompile
+use fevm_precompiles::{is_precompile, recover_signer}
+use fevm_precompiles::secp256k1::N as SECP256K1_N
 
 // Transaction envelope kinds.
 pub const TX_LEGACY: u8 = 0
 pub const TX_ACCESS_LIST: u8 = 1
 pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
+pub const TX_SET_CODE: u8 = 4
 
 // Reasons a transaction is not includable. Invalid transactions leave the state untouched.
 pub const VALID: i32 = 0
@@ -23,7 +26,7 @@ pub const INVALID_PRIORITY_FEE: i32 = 4
 pub const INVALID_GAS_LIMIT: i32 = 5
 pub const INVALID_BLOB_COUNT: i32 = 6
 pub const INVALID_FEE_CAP: i32 = 7
-pub const INVALID_BLOB_CREATE: i32 = 8
+pub const INVALID_CREATE: i32 = 8
 pub const INVALID_NO_BLOBS: i32 = 9
 pub const INVALID_BLOB_VERSION: i32 = 10
 pub const INVALID_BLOB_FEE_CAP: i32 = 11
@@ -33,6 +36,7 @@ pub const INVALID_SENDER_CODE: i32 = 14
 pub const INVALID_TX_TYPE: i32 = 15
 pub const INVALID_GAS_LIMIT_CAP: i32 = 16
 pub const INVALID_CHAIN_ID: i32 = 17
+pub const INVALID_NO_AUTHORIZATIONS: i32 = 18
 
 const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const MAX_INITCODE_SIZE: u64 = 49152
@@ -42,6 +46,9 @@ const GAS_PER_BLOB: u256 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
 const MAX_BLOBS_PER_TX: u64 = 6
+// EIP-7702 intrinsic gas per authorization, of which an existing authority refunds half.
+const AUTHORIZATION_GAS: u128 = 25000
+const EXISTING_AUTHORITY_REFUND: i128 = 12500
 
 pub struct TxEnv {
     pub kind: u8,
@@ -61,19 +68,39 @@ pub struct TxEnv {
 
 impl Copy for TxEnv {}
 
-/// A transaction with its owned calldata (initcode for creations), access list
-/// and versioned blob hashes.
+/// An EIP-7702 authorization: its signer delegates its code to `address`, or
+/// clears the delegation when `address` is zero.
+pub struct Authorization {
+    pub chain_id: u256,
+    pub address: u256,
+    pub nonce: u256,
+    pub y_parity: u256,
+    pub r: u256,
+    pub s: u256,
+}
+
+impl Copy for Authorization {}
+
+/// A transaction with its owned calldata (initcode for creations), access list,
+/// versioned blob hashes and authorizations.
 pub struct TxRequest {
     pub env: TxEnv,
     data: InputData,
     access_accounts: MemVec<u256>,
     access_keys: MemVec<StorageKey>,
     blob_hashes: MemVec<u256>,
+    authorizations: MemVec<Authorization>,
 }
 
 impl TxRequest {
     pub fn new(_ env: TxEnv, data: own InputData) -> Self {
-        Self { env, data, access_accounts: MemVec::new(), access_keys: MemVec::new(), blob_hashes: MemVec::new() }
+        Self {
+            env, data, access_accounts: MemVec::new(), access_keys: MemVec::new(), blob_hashes: MemVec::new(),
+            authorizations: MemVec::new(),
+        }
+    }
+    pub fn add_authorization(mut self, _ authorization: Authorization) -> bool {
+        self.authorizations.try_push(authorization).is_ok()
     }
     /// One access-list entry; each of its storage keys is added with `add_access_key`.
     pub fn add_access_account(mut self, _ address: u256) -> bool { self.access_accounts.try_push(address).is_ok() }
@@ -83,6 +110,7 @@ impl TxRequest {
     pub fn add_blob_hash(mut self, _ hash: u256) -> bool { self.blob_hashes.try_push(hash).is_ok() }
     pub fn data(self) -> ref InputData { ref self.data }
     fn blob_count(self) -> u64 { self.blob_hashes.len().downcast_unchecked() }
+    fn authorization_count(self) -> u128 { self.authorizations.len().downcast_unchecked() }
 }
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
@@ -139,10 +167,11 @@ pub fn intrinsic_gas(_ request: TxRequest) -> IntrinsicGas {
     if request.env.creates { gas += 32000 + 2 * words(data.len()) }
     let accounts: u128 = request.access_accounts.len().downcast_unchecked()
     let keys: u128 = request.access_keys.len().downcast_unchecked()
-    IntrinsicGas { regular: gas + 2400 * accounts + 1900 * keys, floor: 21000 + 10 * tokens }
+    let authorizations = AUTHORIZATION_GAS * request.authorization_count()
+    IntrinsicGas { regular: gas + 2400 * accounts + 1900 * keys + authorizations, floor: 21000 + 10 * tokens }
 }
 
-fn fee_market(_ env: TxEnv) -> bool { env.kind == TX_FEE_MARKET || env.kind == TX_BLOB }
+fn fee_market(_ env: TxEnv) -> bool { env.kind >= TX_FEE_MARKET }
 
 // EIP-1559: the base fee plus the priority fee the fee cap leaves room for.
 fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
@@ -159,9 +188,11 @@ fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
 pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
-    if env.kind > TX_BLOB { return INVALID_TX_TYPE }
-    // Only the blob envelope has versioned hashes.
+    if env.kind > TX_SET_CODE { return INVALID_TX_TYPE }
+    // Only the blob envelope has versioned hashes, and only the set-code
+    // envelope authorizations.
     if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
+    if env.kind != TX_SET_CODE && request.authorization_count() != 0 { return INVALID_TX_TYPE }
     let intrinsic = intrinsic_gas(request)
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
@@ -174,7 +205,6 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     if env.gas_price < block.basefee { return INVALID_FEE_CAP }
     var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
     if env.kind == TX_BLOB {
-        if env.creates { return INVALID_BLOB_CREATE }
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
         if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
         for hash in request.blob_hashes {
@@ -186,6 +216,8 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
             _ => Option::None,
         }
     }
+    if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
+    if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
     let nonce = world.nonce(sender)
     if nonce != env.nonce { return INVALID_NONCE }
     let required = match max_fee {
@@ -196,7 +228,8 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
         Option::Some(required) => if world.balance(sender) < required { return INVALID_BALANCE },
         Option::None => return INVALID_BALANCE,
     }
-    if world.code_size(sender) != 0 { return INVALID_SENDER_CODE }
+    // EIP-3607, except that an EIP-7702 delegated account may send.
+    if world.code_size(sender) != 0 && world.delegate(sender).is_none() { return INVALID_SENDER_CODE }
     VALID
 }
 
@@ -227,6 +260,66 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
     tx.set_balance(address: sender, value: tx.balance(sender) - fee)
 }
 
+// The RLP of `value` as an integer, written at `len`; returns the new length.
+fn rlp_integer(_ out: mut [u8; 64], len: usize, _ value: u256) -> usize {
+    if value != 0 && value < 0x80 {
+        out[len] = value.downcast_truncate()
+        return len + 1
+    }
+    var bytes: usize = 0
+    while bytes < 32 && value >> (bytes * 8) as u256 != 0 { bytes += 1 }
+    out[len] = (0x80 + bytes).downcast_truncate()
+    for i in 0..bytes { out[len + 1 + i] = (value >> ((bytes - 1 - i) * 8) as u256).downcast_truncate() }
+    len + 1 + bytes
+}
+
+// What an authority signs: keccak256(0x05 || rlp([chain_id, address, nonce])).
+fn authorization_hash(_ authorization: Authorization) -> u256 {
+    // At most 33 + 21 + 9 bytes, with the nonce below 2^64.
+    var payload: [u8; 64] = [0; 64]
+    var len = rlp_integer(mut payload, len: 0, authorization.chain_id)
+    payload[len] = 0x94
+    for i in 0..20 { payload[len + 1 + i] = (authorization.address >> ((19 - i) * 8) as u256).downcast_truncate() }
+    len = rlp_integer(mut payload, len: len + 21, authorization.nonce)
+    var hash = Keccak256::new()
+    let header: [u8; 3] = if len < 56 { [0x05, (0xc0 + len).downcast_truncate(), 0] }
+        else { [0x05, 0xf8, len.downcast_truncate()] }
+    hash.update(header, offset: 0, len: if len < 56 { 2 } else { 3 })
+    hash.update(payload, offset: 0, len: len.downcast_unchecked())
+    hash.finish_word()
+}
+
+// The signer of an authorization for this chain, if its signature is
+// well-formed (EIP-2 s) and recovers one.
+fn authority(_ authorization: Authorization, chain_id: u256) -> Option<u256> {
+    let a = authorization
+    let usable = (a.chain_id == 0 || a.chain_id == chain_id) && a.nonce < 0xffffffffffffffff && a.y_parity <= 1
+        && a.r != 0 && a.r < SECP256K1_N && a.s != 0 && a.s <= SECP256K1_N / 2
+    if !usable { return Option::None }
+    recover_signer(hash: authorization_hash(a), recovery_id: a.y_parity, r: a.r, s: a.s)
+}
+
+// EIP-7702: apply the authorizations in order, skipping invalid ones. Each
+// recovered authority is warmed; a valid one gets the delegation and its next
+// nonce, and refunds part of the intrinsic charge if the account existed. The
+// changes precede the message's checkpoint, so they survive its failure.
+fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32 {
+    for authorization in request.authorizations {
+        let signer = authority(authorization, chain_id)
+        if signer.is_none() { continue }
+        let authority = signer.unwrap()
+        var status = tx.warm_account(address: authority)
+        if status != OK { return status }
+        let delegable = tx.code_size(authority) == 0 || tx.delegate(authority).is_some()
+        if !delegable || tx.nonce(authority) != authorization.nonce { continue }
+        if tx.exists(authority) { tx.add_refund(EXISTING_AUTHORITY_REFUND) }
+        status = tx.delegate_code(address: authority, delegate: address_word(authorization.address))
+        if status == OK { status = tx.increment_nonce(authority) }
+        if status != OK { return status }
+    }
+    OK
+}
+
 // The top-level message: a creation or a call, each under its own checkpoint.
 fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv) -> ExecutionResult {
     let sender = call.caller
@@ -251,12 +344,24 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         tx.revert(checkpoint)
         return status_result(moved)
     }
-    if is_precompile(target) {
+    // A delegated account runs its delegate's code, never a precompile (EIP-7702).
+    let delegate = tx.delegate(target)
+    if delegate.is_none() && is_precompile(target) {
         let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }
-    let program = load_program(tx, address: target)
+    let program = match delegate {
+        Option::Some(address) => {
+            let warmed = tx.warm_account(address)
+            if warmed != OK {
+                tx.revert(checkpoint)
+                return status_result(warmed)
+            }
+            if is_precompile(address) { Program::new(empty_bytes()) } else { load_program(tx, address) }
+        },
+        Option::None => load_program(tx, address: target),
+    }
     var vm = Vm::new()
     vm.run(program, request.data(), call, block, mut tx)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
@@ -277,7 +382,8 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     let intrinsic = intrinsic_gas(request)
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
     tx.swap_frame_buffers(mut buffers)
-    let prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
+    var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
+    if prepared == OK { prepared = authorize(mut tx, request, chain_id: block.chainid) }
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
         gasprice: price, gas_limit: env.gas_limit - intrinsic.regular.downcast_unchecked(), is_static: false,

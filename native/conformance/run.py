@@ -67,7 +67,7 @@ def tx_kind(transaction):
 def encode(test, indexes):
     """The driver's binary case format; integers and lengths are big endian."""
     env, tx = test['env'], test['transaction']
-    out = bytearray([2])
+    out = bytearray([3])
     out += be(env['currentCoinbase'], 20)
     out += be(env['currentNumber'], 32)
     out += be(env['currentTimestamp'], 32)
@@ -104,6 +104,11 @@ def encode(test, indexes):
         out += b''.join(be(key, 32) for key in entry['storageKeys'])
     hashes = tx.get('blobVersionedHashes', [])
     out += len(hashes).to_bytes(4, 'big') + b''.join(be(value, 32) for value in hashes)
+    authorizations = tx.get('authorizationList', [])
+    out += len(authorizations).to_bytes(4, 'big')
+    for entry in authorizations:
+        out += be(entry['chainId'], 32) + be(entry['address'], 20) + be(entry['nonce'], 32)
+        out += be(entry.get('yParity', entry.get('v')), 32) + be(entry['r'], 32) + be(entry['s'], 32)
     return bytes(out)
 
 

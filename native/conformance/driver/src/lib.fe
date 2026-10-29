@@ -2,7 +2,7 @@ use std::io::{Read, Write, host, read_char, write, write_char}
 use core::{MemBuffer, Option}
 use std::native::Args
 use keccak::Keccak256
-use fevm::{BlockEnv, FrameBuffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{Authorization, BlockEnv, FrameBuffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
 use fevm::hex::{parse_decimal, write_hex_byte, write_hex_word}
 
 // Reads one case: a version byte, the block, the pre-state accounts and the
@@ -243,7 +243,7 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     var buffers = FrameBuffers::new()
     while true {
         reader.position = 0
-        core::assert(reader.word(bytes: 1) == 2)
+        core::assert(reader.word(bytes: 1) == 3)
         let block = BlockEnv {
             coinbase: reader.word(bytes: 20),
             number: reader.word(bytes: 32),
@@ -316,6 +316,19 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
         while blobs > 0 {
             core::assert(request.add_blob_hash(reader.word(bytes: 32)))
             blobs -= 1
+        }
+        var authorizations = reader.count()
+        while authorizations > 0 {
+            let authorization = Authorization {
+                chain_id: reader.word(bytes: 32),
+                address: reader.word(bytes: 20),
+                nonce: reader.word(bytes: 32),
+                y_parity: reader.word(bytes: 32),
+                r: reader.word(bytes: 32),
+                s: reader.word(bytes: 32),
+            }
+            core::assert(request.add_authorization(authorization))
+            authorizations -= 1
         }
         core::assert(reader.position == reader.data.len())
         if runs > 0 {

@@ -1,4 +1,4 @@
-use core::{MemBuffer, MemSpan}
+use core::{MemBuffer, MemSpan, Option}
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 use keccak::{ByteSource, keccak256_word}
@@ -23,6 +23,15 @@ impl Default for Account {
 
 // EVM account operands use only their low 160 bits.
 pub fn address_word(_ word: u256) -> u256 { word & 0xffffffffffffffffffffffffffffffffffffffff }
+
+/// The EIP-7702 delegation designator `0xef0100 || delegate`.
+pub fn designator(_ delegate: u256) -> [u8; 23] {
+    var code: [u8; 23] = [0; 23]
+    code[0] = 0xef
+    code[1] = 0x01
+    for i in 0..20 { code[3 + i] = (delegate >> ((19 - i) * 8) as u256).downcast_truncate() }
+    code
+}
 
 pub struct StorageKey { pub address: u256, pub slot: u256 }
 
@@ -176,6 +185,15 @@ impl WorldState {
         let account = self.accounts.get(address_word(address)).value
         let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 }
         self.code.slice(offset: offset as usize, len: account.code_len as usize)
+    }
+    /// The account an EIP-7702 delegation designator delegates to, if that is
+    /// the account's code.
+    pub fn delegate(self, _ address: u256) -> Option<u256> {
+        let code = self.code(address)
+        if code.len() != 23 || code[0] != 0xef || code[1] != 0x01 || code[2] != 0 { return Option::None }
+        var delegate: u256 = 0
+        for i in 3..23 { delegate = (delegate << 8) | code[i] as u256 }
+        Option::Some(delegate)
     }
     // The code's JUMPDEST bitmap, computed when the code was set.
     pub fn jumpdests(self, _ address: u256) -> ref MemSpan {

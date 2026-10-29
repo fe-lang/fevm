@@ -61,16 +61,22 @@ let world = settled.state
 Every owner, from results and logs to the world, frees its memory when it goes
 out of scope or is overwritten; nothing is released by hand.
 
-Complete Cancun transactions go through `fevm::transact(world, request, block)`.
-A `TxRequest` holds a `TxEnv` (envelope kind, sender, recipient or creation flag,
-nonce, gas limit and fee fields, value) together with owned calldata or initcode,
-access-list entries and versioned blob hashes. Only blob transactions may carry
-blob hashes. `transact` applies the
+Complete Osaka transactions go through `fevm::transact(world, request, block)`.
+A `TxRequest` holds a `TxEnv` (envelope kind, signed chain ID, recovered sender,
+recipient or creation flag, nonce, gas limit and fee fields, value) together with
+owned calldata or initcode, access-list entries, versioned blob hashes and EIP-7702
+authorizations. Only blob transactions may carry blob hashes, and only set-code
+transactions authorizations. `transact` applies the
 specification's includability checks; an invalid transaction returns the
 untouched state and a receipt whose `invalid` field names the reason. A valid one
 buys its gas, increments the sender nonce, warms the sender, recipient, coinbase,
-precompiles and access list, and runs the call or creation. It then refunds unused
-gas and the capped refund to the sender, pays the priority fee to the coinbase,
+precompiles and access list, and applies its authorizations: each one that
+recovers an authority with a matching nonce delegates that account's code to the
+authorized address, before the call's checkpoint, so a failed call keeps it. It
+then runs the call or creation; a delegated account runs its delegate's code, at
+the top level and in CALL, CALLCODE, DELEGATECALL and STATICCALL, which charge for
+the delegate's access. It then charges at least the EIP-7623 calldata floor,
+refunds unused gas and the capped refund to the sender, pays the priority fee to the coinbase,
 deletes self-destructed new accounts and touched accounts left empty, together
 with their storage, and returns the receipt's status, gas used, output and logs.
 Host failures (allocation), including during fee payment, return the pre-state

@@ -11,7 +11,9 @@ use std::io::Read;
 use revm::context::result::ExecutionResult;
 use revm::context::{BlockEnv, TxEnv};
 use revm::context_interface::block::BlobExcessGasAndPrice;
-use revm::context_interface::transaction::{AccessList, AccessListItem};
+use revm::context_interface::transaction::{
+    AccessList, AccessListItem, Authorization, SignedAuthorization,
+};
 use revm::database::{CacheDB, EmptyDB};
 use revm::primitives::hardfork::SpecId;
 use revm::primitives::{Address, B256, Bytes, Log, TxKind, U256, keccak256};
@@ -58,7 +60,7 @@ struct Case {
 
 fn decode(data: &[u8]) -> Case {
     let mut reader = Reader { data, position: 0 };
-    assert_eq!(reader.word(1), U256::from(2));
+    assert_eq!(reader.word(1), U256::from(3));
     let beneficiary = reader.address();
     let number = reader.word(32);
     let timestamp = reader.word(32);
@@ -125,8 +127,27 @@ fn decode(data: &[u8]) -> Case {
     let blob_hashes = (0..reader.count())
         .map(|_| B256::from(reader.word(32)))
         .collect();
+    // Out-of-range nonces and y parities saturate, which keeps them invalid.
+    let authorizations = (0..reader.count())
+        .map(|_| {
+            let chain_id = reader.word(32);
+            let address = reader.address();
+            let nonce = reader.word(32).saturating_to();
+            let y_parity = reader.word(32).saturating_to();
+            SignedAuthorization::new_unchecked(
+                Authorization {
+                    chain_id,
+                    address,
+                    nonce,
+                },
+                y_parity,
+                reader.word(32),
+                reader.word(32),
+            )
+        })
+        .collect();
     assert_eq!(reader.position, reader.data.len());
-    let tx = TxEnv {
+    let mut tx = TxEnv {
         tx_type,
         caller,
         gas_limit,
@@ -146,6 +167,7 @@ fn decode(data: &[u8]) -> Case {
         max_fee_per_blob_gas,
         ..Default::default()
     };
+    tx.set_signed_authorization(authorizations);
     Case {
         block,
         chain_id,

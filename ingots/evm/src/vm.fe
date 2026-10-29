@@ -1049,7 +1049,19 @@ impl Vm {
             self.fault(access_status)
             return Option::None
         }
-        let extra: u128 = (if cold { 2500 } else { 0 }) + if op == 0xf1 && has_value && empty { 25000 } else { 0 }
+        // EIP-7702: a delegated account runs its delegate's code, whose access is charged too.
+        let delegate = state.delegate(code_address)
+        var delegate_access: u128 = 0
+        if let Option::Some(delegate) = delegate {
+            delegate_access = if state.account_is_warm(delegate) { 100 } else { 2600 }
+            let warmed = state.warm_account(address: delegate)
+            if warmed != OK {
+                self.fault(warmed)
+                return Option::None
+            }
+        }
+        let extra: u128 = (if cold { 2500 } else { 0 }) + delegate_access
+            + if op == 0xf1 && has_value && empty { 25000 } else { 0 }
         if !self.charge(extra) { return Option::None }
         let cap = self.gas_remaining - self.gas_remaining / 64
         let forwarded: u64 = if requested < cap as u256 { requested.downcast_unchecked() } else { cap }
@@ -1083,20 +1095,22 @@ impl Vm {
             state.revert(checkpoint)
             return Option::None
         }
-        if is_precompile(code_address) {
+        if delegate.is_none() && is_precompile(code_address) {
             let result = run_precompile(address: code_address, input: calldata, gas: child_gas)
             if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
             self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })
             return Option::None
         }
-        let code_len = state.code_size(code_address)
+        // A delegate that is a precompile runs nothing.
+        let program_address = match delegate { Option::Some(delegate) => delegate, Option::None => code_address }
+        let code_len = if delegate.is_some() && is_precompile(program_address) { 0 } else { state.code_size(program_address) }
         if code_len == 0 {
             state.commit(checkpoint)
             self.gas_remaining += child_gas
             self.push(1)
             return Option::None
         }
-        let program = load_program(state, address: code_address)
+        let program = load_program(state, address: program_address)
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
