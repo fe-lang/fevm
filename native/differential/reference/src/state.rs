@@ -520,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn cancun_net_storage_metering_vectors() {
+    fn net_storage_metering_vectors() {
         // EIP-2200 sequence vectors with Osaka's cold charge and refund schedule.
         for (original, values, spent, refund) in [
             (0, &[0, 0][..], 2312, 0),

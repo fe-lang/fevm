@@ -63,8 +63,8 @@ python3 native/accept.py --build native/out/linux-bootstrap/build.json \
 Retain `build.json`, `acceptance.json`, CLI/arithmetic/frame/state result JSON, and
 workspace and failure logs. Record host, revisions, commands, exit codes and
 counts; report failed or unexecuted stages explicitly. The suite covers native
-workspace execution, CLI/allocator checks, bounded Cancun frames/state, and
-arithmetic. Full Cancun conformance remains pending.
+workspace execution, CLI/allocator checks, bounded Osaka frames/state, and
+arithmetic. State-test conformance runs separately.
 Shared Cloud hardware is suitable for correctness acceptance, not timing claims.
 
 ## Retained local work

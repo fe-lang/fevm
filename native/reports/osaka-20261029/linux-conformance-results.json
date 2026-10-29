@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "fork": "Osaka",
+  "host": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "fixtures": "/home/sean/code/fevm/native/out/eest-tests-v21.0.1/fixtures/state_tests",
+  "revision": "80e0ec7f6b70ff12e29a36f29039ce5b70ab1eea",
+  "dirty": false,
+  "level": "2",
+  "select": [],
+  "compiler_sha256": "3986c16b327de7f70cc5117a8f3c0285e0387d80d83d93c813f6a618e0dba5dc",
+  "compiler_version": "fe 26.5.0 (3587ff999)",
+  "build_seconds": 10.478170615999261,
+  "executable_sha256": "aee1bb5bb454782f3ec11229383c58fa5d89dce5ddf8eacddcbac4c11e6c0036",
+  "seconds": 3.943371032990399,
+  "cases": 14716,
+  "totals": {
+    "passed": 14693,
+    "signature": 23
+  },
+  "groups": {
+    "for_osaka/berlin": {
+      "passed": 541
+    },
+    "for_osaka/byzantium": {
+      "passed": 600
+    },
+    "for_osaka/cancun": {
+      "passed": 1540
+    },
+    "for_osaka/constantinople": {
+      "passed": 114
+    },
+    "for_osaka/frontier": {
+      "passed": 1067,
+      "signature": 23
+    },
+    "for_osaka/homestead": {
+      "passed": 9
+    },
+    "for_osaka/istanbul": {
+      "passed": 852
+    },
+    "for_osaka/london": {
+      "passed": 6
+    },
+    "for_osaka/osaka": {
+      "passed": 1231
+    },
+    "for_osaka/ported_static": {
+      "passed": 6323
+    },
+    "for_osaka/prague": {
+      "passed": 2244
+    },
+    "for_osaka/shanghai": {
+      "passed": 82
+    },
+    "for_osaka/spurious_dragon": {
+      "passed": 84
+    }
+  }
+}

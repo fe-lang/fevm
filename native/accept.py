@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Downstream acceptance for native FeVM, Cancun frames/state, and arithmetic."""
+"""Downstream acceptance for native FeVM, Osaka frames/state, and arithmetic."""
 import argparse
 import hashlib
 import json
@@ -49,14 +49,14 @@ def main():
     commands.append(([sys.executable, HERE / 'cli.py', '--fe', compiler,
                       '--out', out / 'cli'], 'cli-smoke'))
     commands.append(([sys.executable, HERE / 'differential/run.py', '--fe', compiler,
-                      '--out', out / 'cancun-frames',
-                      '--toolchain', build['manifest']['rust_version']], 'cancun-frames'))
+                      '--out', out / 'osaka-frames',
+                      '--toolchain', build['manifest']['rust_version']], 'osaka-frames'))
     commands.append(([sys.executable, HERE / 'differential/state_run.py', '--fe', compiler,
-                      '--out', out / 'cancun-state',
-                      '--toolchain', build['manifest']['rust_version']], 'cancun-state'))
+                      '--out', out / 'osaka-state',
+                      '--toolchain', build['manifest']['rust_version']], 'osaka-state'))
     if args.build_timeout is not None:
         for command, name in commands:
-            if name in ('cli-smoke', 'cancun-frames', 'cancun-state'):
+            if name in ('cli-smoke', 'osaka-frames', 'osaka-state'):
                 command.extend(['--build-timeout', args.build_timeout])
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
     if args.check_only:

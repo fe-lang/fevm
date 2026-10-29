@@ -1,10 +1,9 @@
 # Native FeVM and arithmetic acceptance tooling
 
-This suite checks the native FeVM workspace and CLI, Cancun frame results,
-and arithmetic differential kernels. Select the compiler manifest for the
-milestone being verified.
-CLI smoke coverage is not Cancun conformance; gas and opcode semantics remain
-separate interpreter milestones.
+This suite checks the native FeVM workspace and CLI, Osaka frame and state
+results, and arithmetic differential kernels. Select the compiler manifest for
+the milestone being verified. CLI smoke coverage is not conformance; the
+[state-test runner](conformance/README.md) is.
 
 The [state-gas checkpoint](reports/state-gas.md) passes all eight stages on
 x86_64 Linux: 37 workspace tests, 14 CLI/allocator checks, 1,729 Cancun frames
@@ -48,23 +47,25 @@ handlers' calls to each other as native tail calls. It uses Rust 1.99.0; the
 default [`toolchain.json`](toolchain.json) records the exact revisions and lock
 hash, and bootstrap fetches both from those repositories.
 
-All seven native acceptance stages pass on x86_64 Linux and AArch64 macOS: 83
-workspace tests, 38 CLI/allocator checks, 1,840 frame comparisons and 1,142 state
-comparisons at each of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the
-three declared simultaneous-fault reason differences per level. The Python
-harness's 13 tests and the Rust reference's nine tests pass. See the
+All seven native acceptance stages pass on x86_64 Linux: 101 workspace tests, 38
+CLI/allocator checks, 1,845 frame comparisons and 1,149 state comparisons at each
+of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
+simultaneous-fault reason differences per level. The Python harness's 13 tests
+and the Rust reference's nine tests pass. See the
+[Osaka report](reports/osaka-20261029/README.md); the
 [tail-call dispatch report](reports/tail-call-dispatch-20261029/README.md), which
-also times evm-benchmarks against FeVM main, revm and evmone; the
+covers AArch64 macOS as well and times evm-benchmarks against FeVM main, revm and
+evmone before Osaka; and the
 [restacked owned-memory report](reports/owned-memory-restack-20261024/README.md)
-and the [owned-memory report](reports/owned-memory-20261020/README.md) cover the
-port to core's memory owners. The
+and the [owned-memory report](reports/owned-memory-20261020/README.md), which cover
+the port to core's memory owners. The
 [Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe
 master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
 on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)
 (47 workspace tests, before the CALL and transaction work) and
 [macOS](reports/macos-arm64-20261019/README.md) reports keep their compiler
 `f69b911ce`. The
-[Cancun state-test runner](conformance/README.md) is separate from acceptance.
+[Osaka state-test runner](conformance/README.md) is separate from acceptance.
 
 The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
 [enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
@@ -108,7 +109,7 @@ Cargo cache. These are reproducible source/dependency inputs, not a promise of
 byte-identical executables across different host linkers or SDKs.
 
 The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the Cancun frame/state and arithmetic corpora
+CLI smoke cases, and the Osaka frame/state and arithmetic corpora
 at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
 against revm's real journal.
 Both frame and state runners build their reference with the bootstrap record's
@@ -144,7 +145,7 @@ does not establish full interpreter conformance or an end-to-end speedup.
 
 ## Resident memory
 
-`native/soak` runs repeated Cancun transactions against one world in one
+`native/soak` runs repeated Osaka transactions against one world in one
 process. Each expands a caller's and a callee's memory, emits a log, sets and
 clears a storage slot and returns data. Every owner frees its memory when it is
 destroyed, so peak RSS stays flat: the runner fails if it grows by more than
@@ -166,11 +167,11 @@ and invalid jump boundaries. The build took 174.09 seconds and peaked at 2.42 GB
 on x86_64 Linux. This focused result does not establish full VM acceptance; the
 whole-ingot suite and CLI/differential matrices remain deferred.
 
-The [Cancun frame suite](differential/README.md) compares 1,840 deterministic
+The [Osaka frame suite](differential/README.md) compares 1,845 deterministic
 frames against a pinned revm interpreter. It checks outcomes, remaining gas,
 output, and completed stacks and active memory, covering arithmetic operand
 roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 1,142-case state suite checks current/original/transient storage,
+The additional 1,149-case state suite checks current/original/transient storage,
 account code and hashes, copy semantics, account/slot warmness, signed refunds,
 logs, blob hashes and nested checkpoints. Signed transaction
 envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.

@@ -43,7 +43,9 @@ state-test clients, `BLOCKHASH(n)` for the previous 256 blocks is the Keccak-256
 hash of `n`'s decimal digits. The driver checks the post-state directly instead
 of recomputing the state root.
 
-The [first complete run](../reports/cancun-conformance-20261019/README.md) passes
-16,800 of 16,847 Cancun cases; the rest exceed FeVM's former 256-entry state
+The [Osaka run](../reports/osaka-20261029/README.md) passes all 14,693 runnable
+cases of `tests@v21.0.1`; 23 are `signature`. Before the Osaka cutover, the
+[first complete run](../reports/cancun-conformance-20261019/README.md) passed
+16,800 of 16,847 Cancun cases of v5.4.0; the rest exceeded FeVM's former 256-entry state
 tables. With growable tables, the
-[owned-memory run](../reports/owned-memory-20261020/README.md) passes all 16,847.
+[owned-memory run](../reports/owned-memory-20261020/README.md) passed all 16,847.

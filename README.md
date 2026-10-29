@@ -5,8 +5,8 @@
 The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and CLI executable
-- `ingots/precompiles`: the Cancun precompiled contracts
-- `native/differential/driver`: a structured frame runner for the pinned Cancun corpus
+- `ingots/precompiles`: the Osaka precompiled contracts
+- `native/differential/driver`: a structured frame runner for the pinned Osaka corpus
 - `native/differential/state_driver`: transaction/checkpoint sequences for the stateful corpus
 - `native/conformance/driver`: runs one Ethereum state test transaction through `transact`
 - `native/fixtures/journal`, `native/fixtures/accounts`, `native/fixtures/logs`, and `native/fixtures/calls`: allocation-failure fixtures run by the native harness
@@ -111,7 +111,7 @@ does not depend on native stack size. Each child frame is allocated separately,
 so frame storage grows with the actual call depth. Each child runs under its own
 checkpoint. Every call touches its target, even without value; a failed call
 undoes the touch.
-Calls charge Cancun warm/cold access, value-transfer and new-account costs,
+Calls charge Osaka warm/cold access, value-transfer and new-account costs,
 forward at most all but one 64th of the remaining gas plus the 2,300-gas stipend,
 and fail without executing on insufficient balance or at the depth limit.
 Children write their output prefix into the caller's memory and replace its
@@ -160,14 +160,14 @@ blob hashes with `add_blob_hash(hash)` before execution; this returns false on
 allocation failure. BLOBHASH costs 3 gas and returns zero for any full-width
 index outside that transaction's list. Blob hashes survive checkpoint rollback.
 
-The transaction warms its sender, destination, coinbase, and Cancun precompiles
+The transaction warms its sender, destination, coinbase, and Osaka precompiles
 upfront. Add access-list entries with `access_list_account(address)` and
 `access_list_slot(address, slot)` before opening any checkpoint or changing runtime
 state. These calls return false on allocation failure. Runtime warming follows
 checkpoint rollback; original storage values remain fixed for the transaction.
 Account keys use their low 160 bits.
 
-BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SLOAD and SSTORE use Cancun warm/cold pricing. SSTORE tracks original,
+BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SLOAD and SSTORE use Osaka warm/cold pricing. SSTORE tracks original,
 current and new values, enforces the 2,300-gas sentry, and updates signed refunds.
 TLOAD/TSTORE cost 100 gas and do not use that sentry. `ExecutionResult.refund_delta`
 is the successful frame's signed contribution; unsuccessful frames contribute
@@ -248,10 +248,12 @@ Smoke samples:
 ./out/fevm 0x0c             # undefined opcode: invalid
 ```
 
-The [Cancun frame corpus](native/differential/README.md) compares selected frame
-results against pinned revm. FeVM passes all 16,847 Cancun state tests of
-execution-spec-tests v5.4.0
-([report](native/reports/owned-memory-restack-20261024/README.md)).
+FeVM implements Osaka, the current mainnet fork. The
+[Osaka frame corpus](native/differential/README.md) compares selected frame
+results against pinned revm. FeVM passes all 14,693 runnable Osaka state tests of
+execution-specs `tests@v21.0.1`; the other 23 have malformed signatures, which
+FeVM, given a recovered sender, does not see
+([report](native/reports/osaka-20261029/README.md)).
 Performance comparisons with other EVMs remain future work.
 
 Native compiler arithmetic checks, performance measurements, and reproducible
