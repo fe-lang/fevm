@@ -40,7 +40,7 @@ def main():
     if report.exists():
         parser.error('acceptance.json already exists; choose a fresh --out directory')
     record = {'schema': 1, 'build': build, 'host': platform.platform(), 'complete': False,
-              'scope': 'native workspace tests, CLI smoke, Cancun frame/state results, numeric kernels; full Cancun conformance remains pending',
+              'scope': 'native workspace tests, CLI smoke, Osaka frame/state results, numeric kernels; not state-test conformance',
               'stage_timeout_seconds': args.stage_timeout, 'build_timeout_seconds': args.build_timeout,
               'checks': []}
     report.write_text(json.dumps(record, indent=2) + '\n')

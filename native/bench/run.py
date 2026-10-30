@@ -81,7 +81,7 @@ def main():
     parser.add_argument('--evmone', type=Path, help='also time this evmone runner (see evmone/build.sh)')
     parser.add_argument('--out', type=Path, default=ROOT / 'native' / 'out' / 'bench')
     parser.add_argument('--level', choices=['0', '1', '2'], default='2')
-    parser.add_argument('--fork', default='London', help="the fixtures' post-state fork; execution uses Cancun")
+    parser.add_argument('--fork', default='London', help="the fixtures' post-state fork; FeVM executes Osaka, revm and evmone Cancun")
     parser.add_argument('--target', type=float, default=0.3, help='CPU seconds of transactions per timed run')
     parser.add_argument('--repeat', type=int, default=3, help='timed runs per mode; the least time counts')
     parser.add_argument('--select', nargs='*', default=[], help='run cases whose label contains any of these')
