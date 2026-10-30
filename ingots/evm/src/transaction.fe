@@ -291,7 +291,6 @@ impl Transaction {
     }
     pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
-    pub fn code_byte(self, address: u256, index: usize) -> u8 { self.state.code_byte(address, index) }
     pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
     pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
     pub fn program(self, _ address: u256) -> Program { self.state.program(address) }

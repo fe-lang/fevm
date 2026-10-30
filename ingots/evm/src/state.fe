@@ -183,11 +183,6 @@ impl WorldState {
             0
         } else { account.code_hash }
     }
-    pub fn code_byte(self, address: u256, index: usize) -> u8 {
-        let account = self.accounts.get(address_word(address)).value
-        core::assert(index < account.code_len)
-        self.code[account.code_offset + 64 + index]
-    }
     // An account's code. One without code has no arena record to address.
     pub fn code(self, _ address: u256) -> ref MemSpan {
         let account = self.accounts.get(address_word(address)).value

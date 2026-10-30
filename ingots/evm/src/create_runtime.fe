@@ -59,7 +59,7 @@ fn create_and_create2_deploy_code_endow_and_bump_nonces() {
     core::assert(vm.return_data.len() == 0)
     core::assert(tx.nonce(0xaa) == 2 && tx.balance(0xaa) == 93)
     core::assert(tx.nonce(first) == 1 && tx.balance(first) == 7 && tx.code_size(first) == 1)
-    core::assert(tx.nonce(second) == 1 && tx.code_size(second) == 1 && tx.code_byte(address: second, index: 0) == 0)
+    core::assert(tx.nonce(second) == 1 && tx.code_size(second) == 1 && tx.code(second)[0] == 0)
     core::assert(tx.was_created(first) && tx.account_is_warm(second))
     tx.finish(commit: true, gas_spent: 0)
 }

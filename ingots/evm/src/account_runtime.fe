@@ -25,15 +25,15 @@ fn account_code_replacement_compacts_and_preserves_other_accounts() {
     core::assert(world.set_code(address: 33, code: [9 as u8]) == OK)
     core::assert(world.set_code(address: 22, code: [0 as u8; 0]) == OK)
     core::assert(world.exists(22) && world.code_size(22) == 0 && world.code_hash(22) == 0)
-    core::assert(world.code_size(11) == 257 && world.code_byte(address: 11, index: 256) == 8)
-    core::assert(world.code_size(33) == 1 && world.code_byte(address: 33, index: 0) == 9)
+    core::assert(world.code_size(11) == 257 && world.code(11)[256] == 8)
+    core::assert(world.code_size(33) == 1 && world.code(33)[0] == 9)
     let alias = ((1 as u256) << 255) | 11
     core::assert(world.set_code(address: alias, code: [97 as u8, 98, 99]) == OK)
     core::assert(world.code_hash(11) == abc && world.code_hash(alias) == abc)
     core::assert(world.balance(11) == 9 && world.nonce(11) == 2)
     core::assert(world.set_code(address: 11, code: OversizedCode {}) == ERR_HOST_ALLOCATION)
     core::assert(world.code_size(11) == 3 && world.code_hash(11) == abc)
-    core::assert(world.code_byte(address: 33, index: 0) == 9)
+    core::assert(world.code(33)[0] == 9)
     core::assert(world.set_code(address: 44, code: OversizedCode {}) == ERR_HOST_ALLOCATION)
     core::assert(!world.exists(44))
 }
@@ -77,7 +77,7 @@ fn account_empty_hash_predicate_and_code_extent_are_independent_of_frame_limits(
     core::assert(world.code_hash(1) == EMPTY_CODE_HASH)
     // EIP-170's maximum deployed code size exceeds this harness's frame input.
     core::assert(world.set_code(address: 2, code: [0x5b as u8; 24576]) == OK)
-    core::assert(world.code_size(2) == 24576 && world.code_byte(address: 2, index: 24575) == 0x5b)
+    core::assert(world.code_size(2) == 24576 && world.code(2)[24575] == 0x5b)
     core::assert(world.code_hash(2) != 0 && world.code_hash(2) != EMPTY_CODE_HASH)
 }
 

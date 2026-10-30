@@ -122,9 +122,8 @@ fn write_world(_ world: WorldState) uses (w: mut Write) {
             write("\",\"")
             write_hex_word(account.nonce)
             write("\",\"0x")
-            for i in 0..account.code_len {
-                write_hex_byte(world.code_byte(address: account.address, index: i) as i32)
-            }
+            let code = world.code(account.address)
+            for i in 0..code.len() { write_hex_byte(code[i] as i32) }
             write("\"]")
         }
         slot += 1
