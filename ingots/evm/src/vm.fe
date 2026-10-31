@@ -10,7 +10,7 @@ use ingot::state::{address_word, delegation}
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
-use ingot::constants::{I256_MIN, STACK_LIMIT}
+use ingot::constants::{I256_MIN, MAX_U256, STACK_LIMIT}
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
@@ -169,7 +169,7 @@ fn sar(shift: u256, value: u256) -> u256 {
     if shift == 0 {
         value
     } else if shift >= 256 {
-        if signed { !(0 as u256) } else { 0 }
+        if signed { MAX_U256 } else { 0 }
     } else {
         let shifted = value >> shift
         if signed { shifted | !((1 << (256 - shift)) - 1) } else { shifted }
@@ -852,7 +852,7 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
     core::assert(available >= value)
     // A self-transfer changes no balance, so static frames may perform it.
     if from == to { return state.touch(from) }
-    if value > !(0 as u256) - state.balance(to) { return ERR_BALANCE_OVERFLOW }
+    if value > MAX_U256 - state.balance(to) { return ERR_BALANCE_OVERFLOW }
     let status = state.set_balance(address: from, value: available - value)
     if status != OK { return status }
     state.set_balance(address: to, value: state.balance(to) + value)

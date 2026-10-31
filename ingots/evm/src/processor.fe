@@ -1,6 +1,7 @@
 use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
+use ingot::constants::MAX_U256
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
@@ -42,7 +43,6 @@ pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
 pub const TX_SET_CODE: u8 = 4
 
-const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 const MAX_INITCODE_SIZE: usize = 49152
 const GAS_PER_BLOB: u256 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and

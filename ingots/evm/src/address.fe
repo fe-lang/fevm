@@ -1,7 +1,6 @@
 use core::num::leading_zeros
 use keccak::Keccak256
-
-const ADDRESS_MASK: u256 = 0xffffffffffffffffffffffffffffffffffffffff
+use ingot::state::address_word
 
 // The bytes of `value`'s minimal big-endian encoding.
 fn byte_len(_ value: u256) -> usize { ((256 - leading_zeros(value) + 7) / 8).downcast_unchecked() }
@@ -24,7 +23,7 @@ pub fn create_address(sender: u256, nonce: u256) -> u256 {
     let list = 0xc0 + 21 + rlp_integer_len(nonce) as u256
     hash.update_word((list << 168) | (0x94 << 160) | sender, len: 22)
     update_rlp_integer(mut hash, nonce)
-    hash.finish_word() & ADDRESS_MASK
+    address_word(hash.finish_word())
 }
 
 /// CREATE2 (EIP-1014): the low 160 bits of keccak256(0xff ++ sender ++ salt ++ code_hash).
@@ -33,7 +32,7 @@ pub fn create2_address(sender: u256, salt: u256, code_hash: u256) -> u256 {
     hash.update_word((0xff << 160) | sender, len: 21)
     hash.update_word(salt, len: 32)
     hash.update_word(code_hash, len: 32)
-    hash.finish_word() & ADDRESS_MASK
+    address_word(hash.finish_word())
 }
 
 #[test]
