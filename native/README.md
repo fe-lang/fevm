@@ -1,269 +1,101 @@
-# Native FeVM and arithmetic acceptance tooling
+# Native tooling
 
-This suite checks the native FeVM workspace and CLI, Osaka frame and state
-results, and arithmetic differential kernels. Select the compiler manifest for
-the milestone being verified. CLI smoke coverage is not conformance; the
-[state-test runner](conformance/README.md) is.
-
-The [state-gas checkpoint](reports/state-gas.md) passes all eight stages on
-x86_64 Linux: 37 workspace tests, 14 CLI/allocator checks, 1,729 Cancun frames
-and 349 stateful sequences at each of O0/O1/O2, plus arithmetic and SwissTable
-matrices. It adds Cancun warm/cold access, original storage and signed refunds
-to the accepted [transaction journal](reports/transaction-journal.md).
-That historical checkpoint retains its own compiler pin. The current pin and
-expanded corpus still need an AArch64 macOS acceptance run.
-The earlier [1,602-frame evidence](reports/cancun-frames.md) is explicitly scoped
-to its historical FeVM revisions and compiler pin.
-
-The preceding [Keccak integration](reports/keccak-integration.md) passes all seven
-stages on published Fe master: 35 workspace tests, 16 CLI checks, 1,835 frames
-and 383 state sequences at O0/O1/O2, plus the arithmetic matrix. Keccak and
-SwissTable now own their standalone test suites in their respective repositories.
-
-The earlier [owned-memory checkpoint](reports/memory-integration-draft.md) and
-[owned-buffer foundation](reports/owned-buffer-foundation.md) retain their own
-compiler manifests and historical platform evidence.
-
-The [account-code milestone](reports/account-code.md) passes all seven stages on
-local Fe `4c03313f1`: 39 workspace tests, 22 CLI/allocator checks, 1,835 frames
-and 737 state sequences at O0/O1/O2, plus 74,676 arithmetic checks.
+Build the pinned compiler, then run acceptance, the state tests and the other
+checks against it.
 
 ## Hosts and prerequisites
 
-Supported execution hosts are **AArch64 macOS** and **x86_64 Linux**. Install Git,
-Python 3.10 or newer, Node/npm, Rust via rustup, CMake, and the host C toolchain. On macOS,
-use the Xcode command-line tools (`cc`, `size`, `otool`); on Linux install a C
-compiler/linker and binutils (`cc`, `size`, `objdump`). Install the exact Rust
-version recorded in the manifest. No third-party Python packages are required.
+Native hosts are **AArch64 macOS** and **x86_64 Linux**. Install Git, Python
+3.10 or newer, Node/npm, Rust via rustup, CMake and the host C toolchain (the
+Xcode command-line tools on macOS; a C compiler and binutils on Linux). Install
+the Rust version recorded in the manifest. No third-party Python packages are
+needed.
 
-The current compiler is Fe
-[`5e882e0a215af088156fdc12cefec09d80d8c1bf`](https://github.com/argotorg/fe/tree/5e882e0a215af088156fdc12cefec09d80d8c1bf)
-([argotorg/fe#1895](https://github.com/argotorg/fe/pull/1895) on master `e572b31ac`),
-which lowers `leading_zeros` to a native count. Its Cargo.lock pins Sonatina main
-`c30e6b22e57ab5315e634539a5e072ee41c67b17`. Fe
-destroys owned values where their lifetime ends and provides core's memory owners
-(`MemBuffer`, `MemVec`, `MemArray`, `Box`), which FeVM uses for all of its heap
-memory, and the byte-order reads, `swap_bytes` and unchecked span and `MemVec`
-access that the dispatch loop and Keccak use. Sonatina compiles FeVM's opcode
-handlers' calls to each other as native tail calls. It uses Rust 1.99.0; the
-default [`toolchain.json`](toolchain.json) records the exact revisions and lock
-hash, and bootstrap fetches both from those repositories.
+## Compiler
 
-All seven native acceptance stages pass on x86_64 Linux: 101 workspace tests, 38
-CLI/allocator checks, 1,845 frame comparisons and 1,149 state comparisons at each
-of O0/O1/O2, plus 74,676 arithmetic checks. Frames retain the three declared
-simultaneous-fault reason differences per level. The Python harness's 13 tests
-and the Rust reference's nine tests pass. See the
-[Osaka report](reports/osaka-20261029/README.md); the
-[tail-call dispatch report](reports/tail-call-dispatch-20261029/README.md), which
-covers AArch64 macOS as well and times evm-benchmarks against FeVM main, revm and
-evmone before Osaka; and the
-[restacked owned-memory report](reports/owned-memory-restack-20261024/README.md)
-and the [owned-memory report](reports/owned-memory-20261020/README.md), which cover
-the port to core's memory owners. The
-[Fe master report](reports/fe-master-20261024/README.md) covers both hosts on Fe
-master `fa06c6cd5`, the [bulk-copy report](reports/bulk-copy-20261019/README.md)
-on `21db8bc23`, and the earlier [Fe master](reports/fe-master-20261019/README.md)
-(47 workspace tests, before the CALL and transaction work) and
-[macOS](reports/macos-arm64-20261019/README.md) reports keep their compiler
-`f69b911ce`. The
-[Osaka state-test runner](conformance/README.md) is separate from acceptance.
-
-The earlier [initialization-join repair](reports/mvs-compile-perf-20261015/README.md),
-[enum-proof repair](reports/mvs-compile-perf-20261014/README.md),
-[MVS refresh](reports/mvs-refresh-20261014/README.md) and
-[MVS port](reports/mvs-port-20261012/README.md) retain their historical compilers,
-measurements and publication evidence.
-
-Earlier [owned-input results](reports/owned-inputs.md), the
-[logs/BLOBHASH report](reports/logs-blobhash.md), and the
-[#1718 integration](reports/keccak-pr1718.md) retain their own historical compiler
-manifests and verification scope. They do not establish MVS acceptance. Keccak's
-standalone differential and timing suite lives in
-[fe-lang/keccak](https://github.com/fe-lang/keccak); FeVM does not use the
-experimental compiler barrier required by that benchmark.
-
-Bootstrap verifies exact commits and builds their committed sources. Native
-acceptance defaults to one test suite at a time (`--jobs` overrides it), because
-preparing the optimized interpreter tests can use substantial memory.
+[`toolchain.json`](toolchain.json) pins Fe
+[`5e882e0a2`](https://github.com/argotorg/fe/tree/5e882e0a215af088156fdc12cefec09d80d8c1bf)
+([argotorg/fe#1895](https://github.com/argotorg/fe/pull/1895) on master
+`e572b31ac`), its Cargo.lock's Sonatina revision and hash, and Rust 1.99.0.
 
 ```sh
 python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0
+```
+
+Bootstrap checks out the exact commits, verifies the lock hash, generates the
+tree-sitter parser from npm's lockfile, builds the compiler and records its
+identity, hash, host and build time in `<out>/build.json`. The compiler is
+copied to `<out>/bin/fe`. Use a fresh output directory each time;
+`--target-dir` reuses Cargo artifacts, and `--prepare-only` materializes the
+sources without building. Cargo dependencies need network access or a
+populated cache.
+
+## Acceptance
+
+```sh
 python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
 
-For slower compiler candidates, `--build-timeout SECONDS` overrides each CLI/frame/state
-Fe build deadline, and `--stage-timeout SECONDS` overrides the deadline for a complete
-acceptance stage. Reports record both settings; a timeout still fails acceptance.
-Standalone CLI and differential runners also accept `--build-timeout`.
+Acceptance checks the compiler hash and runs seven stages:
 
-Choose a fresh output directory for each bootstrap and arithmetic run.
-`--target-dir /path/to/cache` can reuse Cargo artifacts while checking out clean
-sources; the build record identifies that cache. The finished compiler is copied
-to `<out>/bin/fe` so later cache reuse cannot replace it. `--prepare-only` verifies and
-materializes the pinned sources without building; it does not produce a compiler.
-The build uses `Cargo.lock`, verifies its hash, generates the tree-sitter parser
-using npm's lockfile, and records compiler identity, hash, host and build time.
-Dependency URL redirection is scoped to the build process, not global Git config.
-The compiler's Cargo dependencies still require network access or a populated
-Cargo cache. These are reproducible source/dependency inputs, not a promise of
-byte-identical executables across different host linkers or SDKs.
+1. `workspace-O0`, `workspace-O1`, `workspace-O2`: every workspace test.
+2. `cli-smoke`: CLI arguments, parsing, execution, return data and exit
+   statuses, plus allocation-failure fixtures that relink the interpreter
+   object against a controlled allocator (`fixtures/vm_allocator.c`).
+3. `osaka-frames`: 1,845 frames against revm ([differential](differential/README.md)).
+4. `osaka-state`: 1,149 transaction and checkpoint sequences against revm's
+   journal.
+5. `arithmetic`: the compiler arithmetic matrix (below).
 
-The acceptance command checks the compiler hash, runs every workspace test,
-CLI smoke cases, and the Osaka frame/state and arithmetic corpora
-at O0/O1/O2. State cases compare refunds and checkpoint/transaction boundaries
-against revm's real journal.
-Both frame and state runners build their reference with the bootstrap record's
-Rust version and an explicit output directory. Their reports record the selected
-toolchain, Rust/Cargo versions and reference target directory.
-It writes JSON plus per-command logs. CLI checks cover arguments, parsing, basic
-execution, calldata return, and exit status; they retain build/link times and
-artifact sizes. An incomplete or failing suite exits nonzero. Run the same
-commands on each supported host; an unexecuted platform is not a passing result.
-Use `--check-only` on shared CI machines. Full Fe/Sonatina project verification
-is additional to this downstream suite.
+It writes JSON and per-command logs, and exits nonzero if any stage fails.
+`--jobs` runs test suites concurrently (the default is one, since optimized
+interpreter tests use substantial memory); `--build-timeout` and
+`--stage-timeout` override the deadlines. Use `--check-only` on shared
+machines, which skips timing measurements. Run it on each host: an unexecuted
+platform is not a passing result.
 
-## Reduced O1 development check
+## State tests
 
-The checkpoint probe compiles the real transaction, journal, state and log modules
-with a small entry point, then checks nested log commit/rollback and receipt
-ownership. It avoids compiling the full interpreter and differential drivers.
-
-```sh
-python3 native/perf/run.py --probe checkpoints --fe /path/to/fe \
-  --out native/out/checkpoints-o1
-python3 native/perf/run.py --probe inputs --fe /path/to/fe \
-  --out native/out/inputs-o1
-python3 native/perf/run.py --probe vm_inputs --fe /path/to/fe \
-  --out native/out/vm-inputs-o1
-```
-
-Each run requires a fresh output directory and records source/compiler hashes,
-one-thread O1 build wall/CPU time, peak RSS and checked execution output. The
-default build deadline is 180 seconds (`--build-timeout` overrides it). Use CPU
-time for shared-host comparisons and compare identical source hashes. This probe
-does not establish full interpreter conformance or an end-to-end speedup.
+The [state-test runner](conformance/README.md) runs execution-spec-tests
+Osaka state tests through `transact`. It is not part of acceptance.
 
 ## Resident memory
 
 `native/soak` runs repeated Osaka transactions against one world in one
 process. Each expands a caller's and a callee's memory, emits a log, sets and
-clears a storage slot and returns data. Every owner frees its memory when it is
-destroyed, so peak RSS stays flat: the runner fails if it grows by more than
-1 MiB between 1,000 and 40,000 transactions.
+clears a storage slot and returns data. Peak RSS must stay flat: the runner
+fails if it grows by more than 1 MiB between 1,000 and 40,000 transactions.
 
 ```sh
 python3 native/soak/run.py --fe native/out/toolchain/bin/fe --out native/out/soak
 ```
 
-The input probe compiles only the real code/input types and hex parser. It checks
-50,000-byte inputs, copy ownership, PUSH/jump boundaries, malformed hex, and
-allocation/release behavior when code or jump-map allocation fails. Its controlled
-allocator is relinked against the same native object, avoiding another Fe build.
-
-`--probe vm_inputs` compiles the VM production modules and calls three owned-input
-integration tests. They pass at O1 with the current development compiler: reusable
-9,001-byte calldata, failed inputs before checkpointing, and large code with valid
-and invalid jump boundaries. The build took 174.09 seconds and peaked at 2.42 GB RSS
-on x86_64 Linux. This focused result does not establish full VM acceptance; the
-whole-ingot suite and CLI/differential matrices remain deferred.
-
-The [Osaka frame suite](differential/README.md) compares 1,845 deterministic
-frames against a pinned revm interpreter. It checks outcomes, remaining gas,
-output, and completed stacks and active memory, covering arithmetic operand
-roles, PUSH padding, jump destinations, stack limits, and memory/copy boundaries.
-The additional 1,149-case state suite checks current/original/transient storage,
-account code and hashes, copy semantics, account/slot warmness, signed refunds,
-logs, blob hashes and nested checkpoints. Signed transaction
-envelopes, intrinsic charges and CALL/CREATE opcodes remain separate work.
-
-SwissTable unit tests, differential checks, and benchmarks live in the
-[standalone library repository](https://github.com/fe-lang/swisstable/tree/main/native).
-FeVM workspace tests exercise its pinned git dependency through interpreter and
-transaction behavior.
-
-## Arithmetic correctness and measurement
+## Arithmetic
 
 ```sh
 python3 native/arith/run.py --fe native/out/toolchain/bin/fe \
   --out native/out/arithmetic
 ```
 
-The runner generates one standalone Fe executable per operation, representation
-and optimization level. It checks addition, wrapping multiplication, unsigned
-division/remainder, shifts, comparison and wrapping exponentiation against
-Python arbitrary-precision integer results. Boundary cases cross every limb and
-include full-width values, overshifts, and large exponents; deterministic random
-cases and repeated dependent calculations supplement them. Zero divisors are
-excluded from successful-operation vectors; compiler trap tests remain part of
-the upstream suite.
+The runner checks the compiler's 256-bit arithmetic: one standalone Fe
+executable per operation, representation and optimization level, against
+Python's arbitrary-precision results. Operations are addition, wrapping
+multiplication, unsigned division and remainder, shifts, comparison and
+wrapping exponentiation, with boundary cases across every limb and
+deterministic random cases. The representations are built-in `u256` and a
+four-`u64` struct with limb arithmetic, a control for the compiler rather than
+an optimal implementation.
 
-The two representations are built-in `u256` and a four-`u64` value struct. The
-latter uses limb arithmetic (with `u128` products/carries), restoring division,
-and exponentiation by squaring. It is a compiler diagnostic control, not a claim
-that a handwritten limb implementation is optimal. Conversion between the wire
-format and either representation happens outside the repeated kernel loop.
-
-Inputs arrive at runtime through the trusted `std::io` host capabilities. The kernel is kept out of
-line and each iteration consumes the preceding result (`a = result XOR seed`),
-so the operation cannot be replaced with a compile-time constant. Each batch's
-final result is checked against the reference computation. Comparison and some
-operand classes can have short recurrence periods; this is not a random-input
-throughput benchmark or a complete EVM performance measurement.
-
-Timing uses `std::native::cpu_clock_ticks()` around the kernel, excluding process
-startup, parsing and output. A compiled C probe verifies `clock_t` width and
-`CLOCKS_PER_SEC`. A warmup batch is discarded, batch size adapts to timer
-resolution, and all sample values are retained. CPU time is not wall latency;
-CPU frequency, thermal state and other workloads still affect it. Measure on an
-idle machine and alternate baseline/candidate runs before claiming a speedup.
-
-Each result records compiler/source hashes, host, correctness case counts,
-CPU nanoseconds per dependent iteration, complete build times, separate relink
-time, object/executable sizes, and executable-text size. Build time includes
-compiler startup, linking and debugging-report emission; it is not an isolated
-backend compile measurement. Text size includes the driver as well as the kernel.
-The object, emitted IR and disassembly are retained for attribution and review.
-
-Useful selections:
-
-```sh
-python3 native/arith/run.py --fe /path/to/fe --out native/out/div-check \
-  --operations div rem --levels 0 2 --check-only
-python3 native/arith/run.py --fe /path/to/fe --out native/out/mul-profile \
-  --operations mul --samples 9 --batch-ms 50 --build-samples 5
-```
-
-A failure keeps the generated source and available compiler reports. Fix the
-root cause; do not remove a failing representation or optimization level from
-acceptance to obtain a passing report.
-
-After producing baseline and candidate runs, remeasure their common combinations
-in alternating order on the same host:
+Without `--check-only` it also times each kernel with
+`std::native::cpu_clock_ticks()`, keeping every sample, build times and
+artifact sizes. `--operations` and `--levels` select a subset, and
+`arith/compare.py` remeasures a baseline and a candidate in alternating order:
 
 ```sh
 python3 native/arith/compare.py --baseline native/out/baseline/results.json \
   --candidate native/out/candidate/results.json --out native/out/comparison
 ```
 
-The comparison verifies artifact hashes and matching source hashes before running,
-retains every trial, and checks all batch results against the same independent
-oracle. Start with a focused selection such as `div rem` at O2 when measuring a
-specific change. See `reports/` for the recorded local evidence and its limits.
-
-
-## Offline Linux handoff
-
-For a runner without repository access, create local Git bundles after completing
-a bootstrap:
-
-```sh
-python3 native/handoff.py --build native/out/toolchain/build.json \
-  --out native/out/linux-handoff
-```
-
-The handoff contains only the three committed histories needed for the pinned
-FeVM, Fe and Sonatina revisions, their hashes, and exact Linux instructions.
-It does not push branches or claim Linux verification. Transfer the directory
-to a Linux runner and return the generated JSON records and logs.
+Measure on an idle machine. A failure keeps the generated source and compiler
+reports; fix the root cause rather than dropping a representation or level.

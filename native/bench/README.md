@@ -32,8 +32,8 @@ Osaka rules and the revm and evmone runners Cancun rules; all 27 cases use the
 same gas under both.
 
 The timed work is transaction validation, execution and the result's state
-changes. FeVM and evmone analyze code for jump destinations on every call;
-revm analyzes it when the code enters its database, which the setup covers.
+changes. evmone analyzes code for jump destinations on every call; FeVM and
+revm analyze it when the code enters their state, which the setup covers.
 
 ## Engines
 
