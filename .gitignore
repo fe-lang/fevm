@@ -7,6 +7,7 @@
 /native/out/
 /native/differential/reference/target/
 /native/bench/revm/target/
+/native/client/target/
 __pycache__/
 
 # Fe native build report staging

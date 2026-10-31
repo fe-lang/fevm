@@ -37,7 +37,7 @@ python3 native/accept.py --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
 
-Acceptance checks the compiler hash and runs seven stages:
+Acceptance checks the compiler hash and runs eight stages:
 
 1. `workspace-O0`, `workspace-O1`, `workspace-O2`: every workspace test.
 2. `cli-smoke`: CLI arguments, parsing, execution, return data and exit
@@ -46,7 +46,8 @@ Acceptance checks the compiler hash and runs seven stages:
 3. `osaka-frames`: 1,845 frames against revm ([differential](differential/README.md)).
 4. `osaka-state`: 1,149 transaction and checkpoint sequences against revm's
    journal.
-5. `arithmetic`: the compiler arithmetic matrix (below).
+5. `session`: the [Rust client](client/README.md)'s tests against `fevm serve`.
+6. `arithmetic`: the compiler arithmetic matrix (below).
 
 It writes JSON and per-command logs, and exits nonzero if any stage fails.
 `--jobs` runs test suites concurrently (the default is one, since optimized

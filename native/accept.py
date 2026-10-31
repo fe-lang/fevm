@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Downstream acceptance for native FeVM, Osaka frames/state, and arithmetic."""
+"""Downstream acceptance for native FeVM, Osaka frames/state, the session client, and arithmetic."""
 import argparse
 import hashlib
 import json
@@ -40,7 +40,7 @@ def main():
     if report.exists():
         parser.error('acceptance.json already exists; choose a fresh --out directory')
     record = {'schema': 1, 'build': build, 'host': platform.platform(), 'complete': False,
-              'scope': 'native workspace tests, CLI smoke, Osaka frame/state results, numeric kernels; not state-test conformance',
+              'scope': 'native workspace tests, CLI smoke, Osaka frame/state results, session client, numeric kernels; not state-test conformance',
               'stage_timeout_seconds': args.stage_timeout, 'build_timeout_seconds': args.build_timeout,
               'checks': []}
     report.write_text(json.dumps(record, indent=2) + '\n')
@@ -54,9 +54,12 @@ def main():
     commands.append(([sys.executable, HERE / 'differential/state_run.py', '--fe', compiler,
                       '--out', out / 'osaka-state',
                       '--toolchain', build['manifest']['rust_version']], 'osaka-state'))
+    commands.append(([sys.executable, HERE / 'client/run.py', '--fe', compiler,
+                      '--out', out / 'session',
+                      '--toolchain', build['manifest']['rust_version']], 'session'))
     if args.build_timeout is not None:
         for command, name in commands:
-            if name in ('cli-smoke', 'osaka-frames', 'osaka-state'):
+            if name in ('cli-smoke', 'osaka-frames', 'osaka-state', 'session'):
                 command.extend(['--build-timeout', args.build_timeout])
     arithmetic = [sys.executable, HERE / 'arith/run.py', '--fe', compiler, '--out', out / 'arithmetic']
     if args.check_only:

@@ -14,6 +14,7 @@ The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the Osaka precompiled contracts
+- `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state-test runner and its driver
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
@@ -53,6 +54,12 @@ stack as a 32-byte word, or `empty`. On failure it prints the status name
 ./out/fevm 0x5f3500 0x1234       # CALLDATALOAD
 ./out/fevm 0x01                  # stack_underflow, exit 10
 ```
+
+`fevm serve` keeps one world and answers binary requests on stdin: settings,
+block values, account and storage writes and reads, transactions that commit
+or only simulate, snapshots and reverts. It is how programs not written in Fe
+use fevm; [`native/client`](native/client/README.md) has a Rust client and
+the protocol.
 
 ## Library
 
@@ -132,9 +139,10 @@ python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
   --fixtures <execution-spec-tests>/fixtures/state_tests --out native/out/conformance
 ```
 
-Acceptance runs seven stages: the workspace tests at O0, O1 and O2, CLI and
+Acceptance runs eight stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
-and the arithmetic matrix ([native/README.md](native/README.md)). The
+the session client's tests and the arithmetic matrix
+([native/README.md](native/README.md)). The
 [state-test runner](native/conformance/README.md) is separate; the 23 Osaka
 state tests it does not count have malformed signatures, which fevm, given a
 recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
