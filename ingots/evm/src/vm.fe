@@ -1547,6 +1547,9 @@ impl Vm {
         unsafe { self.stack.set_len(depth) }
     }
 
+    // Every handler can fault, usually twice; one copy out of line keeps
+    // the handlers small.
+    #[inline(never)]
     fn faulted_at(mut self, _ status: i32, _ pc: usize, _ gas: u64, _ depth: usize) {
         self.fault(status)
         self.stopped_at(pc, gas, depth)
