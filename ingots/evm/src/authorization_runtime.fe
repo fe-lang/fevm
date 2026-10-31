@@ -3,7 +3,7 @@ use ingot::status::{ERR_REVERT, OK}
 use ingot::processor::{Applied, Authorization, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest, transact}
 use ingot::status::{INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, VALID}
 use ingot::state::{WorldState, designator}
-use ingot::types::{BlockEnv, default_block_env, empty_bytes}
+use ingot::types::{BlockEnv, Config, default_block_env, empty_bytes}
 use ingot::vm::FrameBuffers
 
 // Execution-specs fixture authorizations for any chain, with their signers.
@@ -58,7 +58,7 @@ fn set_code(_ world: own WorldState, to: u256, nonce: u256, authorizations: [Aut
     var request = TxRequest::new(env, data: empty_bytes())
     for index in 0..count { core::assert(request.add_authorization(authorizations[index])) }
     var buffers = FrameBuffers::new()
-    transact(world, request, block(), mut buffers)
+    transact(world, request, block(), Config::osaka(), mut buffers)
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn set_code_transactions_need_authorizations_and_a_recipient() {
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_authorization(signed(nonce: 0)))
     var buffers = FrameBuffers::new()
-    core::assert(transact(empty.state, request, block(), mut buffers).receipt.invalid == INVALID_CREATE)
+    core::assert(transact(empty.state, request, block(), Config::osaka(), mut buffers).receipt.invalid == INVALID_CREATE)
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn delegated_accounts_send_and_calls_run_their_delegates() {
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
     var buffers = FrameBuffers::new()
-    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), mut buffers)
+    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
     core::assert(applied.state.storage_load(SIGNER, 0) == 1 && applied.state.storage_load(DELEGATE, 0) == 0)
     // Five PUSH0, PUSH20, GAS, CALL with a cold target and a cold delegate,

@@ -4,7 +4,7 @@ use swisstable::SwissTable
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word, designator}
-use ingot::types::Program
+use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::FrameBuffers
 use fevm_precompiles::is_precompile
@@ -56,6 +56,7 @@ pub struct Transaction {
     started: bool,
     depth: usize,
     is_static: bool,
+    config: Config,
     // Lent by the caller for the transaction's frames.
     frame_buffers: FrameBuffers,
 }
@@ -83,9 +84,13 @@ impl Transaction {
             started: false,
             depth: 0,
             is_static: false,
+            config: Config::osaka(),
             frame_buffers: FrameBuffers::new(),
         }
     }
+
+    pub fn config(self) -> Config { self.config }
+    pub fn configure(mut self, _ config: Config) { self.config = config }
 
     pub fn frame_buffers(mut self) -> mut FrameBuffers { mut self.frame_buffers }
 

@@ -766,9 +766,6 @@ impl Vm {
 
 // The root is depth zero; at most 1024 child frames may execute beneath it.
 pub const CALL_DEPTH_LIMIT: usize = 1024
-// EIP-170 deployed code and EIP-3860 initcode limits.
-const MAX_CODE_SIZE: u64 = 24576
-const MAX_INITCODE_SIZE: u256 = 49152
 
 struct Frame {
     vm: Vm,
@@ -923,7 +920,7 @@ impl Vm {
         let len: u64 = self.output.len().downcast_unchecked()
         if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
-        } else if len > MAX_CODE_SIZE || !self.charge(len as u128 * 200) {
+        } else if len > state.config().max_code_size || !self.charge(len as u128 * 200) {
             self.fault(ERR_OUT_OF_GAS)
         } else {
             self.fault(state.deploy_code(address, code: self.output.span()))
@@ -1070,7 +1067,7 @@ impl Vm {
         // 32,000 gas, two per initcode word (EIP-3860), and six per word hashed by CREATE2.
         let cost = 32000 + words * if op == 0xf5 { 8 } else { 2 }
         if !self.charge(cost) || !self.expand_memory(plan.size) { return Option::None }
-        if len > MAX_INITCODE_SIZE {
+        if len > state.config().max_initcode_size as u256 {
             self.fault(ERR_OUT_OF_GAS)
             return Option::None
         }

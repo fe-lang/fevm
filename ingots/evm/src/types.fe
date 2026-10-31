@@ -151,8 +151,42 @@ pub struct CallEnv {
 
 impl Copy for CallEnv {}
 
-// EIP-7825's cap on a transaction's gas limit.
-pub const TX_GAS_LIMIT_CAP: u64 = 16_777_216
+/// Host settings for transactions. `Config::osaka()` is mainnet's rules; a test
+/// harness may raise the limits or skip the checks that need a real signed and
+/// funded transaction.
+pub struct Config {
+    // EIP-170: the largest code a creation may deposit.
+    pub max_code_size: u64,
+    // EIP-3860: the largest initcode.
+    pub max_initcode_size: u64,
+    // EIP-7825: the largest transaction gas limit.
+    pub tx_gas_limit_cap: u64,
+    // A transaction's signed chain ID must be the block's.
+    pub check_chain_id: bool,
+    // A transaction's nonce must be its sender's.
+    pub check_nonce: bool,
+    // A transaction's fee cap must cover the base fee. Without the check, a
+    // transaction priced below it pays its own price and no priority fee.
+    pub check_base_fee: bool,
+    // EIP-3607: a sender may not have code, unless it is an EIP-7702 delegation.
+    pub check_sender_code: bool,
+}
+
+impl Copy for Config {}
+
+impl Config {
+    pub fn osaka() -> Self {
+        Config {
+            max_code_size: 24_576,
+            max_initcode_size: 49_152,
+            tx_gas_limit_cap: 16_777_216,
+            check_chain_id: true,
+            check_nonce: true,
+            check_base_fee: true,
+            check_sender_code: true,
+        }
+    }
+}
 
 pub struct BlockEnv {
     pub coinbase: u256,
@@ -163,9 +197,6 @@ pub struct BlockEnv {
     pub chainid: u256,
     pub basefee: u256,
     pub blobbasefee: u256,
-    // The largest valid transaction gas limit: TX_GAS_LIMIT_CAP, unless a host
-    // that runs larger transactions, such as benchmarks or tests, raises it.
-    pub tx_gas_limit_cap: u64,
 }
 
 pub struct ExecutionResult {
@@ -196,6 +227,5 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
-        tx_gas_limit_cap: TX_GAS_LIMIT_CAP,
     }
 }

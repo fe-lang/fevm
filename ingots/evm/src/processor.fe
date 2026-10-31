@@ -5,7 +5,7 @@ use ingot::constants::MAX_U256
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
-use ingot::types::{BlockEnv, CallEnv, ExecutionResult, InputData, Program, empty_bytes}
+use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
 use ingot::vm::{FrameBuffers, Vm, begin_create, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
@@ -43,7 +43,6 @@ pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
 pub const TX_SET_CODE: u8 = 4
 
-const MAX_INITCODE_SIZE: usize = 49152
 const GAS_PER_BLOB: u256 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
@@ -116,12 +115,16 @@ impl TxRequest {
 }
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
-/// outcome (OK, ERR_REVERT, an exceptional halt or ERR_ADDRESS_COLLISION); any
-/// other status is a host failure, after which the pre-state is returned.
+/// outcome (OK, ERR_REVERT or an exceptional halt); any other status is a host
+/// failure, after which the pre-state is returned. `created` is the new
+/// contract's address when a creation succeeds. `gas_refunded` is the refund
+/// that reduced `gas_used`.
 pub struct Receipt {
     pub invalid: i32,
     pub status: i32,
     pub gas_used: u64,
+    pub gas_refunded: u64,
+    pub created: Option<u256>,
     pub output: MemBuffer,
     pub logs: LogBuffer,
 }
@@ -182,7 +185,9 @@ fn fee_market(_ env: TxEnv) -> bool { env.kind >= TX_FEE_MARKET }
 
 // EIP-1559: the base fee plus the priority fee the fee cap leaves room for.
 fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
-    if !fee_market(env) { return env.gas_price }
+    // Only a host that skips the base fee check admits a fee cap below it; the
+    // transaction then pays its cap.
+    if !fee_market(env) || env.gas_price <= base_fee { return env.gas_price }
     let headroom = env.gas_price - base_fee
     base_fee + if env.max_priority_fee_per_gas < headroom { env.max_priority_fee_per_gas } else { headroom }
 }
@@ -192,7 +197,7 @@ fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
 }
 
 /// The Osaka includability checks, in specification order.
-pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) -> i32 {
+pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_SET_CODE { return INVALID_TX_TYPE }
@@ -203,13 +208,15 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     let intrinsic = intrinsic_gas(request)
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
-    if env.creates && request.data().len() > MAX_INITCODE_SIZE { return INVALID_INITCODE_SIZE }
-    if env.gas_limit > block.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
+    if env.creates && request.data().len() > config.max_initcode_size as usize { return INVALID_INITCODE_SIZE }
+    if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
     if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
-    if let Option::Some(chain_id) = env.chain_id && chain_id != block.chainid { return INVALID_CHAIN_ID }
-    if env.gas_price < block.basefee { return INVALID_FEE_CAP }
+    if config.check_chain_id && let Option::Some(chain_id) = env.chain_id && chain_id != block.chainid {
+        return INVALID_CHAIN_ID
+    }
+    if config.check_base_fee && env.gas_price < block.basefee { return INVALID_FEE_CAP }
     var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
     if env.kind == TX_BLOB {
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
@@ -226,7 +233,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
     if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
     if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
     let nonce = world.nonce(sender)
-    if nonce != env.nonce { return INVALID_NONCE }
+    if config.check_nonce && nonce != env.nonce { return INVALID_NONCE }
     let required = match max_fee {
         Option::Some(fee) => checked_add(fee, env.value),
         Option::None => Option::None,
@@ -236,12 +243,17 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv) ->
         Option::None => return INVALID_BALANCE,
     }
     // EIP-3607, except that an EIP-7702 delegated account may send.
-    if world.code_size(sender) != 0 && world.delegate(sender).is_none() { return INVALID_SENDER_CODE }
+    if config.check_sender_code && world.code_size(sender) != 0 && world.delegate(sender).is_none() {
+        return INVALID_SENDER_CODE
+    }
     VALID
 }
 
 fn empty_receipt(invalid: i32, status: i32) -> Receipt {
-    Receipt { invalid, status, gas_used: 0, output: MemBuffer::empty(), logs: LogBuffer::new() }
+    Receipt {
+        invalid, status, gas_used: 0, gas_refunded: 0, created: Option::None, output: MemBuffer::empty(),
+        logs: LogBuffer::new(),
+    }
 }
 
 // A host failure during a valid transaction returns the pre-state.
@@ -360,15 +372,17 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
 /// transactions pay for gas, run their message, refund unused and refunded gas
 /// to the sender, pay the priority fee to the coinbase, and settle deletions.
 /// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
-pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ buffers: mut FrameBuffers) -> Applied {
+pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                _ buffers: mut FrameBuffers) -> Applied {
     let env = request.env
-    let invalid = validate(world, request, block)
+    let invalid = validate(world, request, block, config)
     if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
     let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
     let intrinsic = intrinsic_gas(request)
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
+    tx.configure(config)
     tx.swap_frame_buffers(mut buffers)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
@@ -391,7 +405,8 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
     let coinbase = address_word(block.coinbase)
     if paid == OK {
-        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * (price - block.basefee))
+        let tip = if price > block.basefee { price - block.basefee } else { 0 }
+        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * tip)
     }
     if paid != OK {
         return host_failure(tx, status: paid)
@@ -400,6 +415,11 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     let settled = tx.finish(commit: true, gas_spent)
     Applied {
         state: settled.state,
-        receipt: Receipt { invalid: VALID, status: result.status, gas_used, output: result.output, logs: settled.logs },
+        receipt: Receipt {
+            invalid: VALID, status: result.status, gas_used,
+            gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
+            created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
+            output: result.output, logs: settled.logs,
+        },
     }
 }

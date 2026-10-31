@@ -1,0 +1,142 @@
+use core::Option
+use ingot::address::create_address
+use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, transact}
+use ingot::state::WorldState
+use ingot::status::{
+    ERR_OUT_OF_GAS,
+    INVALID_CHAIN_ID,
+    INVALID_FEE_CAP,
+    INVALID_INITCODE_SIZE,
+    INVALID_NONCE,
+    INVALID_SENDER_CODE,
+    OK,
+    VALID,
+}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+use ingot::vm::FrameBuffers
+
+const SENDER: u256 = 0x1000
+
+fn funded() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    world
+}
+
+fn block() -> BlockEnv {
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    block.chainid = 1
+    block
+}
+
+fn call(to: u256) -> TxEnv {
+    TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+}
+
+fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
+    var buffers = FrameBuffers::new()
+    transact(world, TxRequest::new(env, data), block, config, mut buffers)
+}
+
+// Initcode that returns `len` zero bytes as the new code: PUSH3 len; PUSH0; RETURN.
+fn deployer(len: u32) -> InputData {
+    let bytes: [u8; 6] = [
+        0x62, (len >> 16).downcast_unchecked(), ((len >> 8) & 0xff).downcast_unchecked(),
+        (len & 0xff).downcast_unchecked(), 0x5f, 0xf3,
+    ]
+    InputData::copy_from(bytes, offset: 0, len: 6)
+}
+
+#[test]
+fn config_checks_can_be_skipped() {
+    var env = call(to: 0xbb)
+    env.chain_id = Option::Some(2)
+    var config = Config::osaka()
+    let wrong_chain = send(funded(), env, empty_bytes(), block(), config)
+    core::assert(wrong_chain.receipt.invalid == INVALID_CHAIN_ID)
+    config.check_chain_id = false
+    core::assert(send(wrong_chain.state, env, empty_bytes(), block(), config).receipt.invalid == VALID)
+
+    env = call(to: 0xbb)
+    env.nonce = 5
+    config = Config::osaka()
+    let wrong_nonce = send(funded(), env, empty_bytes(), block(), config)
+    core::assert(wrong_nonce.receipt.invalid == INVALID_NONCE)
+    config.check_nonce = false
+    let applied = send(wrong_nonce.state, env, empty_bytes(), block(), config)
+    // The sender's nonce still increments.
+    core::assert(applied.receipt.invalid == VALID && applied.state.nonce(SENDER) == 1)
+
+    var world = funded()
+    core::assert(world.set_code(address: SENDER, code: [0x00 as u8]) == OK)
+    config = Config::osaka()
+    let with_code = send(world, call(to: 0xbb), empty_bytes(), block(), config)
+    core::assert(with_code.receipt.invalid == INVALID_SENDER_CODE)
+    config.check_sender_code = false
+    core::assert(send(with_code.state, call(to: 0xbb), empty_bytes(), block(), config).receipt.invalid == VALID)
+}
+
+#[test]
+fn config_admits_prices_below_the_base_fee() {
+    var block = block()
+    block.basefee = 10
+    block.coinbase = 0xc0
+    var env = call(to: 0xbb)
+    env.kind = TX_FEE_MARKET
+    env.gas_price = 4
+    env.max_priority_fee_per_gas = 4
+    var config = Config::osaka()
+    let rejected = send(funded(), env, empty_bytes(), block, config)
+    core::assert(rejected.receipt.invalid == INVALID_FEE_CAP)
+    config.check_base_fee = false
+    let applied = send(rejected.state, env, empty_bytes(), block, config)
+    // The transaction pays its fee cap and the coinbase no priority fee.
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.gas_used == 21_000)
+    core::assert(applied.state.balance(SENDER) == 1_000_000_000_000 - 21_000 * 4)
+    core::assert(applied.state.balance(0xc0) == 0)
+}
+
+#[test]
+fn config_sets_code_size_limits() {
+    var env = call(to: 0)
+    env.creates = true
+    env.gas_limit = 16_000_000
+    // 30,000 bytes exceeds EIP-170's 24,576, which the deposit charges as out of gas.
+    let osaka = send(funded(), env, deployer(len: 30_000), block(), Config::osaka())
+    core::assert(osaka.receipt.invalid == VALID && osaka.receipt.status == ERR_OUT_OF_GAS)
+    core::assert(osaka.receipt.created.is_none())
+    var config = Config::osaka()
+    config.max_code_size = 32_768
+    env.nonce = 1
+    let raised = send(osaka.state, env, deployer(len: 30_000), block(), config)
+    let created = create_address(sender: SENDER, nonce: 1)
+    core::assert(raised.receipt.status == OK && raised.state.code_size(created) == 30_000)
+    core::assert(raised.receipt.created.unwrap_or(default: 0) == created)
+
+    // EIP-3860's initcode limit is 49,152 bytes; zero bytes are STOPs.
+    let initcode: [u8; 49_153] = [0; 49_153]
+    env.nonce = 2
+    let rejected = send(raised.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), Config::osaka())
+    core::assert(rejected.receipt.invalid == INVALID_INITCODE_SIZE)
+    config.max_initcode_size = 65_536
+    let applied = send(rejected.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), config)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+}
+
+#[test]
+fn receipt_reports_the_refund() {
+    var world = funded()
+    // SSTORE(0, 0) on a slot holding 1: a cold reset that refunds 4,800.
+    core::assert(world.set_code(address: 0xbb, code: [0x5f as u8, 0x5f, 0x55]) == OK)
+    core::assert(world.storage_store(0xbb, 0, 1))
+    let applied = send(world, call(to: 0xbb), empty_bytes(), block(), Config::osaka())
+    let receipt = applied.receipt
+    // 21,000 intrinsic, two PUSH0 and a cold SSTORE reset (2,100 + 2,900).
+    let spent: u64 = 21_000 + 2 + 2 + 5_000
+    core::assert(receipt.status == OK && receipt.gas_refunded == 4_800 && receipt.gas_used == spent - 4_800)
+    core::assert(receipt.created.is_none())
+}

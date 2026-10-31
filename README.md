@@ -58,8 +58,8 @@ stack as a 32-byte word, or `empty`. On failure it prints the status name
 
 ### Transactions
 
-`transact(world, request, block, buffers)` runs one transaction and returns
-`Applied { state, receipt }`.
+`transact(world, request, block, config, buffers)` runs one transaction and
+returns `Applied { state, receipt }`.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -69,9 +69,12 @@ stack as a 32-byte word, or `empty`. On failure it prints the status name
   owned calldata or initcode, access-list entries, blob hashes and EIP-7702
   authorizations. fevm takes the recovered sender; decoding and checking
   signed envelopes belongs to the host.
-- `BlockEnv` holds the block's values, the chain ID and `tx_gas_limit_cap`
-  (EIP-7825's 2^24 by default, which a host running larger transactions may
-  raise).
+- `BlockEnv` holds the block's values and the chain ID.
+- `Config` holds the host's settings. `Config::osaka()` is mainnet's rules: the
+  EIP-170 and EIP-3860 code size limits, EIP-7825's 2^24 gas cap, and the
+  chain ID, nonce, base fee and EIP-3607 sender checks. A test harness may
+  raise the limits or skip the checks; a transaction priced below the base fee
+  then pays its own price and no priority fee.
 - `FrameBuffers` is a pool of frame memory, stacks and child frames that
   repeated transactions reuse.
 
@@ -81,8 +84,9 @@ sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
 the EIP-7623 calldata floor, refunds unused gas and the capped refund, pays the
 priority fee, and deletes self-destructed new accounts and touched empty
-accounts. The receipt has the status, gas used, output and logs. A host failure
-(allocation, balance overflow) returns the pre-state with that status.
+accounts. The receipt has the status, gas used and refunded, the created
+contract's address, the output and the logs. A host failure (allocation,
+balance overflow) returns the pre-state with that status.
 
 ### Statuses
 
