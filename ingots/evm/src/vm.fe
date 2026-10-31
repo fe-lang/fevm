@@ -1120,7 +1120,7 @@ impl Vm {
         let child_gas = forwarded + if has_value { 2300 } else { 0 }
         self.return_data.clear()
         // Target warming belongs to the caller checkpoint, including failures.
-        if depth == CALL_DEPTH_LIMIT || (transfers && state.balance(sender) < value) {
+        if depth == CALL_DEPTH_LIMIT || (has_value && state.balance(sender) < value) {
             self.gas_remaining += child_gas
             self.push(0)
             return Option::None
