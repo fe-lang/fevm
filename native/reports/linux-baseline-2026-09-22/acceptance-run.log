@@ -1,7 +1,0 @@
-workspace-O0: passed
-workspace-O1: passed
-workspace-O2: passed
-cli-smoke: passed
-swisstable-differential: passed
-arithmetic: passed
-acceptance exit=0
