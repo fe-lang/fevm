@@ -63,7 +63,8 @@ returns `Applied { state, receipt }`.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
-  hashes with `set_block_hash`.
+  hashes with `set_block_hash`. `try_clone` copies the world, so a host can
+  keep a snapshot and return to it.
 - A `TxRequest` holds a `TxEnv` (envelope kind, signed chain ID, recovered
   sender, recipient or creation flag, nonce, gas limit, fee fields, value) with
   owned calldata or initcode, access-list entries, blob hashes and EIP-7702

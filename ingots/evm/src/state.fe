@@ -76,6 +76,17 @@ fn record_len(_ len: usize) -> usize {
     64 + len + jumpdest_map_len(len)
 }
 
+// A copy of `table`; none if allocation fails.
+fn copy_table<K, V>(_ table: SwissTable<K, V>) -> Option<SwissTable<K, V>> where K: SwissKey + Default + Copy, V: Default + Copy {
+    var copy = SwissTable<K, V>::empty()
+    if !copy.try_reserve(table.len()) { return Option::None }
+    for slot in 0..table.capacity() {
+        let entry = table.entry(slot)
+        if entry.occupied && !copy.try_insert(entry.key, entry.value) { return Option::None }
+    }
+    Option::Some(copy)
+}
+
 pub struct WorldState {
     accounts: SwissTable<u256, Account>,
     // Packed [address:32, length:32, code:length, jumpdests] records, where
@@ -95,6 +106,27 @@ impl WorldState {
             block_hashes: SwissTable<u256, u256>::empty(),
         }
     }
+    /// A copy of the world, which a host can keep to restore later; none if
+    /// allocation fails.
+    pub fn try_clone(self) -> Option<WorldState> {
+        let accounts = match copy_table(self.accounts) {
+            Option::Some(accounts) => accounts,
+            Option::None => return Option::None,
+        }
+        let storage = match copy_table(self.storage) {
+            Option::Some(storage) => storage,
+            Option::None => return Option::None,
+        }
+        let block_hashes = match copy_table(self.block_hashes) {
+            Option::Some(block_hashes) => block_hashes,
+            Option::None => return Option::None,
+        }
+        match MemBuffer::try_from_span(self.code.span()) {
+            Option::Some(code) => Option::Some(WorldState { accounts, code, storage, block_hashes }),
+            Option::None => Option::None,
+        }
+    }
+
     pub fn exists(self, _ address: u256) -> bool {
         self.accounts.contains(address_word(address))
     }

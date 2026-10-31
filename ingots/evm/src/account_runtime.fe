@@ -128,3 +128,21 @@ fn accounts_grow_and_undo_removes_the_accounts_a_frame_created() {
     core::assert(world.exists(1003) && world.nonce(1001) == 1)
     core::assert(world.set_code(address: 0, code: [1 as u8]) == OK)
 }
+
+#[test]
+fn world_clone_is_independent_of_the_original() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0xaa, 7) && world.set_nonce(0xaa, 2))
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5b]) == OK)
+    core::assert(world.storage_store(0xbb, 3, 9) && world.set_block_hash(5, 0x55))
+    let snapshot = world.try_clone().unwrap()
+    core::assert(world.set_balance(0xaa, 8) && world.storage_store(0xbb, 3, 10))
+    core::assert(world.set_code(address: 0xbb, code: [0x00 as u8]) == OK)
+    world.remove_account(0xaa)
+    core::assert(snapshot.balance(0xaa) == 7 && snapshot.nonce(0xaa) == 2)
+    core::assert(snapshot.storage_load(0xbb, 3) == 9 && snapshot.block_hash(5) == 0x55)
+    core::assert(snapshot.code_size(0xbb) == 3 && snapshot.code_hash(0xbb) != world.code_hash(0xbb))
+    // The copy's code keeps its jump destinations.
+    core::assert(snapshot.program(0xbb).is_jumpdest(2))
+    core::assert(!world.exists(0xaa) && world.storage_load(0xbb, 3) == 10)
+}
