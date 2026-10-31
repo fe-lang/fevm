@@ -374,6 +374,18 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
 /// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
 pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                 _ buffers: mut FrameBuffers) -> Applied {
+    apply(world, request, block, config, mut buffers, commit: true)
+}
+
+/// Runs a transaction as `transact` does but keeps none of its changes: the
+/// returned state is the pre-state. The receipt is the one `transact` would give.
+pub fn simulate(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                _ buffers: mut FrameBuffers) -> Applied {
+    apply(world, request, block, config, mut buffers, commit: false)
+}
+
+fn apply(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+         _ buffers: mut FrameBuffers, commit: bool) -> Applied {
     let env = request.env
     let invalid = validate(world, request, block, config)
     if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
@@ -411,15 +423,16 @@ pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv
     if paid != OK {
         return host_failure(tx, status: paid)
     }
-    tx.settle()
-    let settled = tx.finish(commit: true, gas_spent)
+    let logs = tx.take_logs()
+    // Settlement's deletions bypass the journal, which undoes the rest.
+    if commit { tx.settle() }
     Applied {
-        state: settled.state,
+        state: tx.finish(commit, gas_spent).state,
         receipt: Receipt {
             invalid: VALID, status: result.status, gas_used,
             gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
             created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
-            output: result.output, logs: settled.logs,
+            output: result.output, logs,
         },
     }
 }

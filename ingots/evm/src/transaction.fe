@@ -102,6 +102,7 @@ impl Transaction {
     }
 
     pub fn logs(self) -> ref LogBuffer { ref self.logs }
+    pub fn take_logs(mut self) -> LogBuffer { core::mem::replace(mut self.logs, LogBuffer::new()) }
 
     pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> i32 {
         self.started = true

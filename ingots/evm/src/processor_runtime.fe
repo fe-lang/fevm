@@ -1,6 +1,6 @@
 use core::Option
 use ingot::address::create_address
-use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, transact}
+use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::{
     ERR_OUT_OF_GAS,
@@ -139,4 +139,21 @@ fn receipt_reports_the_refund() {
     let spent: u64 = 21_000 + 2 + 2 + 5_000
     core::assert(receipt.status == OK && receipt.gas_refunded == 4_800 && receipt.gas_used == spent - 4_800)
     core::assert(receipt.created.is_none())
+}
+
+#[test]
+fn simulate_gives_the_receipt_and_keeps_the_state() {
+    var world = funded()
+    // SSTORE(0, 1); LOG0(0, 0).
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
+    var buffers = FrameBuffers::new()
+    let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(), Config::osaka(), mut buffers)
+    let receipt = simulated.receipt
+    core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.logs.len() == 1)
+    let state = simulated.state
+    core::assert(state.storage_load(0xbb, 0) == 0 && state.nonce(SENDER) == 0)
+    core::assert(state.balance(SENDER) == 1_000_000_000_000)
+    let applied = transact(state, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(), Config::osaka(), mut buffers)
+    core::assert(applied.receipt.gas_used == receipt.gas_used && applied.receipt.logs.len() == 1)
+    core::assert(applied.state.storage_load(0xbb, 0) == 1 && applied.state.nonce(SENDER) == 1)
 }
