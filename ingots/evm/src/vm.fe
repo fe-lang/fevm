@@ -208,7 +208,6 @@ pub struct Vm {
     pub pc: usize,
     pub status: i32,
     pub halted: bool,
-    pub unsupported_opcode: i32,
     // The running code's JUMPDEST bitmap and the length it covers, which
     // `run_until_child` sets for the opcode handlers.
     jumpdests: *u8,
@@ -229,7 +228,6 @@ impl Vm {
             pc: 0,
             status: OK,
             halted: false,
-            unsupported_opcode: 0,
             jumpdests: (0 as usize) as *u8,
             jump_limit: 0,
         }
@@ -267,7 +265,6 @@ impl Vm {
         self.pc = 0
         self.status = OK
         self.halted = false
-        self.unsupported_opcode = 0
         self.gas_remaining = gas
         self.refund_delta = 0
     }
@@ -641,11 +638,6 @@ impl Vm {
         self.push(result)
     }
 
-    fn invalid(mut self, _ op: i32) {
-        self.unsupported_opcode = op
-        self.fault(ERR_INVALID_OPCODE)
-    }
-
     fn sload(mut self, _ call: CallEnv, _ state: mut Transaction) {
         let slot = self.pop()
         if !self.ok() { return }
@@ -872,8 +864,8 @@ pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value
 }
 
 /// Run a precompile and express its outcome as a frame result. Invalid input and
-/// insufficient gas are exceptional halts that consume all `gas`; unsupported
-/// input sizes and allocation failures are host errors.
+/// insufficient gas are exceptional halts that consume all `gas`; allocation
+/// failure is a host error.
 pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionResult {
     let outcome = fevm_precompiles::run(address, input, gas)
     let status = if outcome.status == SUCCESS { OK }
@@ -888,7 +880,6 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
         output_valid: status == OK,
         stack_top: 0,
         stack_len: 0,
-        unsupported_opcode: 0,
     }
 }
 
@@ -896,7 +887,7 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
 pub fn status_result(_ status: i32) -> ExecutionResult {
     ExecutionResult {
         status, output: MemBuffer::empty(), gas_remaining: 0, refund_delta: 0,
-        output_valid: false, stack_top: 0, stack_len: 0, unsupported_opcode: 0,
+        output_valid: false, stack_top: 0, stack_len: 0,
     }
 }
 
@@ -904,9 +895,8 @@ impl Vm {
     fn accept_child(mut self, _ child: own ChildResult) {
         let result = child.result
         if !is_evm_outcome(result.status) {
-            // Host failures and unfinished VM features abort the execution. They
-            // must never be reported to EVM code as an ordinary failed CALL.
-            self.unsupported_opcode = result.unsupported_opcode
+            // Host failures abort the execution. They must never be reported
+            // to EVM code as an ordinary failed CALL.
             self.fault(result.status)
             return
         }
@@ -2156,7 +2146,7 @@ impl Vm {
                         },
                         // INVALID (0xfe) and every undefined byte are exceptional halts.
                         _ => {
-                            self.invalid(op)
+                            self.fault(ERR_INVALID_OPCODE)
                             break
                         },
                         }
@@ -2275,7 +2265,6 @@ impl Vm {
             output_valid: self.output_valid,
             stack_top,
             stack_len,
-            unsupported_opcode: self.unsupported_opcode,
             gas_remaining: self.gas_remaining,
             refund_delta: self.refund_delta,
         }
