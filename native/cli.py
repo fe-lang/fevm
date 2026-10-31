@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # The bytes of a boxed child `Frame` (packed, with the stack on the heap).
 FRAME_BOX_SIZE = 474
 CASES = [
-    ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata]\n'),
+    ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n'),
     ('empty', [''], 0, 'empty\n'),
     ('stop', ['00'], 0, 'empty\n'),
     ('keccak-empty', ['5f5f20'], 0, '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n'),

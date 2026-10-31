@@ -1,6 +1,7 @@
 use ingot::transaction::Transaction
 use std::io::{Write, host, write, write_char, writeln}
 use std::native::Args
+use ingot::session::serve
 use ingot::hex::{
     ERR_BAD_HEX,
     ERR_ODD_HEX,
@@ -17,7 +18,7 @@ use ingot::vm::{Vm, execute_vm}
 const ERR_USAGE: i32 = 2
 
 fn usage() -> i32 uses (w: mut Write) {
-    writeln("usage: fevm <hex-bytecode> [hex-calldata]")
+    writeln("usage: fevm <hex-bytecode> [hex-calldata] | fevm serve")
     ERR_USAGE
 }
 
@@ -54,6 +55,15 @@ pub fn run(_ args: Args) -> i32 {
     with (Write = host()) {
         if args.len() != 2 && args.len() != 3 {
             return usage()
+        }
+        let first = args.get(1)
+        let serve_word: [u8; 5] = [0x73, 0x65, 0x72, 0x76, 0x65]
+        var serving = args.len() == 2 && first.len() == 5
+        for i in 0..5 {
+            serving = serving && first.byte_at(i) == serve_word[i]
+        }
+        if serving {
+            return serve()
         }
 
         let program = parse_hex_program(args.get(1))
