@@ -21,10 +21,11 @@ let contract = receipt.created.expect("deployed");
 ```
 
 `transact` keeps a transaction's changes and `call` keeps none, as eth_call
-does. `snapshot` copies the world and `revert` returns to a copy. `configure`
-sets the code size limits, the gas cap and the checks a test may skip
-(chain ID, nonce, base fee, EIP-3607). Receipts carry the status, validity,
-gas used and refunded, created address, output and logs.
+does. `snapshot` copies the world and `revert` returns to a copy.
+`configure` sets the code size limits, the gas cap and the checks a test may
+skip (chain ID, nonce, base fee, EIP-3607). Receipts carry the status,
+validity, gas used and refunded, created address, output and logs, and the
+step and call traces that `set_tracing` asks for.
 
 `run.py` builds fevm and runs the client's tests against it; acceptance runs it
 as the `session` stage.
@@ -56,7 +57,7 @@ Fields are big endian. `word` is 32 bytes, `address` 20, `u64` 8, `count` 4,
 | 7 set block hash | number word, hash word | |
 | 8 account | address | exists flag, balance word, nonce word, code_hash word, code bytes |
 | 9 storage | address, slot word | value word |
-| 10 transact | flags byte (bit 0 commit), transaction | receipt |
+| 10 transact | flags byte (bit 0 commit, 1 trace calls, 2 trace steps), transaction | receipt |
 | 11 snapshot | | id count |
 | 12 revert | id count | |
 
@@ -72,7 +73,13 @@ sender is recovered; fevm does not check signatures.
 A receipt is: invalid byte (0 for a valid transaction, else the validity
 code), status byte, gas_used u64, gas_refunded u64, created flag and address,
 output bytes, and a count of logs, each an address, a topic-count byte, the
-topic words and data bytes. Codes and names are in
+topic words and data bytes. Then the trace: a complete flag; a count of
+steps, each pc as a count, op byte, call depth u16, gas u64, stack length u16
+and memory size u64; and a count of call events, each an enter flag, kind
+byte (the opcode, entering), depth u16, from address, to address, value word,
+gas u64 (given entering, left leaving), status byte (leaving), the number of
+steps before it as a count, and data bytes (input entering, output leaving).
+Untraced receipts have empty lists. Codes and names are in
 [`ingots/evm/src/status.fe`](../../ingots/evm/src/status.fe).
 
 Snapshot ids count up from zero. Reverting to snapshot `n` restores the world

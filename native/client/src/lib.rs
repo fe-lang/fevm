@@ -237,6 +237,52 @@ pub struct Log {
     pub data: Vec<u8>,
 }
 
+/// What to record in a transaction's trace.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tracing {
+    pub steps: bool,
+    pub calls: bool,
+}
+
+/// One opcode about to run, with the gas, stack depth and memory size before
+/// it. `depth` is the call depth, zero for the transaction's own frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Step {
+    pub pc: u32,
+    pub op: u8,
+    pub depth: u16,
+    pub gas: u64,
+    pub stack_len: u16,
+    pub memory_size: u64,
+}
+
+/// A call or creation entering its frame or leaving it. Entering, `kind` is
+/// the opcode (CALL or CREATE for the transaction's own message) and `data`
+/// the input; leaving, `status` and `gas` are the outcome and gas left, and
+/// `data` the output. `steps` counts the steps recorded before the event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallEvent {
+    pub enter: bool,
+    pub kind: u8,
+    pub depth: u16,
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
+    pub gas: u64,
+    pub status: Status,
+    pub steps: u32,
+    pub data: Vec<u8>,
+}
+
+/// The steps and call events of a traced transaction, in execution order.
+/// `complete` is false if fevm ran out of memory and dropped records.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Trace {
+    pub complete: bool,
+    pub steps: Vec<Step>,
+    pub calls: Vec<CallEvent>,
+}
+
 /// A transaction's result. An invalid transaction ran nothing; its other
 /// fields are empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -248,6 +294,7 @@ pub struct Receipt {
     pub created: Option<Address>,
     pub output: Vec<u8>,
     pub logs: Vec<Log>,
+    pub trace: Trace,
 }
 
 impl Receipt {
@@ -314,6 +361,8 @@ const SNAPSHOT: u8 = 11;
 const REVERT: u8 = 12;
 
 const COMMIT: u8 = 1;
+const TRACE_CALLS: u8 = 2;
+const TRACE_STEPS: u8 = 4;
 
 struct Encoder(Vec<u8>);
 
@@ -385,6 +434,12 @@ impl<'a> Decoder<'a> {
         ))
     }
 
+    fn u16(&mut self) -> Result<u16> {
+        Ok(u16::from_be_bytes(
+            self.take(2)?.try_into().expect("2 bytes"),
+        ))
+    }
+
     fn count(&mut self) -> Result<usize> {
         Ok(u32::from_be_bytes(self.take(4)?.try_into().expect("4 bytes")) as usize)
     }
@@ -409,6 +464,7 @@ impl<'a> Decoder<'a> {
 /// One `fevm serve` process and the world it holds.
 pub struct Session {
     child: Child,
+    tracing: Tracing,
     // Taken when the session drops: closing stdin ends fevm serve.
     input: Option<BufWriter<ChildStdin>>,
     output: BufReader<ChildStdout>,
@@ -427,6 +483,7 @@ impl Session {
         let output = BufReader::new(child.stdout.take().expect("piped stdout"));
         Ok(Session {
             child,
+            tracing: Tracing::default(),
             input,
             output,
         })
@@ -538,6 +595,11 @@ impl Session {
         Ok(value)
     }
 
+    /// What later transactions and calls record in their receipts' traces.
+    pub fn set_tracing(&mut self, tracing: Tracing) {
+        self.tracing = tracing;
+    }
+
     /// Runs `tx` and keeps its changes.
     pub fn transact(&mut self, tx: &Tx) -> Result<Receipt> {
         self.run(tx, COMMIT)
@@ -548,7 +610,10 @@ impl Session {
         self.run(tx, 0)
     }
 
-    fn run(&mut self, tx: &Tx, flags: u8) -> Result<Receipt> {
+    fn run(&mut self, tx: &Tx, commit: u8) -> Result<Receipt> {
+        let flags = commit
+            | if self.tracing.calls { TRACE_CALLS } else { 0 }
+            | if self.tracing.steps { TRACE_STEPS } else { 0 };
         let mut request = Encoder::new(TRANSACT);
         request
             .byte(flags)
@@ -608,6 +673,35 @@ impl Session {
                 })
             })
             .collect::<Result<_>>()?;
+        let complete = decoder.byte()? != 0;
+        let steps = (0..decoder.count()?)
+            .map(|_| {
+                Ok(Step {
+                    pc: u32::try_from(decoder.count()?).expect("4 bytes"),
+                    op: decoder.byte()?,
+                    depth: decoder.u16()?,
+                    gas: decoder.u64()?,
+                    stack_len: decoder.u16()?,
+                    memory_size: decoder.u64()?,
+                })
+            })
+            .collect::<Result<_>>()?;
+        let calls = (0..decoder.count()?)
+            .map(|_| {
+                Ok(CallEvent {
+                    enter: decoder.byte()? != 0,
+                    kind: decoder.byte()?,
+                    depth: decoder.u16()?,
+                    from: decoder.address()?,
+                    to: decoder.address()?,
+                    value: decoder.word()?,
+                    gas: decoder.u64()?,
+                    status: Status::from_code(decoder.byte()?),
+                    steps: u32::try_from(decoder.count()?).expect("4 bytes"),
+                    data: decoder.bytes()?,
+                })
+            })
+            .collect::<Result<_>>()?;
         decoder.finish()?;
         Ok(Receipt {
             invalid,
@@ -617,6 +711,11 @@ impl Session {
             created: has_created.then_some(created),
             output,
             logs,
+            trace: Trace {
+                complete,
+                steps,
+                calls,
+            },
         })
     }
 

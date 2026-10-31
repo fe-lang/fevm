@@ -1,6 +1,6 @@
 //! Drives a real `fevm serve`; set `FEVM_BIN` to the fevm executable.
 
-use fevm_client::{Address, Block, Config, Error, Invalid, Session, Status, Tx, U256};
+use fevm_client::{Address, Block, Config, Error, Invalid, Session, Status, Tracing, Tx, U256};
 
 const SENDER: u64 = 0x1000;
 
@@ -174,4 +174,41 @@ fn configure_raises_the_code_size_limit() {
     assert!(raised.succeeded(), "{raised:?}");
     let code = session.account(raised.created.unwrap()).unwrap().code;
     assert_eq!(code.len(), 30_000);
+}
+
+#[test]
+fn traces_steps_and_calls() {
+    let mut session = session();
+    let target = Address::from(0xbb);
+    session.set_code(target, &COUNTER).unwrap();
+    let untraced = session.call(&tx(Some(target), 0, &[])).unwrap();
+    assert!(untraced.trace.steps.is_empty() && untraced.trace.calls.is_empty());
+
+    session.set_tracing(Tracing {
+        steps: true,
+        calls: true,
+    });
+    let traced = session.transact(&tx(Some(target), 0, &[0x42])).unwrap();
+    assert_eq!(
+        traced.gas_used,
+        untraced.gas_used + 16,
+        "one calldata byte costs 16 gas"
+    );
+    let trace = &traced.trace;
+    assert!(trace.complete);
+    // COUNTER runs 12 opcodes, up to its RETURN.
+    let ops: Vec<u8> = trace.steps.iter().map(|step| step.op).collect();
+    assert_eq!(
+        ops,
+        [
+            0x5f, 0x54, 0x60, 0x01, 0x80, 0x5f, 0x55, 0x5f, 0x52, 0x60, 0x5f, 0xf3
+        ]
+    );
+    assert_eq!(trace.steps[0].gas, 1_000_000 - 21_000 - 16);
+    assert_eq!(trace.calls.len(), 2);
+    assert!(trace.calls[0].enter && trace.calls[0].kind == 0xf1 && trace.calls[0].to == target);
+    assert_eq!(trace.calls[0].data, [0x42]);
+    assert!(!trace.calls[1].enter && trace.calls[1].status == Status::Success);
+    assert_eq!(trace.calls[1].data, word(1));
+    assert_eq!(trace.calls[1].steps as usize, trace.steps.len());
 }

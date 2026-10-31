@@ -65,8 +65,8 @@ the protocol.
 
 ### Transactions
 
-`transact(world, request, block, config, buffers)` runs one transaction and
-returns `Applied { state, receipt }`.
+`transact(world, request, block, config, buffers, tracer)` runs one
+transaction and returns `Applied { state, receipt }`.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -85,6 +85,7 @@ returns `Applied { state, receipt }`.
   then pays its own price and no priority fee.
 - `FrameBuffers` is a pool of frame memory, stacks and child frames that
   repeated transactions reuse.
+- `tracer` watches the transaction run (below); `()` traces nothing.
 
 An invalid transaction returns the untouched state and a receipt whose
 `invalid` field names the reason. A valid one buys its gas, increments the
@@ -95,6 +96,27 @@ priority fee, and deletes self-destructed new accounts and touched empty
 accounts. The receipt has the status, gas used and refunded, the created
 contract's address, the output and the logs. A host failure (allocation,
 balance overflow) returns the pre-state with that status.
+
+### Tracing
+
+A tracer is any type that implements `Tracer`, whose hooks do nothing by
+default:
+
+```fe
+pub trait Tracer {
+    fn step(mut self, _ step: Step) {}
+    fn enter(mut self, _ call: CallStart, input: MemSpan) {}
+    fn leave(mut self, _ call: CallEnd, output: MemSpan) {}
+}
+```
+
+`step` runs before every opcode with its pc, the gas, stack depth and memory
+size, and the call depth. `enter` runs when a call or creation enters its frame
+(opcode, caller, target, value, gas, input) and `leave` when it leaves (status,
+gas left, output), the transaction's own message included. `transact` is
+generic over the tracer, so `()` compiles to the same code as an interpreter
+without hooks. `Trace` is a tracer that records the steps, the calls or both;
+`fevm serve` uses it.
 
 ### Statuses
 
