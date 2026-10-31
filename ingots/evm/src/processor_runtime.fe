@@ -12,6 +12,7 @@ use ingot::status::{
     OK,
     VALID,
 }
+use ingot::trace::{Step, Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
 use ingot::vm::FrameBuffers
 
@@ -39,7 +40,8 @@ fn call(to: u256) -> TxEnv {
 
 fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
     var buffers = FrameBuffers::new()
-    transact(world, TxRequest::new(env, data), block, config, mut buffers)
+    var tracer = ()
+    transact(world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
 }
 
 // Initcode that returns `len` zero bytes as the new code: PUSH3 len; PUSH0; RETURN.
@@ -147,13 +149,85 @@ fn simulate_gives_the_receipt_and_keeps_the_state() {
     // SSTORE(0, 1); LOG0(0, 0).
     core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
     var buffers = FrameBuffers::new()
-    let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(), Config::osaka(), mut buffers)
+    var tracer = ()
+    let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+                             Config::osaka(), mut buffers, mut tracer)
     let receipt = simulated.receipt
     core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.logs.len() == 1)
     let state = simulated.state
     core::assert(state.storage_load(0xbb, 0) == 0 && state.nonce(SENDER) == 0)
     core::assert(state.balance(SENDER) == 1_000_000_000_000)
-    let applied = transact(state, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(), Config::osaka(), mut buffers)
+    let applied = transact(state, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+                           Config::osaka(), mut buffers, mut tracer)
     core::assert(applied.receipt.gas_used == receipt.gas_used && applied.receipt.logs.len() == 1)
     core::assert(applied.state.storage_load(0xbb, 0) == 1 && applied.state.nonce(SENDER) == 1)
+}
+
+// A calls B, the identity precompile and the codeless 0xcc, each with
+// CALL(gas, to, 0, 0, 0, 0, 0) and POP, then stops. B is PUSH1 1; STOP.
+fn calling_world() -> WorldState {
+    var world = funded()
+    let a: [u8; 31] = [
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1, 0x50,
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0x04, 0x5a, 0xf1, 0x50,
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xcc, 0x5a, 0xf1, 0x50, 0x00,
+    ]
+    core::assert(world.set_code(address: 0xaa, code: a) == OK)
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x00]) == OK)
+    world
+}
+
+fn traced<T: Tracer>(_ world: own WorldState, nonce: u256, _ tracer: mut T) -> Applied {
+    var env = call(to: 0xaa)
+    env.nonce = nonce
+    var buffers = FrameBuffers::new()
+    transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
+}
+
+#[test]
+fn trace_records_steps_and_calls_in_order() {
+    var none = ()
+    let untraced = traced(calling_world(), nonce: 0, mut none)
+    core::assert(untraced.receipt.status == OK)
+    var trace = Trace::new(steps: true, calls: true)
+    let applied = traced(untraced.state, nonce: 1, mut trace)
+    core::assert(applied.receipt.status == OK && applied.receipt.gas_used == untraced.receipt.gas_used)
+    core::assert(trace.complete)
+    // A runs 28 opcodes and B two.
+    core::assert(trace.step_count() == 30)
+    let first = trace.step(0)
+    core::assert(first.pc == 0 && first.op == 0x5f && first.depth == 0 && first.gas == 100_000 - 21_000)
+    let in_b = trace.step(8)
+    core::assert(in_b.pc == 0 && in_b.op == 0x60 && in_b.depth == 1 && in_b.stack_len == 0)
+    core::assert(trace.step(10).pc == 9 && trace.step(10).op == 0x50 && trace.step(10).depth == 0)
+    // Enter A, then enter and leave B, the precompile and 0xcc, then leave A.
+    core::assert(trace.call_count() == 8)
+    let enter_a = trace.call(0)
+    core::assert(enter_a.enter && enter_a.kind == 0xf1 && enter_a.depth == 0 && enter_a.to == 0xaa && enter_a.steps == 0)
+    let enter_b = trace.call(1)
+    core::assert(enter_b.enter && enter_b.kind == 0xf1 && enter_b.depth == 1 && enter_b.from == 0xaa && enter_b.to == 0xbb)
+    core::assert(enter_b.steps == 8 && trace.call(2).steps == 10 && !trace.call(2).enter && trace.call(2).status == OK)
+    core::assert(trace.call(3).to == 0x04 && trace.call(3).steps == 19 && trace.call(4).steps == 19)
+    core::assert(trace.call(5).to == 0xcc && !trace.call(6).enter)
+    let leave_a = trace.call(7)
+    core::assert(!leave_a.enter && leave_a.depth == 0 && leave_a.steps == 30)
+
+    var calls = Trace::new(steps: false, calls: true)
+    let _ = traced(applied.state, nonce: 2, mut calls)
+    core::assert(calls.step_count() == 0 && calls.call_count() == 8 && calls.call(7).steps == 0)
+}
+
+// Counts the opcodes run at each call depth, and keeps the other hooks' defaults.
+struct DepthCounter { counts: [usize; 2] }
+
+impl Tracer for DepthCounter {
+    fn step(mut self, _ step: Step) { self.counts[step.depth] += 1 }
+}
+
+#[test]
+fn trace_runs_a_custom_tracer() {
+    var counter = DepthCounter { counts: [0, 0] }
+    let applied = traced(calling_world(), nonce: 0, mut counter)
+    core::assert(applied.receipt.status == OK)
+    core::assert(counter.counts[0] == 28 && counter.counts[1] == 2)
 }

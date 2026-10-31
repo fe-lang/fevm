@@ -3,9 +3,10 @@
 // many bytes. native/client/README.md specifies the requests and responses.
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::ptr::offset_bytes
-use ingot::processor::{Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::OK
+use ingot::trace::{Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
 use ingot::vm::FrameBuffers
 
@@ -38,6 +39,8 @@ const NO_SNAPSHOT: u8 = 3
 
 // TRANSACT flags.
 const COMMIT: u8 = 1
+const TRACE_CALLS: u8 = 2
+const TRACE_STEPS: u8 = 4
 
 // Fills `len` bytes at `buf` from stdin; false at the end of input.
 fn read_exact(_ buf: *u8, _ len: usize) -> bool {
@@ -140,7 +143,7 @@ fn status_response(ok: bool) -> Writer {
     Writer::new(if ok { DONE } else { ALLOCATION_FAILED })
 }
 
-fn receipt_response(_ receipt: Receipt) -> Writer {
+fn receipt_response(_ receipt: Receipt, _ trace: Trace) -> Writer {
     var out = Writer::new(DONE)
     out.byte(receipt.invalid.downcast_unchecked())
     out.byte(receipt.status.downcast_unchecked())
@@ -168,6 +171,31 @@ fn receipt_response(_ receipt: Receipt) -> Writer {
         for topic in 0..topics { out.word(entry.topics[topic], bytes: 32) }
         out.span(logs.payload(index))
         index += 1
+    }
+    out.byte(if trace.complete { 1 } else { 0 })
+    out.word(trace.step_count() as u256, bytes: 4)
+    for index in 0..trace.step_count() {
+        let step = trace.step(index)
+        out.word(step.pc as u256, bytes: 4)
+        out.byte(step.op)
+        out.word(step.depth as u256, bytes: 2)
+        out.word(step.gas as u256, bytes: 8)
+        out.word(step.stack_len as u256, bytes: 2)
+        out.word(step.memory_size as u256, bytes: 8)
+    }
+    out.word(trace.call_count() as u256, bytes: 4)
+    for index in 0..trace.call_count() {
+        let event = trace.call(index)
+        out.byte(if event.enter { 1 } else { 0 })
+        out.byte(event.kind)
+        out.word(event.depth as u256, bytes: 2)
+        out.word(event.from, bytes: 20)
+        out.word(event.to, bytes: 20)
+        out.word(event.value, bytes: 32)
+        out.word(event.gas as u256, bytes: 8)
+        out.byte(event.status.downcast_unchecked())
+        out.word(event.steps as u256, bytes: 4)
+        out.span(trace.call_data(index))
     }
     out
 }
@@ -235,6 +263,15 @@ struct Session {
 }
 
 impl Session {
+    fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Applied {
+        let world = core::mem::replace(mut self.world, WorldState::empty())
+        if commit {
+            transact(world, request, self.block, self.config, mut self.buffers, mut tracer)
+        } else {
+            simulate(world, request, self.block, self.config, mut self.buffers, mut tracer)
+        }
+    }
+
     fn handle(mut self, _ reader: mut Reader) -> Writer {
         match reader.byte() {
             CONFIGURE => {
@@ -327,14 +364,16 @@ impl Session {
                     Option::Some(request) => request,
                     Option::None => return Writer::new(ALLOCATION_FAILED),
                 }
-                let world = core::mem::replace(mut self.world, WorldState::empty())
-                let applied = if (flags & COMMIT) != 0 {
-                    transact(world, request, self.block, self.config, mut self.buffers)
+                let commit = (flags & COMMIT) != 0
+                var trace = Trace::new(steps: (flags & TRACE_STEPS) != 0, calls: (flags & TRACE_CALLS) != 0)
+                let applied = if (flags & (TRACE_STEPS | TRACE_CALLS)) == 0 {
+                    var untraced = ()
+                    self.apply(request, commit, mut untraced)
                 } else {
-                    simulate(world, request, self.block, self.config, mut self.buffers)
+                    self.apply(request, commit, mut trace)
                 }
                 self.world = applied.state
-                receipt_response(applied.receipt)
+                receipt_response(applied.receipt, trace)
             },
             SNAPSHOT => {
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }

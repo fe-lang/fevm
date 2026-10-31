@@ -58,7 +58,8 @@ fn set_code(_ world: own WorldState, to: u256, nonce: u256, authorizations: [Aut
     var request = TxRequest::new(env, data: empty_bytes())
     for index in 0..count { core::assert(request.add_authorization(authorizations[index])) }
     var buffers = FrameBuffers::new()
-    transact(world, request, block(), Config::osaka(), mut buffers)
+    var tracer = ()
+    transact(world, request, block(), Config::osaka(), mut buffers, mut tracer)
 }
 
 #[test]
@@ -118,7 +119,9 @@ fn set_code_transactions_need_authorizations_and_a_recipient() {
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_authorization(signed(nonce: 0)))
     var buffers = FrameBuffers::new()
-    core::assert(transact(empty.state, request, block(), Config::osaka(), mut buffers).receipt.invalid == INVALID_CREATE)
+    var tracer = ()
+    core::assert(transact(empty.state, request, block(), Config::osaka(), mut buffers,
+                          mut tracer).receipt.invalid == INVALID_CREATE)
 }
 
 #[test]
@@ -141,7 +144,9 @@ fn delegated_accounts_send_and_calls_run_their_delegates() {
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
     var buffers = FrameBuffers::new()
-    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers)
+    var tracer = ()
+    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(),
+                           Config::osaka(), mut buffers, mut tracer)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
     core::assert(applied.state.storage_load(SIGNER, 0) == 1 && applied.state.storage_load(DELEGATE, 0) == 0)
     // Five PUSH0, PUSH20, GAS, CALL with a cold target and a cold delegate,

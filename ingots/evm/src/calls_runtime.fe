@@ -70,12 +70,14 @@ pub fn call_variants_preserve_environment_and_value() {
         call.origin = 0xcc
         call.callvalue = 9
         var vm = Vm::new()
+        var tracer = ()
         vm.run(
             env_call(op),
             empty_bytes(),
             call,
             default_block_env(),
             mut tx,
+            mut tracer,
         )
         core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 1)
         core::assert(vm.return_data.len() == 128 && vm.memory_size == 128)
@@ -142,12 +144,14 @@ pub fn call_revert_restores_state_and_keeps_output_prefix() {
             0xf1,
         ]
         var vm = Vm::new()
+        var tracer = ()
         vm.run(
             Program::copy_from(ops, len: 20),
             empty_bytes(),
             call,
             default_block_env(),
             mut tx,
+            mut tracer,
         )
         core::assert(vm.status == OK)
         core::assert(vm.stack.len() == 1 && vm.stack[0] == if exit == 0xf3 { 1 } else { 0 })
@@ -187,13 +191,14 @@ pub fn call_empty_and_insufficient_funds_charge_exact_gas() {
         let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x60, value, 0x60, 0xbb, 0x5f, 0xf1]
         let program = Program::copy_from(ops, len: 10)
         var vm = Vm::new()
-        vm.run(program, empty_bytes(), call, default_block_env(), mut tx)
+        var tracer = ()
+        vm.run(program, empty_bytes(), call, default_block_env(), mut tx, mut tracer)
         core::assert(
             vm.status == OK && vm.stack[0] == success && vm.gas_remaining == expected_gas,
         )
         core::assert(vm.return_data.len() == 0 && tx.account_is_warm(0xbb))
         if value == 0 {
-            vm.run(program, empty_bytes(), call, default_block_env(), mut tx)
+            vm.run(program, empty_bytes(), call, default_block_env(), mut tx, mut tracer)
             core::assert(vm.gas_remaining == 999884)
         }
         tx.finish(commit: true, gas_spent: 0)
@@ -210,12 +215,14 @@ pub fn call_static_rules_and_return_data_bounds() {
         call.address = 0xaa
         call.is_static = true
         var vm = Vm::new()
+        var tracer = ()
         vm.run(
             env_call(op),
             empty_bytes(),
             call,
             default_block_env(),
             mut tx,
+            mut tracer,
         )
         core::assert(
             vm.status == if op == 0xf1 { ERR_STATIC_WRITE } else { OK },
@@ -261,12 +268,14 @@ pub fn call_static_rules_and_return_data_bounds() {
             0x3e,
         ]
         var vm = Vm::new()
+        var tracer = ()
         vm.run(
             Program::copy_from(ops, len: 22),
             empty_bytes(),
             default_call_env(),
             default_block_env(),
             mut tx,
+            mut tracer,
         )
         core::assert(
             vm.status == if source == 2 {
@@ -321,12 +330,14 @@ pub fn call_protocol_depth_is_iterative_and_independent_of_checkpoints() {
     call.address = 0xaa
     call.gas_limit = 0xffffffffffffffff
     var vm = Vm::new()
+    var tracer = ()
     vm.run(
         Program::copy_from(ops, len: 24),
         empty_bytes(),
         call,
         default_block_env(),
         mut tx,
+        mut tracer,
     )
     core::assert(vm.status == OK && tx.depth() == 1)
     core::assert(tx.transient_load(address: 0xaa, slot: 0) == 1025)

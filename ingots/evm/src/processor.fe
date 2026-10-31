@@ -5,6 +5,7 @@ use ingot::constants::MAX_U256
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
+use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
 use ingot::vm::{FrameBuffers, Vm, begin_create, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
@@ -324,7 +325,8 @@ fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32
 }
 
 // The top-level message: a creation or a call, each under its own checkpoint.
-fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv) -> ExecutionResult {
+fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv,
+                              _ tracer: mut T) -> ExecutionResult {
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
@@ -336,7 +338,7 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         }
         let program = Program::copy_from(request.data(), len: request.data().len() as usize)
         var vm = Vm::new()
-        vm.create(program, call, block, mut tx)
+        vm.create(program, call, block, mut tx, mut tracer)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return vm.into_result(mut tx.frame_buffers())
     }
@@ -363,7 +365,7 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
         program = if is_precompile(address) { Program::new(empty_bytes()) } else { tx.program(address) }
     }
     var vm = Vm::new()
-    vm.run(program, request.data(), call, block, mut tx)
+    vm.run(program, request.data(), call, block, mut tx, mut tracer)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     vm.into_result(mut tx.frame_buffers())
 }
@@ -372,20 +374,22 @@ fn execute_message(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, b
 /// transactions pay for gas, run their message, refund unused and refunded gas
 /// to the sender, pay the priority fee to the coinbase, and settle deletions.
 /// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
-pub fn transact(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                _ buffers: mut FrameBuffers) -> Applied {
-    apply(world, request, block, config, mut buffers, commit: true)
+/// `tracer` sees each opcode and each call and creation, the transaction's own
+/// message among them; pass `()` to trace nothing.
+pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                           _ buffers: mut FrameBuffers, _ tracer: mut T) -> Applied {
+    apply(world, request, block, config, mut buffers, mut tracer, commit: true)
 }
 
 /// Runs a transaction as `transact` does but keeps none of its changes: the
 /// returned state is the pre-state. The receipt is the one `transact` would give.
-pub fn simulate(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                _ buffers: mut FrameBuffers) -> Applied {
-    apply(world, request, block, config, mut buffers, commit: false)
+pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                           _ buffers: mut FrameBuffers, _ tracer: mut T) -> Applied {
+    apply(world, request, block, config, mut buffers, mut tracer, commit: false)
 }
 
-fn apply(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-         _ buffers: mut FrameBuffers, commit: bool) -> Applied {
+fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                    _ buffers: mut FrameBuffers, _ tracer: mut T, commit: bool) -> Applied {
     let env = request.env
     let invalid = validate(world, request, block, config)
     if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
@@ -402,7 +406,17 @@ fn apply(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ con
         address: target, caller: sender, origin: sender, callvalue: env.value,
         gasprice: price, gas_limit: env.gas_limit - intrinsic.regular.downcast_unchecked(), is_static: false,
     }
-    let result = if prepared == OK { execute_message(mut tx, request, call, block) } else { status_result(prepared) }
+    let result = if prepared == OK {
+        // The transaction's own message is a call or creation at depth zero.
+        tracer.enter(CallStart { kind: if env.creates { 0xf0 } else { 0xf1 }, depth: 0, from: sender, to: target,
+                                 value: env.value, gas: call.gas_limit }, input: request.data().bytes())
+        let result = execute_message(mut tx, request, call, block, mut tracer)
+        tracer.leave(CallEnd { depth: 0, status: result.status, gas: result.gas_remaining },
+                     output: result.output.span())
+        result
+    } else {
+        status_result(prepared)
+    }
     tx.swap_frame_buffers(mut buffers)
     if !is_evm_outcome(result.status) {
         return host_failure(tx, status: result.status)

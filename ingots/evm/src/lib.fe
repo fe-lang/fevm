@@ -4,6 +4,7 @@ pub use hex::{self, parse_hex_program}
 pub use logs::{LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
+pub use trace::{CallEvent, Step, Trace}
 pub use types::{
     BlockEnv,
     InputData,

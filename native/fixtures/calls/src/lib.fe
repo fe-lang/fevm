@@ -18,7 +18,8 @@ pub fn main() -> i32 {
     call.address = 0xaa
     let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1]
     var vm = Vm::new()
-    vm.run(Program::copy_from(ops, len: 9), empty_bytes(), call, default_block_env(), mut tx)
+    var tracer = ()
+    vm.run(Program::copy_from(ops, len: 9), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
     let completed = vm.status == OK
     core::assert(completed || vm.status == ERR_HOST_ALLOCATION)
     core::assert(!completed || (vm.stack.len() == 1 && vm.stack[0] == 1))
