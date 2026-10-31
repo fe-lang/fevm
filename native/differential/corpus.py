@@ -1,4 +1,4 @@
-"""Deterministic, terminating Osaka frames for the first interpreter slice."""
+"""Deterministic, terminating Osaka frames to compare against revm."""
 import random
 
 MASK = (1 << 256) - 1

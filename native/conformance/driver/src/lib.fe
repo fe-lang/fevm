@@ -159,8 +159,8 @@ fn write_number(_ value: u64) uses (w: mut Write) {
     }
 }
 
-fn capacity_failure() -> i32 {
-    with (Write = host()) { write("{\"host_error\":\"pre-state exceeds table capacity\"}\n") }
+fn allocation_failure() -> i32 {
+    with (Write = host()) { write("{\"host_error\":\"pre-state allocation failed\"}\n") }
     3
 }
 
@@ -229,14 +229,14 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
             let loaded = world.ensure_account(address) && world.set_balance(address, balance)
                 && world.set_nonce(address, nonce) && world.set_code(address, code) == OK
             if !loaded {
-                return capacity_failure()
+                return allocation_failure()
             }
             var slots = reader.count()
             while slots > 0 {
                 let slot = reader.word(bytes: 32)
                 let value = reader.word(bytes: 32)
                 if !world.storage_store(address, slot, value) {
-                    return capacity_failure()
+                    return allocation_failure()
                 }
                 slots -= 1
             }

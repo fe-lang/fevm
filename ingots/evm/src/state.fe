@@ -200,8 +200,8 @@ impl WorldState {
         let jumpdests = self.code.slice(offset: offset + len, len: jumpdest_map_len(len))
         Program::analyzed(self.code.slice(offset, len), jumpdests)
     }
-    // Host-side database initialization. Execution cannot mutate code until
-    // CREATE's account lifecycle and code-deposit rules are implemented.
+    // Copies `code` into the arena with its jump-destination map and hash. Hosts
+    // set up accounts with it; code deposits and EIP-7702 delegations use it too.
     pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
         let address = address_word(address)
         let previous = self.accounts.get(address)
