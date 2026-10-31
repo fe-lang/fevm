@@ -1,29 +1,20 @@
 use ingot::transaction::Transaction
 use std::io::{Write, host, write, write_char, writeln}
 use std::native::Args
-use ingot::constants::{
-    ERR_BAD_HEX,
-    ERR_INVALID_JUMP,
-    ERR_INVALID_OPCODE,
-    ERR_OUT_OF_GAS,
-    ERR_HOST_ALLOCATION,
-    ERR_ODD_HEX,
-    ERR_RETURN_DATA_OOB,
-    ERR_REVERT,
-    ERR_STACK_OVERFLOW,
-    ERR_STACK_UNDERFLOW,
-    ERR_USAGE,
-    OK,
-}
 use ingot::hex::{
+    ERR_BAD_HEX,
+    ERR_ODD_HEX,
     parse_hex_bytes,
     parse_hex_program,
     write_hex_bytes,
     write_hex_u256,
 }
 use ingot::state::WorldState
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_REVERT, OK, write_status_name}
 use ingot::types::{default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute_vm}
+
+const ERR_USAGE: i32 = 2
 
 fn usage() -> i32 uses (w: mut Write) {
     writeln("usage: fevm <hex-bytecode> [hex-calldata]")
@@ -40,19 +31,12 @@ fn write_parse_error(_ status: i32) uses (w: mut Write) {
 }
 
 fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
-    match vm.status {
-        ERR_STACK_UNDERFLOW => writeln("stack underflow"),
-        ERR_STACK_OVERFLOW => writeln("stack overflow"),
-        ERR_HOST_ALLOCATION => writeln("host allocation failed"),
-        ERR_OUT_OF_GAS => writeln("out of gas"),
-        ERR_INVALID_JUMP => writeln("invalid jump destination"),
-        ERR_INVALID_OPCODE => writeln("invalid opcode"),
-        ERR_RETURN_DATA_OOB => writeln("return data out of bounds"),
-        ERR_REVERT => {
-            write("revert ")
-            write_hex_bytes(vm.output)
-        },
-        _ => writeln("execution failed"),
+    write_status_name(vm.status)
+    if vm.status == ERR_REVERT {
+        write(" ")
+        write_hex_bytes(vm.output)
+    } else {
+        write_char(10)
     }
 }
 
@@ -75,15 +59,13 @@ pub fn run(_ args: Args) -> i32 {
         let program = parse_hex_program(args.get(1))
         if program.status != OK {
             write_parse_error(program.status)
-            let status = program.status
-            return status
+            return program.status
         }
 
         let calldata = if args.len() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
         if calldata.status != OK {
             write_parse_error(calldata.status)
-            let status = calldata.status
-            return status
+            return calldata.status
         }
 
         var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
@@ -97,8 +79,7 @@ pub fn run(_ args: Args) -> i32 {
         state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining)
         if vm.status != OK {
             write_vm_error(vm)
-            let status = vm.status
-            return status
+            return vm.status
         }
 
         write_result(vm)

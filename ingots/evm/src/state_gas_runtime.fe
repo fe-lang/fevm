@@ -1,4 +1,4 @@
-use ingot::constants::{ERR_OUT_OF_GAS, ERR_REVERT, OK}
+use ingot::status::{ERR_OUT_OF_GAS, ERR_REVERT, OK}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::transaction_runtime::{checkpoint, program}

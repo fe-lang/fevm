@@ -1,7 +1,7 @@
 use core::MemBuffer
 use std::native::Args
 use fevm::{Checkpoint, Transaction, WorldState, OK}
-use fevm::constants::ERR_HOST_ALLOCATION
+use fevm::status::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
     tx.checkpoint(is_static: false)

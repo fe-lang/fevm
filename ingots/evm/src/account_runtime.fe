@@ -1,5 +1,5 @@
 use keccak::ByteSource
-use ingot::constants::{ERR_HOST_ALLOCATION, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::state::{EMPTY_CODE_HASH, WorldState}
 use ingot::transaction::Transaction
 use ingot::transaction_runtime::checkpoint

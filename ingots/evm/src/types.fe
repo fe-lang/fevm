@@ -1,6 +1,6 @@
 use core::{MemBuffer, MemSpan, Option}
 use keccak::ByteSource
-use ingot::constants::{ERR_HOST_ALLOCATION, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, OK}
 
 // Zero bytes after the code: execution that runs off the end reads STOP, and
 // a PUSH32 at the last byte reads its zero-padded immediate in one word, so

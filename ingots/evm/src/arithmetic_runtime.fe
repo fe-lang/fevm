@@ -1,4 +1,4 @@
-use ingot::constants::{ERR_OUT_OF_GAS, OK}
+use ingot::status::{ERR_OUT_OF_GAS, OK}
 use ingot::{Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
 
 // PUSH32 `value`, CLZ: 3 + 5 gas.

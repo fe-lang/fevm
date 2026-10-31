@@ -1,5 +1,5 @@
 use core::MemBuffer
-use ingot::constants::{ERR_RETURN_DATA_OOB, ERR_STATIC_WRITE, OK}
+use ingot::status::{ERR_RETURN_DATA_OOB, ERR_STATIC_WRITE, OK}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}

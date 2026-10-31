@@ -1,5 +1,5 @@
 use core::MemBuffer
-use ingot::constants::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
 use ingot::{InputData, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::Vm
 

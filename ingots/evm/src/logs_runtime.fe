@@ -1,6 +1,6 @@
 use core::MemBuffer
 use ingot::{LogBuffer, OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
-use ingot::constants::{ERR_OUT_OF_GAS, ERR_STATIC_WRITE}
+use ingot::status::{ERR_OUT_OF_GAS, ERR_STATIC_WRITE}
 use ingot::transaction_runtime::{checkpoint, program}
 use ingot::vm::Vm
 

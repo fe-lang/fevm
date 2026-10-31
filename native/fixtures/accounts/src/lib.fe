@@ -1,6 +1,6 @@
 use keccak::ByteSource
 use fevm::{WorldState, OK}
-use fevm::constants::ERR_HOST_ALLOCATION
+use fevm::status::ERR_HOST_ALLOCATION
 
 struct LargeCode {}
 impl ByteSource for LargeCode {

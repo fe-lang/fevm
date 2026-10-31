@@ -1,9 +1,7 @@
 use core::Option
-use ingot::constants::{ERR_REVERT, OK}
-use ingot::processor::{
-    Applied, Authorization, INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest,
-    VALID, transact,
-}
+use ingot::status::{ERR_REVERT, OK}
+use ingot::processor::{Applied, Authorization, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest, transact}
+use ingot::status::{INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, VALID}
 use ingot::state::{WorldState, designator}
 use ingot::types::{BlockEnv, default_block_env, empty_bytes}
 use ingot::vm::FrameBuffers

@@ -1,7 +1,7 @@
 use core::{MemSpan, MemVec, Option}
 use ingot::logs::LogBuffer
 use swisstable::SwissTable
-use ingot::constants::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
 use ingot::state::{StorageKey, WorldState, address_word, designator}
 use ingot::types::Program

@@ -1,5 +1,5 @@
 use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
-use ingot::constants::{ERR_OUT_OF_GAS, ERR_STACK_UNDERFLOW}
+use ingot::status::{ERR_OUT_OF_GAS, ERR_STACK_UNDERFLOW}
 use ingot::vm::Vm
 
 #[test]

@@ -1,5 +1,5 @@
 use std::native::Args
-pub use constants::{ERR_REVERT, OK}
+pub use status::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
 pub use logs::{LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}

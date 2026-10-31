@@ -30,8 +30,8 @@ CASES = [
     ('large-calldata-size', ['36', 'ab' * 9001], 0, f'0x{9001:064x}\n'),
     ('bad-hex', ['zz'], 3, 'invalid hex bytecode\n'),
     ('odd-hex', ['0'], 4, 'hex bytecode has an odd number of digits\n'),
-    ('stack-underflow', ['01'], 10, 'stack underflow\n'),
-    ('invalid', ['fe'], 17, 'invalid opcode\n'),
+    ('stack-underflow', ['01'], 10, 'stack_underflow\n'),
+    ('invalid', ['fe'], 17, 'invalid_opcode\n'),
     ('revert', ['60006000fd'], 19, 'revert 0x\n'),
 ]
 
@@ -89,7 +89,7 @@ def main():
             result = subprocess.run([str(controlled), '620100015ff3'],
                                     capture_output=True, timeout=60)
             expected_status = 21 if failure_at else 0
-            expected_output = b'host allocation failed\n' if failure_at else b'0x' + b'00' * 65537 + b'\n'
+            expected_output = b'host_allocation\n' if failure_at else b'0x' + b'00' * 65537 + b'\n'
             passed = (result.returncode == expected_status and result.stdout == expected_output
                       and not result.stderr)
             row['checks'].append({'name': name, 'passed': passed, 'status': result.returncode,
@@ -174,7 +174,7 @@ def main():
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
                      ROOT / 'native/fixtures/vm_allocator.c', folder / 'fevm.o', '-o', controlled])
             result = subprocess.run([str(controlled), '620100015fa0'], capture_output=True, timeout=60)
-            expected = b'host allocation failed\n' if failure_at else b'empty\n'
+            expected = b'host_allocation\n' if failure_at else b'empty\n'
             passed = result.returncode == (21 if failure_at else 0) and result.stdout == expected and not result.stderr
             row['checks'].append({'name': f'log-data-allocator-{failure_at}', 'passed': passed,
                                   'status': result.returncode, 'stdout': result.stdout.decode(errors='replace'),

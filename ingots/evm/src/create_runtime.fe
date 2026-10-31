@@ -1,11 +1,9 @@
 use core::{MemBuffer, Option}
 use keccak::keccak256_word
 use ingot::address::{create_address, create2_address}
-use ingot::constants::{ERR_PRECOMPILE, OK}
-use ingot::processor::{
-    Applied, INVALID_BLOB_COUNT, INVALID_CHAIN_ID, INVALID_GAS_LIMIT_CAP, INVALID_INTRINSIC_GAS, INVALID_NONCE, INVALID_TX_TYPE,
-    TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, VALID, transact,
-}
+use ingot::status::{ERR_PRECOMPILE, OK}
+use ingot::processor::{Applied, TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, transact}
+use ingot::status::{INVALID_BLOB_COUNT, INVALID_CHAIN_ID, INVALID_GAS_LIMIT_CAP, INVALID_INTRINSIC_GAS, INVALID_NONCE, INVALID_TX_TYPE, VALID}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, InputData, Program, default_block_env, default_call_env, empty_bytes}

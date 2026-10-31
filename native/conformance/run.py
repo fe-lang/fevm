@@ -17,12 +17,6 @@ ROOT = HERE.parent.parent
 FORK = 'Osaka'
 # BPO2's, for fixtures without a blob schedule.
 BLOB_BASE_FEE_UPDATE_FRACTION = 11684671
-# Execution statuses defined by the EVM (see ingots/evm/src/constants.fe);
-# every other driver status is a host failure.
-EVM_STATUSES = {0: 'success', 19: 'revert', 10: 'stack_underflow', 11: 'stack_overflow',
-                15: 'out_of_gas', 16: 'invalid_jump', 17: 'invalid_opcode', 18: 'return_data_oob',
-                23: 'static_write', 24: 'code_prefix', 25: 'precompile_failure', 27: 'address_collision'}
-HOST_STATUSES = {21: 'host_allocation', 26: 'balance_overflow'}
 # FeVM takes a transaction's recovered sender; rejecting a malformed signature
 # belongs to the host that decodes the signed transaction.
 SIGNATURE_EXCEPTION = 'TransactionException.INVALID_SIGNATURE_VRS'
@@ -177,18 +171,18 @@ def check(executable, case, timeout):
     if observed.returncode:
         return 'crash', [f'exit status {observed.returncode}'], seconds
     status = result['status']
-    if result['invalid'] == 0 and status not in EVM_STATUSES:
-        return 'host_error', [HOST_STATUSES.get(status, f'status {status}')], seconds
+    if result['host_failure']:
+        return 'host_error', [status], seconds
     problems = []
     expect_invalid = 'expectException' in post
-    if expect_invalid != (result['invalid'] != 0):
+    if expect_invalid != (result['invalid'] is not None):
         problems.append(f'expected {"invalid (" + post["expectException"] + ")" if expect_invalid else "valid"}, '
-                        f'got {"invalid " + str(result["invalid"]) if result["invalid"] else "valid"}')
+                        f'got {"invalid " + result["invalid"] if result["invalid"] else "valid"}')
     if result['logs_hash'] != f'0x{number(post["logs"]):064x}':
         problems.append(f'logs hash {result["logs_hash"]} != {post["logs"]}')
     problems += state_difference(expected_state(post['state']), observed_state(result))
     if problems:
-        problems.insert(0, f'execution status {EVM_STATUSES.get(status, status)}, gas used {result["gas_used"]}')
+        problems.insert(0, f'execution status {status}, gas used {result["gas_used"]}')
         return 'failed', problems, seconds
     return 'passed', [], seconds
 

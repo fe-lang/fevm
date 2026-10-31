@@ -1,8 +1,12 @@
 use core::{MemBuffer, Option}
 use std::io::{Write, write, write_char}
 use std::native::Arg
-use ingot::constants::{ERR_BAD_HEX, ERR_HOST_ALLOCATION, ERR_ODD_HEX, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::types::{InputData, Program}
+
+// Parse failures.
+pub const ERR_BAD_HEX: i32 = 3
+pub const ERR_ODD_HEX: i32 = 4
 
 fn hex_digit(_ value: u8) -> i32 {
     if value < 10 {

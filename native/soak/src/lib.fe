@@ -1,7 +1,8 @@
 use core::Option
 use std::native::Args
 use fevm::{FrameBuffers, OK, WorldState, default_block_env, empty_bytes}
-use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, VALID, transact}
+use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, transact}
+use fevm::status::VALID
 
 // Runs the given number of transactions against one world in one process.
 // Contract A expands its memory to 32 KiB, logs a word, sets and clears a slot,

@@ -30,7 +30,7 @@ def cases(benchmarks, fork, selection):
 
 def outcome(command, payload, statuses):
     """The outcome one run of `command` reports for `payload`, comparable across
-    drivers; `statuses` maps FeVM's numeric statuses to revm's names."""
+    drivers; `statuses` reduces FeVM's status names to revm's success, revert or halt."""
     process = subprocess.run(command, input=payload, capture_output=True)
     assert process.returncode == 0, (command, process.returncode, process.stderr.decode(errors='replace')[-2000:])
     result = json.loads(process.stdout)
@@ -38,7 +38,7 @@ def outcome(command, payload, statuses):
         return {'invalid': True}
     status = result['status']
     if statuses:
-        status = 'success' if status == 0 else 'revert' if status == 19 else 'halt'
+        status = status if status in ('success', 'revert') else 'halt'
     return {'invalid': False, 'status': status.split()[0], 'gas_used': result['gas_used'],
             'logs_hash': result['logs_hash']}
 

@@ -1,0 +1,109 @@
+// Execution statuses and transaction validity codes, with their names.
+use std::io::{Write, write}
+
+// Outcomes defined by the EVM.
+pub const OK: i32 = 0
+pub const ERR_REVERT: i32 = 19
+
+// Exceptional halts, which consume all of a frame's gas.
+pub const ERR_STACK_UNDERFLOW: i32 = 10
+pub const ERR_STACK_OVERFLOW: i32 = 11
+pub const ERR_OUT_OF_GAS: i32 = 15
+pub const ERR_INVALID_JUMP: i32 = 16
+pub const ERR_INVALID_OPCODE: i32 = 17
+pub const ERR_RETURN_DATA_OOB: i32 = 18
+pub const ERR_STATIC_WRITE: i32 = 23
+// EIP-3541: deployed code may not start with 0xEF.
+pub const ERR_CODE_PREFIX: i32 = 24
+// A precompile rejected its input or ran out of gas.
+pub const ERR_PRECOMPILE: i32 = 25
+// EIP-684/EIP-7610: a creation transaction targets an account with code, a
+// nonce or storage.
+pub const ERR_ADDRESS_COLLISION: i32 = 27
+
+// Host failures. They abort the transaction and leave the pre-state; EVM code
+// never sees them.
+pub const ERR_HOST_ALLOCATION: i32 = 21
+// A transfer would overflow a 256-bit balance.
+pub const ERR_BALANCE_OVERFLOW: i32 = 26
+
+pub fn exceptional(_ status: i32) -> bool {
+    status == ERR_STACK_UNDERFLOW || status == ERR_STACK_OVERFLOW
+        || status == ERR_INVALID_JUMP || status == ERR_INVALID_OPCODE
+        || status == ERR_RETURN_DATA_OOB || status == ERR_STATIC_WRITE
+        || status == ERR_OUT_OF_GAS || status == ERR_CODE_PREFIX || status == ERR_PRECOMPILE
+        || status == ERR_ADDRESS_COLLISION
+}
+
+/// Outcomes defined by the EVM: success, revert and exceptional halts. Every
+/// other status is a host failure that aborts the whole execution.
+pub fn is_evm_outcome(_ status: i32) -> bool {
+    status == OK || status == ERR_REVERT || exceptional(status)
+}
+
+pub fn write_status_name(_ status: i32) uses (w: mut Write) {
+    match status {
+        OK => write("success"),
+        ERR_REVERT => write("revert"),
+        ERR_STACK_UNDERFLOW => write("stack_underflow"),
+        ERR_STACK_OVERFLOW => write("stack_overflow"),
+        ERR_OUT_OF_GAS => write("out_of_gas"),
+        ERR_INVALID_JUMP => write("invalid_jump"),
+        ERR_INVALID_OPCODE => write("invalid_opcode"),
+        ERR_RETURN_DATA_OOB => write("return_data_oob"),
+        ERR_STATIC_WRITE => write("static_write"),
+        ERR_CODE_PREFIX => write("code_prefix"),
+        ERR_PRECOMPILE => write("precompile_failure"),
+        ERR_ADDRESS_COLLISION => write("address_collision"),
+        ERR_HOST_ALLOCATION => write("host_allocation"),
+        ERR_BALANCE_OVERFLOW => write("balance_overflow"),
+        _ => write("unknown"),
+    }
+}
+
+// Reasons a transaction is not includable. Invalid transactions leave the
+// state untouched.
+pub const VALID: i32 = 0
+pub const INVALID_INTRINSIC_GAS: i32 = 1
+pub const INVALID_INITCODE_SIZE: i32 = 2
+pub const INVALID_NONCE_LIMIT: i32 = 3
+pub const INVALID_PRIORITY_FEE: i32 = 4
+pub const INVALID_GAS_LIMIT: i32 = 5
+pub const INVALID_BLOB_COUNT: i32 = 6
+pub const INVALID_FEE_CAP: i32 = 7
+pub const INVALID_CREATE: i32 = 8
+pub const INVALID_NO_BLOBS: i32 = 9
+pub const INVALID_BLOB_VERSION: i32 = 10
+pub const INVALID_BLOB_FEE_CAP: i32 = 11
+pub const INVALID_NONCE: i32 = 12
+pub const INVALID_BALANCE: i32 = 13
+pub const INVALID_SENDER_CODE: i32 = 14
+pub const INVALID_TX_TYPE: i32 = 15
+pub const INVALID_GAS_LIMIT_CAP: i32 = 16
+pub const INVALID_CHAIN_ID: i32 = 17
+pub const INVALID_NO_AUTHORIZATIONS: i32 = 18
+
+pub fn write_invalid_name(_ invalid: i32) uses (w: mut Write) {
+    match invalid {
+        VALID => write("valid"),
+        INVALID_INTRINSIC_GAS => write("intrinsic_gas"),
+        INVALID_INITCODE_SIZE => write("initcode_size"),
+        INVALID_NONCE_LIMIT => write("nonce_limit"),
+        INVALID_PRIORITY_FEE => write("priority_fee"),
+        INVALID_GAS_LIMIT => write("gas_limit"),
+        INVALID_BLOB_COUNT => write("blob_count"),
+        INVALID_FEE_CAP => write("fee_cap"),
+        INVALID_CREATE => write("create"),
+        INVALID_NO_BLOBS => write("no_blobs"),
+        INVALID_BLOB_VERSION => write("blob_version"),
+        INVALID_BLOB_FEE_CAP => write("blob_fee_cap"),
+        INVALID_NONCE => write("nonce"),
+        INVALID_BALANCE => write("balance"),
+        INVALID_SENDER_CODE => write("sender_code"),
+        INVALID_TX_TYPE => write("tx_type"),
+        INVALID_GAS_LIMIT_CAP => write("gas_limit_cap"),
+        INVALID_CHAIN_ID => write("chain_id"),
+        INVALID_NO_AUTHORIZATIONS => write("no_authorizations"),
+        _ => write("unknown"),
+    }
+}

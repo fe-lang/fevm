@@ -1,5 +1,5 @@
 use ingot::transaction::Transaction
-use ingot::constants::{ERR_OUT_OF_GAS, OK}
+use ingot::status::{ERR_OUT_OF_GAS, OK}
 use ingot::state::WorldState
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute, execute_vm}

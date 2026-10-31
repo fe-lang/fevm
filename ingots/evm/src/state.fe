@@ -2,7 +2,7 @@ use core::{MemBuffer, MemSpan, Option}
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 use keccak::{ByteSource, keccak256_word}
-use ingot::constants::{ERR_HOST_ALLOCATION, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470

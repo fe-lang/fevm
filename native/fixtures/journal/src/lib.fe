@@ -1,5 +1,5 @@
 use fevm::{Checkpoint, Transaction, WorldState, OK}
-use fevm::constants::ERR_HOST_ALLOCATION
+use fevm::status::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
     transaction.checkpoint(is_static: false)

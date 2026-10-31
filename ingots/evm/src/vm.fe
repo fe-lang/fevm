@@ -10,27 +10,28 @@ use ingot::state::{address_word, delegation}
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
-use ingot::constants::{
+use ingot::constants::{I256_MIN, STACK_LIMIT}
+use ingot::address::{create_address, create2_address}
+use ingot::transaction::{Checkpoint, Transaction}
+use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
+use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
+use ingot::status::{
     ERR_BALANCE_OVERFLOW,
     ERR_CODE_PREFIX,
-    ERR_PRECOMPILE,
+    ERR_HOST_ALLOCATION,
     ERR_INVALID_JUMP,
     ERR_INVALID_OPCODE,
     ERR_OUT_OF_GAS,
-    ERR_HOST_ALLOCATION,
+    ERR_PRECOMPILE,
     ERR_RETURN_DATA_OOB,
     ERR_REVERT,
     ERR_STACK_OVERFLOW,
     ERR_STACK_UNDERFLOW,
     ERR_STATIC_WRITE,
-    I256_MIN,
     OK,
-    STACK_LIMIT,
+    exceptional,
+    is_evm_outcome,
 }
-use ingot::address::{create_address, create2_address}
-use ingot::transaction::{Checkpoint, Transaction}
-use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
-use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 
 // Charges `cost` against `gas`, or fails without charging.
 #[inline(always)]
@@ -844,13 +845,6 @@ fn frame_allocation(_ buffers: mut FrameBuffers) -> Option<Box<Frame>> {
     }
 }
 
-fn exceptional(_ status: i32) -> bool {
-    status == ERR_STACK_UNDERFLOW || status == ERR_STACK_OVERFLOW
-        || status == ERR_INVALID_JUMP || status == ERR_INVALID_OPCODE
-        || status == ERR_RETURN_DATA_OOB || status == ERR_STATIC_WRITE
-        || status == ERR_OUT_OF_GAS || status == ERR_CODE_PREFIX || status == ERR_PRECOMPILE
-}
-
 /// Move ether as the specification's move_ether, writing (and touching) both
 /// accounts even for a self-transfer. The sender must hold `value`.
 pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
@@ -896,12 +890,6 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
         stack_len: 0,
         unsupported_opcode: 0,
     }
-}
-
-/// Outcomes defined by the EVM: success, revert and exceptional halts. Every
-/// other status is a host failure that aborts the whole execution.
-pub fn is_evm_outcome(_ status: i32) -> bool {
-    status == OK || status == ERR_REVERT || exceptional(status)
 }
 
 /// A result without output or remaining gas, for messages that never run code.
