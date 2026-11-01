@@ -1,3 +1,4 @@
+use core::num::swap_bytes
 use core::ops::WrappingAdd
 use keccak::ByteSource
 
@@ -59,35 +60,31 @@ fn rotate_left(_ value: u32, by: u32) -> u32 {
 
 // Both hashes consume 64-byte blocks followed by 0x80, zero padding and a
 // 64-bit bit count; SHA-256 stores the count big endian, RIPEMD-160 little endian.
-fn padded_block<T: ByteSource>(_ input: T, block_index: u64, blocks: u64, big_endian: bool) -> [u8; 64] {
+fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_index: usize, blocks: usize,
+                                big_endian: bool) -> [u8; 64] {
     var block: [u8; 64] = [0; 64]
-    let len = input.len()
     let start = block_index * 64
-    var i: u64 = 0
-    while i < 64 {
+    for i in 0..64 {
         let position = start + i
         if position < len {
-            block[i as usize] = input.byte_at(position)
+            block[i] = input.byte_at(offset + position)
         } else if position == len {
-            block[i as usize] = 0x80
+            block[i] = 0x80
         }
-        i += 1
     }
     if block_index == blocks - 1 {
         // Inputs are bounded by host memory, so the bit count fits 64 bits.
-        let bits = len * 8
-        i = 0
-        while i < 8 {
-            let shift = if big_endian { (7 - i) * 8 } else { i * 8 }
-            block[(56 + i) as usize] = (bits >> shift).downcast_truncate()
-            i += 1
+        let bits: u64 = (len * 8).downcast_unchecked()
+        for i in 0..8 {
+            let shift: u64 = (if big_endian { (7 - i) * 8 } else { i * 8 }).downcast_unchecked()
+            block[56 + i] = (bits >> shift).downcast_truncate()
         }
     }
     block
 }
 
 // One length byte (0x80) and eight count bytes follow the message.
-fn padded_blocks(_ len: u64) -> u64 { (len + 9 + 63) / 64 }
+fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
 
 fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     var w: [u32; 64] = [0; 64]
@@ -142,21 +139,15 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     state[7] = state[7].wrapping_add(h)
 }
 
-pub fn sha256<T: ByteSource>(_ input: T) -> [u8; 32] {
+/// The SHA-256 digest of `len` bytes of `input` from `offset`, as a big-endian word.
+pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> u256 {
     var state = SHA256_IV
-    let blocks = padded_blocks(input.len())
-    var index: u64 = 0
-    while index < blocks {
-        sha256_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: true))
-        index += 1
+    let blocks = padded_blocks(len)
+    for index in 0..blocks {
+        sha256_compress(mut state, padded_block(input, offset, len, block_index: index, blocks, big_endian: true))
     }
-    var digest: [u8; 32] = [0; 32]
-    var i: u64 = 0
-    while i < 32 {
-        let shift: u32 = ((3 - i % 4) * 8).downcast_unchecked()
-        digest[i as usize] = (state[(i / 4) as usize] >> shift).downcast_truncate()
-        i += 1
-    }
+    var digest: u256 = 0
+    for word in state { digest = (digest << 32) | word as u256 }
     digest
 }
 
@@ -218,20 +209,15 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
     state[0] = t
 }
 
-pub fn ripemd160<T: ByteSource>(_ input: T) -> [u8; 20] {
+/// The RIPEMD-160 digest of `input`, as a big-endian 160-bit word.
+pub fn ripemd160<T: ByteSource>(_ input: T) -> u256 {
     var state = RIPEMD_IV
     let blocks = padded_blocks(input.len())
-    var index: u64 = 0
-    while index < blocks {
-        ripemd_compress(mut state, padded_block(input, block_index: index, blocks, big_endian: false))
-        index += 1
+    for index in 0..blocks {
+        ripemd_compress(mut state, padded_block(input, offset: 0, len: input.len(), block_index: index, blocks, big_endian: false))
     }
-    var digest: [u8; 20] = [0; 20]
-    var i: u64 = 0
-    while i < 20 {
-        let shift: u32 = ((i % 4) * 8).downcast_unchecked()
-        digest[i as usize] = (state[(i / 4) as usize] >> shift).downcast_truncate()
-        i += 1
-    }
+    // Each state word holds its four digest bytes little-endian.
+    var digest: u256 = 0
+    for word in state { digest = (digest << 32) | swap_bytes(word) as u256 }
     digest
 }

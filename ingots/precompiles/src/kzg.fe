@@ -7,7 +7,7 @@ use ingot::bls_tower::Fp2
 use ingot::hashes::sha256
 
 /// EIP-4844 point evaluation input: versioned hash, z, y, commitment, proof.
-pub const INPUT_LEN: u64 = 192
+pub const INPUT_LEN: usize = 192
 pub const GAS: u64 = 50000
 pub const FIELD_ELEMENTS_PER_BLOB: u256 = 4096
 /// The BLS12-381 scalar field order, BLS_MODULUS in EIP-4844.
@@ -22,19 +22,15 @@ const TAU_G2_X1: [u64; 6] = [0x11a3670749dfd455, 0x04991d7b3abffadc, 0x85446a8e1
 const TAU_G2_Y0: [u64; 6] = [0xaa130838793b2317, 0xe236dd220f891637, 0x6502782925760980, 0xd05c25f60557ec89, 0x6095767a44064474, 0x185693917080d405]
 const TAU_G2_Y1: [u64; 6] = [0x549f9e175b03dc0a, 0x32c0c95a77106cfe, 0x64a74eae5705d080, 0x53deeaf56659ed9e, 0x09a1d368508afb93, 0x12cf3a4525b5e9bd]
 
-fn word<T: ByteSource>(_ source: T, offset: u64) -> u256 {
+fn word<T: ByteSource>(_ source: T, offset: usize) -> u256 {
     var value: u256 = 0
-    var i: u64 = 0
-    while i < 32 {
-        value = (value << 8) | source.byte_at(offset + i) as u256
-        i += 1
-    }
+    for i in 0..32 { value = (value << 8) | source.byte_at(offset + i) as u256 }
     value
 }
 
 /// KZG commitments and proofs: the encoded identity, or a valid compressed
 /// point in the prime-order subgroup (validate_kzg_g1 and KeyValidate).
-pub fn decode_kzg_g1<T: ByteSource>(_ source: T, offset: u64) -> Option<Affine<Fp>> {
+pub fn decode_kzg_g1<T: ByteSource>(_ source: T, offset: usize) -> Option<Affine<Fp>> {
     let point = match decompress_g1(source, offset) {
         Option::Some(point) => point,
         Option::None => return Option::None,
@@ -56,19 +52,9 @@ fn tau_g2() -> Point<Fp2> {
 /// precompile input; the versioned hash must match the commitment.
 pub fn verify<T: ByteSource>(_ input: T) -> bool {
     core::assert(input.len() == INPUT_LEN)
-    var commitment_bytes: [u8; 48] = [0; 48]
-    var i: u64 = 0
-    while i < 48 {
-        commitment_bytes[i as usize] = input.byte_at(96 + i)
-        i += 1
-    }
-    let digest = sha256(commitment_bytes)
-    if input.byte_at(0) != 0x01 { return false }
-    i = 1
-    while i < 32 {
-        if input.byte_at(i) != digest[i as usize] { return false }
-        i += 1
-    }
+    // The versioned hash is 0x01 followed by the commitment digest's last 31 bytes.
+    let versioned = (1 << 248) | (sha256(input, offset: 96, len: 48) & ((1 << 248) - 1))
+    if word(input, offset: 0) != versioned { return false }
     let z = word(input, offset: 32)
     let y = word(input, offset: 64)
     if z >= BLS_MODULUS || y >= BLS_MODULUS { return false }

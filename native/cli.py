@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and smoke-test the native FeVM CLI; this is not Cancun conformance."""
+"""Build and smoke-test the native FeVM CLI; this is not conformance."""
 import argparse
 import hashlib
 import json
@@ -11,10 +11,10 @@ import time
 from arith.run import artifacts, command
 
 ROOT = Path(__file__).resolve().parent.parent
-# The bytes of a boxed child `Frame` (packed, with the stack on the heap).
-FRAME_BOX_SIZE = 477
+# The bytes of a boxed child `Frame` (with the stack on the heap).
+FRAME_BOX_SIZE = 576
 CASES = [
-    ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata]\n'),
+    ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n'),
     ('empty', [''], 0, 'empty\n'),
     ('stop', ['00'], 0, 'empty\n'),
     ('keccak-empty', ['5f5f20'], 0, '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n'),
@@ -30,8 +30,8 @@ CASES = [
     ('large-calldata-size', ['36', 'ab' * 9001], 0, f'0x{9001:064x}\n'),
     ('bad-hex', ['zz'], 3, 'invalid hex bytecode\n'),
     ('odd-hex', ['0'], 4, 'hex bytecode has an odd number of digits\n'),
-    ('stack-underflow', ['01'], 10, 'stack underflow\n'),
-    ('invalid', ['fe'], 17, 'invalid opcode\n'),
+    ('stack-underflow', ['01'], 10, 'stack_underflow\n'),
+    ('invalid', ['fe'], 17, 'invalid_opcode\n'),
     ('revert', ['60006000fd'], 19, 'revert 0x\n'),
 ]
 
@@ -48,7 +48,7 @@ def main():
     compiler = args.fe.resolve()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    record = {'schema': 1, 'scope': 'native FeVM CLI smoke, not Cancun conformance',
+    record = {'schema': 1, 'scope': 'native FeVM CLI smoke, not conformance',
               'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
               'host': platform.platform(), 'build_timeout_seconds': args.build_timeout,
               'complete': False, 'builds': []}
@@ -89,7 +89,7 @@ def main():
             result = subprocess.run([str(controlled), '620100015ff3'],
                                     capture_output=True, timeout=60)
             expected_status = 21 if failure_at else 0
-            expected_output = b'host allocation failed\n' if failure_at else b'0x' + b'00' * 65537 + b'\n'
+            expected_output = b'host_allocation\n' if failure_at else b'0x' + b'00' * 65537 + b'\n'
             passed = (result.returncode == expected_status and result.stdout == expected_output
                       and not result.stderr)
             row['checks'].append({'name': name, 'passed': passed, 'status': result.returncode,
@@ -109,7 +109,7 @@ def main():
         journal.joinpath('build.log').write_bytes(log)
         artifacts(journal / 'fevm_journal', journal_archive, journal, object_name='fevm_journal.o')
         controlled = journal / 'allocation-failure'
-        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1', '-DWATCH_SIZE=100352',
+        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1', '-DWATCH_SIZE=131072',
                  ROOT / 'native/fixtures/vm_allocator.c', journal / 'fevm_journal.o',
                  '-o', controlled])
         result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
@@ -152,7 +152,7 @@ def main():
         calls.joinpath('build.log').write_bytes(log)
         artifacts(calls / 'fevm_calls', calls_archive, calls, object_name='fevm_calls.o')
         # A depth-two CALL chain allocates one box per child, of the frame's
-        # packed size. Fail each in turn; every success must be released.
+        # size. Fail each in turn; every success must be released.
         for failure_at in [0, 1, 2]:
             controlled = calls / f'allocator-{failure_at}'
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
@@ -174,7 +174,7 @@ def main():
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
                      ROOT / 'native/fixtures/vm_allocator.c', folder / 'fevm.o', '-o', controlled])
             result = subprocess.run([str(controlled), '620100015fa0'], capture_output=True, timeout=60)
-            expected = b'host allocation failed\n' if failure_at else b'empty\n'
+            expected = b'host_allocation\n' if failure_at else b'empty\n'
             passed = result.returncode == (21 if failure_at else 0) and result.stdout == expected and not result.stderr
             row['checks'].append({'name': f'log-data-allocator-{failure_at}', 'passed': passed,
                                   'status': result.returncode, 'stdout': result.stdout.decode(errors='replace'),
@@ -190,7 +190,7 @@ def main():
                        '--report', '--report-out', log_archive], timeout=args.build_timeout)
         logs.joinpath('build.log').write_bytes(log)
         artifacts(logs / 'fevm_logs', log_archive, logs, object_name='fevm_logs.o')
-        for mode, size in [('h', 94208), ('b', 128), ('b', 256)]:
+        for mode, size in [('h', 98304), ('b', 128), ('b', 256)]:
             for failure_at in [0, 1]:
                 name = f'log-headers-{failure_at}' if mode == 'h' else f'blob-hashes-{size}-{failure_at}'
                 controlled = logs / name

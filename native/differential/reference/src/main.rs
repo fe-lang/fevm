@@ -42,7 +42,7 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
             ..InputsImpl::default()
         },
         false,
-        SpecId::CANCUN,
+        SpecId::OSAKA,
         case.gas_limit,
     );
     let result = interpreter

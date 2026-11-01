@@ -1,4 +1,4 @@
-use ingot::constants::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK}
+use ingot::status::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK}
 use ingot::state::WorldState
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
@@ -110,7 +110,8 @@ fn transaction_checkpoints_do_not_consume_evm_call_depth() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     let parent = checkpoint(mut tx, is_static: false)
     var vm = Vm::new()
-    vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx)
+    var tracer = ()
+    vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && tx.depth() == 1)
     tx.commit(parent)
     tx.finish(commit: true, gas_spent: 0)

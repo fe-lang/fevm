@@ -1,0 +1,135 @@
+use core::{MemArray, MemBuffer}
+use ingot::{FAILURE, SUCCESS, run}
+use ingot::bls_curve::{Point, g1_generator, g2_generator}
+use ingot::bls_field::{Field, Fp}
+use ingot::bls_tower::Fp2
+
+fn append_fp(_ buffer: mut MemBuffer, _ value: Fp) {
+    let start = buffer.len()
+    buffer.resize(start + 64)
+    let limbs = value.to_canonical()
+    var i: u64 = 0
+    while i < 48 {
+        buffer[start + 16 + i as usize] = (limbs[((47 - i) / 8) as usize] >> (((47 - i) % 8) * 8)).downcast_truncate()
+        i += 1
+    }
+}
+
+fn append_g1(_ buffer: mut MemBuffer, _ point: Point<Fp>) {
+    let affine = point.to_affine()
+    append_fp(mut buffer, if affine.infinity { Fp::zero() } else { affine.x })
+    append_fp(mut buffer, if affine.infinity { Fp::zero() } else { affine.y })
+}
+
+fn append_g2(_ buffer: mut MemBuffer, _ point: Point<Fp2>) {
+    let affine = point.to_affine()
+    let x = if affine.infinity { Fp2::zero() } else { affine.x }
+    let y = if affine.infinity { Fp2::zero() } else { affine.y }
+    for value in [x.c0, x.c1, y.c0, y.c1] { append_fp(mut buffer, value) }
+}
+
+fn append_scalar(_ buffer: mut MemBuffer, _ scalar: u256) {
+    let start = buffer.len()
+    buffer.resize(start + 32)
+    buffer.span().write_word(offset: start, value: scalar)
+}
+
+fn same(_ a: MemBuffer, _ b: MemBuffer) -> bool {
+    if a.len() != b.len() { return false }
+    for i in 0..a.len() {
+        if a[i] != b[i] { return false }
+    }
+    true
+}
+
+fn g1_pair(_ p: Point<Fp>, _ q: Point<Fp>) -> MemBuffer {
+    var input = MemBuffer::empty()
+    append_g1(mut input, p)
+    append_g1(mut input, q)
+    input
+}
+
+#[test]
+fn bls_additions_and_msm_agree() {
+    let g = g1_generator()
+    let doubled = run(address: 0x0b, input: g1_pair(g, g), gas: 375)
+    core::assert(doubled.status == SUCCESS && doubled.gas_used == 375 && doubled.output.len() == 128)
+    var msm = MemBuffer::empty()
+    append_g1(mut msm, g)
+    append_scalar(mut msm, 2)
+    let multiplied = run(address: 0x0c, input: msm, gas: 12000)
+    core::assert(multiplied.status == SUCCESS && multiplied.gas_used == 12000 && same(doubled.output, multiplied.output))
+    // G + (-G) and G + O; the identity encodes as zeros.
+    let cancelled = run(address: 0x0b, input: g1_pair(g, g.neg()), gas: 375)
+    core::assert(cancelled.status == SUCCESS && same(cancelled.output, MemArray<u8>::new_zeroed(128).into_buffer()))
+    var expected = MemBuffer::empty()
+    append_g1(mut expected, g)
+    core::assert(same(run(address: 0x0b, input: g1_pair(g, Point::identity()), gas: 375).output, expected))
+    // Two MSM pairs get the 949 per mille discount: 2 * 12,000 * 949 / 1,000.
+    var two = MemBuffer::empty()
+    for scalar in [1 as u256, 1] {
+        append_g1(mut two, g)
+        append_scalar(mut two, scalar)
+    }
+    let summed = run(address: 0x0c, input: two, gas: 22776)
+    core::assert(summed.status == SUCCESS && summed.gas_used == 22776 && same(summed.output, doubled.output))
+    // G2: Q + Q = 2Q, for 600 and 22,500 gas.
+    let q = g2_generator()
+    var pair = MemBuffer::empty()
+    append_g2(mut pair, q)
+    append_g2(mut pair, q)
+    let twice = run(address: 0x0d, input: pair, gas: 600)
+    var g2_msm = MemBuffer::empty()
+    append_g2(mut g2_msm, q)
+    append_scalar(mut g2_msm, 2)
+    let times_two = run(address: 0x0e, input: g2_msm, gas: 22500)
+    core::assert(twice.status == SUCCESS && times_two.status == SUCCESS && same(twice.output, times_two.output))
+}
+
+#[test]
+fn bls_pairing_checks_products() {
+    let g = g1_generator()
+    let q = g2_generator()
+    // e(G, Q) e(-G, Q) e(O, Q) = 1, three pairs for 32,600 * 3 + 37,700 gas.
+    var balanced = MemBuffer::empty()
+    for p in [g, g.neg(), Point::identity()] {
+        append_g1(mut balanced, p)
+        append_g2(mut balanced, q)
+    }
+    let one = run(address: 0x0f, input: balanced, gas: 135500)
+    core::assert(one.status == SUCCESS && one.gas_used == 135500 && one.output.len() == 32 && one.output[31] == 1)
+    var single = MemBuffer::empty()
+    append_g1(mut single, g)
+    append_g2(mut single, q)
+    let not_one = run(address: 0x0f, input: single, gas: 70300)
+    core::assert(not_one.status == SUCCESS && not_one.output.len() == 32 && not_one.output[31] == 0)
+    core::assert(run(address: 0x0f, input: MemBuffer::empty(), gas: 1_000_000).status == FAILURE)
+}
+
+#[test]
+fn bls_rejects_malformed_input() {
+    let g = g1_generator()
+    var input = g1_pair(g, g)
+    let gas: u64 = 1_000_000
+    core::assert(run(address: 0x0b, input: input.slice(offset: 0, len: 255), gas).status == FAILURE)
+    // A nonzero padding byte, then a point off the curve.
+    input[0] = 1
+    core::assert(run(address: 0x0b, input, gas).status == FAILURE)
+    input[0] = 0
+    input[127] ^= 1
+    let off_curve = run(address: 0x0b, input, gas)
+    core::assert(off_curve.status == FAILURE && off_curve.gas_used == gas)
+    // A field element of p itself, and too little gas.
+    var p_input = MemArray<u8>::new_zeroed(64).into_buffer()
+    for (index, byte) in [(16 as usize, 0x1a as u8), (17, 0x01), (18, 0x11), (19, 0xea)] { p_input[index] = byte }
+    let modulus: [u8; 44] = [
+        0x39, 0x7f, 0xe6, 0x9a, 0x4b, 0x1b, 0xa7, 0xb6, 0x43, 0x4b, 0xac, 0xd7, 0x64, 0x77, 0x4b, 0x84, 0xf3, 0x85,
+        0x12, 0xbf, 0x67, 0x30, 0xd2, 0xa0, 0xf6, 0xb0, 0xf6, 0x24, 0x1e, 0xab, 0xff, 0xfe, 0xb1, 0x53, 0xff, 0xff,
+        0xb9, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xaa, 0xab,
+    ]
+    for i in 0..44 { p_input[20 + i] = modulus[i] }
+    core::assert(run(address: 0x10, input: p_input, gas).status == FAILURE)
+    p_input[63] = 0xaa
+    core::assert(run(address: 0x10, input: p_input, gas).status == SUCCESS)
+    core::assert(run(address: 0x10, input: p_input, gas: 5499).status == FAILURE)
+}

@@ -1,13 +1,13 @@
 use keccak::ByteSource
-use ingot::constants::{ERR_HOST_ALLOCATION, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::state::{EMPTY_CODE_HASH, WorldState}
 use ingot::transaction::Transaction
 use ingot::transaction_runtime::checkpoint
 
 struct OversizedCode {}
 impl ByteSource for OversizedCode {
-    fn len(self) -> u64 { 0xffffffffffffffff }
-    fn byte_at(self, _ index: u64) -> u8 { core::panic() }
+    fn len(self) -> usize { 0xffffffffffffffff }
+    fn byte_at(self, _ index: usize) -> u8 { core::panic() }
 }
 
 #[test]
@@ -25,17 +25,27 @@ fn account_code_replacement_compacts_and_preserves_other_accounts() {
     core::assert(world.set_code(address: 33, code: [9 as u8]) == OK)
     core::assert(world.set_code(address: 22, code: [0 as u8; 0]) == OK)
     core::assert(world.exists(22) && world.code_size(22) == 0 && world.code_hash(22) == 0)
-    core::assert(world.code_size(11) == 257 && world.code_byte(address: 11, index: 256) == 8)
-    core::assert(world.code_size(33) == 1 && world.code_byte(address: 33, index: 0) == 9)
+    core::assert(world.code_size(11) == 257 && world.code(11)[256] == 8)
+    core::assert(world.code_size(33) == 1 && world.code(33)[0] == 9)
     let alias = ((1 as u256) << 255) | 11
     core::assert(world.set_code(address: alias, code: [97 as u8, 98, 99]) == OK)
     core::assert(world.code_hash(11) == abc && world.code_hash(alias) == abc)
     core::assert(world.balance(11) == 9 && world.nonce(11) == 2)
     core::assert(world.set_code(address: 11, code: OversizedCode {}) == ERR_HOST_ALLOCATION)
     core::assert(world.code_size(11) == 3 && world.code_hash(11) == abc)
-    core::assert(world.code_byte(address: 33, index: 0) == 9)
+    core::assert(world.code(33)[0] == 9)
     core::assert(world.set_code(address: 44, code: OversizedCode {}) == ERR_HOST_ALLOCATION)
     core::assert(!world.exists(44))
+}
+
+// The account program's code length and JUMPDEST bit mask.
+fn jumpdests(_ world: WorldState, _ address: u256) -> (usize, u256) {
+    let program = world.program(address)
+    var mask: u256 = 0
+    for pc in 0..program.len() {
+        if program.is_jumpdest(pc as u256) { mask |= 1 << pc as u256 }
+    }
+    (program.len(), mask)
 }
 
 #[test]
@@ -44,14 +54,13 @@ fn account_code_jumpdests_follow_compaction() {
     // PUSH1 hides the middle 0x5b; the first and last are JUMPDESTs.
     core::assert(world.set_code(address: 1, code: [0x5b as u8, 0x60, 0x5b, 0x5b]) == OK)
     core::assert(world.set_code(address: 2, code: [0 as u8, 0, 0, 0, 0, 0, 0, 0, 0x5b, 0x5b]) == OK)
-    core::assert(world.jumpdests(1).len() == 1 && world.jumpdests(1)[0] == 0b1001)
+    core::assert(jumpdests(world, 1) == (4, 0b1001))
     // Replacing the first record moves the second down, and the new record
     // lands on the second's old code bytes.
     core::assert(world.set_code(address: 1, code: [0x60 as u8]) == OK)
-    core::assert(world.jumpdests(1).len() == 1 && world.jumpdests(1)[0] == 0)
-    core::assert(world.jumpdests(2).len() == 2 && world.jumpdests(2)[0] == 0 && world.jumpdests(2)[1] == 0b11)
+    core::assert(jumpdests(world, 1) == (1, 0) && jumpdests(world, 2) == (10, 0b11 << 8))
     core::assert(world.set_code(address: 2, code: [0 as u8; 0]) == OK)
-    core::assert(world.jumpdests(2).len() == 0)
+    core::assert(jumpdests(world, 2) == (0, 0))
 }
 
 #[test]
@@ -68,7 +77,7 @@ fn account_empty_hash_predicate_and_code_extent_are_independent_of_frame_limits(
     core::assert(world.code_hash(1) == EMPTY_CODE_HASH)
     // EIP-170's maximum deployed code size exceeds this harness's frame input.
     core::assert(world.set_code(address: 2, code: [0x5b as u8; 24576]) == OK)
-    core::assert(world.code_size(2) == 24576 && world.code_byte(address: 2, index: 24575) == 0x5b)
+    core::assert(world.code_size(2) == 24576 && world.code(2)[24575] == 0x5b)
     core::assert(world.code_hash(2) != 0 && world.code_hash(2) != EMPTY_CODE_HASH)
 }
 
@@ -118,4 +127,22 @@ fn accounts_grow_and_undo_removes_the_accounts_a_frame_created() {
     core::assert(world.set_code(address: 1003, code: [1 as u8]) == OK)
     core::assert(world.exists(1003) && world.nonce(1001) == 1)
     core::assert(world.set_code(address: 0, code: [1 as u8]) == OK)
+}
+
+#[test]
+fn world_clone_is_independent_of_the_original() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0xaa, 7) && world.set_nonce(0xaa, 2))
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5b]) == OK)
+    core::assert(world.storage_store(0xbb, 3, 9) && world.set_block_hash(5, 0x55))
+    let snapshot = world.try_clone().unwrap()
+    core::assert(world.set_balance(0xaa, 8) && world.storage_store(0xbb, 3, 10))
+    core::assert(world.set_code(address: 0xbb, code: [0x00 as u8]) == OK)
+    world.remove_account(0xaa)
+    core::assert(snapshot.balance(0xaa) == 7 && snapshot.nonce(0xaa) == 2)
+    core::assert(snapshot.storage_load(0xbb, 3) == 9 && snapshot.block_hash(5) == 0x55)
+    core::assert(snapshot.code_size(0xbb) == 3 && snapshot.code_hash(0xbb) != world.code_hash(0xbb))
+    // The copy's code keeps its jump destinations.
+    core::assert(snapshot.program(0xbb).is_jumpdest(2))
+    core::assert(!world.exists(0xaa) && world.storage_load(0xbb, 3) == 10)
 }

@@ -1,0 +1,424 @@
+// `fevm serve`: a host drives one world with requests on stdin and reads one
+// response to each on stdout. Every frame is a big-endian u32 length and that
+// many bytes. native/client/README.md specifies the requests and responses.
+use core::{MemBuffer, MemSpan, MemVec, Option}
+use std::io::{Stdin, Stdout}
+use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+use ingot::state::WorldState
+use ingot::status::OK
+use ingot::trace::{Trace, Tracer}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+use ingot::vm::FrameBuffers
+
+// Requests.
+const CONFIGURE: u8 = 1
+const SET_BLOCK: u8 = 2
+const SET_BALANCE: u8 = 3
+const SET_NONCE: u8 = 4
+const SET_CODE: u8 = 5
+const SET_STORAGE: u8 = 6
+const SET_BLOCK_HASH: u8 = 7
+const ACCOUNT: u8 = 8
+const STORAGE: u8 = 9
+const TRANSACT: u8 = 10
+const SNAPSHOT: u8 = 11
+const REVERT: u8 = 12
+
+// Response statuses.
+const DONE: u8 = 0
+const ALLOCATION_FAILED: u8 = 1
+const BAD_REQUEST: u8 = 2
+const NO_SNAPSHOT: u8 = 3
+
+// TRANSACT flags.
+const COMMIT: u8 = 1
+const TRACE_CALLS: u8 = 2
+const TRACE_STEPS: u8 = 4
+
+// Fills `buf` from stdin; false at the end of input.
+fn read_exact(_ buf: mut MemSpan) -> bool uses (input: mut Stdin) {
+    var done: usize = 0
+    while done < buf.len() {
+        match input.read_stdin(buf.tail(done)) {
+            Option::Some(count) => {
+                if count == 0 { return false }
+                done += count
+            },
+            Option::None => return false,
+        }
+    }
+    true
+}
+
+// A request's bytes. Reads past the end yield zero and fail the request.
+struct Reader { data: MemBuffer, position: usize, failed: bool }
+
+impl Reader {
+    fn word(mut self, bytes: usize) -> u256 {
+        if self.position + bytes > self.data.len() {
+            self.failed = true
+            return 0
+        }
+        var value: u256 = 0
+        for byte in self.data.slice(offset: self.position, len: bytes) {
+            value = (value << 8) | byte as u256
+        }
+        self.position += bytes
+        value
+    }
+    fn byte(mut self) -> u8 { self.word(bytes: 1).downcast_unchecked() }
+    fn flag(mut self) -> bool { self.byte() != 0 }
+    fn u64(mut self) -> u64 { self.word(bytes: 8).downcast_unchecked() }
+    fn count(mut self) -> usize { self.word(bytes: 4).downcast_unchecked() }
+    fn address(mut self) -> u256 { self.word(bytes: 20) }
+    fn bytes(mut self) -> InputData {
+        let len = self.count()
+        if self.failed || self.position + len > self.data.len() {
+            self.failed = true
+            return empty_bytes()
+        }
+        let input = InputData::copy_bytes(self.data.slice(offset: self.position, len))
+        self.position += len
+        input
+    }
+    // Whether the request was well formed and read to its end.
+    fn complete(self) -> bool { !self.failed && self.position == self.data.len() }
+}
+
+// A response's bytes, after its status.
+struct Writer { bytes: MemVec<u8>, failed: bool }
+
+impl Writer {
+    fn new(_ status: u8) -> Self {
+        var writer = Writer { bytes: MemVec::new(), failed: false }
+        writer.byte(status)
+        writer
+    }
+    fn byte(mut self, _ value: u8) {
+        if self.bytes.try_push(value).is_err() { self.failed = true }
+    }
+    fn word(mut self, _ value: u256, bytes: usize) {
+        var shift = bytes * 8
+        while shift > 0 {
+            shift -= 8
+            self.byte(((value >> shift as u256) & 0xff).downcast_unchecked())
+        }
+    }
+    fn span(mut self, _ bytes: MemSpan) {
+        self.word(bytes.len() as u256, bytes: 4)
+        for byte in bytes { self.byte(byte) }
+    }
+    // Writes the frame; a response that could not be built becomes
+    // ALLOCATION_FAILED. False if stdout is closed.
+    fn send(self) -> bool uses (out: mut Stdout) {
+        var frame = MemVec<u8>::new()
+        let ok = !self.failed && frame.try_reserve(self.bytes.len() + 4)
+        let len = if ok { self.bytes.len() } else { 1 }
+        for shift in [24, 16, 8, 0] { frame.push(((len >> shift) & 0xff).downcast_unchecked()) }
+        if ok {
+            for byte in self.bytes { frame.push(byte) }
+        } else {
+            frame.push(ALLOCATION_FAILED)
+        }
+        out.write_stdout(frame.as_slice())
+    }
+}
+
+fn status_response(ok: bool) -> Writer {
+    Writer::new(if ok { DONE } else { ALLOCATION_FAILED })
+}
+
+fn receipt_response(_ receipt: Receipt, _ trace: Trace) -> Writer {
+    var out = Writer::new(DONE)
+    out.byte(receipt.invalid.downcast_unchecked())
+    out.byte(receipt.status.downcast_unchecked())
+    out.word(receipt.gas_used as u256, bytes: 8)
+    out.word(receipt.gas_refunded as u256, bytes: 8)
+    match receipt.created {
+        Option::Some(address) => {
+            out.byte(1)
+            out.word(address, bytes: 20)
+        },
+        Option::None => {
+            out.byte(0)
+            out.word(0, bytes: 20)
+        },
+    }
+    out.span(receipt.output.span())
+    let logs = ref receipt.logs
+    out.word(logs.len() as u256, bytes: 4)
+    var index: u64 = 0
+    while index < logs.len() {
+        let entry = logs.entry(index)
+        out.word(entry.address, bytes: 20)
+        out.byte(entry.topic_count.downcast_unchecked())
+        let topics: usize = entry.topic_count.downcast_unchecked()
+        for topic in 0..topics { out.word(entry.topics[topic], bytes: 32) }
+        out.span(logs.payload(index))
+        index += 1
+    }
+    out.byte(if trace.complete { 1 } else { 0 })
+    out.word(trace.step_count() as u256, bytes: 4)
+    for index in 0..trace.step_count() {
+        let step = trace.step(index)
+        out.word(step.pc as u256, bytes: 4)
+        out.byte(step.op)
+        out.word(step.depth as u256, bytes: 2)
+        out.word(step.gas as u256, bytes: 8)
+        out.word(step.stack_len as u256, bytes: 2)
+        out.word(step.memory_size as u256, bytes: 8)
+    }
+    out.word(trace.call_count() as u256, bytes: 4)
+    for index in 0..trace.call_count() {
+        let event = trace.call(index)
+        out.byte(if event.enter { 1 } else { 0 })
+        out.byte(event.kind)
+        out.word(event.depth as u256, bytes: 2)
+        out.word(event.from, bytes: 20)
+        out.word(event.to, bytes: 20)
+        out.word(event.value, bytes: 32)
+        out.word(event.gas as u256, bytes: 8)
+        out.byte(event.status.downcast_unchecked())
+        out.word(event.steps as u256, bytes: 4)
+        out.span(trace.call_data(index))
+    }
+    out
+}
+
+// Decodes a transaction in the conformance driver's order.
+fn read_request(_ reader: mut Reader) -> Option<TxRequest> {
+    let kind = reader.byte()
+    let signed_chain = reader.flag()
+    let chain_id = reader.word(bytes: 32)
+    let env = TxEnv {
+        kind,
+        chain_id: if signed_chain { Option::Some(chain_id) } else { Option::None },
+        sender: reader.address(),
+        creates: reader.flag(),
+        to: reader.address(),
+        nonce: reader.word(bytes: 32),
+        gas_limit: reader.u64(),
+        gas_price: reader.word(bytes: 32),
+        max_priority_fee_per_gas: reader.word(bytes: 32),
+        max_fee_per_blob_gas: reader.word(bytes: 32),
+        value: reader.word(bytes: 32),
+    }
+    let data = reader.bytes()
+    if data.status != OK { return Option::None }
+    var request = TxRequest::new(env, data)
+    var stored = true
+    var entries = reader.count()
+    while entries > 0 && !reader.failed {
+        let address = reader.address()
+        stored = stored && request.add_access_account(address)
+        var keys = reader.count()
+        while keys > 0 && !reader.failed {
+            stored = stored && request.add_access_key(address, slot: reader.word(bytes: 32))
+            keys -= 1
+        }
+        entries -= 1
+    }
+    var blobs = reader.count()
+    while blobs > 0 && !reader.failed {
+        stored = stored && request.add_blob_hash(reader.word(bytes: 32))
+        blobs -= 1
+    }
+    var authorizations = reader.count()
+    while authorizations > 0 && !reader.failed {
+        let authorization = Authorization {
+            chain_id: reader.word(bytes: 32),
+            address: reader.address(),
+            nonce: reader.word(bytes: 32),
+            y_parity: reader.word(bytes: 32),
+            r: reader.word(bytes: 32),
+            s: reader.word(bytes: 32),
+        }
+        stored = stored && request.add_authorization(authorization)
+        authorizations -= 1
+    }
+    if stored { Option::Some(request) } else { Option::None }
+}
+
+struct Session {
+    world: WorldState,
+    block: BlockEnv,
+    config: Config,
+    buffers: FrameBuffers,
+    snapshots: MemVec<WorldState>,
+}
+
+impl Session {
+    fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Applied {
+        let world = core::mem::replace(mut self.world, WorldState::empty())
+        if commit {
+            transact(world, request, self.block, self.config, mut self.buffers, mut tracer)
+        } else {
+            simulate(world, request, self.block, self.config, mut self.buffers, mut tracer)
+        }
+    }
+
+    fn handle(mut self, _ reader: mut Reader) -> Writer {
+        match reader.byte() {
+            CONFIGURE => {
+                let max_code_size = reader.u64()
+                let max_initcode_size = reader.u64()
+                let tx_gas_limit_cap = reader.u64()
+                let checks = reader.byte()
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                self.config = Config {
+                    max_code_size,
+                    max_initcode_size,
+                    tx_gas_limit_cap,
+                    check_chain_id: (checks & 1) != 0,
+                    check_nonce: (checks & 2) != 0,
+                    check_base_fee: (checks & 4) != 0,
+                    check_sender_code: (checks & 8) != 0,
+                }
+                Writer::new(DONE)
+            },
+            SET_BLOCK => {
+                let block = BlockEnv {
+                    coinbase: reader.address(),
+                    number: reader.word(bytes: 32),
+                    timestamp: reader.word(bytes: 32),
+                    prevrandao: reader.word(bytes: 32),
+                    gaslimit: reader.word(bytes: 32),
+                    basefee: reader.word(bytes: 32),
+                    blobbasefee: reader.word(bytes: 32),
+                    chainid: reader.word(bytes: 32),
+                }
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                self.block = block
+                Writer::new(DONE)
+            },
+            SET_BALANCE => {
+                let address = reader.address()
+                let value = reader.word(bytes: 32)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                status_response(ok: self.world.set_balance(address, value))
+            },
+            SET_NONCE => {
+                let address = reader.address()
+                let value = reader.word(bytes: 32)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                status_response(ok: self.world.set_nonce(address, value))
+            },
+            SET_CODE => {
+                let address = reader.address()
+                let code = reader.bytes()
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                status_response(ok: code.status == OK && self.world.set_code(address, code) == OK)
+            },
+            SET_STORAGE => {
+                let address = reader.address()
+                let slot = reader.word(bytes: 32)
+                let value = reader.word(bytes: 32)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                status_response(ok: self.world.storage_store(address, slot, value))
+            },
+            SET_BLOCK_HASH => {
+                let number = reader.word(bytes: 32)
+                let hash = reader.word(bytes: 32)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                status_response(ok: self.world.set_block_hash(number, hash))
+            },
+            ACCOUNT => {
+                let address = reader.address()
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                var out = Writer::new(DONE)
+                out.byte(if self.world.exists(address) { 1 } else { 0 })
+                out.word(self.world.balance(address), bytes: 32)
+                out.word(self.world.nonce(address), bytes: 32)
+                out.word(self.world.code_hash(address), bytes: 32)
+                out.span(self.world.code(address))
+                out
+            },
+            STORAGE => {
+                let address = reader.address()
+                let slot = reader.word(bytes: 32)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                var out = Writer::new(DONE)
+                out.word(self.world.storage_load(address, slot), bytes: 32)
+                out
+            },
+            TRANSACT => {
+                let flags = reader.byte()
+                let request = read_request(mut reader)
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                let request = match request {
+                    Option::Some(request) => request,
+                    Option::None => return Writer::new(ALLOCATION_FAILED),
+                }
+                let commit = (flags & COMMIT) != 0
+                var trace = Trace::new(steps: (flags & TRACE_STEPS) != 0, calls: (flags & TRACE_CALLS) != 0)
+                let applied = if (flags & (TRACE_STEPS | TRACE_CALLS)) == 0 {
+                    var untraced = ()
+                    self.apply(request, commit, mut untraced)
+                } else {
+                    self.apply(request, commit, mut trace)
+                }
+                self.world = applied.state
+                receipt_response(applied.receipt, trace)
+            },
+            SNAPSHOT => {
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                let id = self.snapshots.len()
+                let stored = match self.world.try_clone() {
+                    Option::Some(copy) => self.snapshots.try_push(copy).is_ok(),
+                    Option::None => false,
+                }
+                if !stored { return Writer::new(ALLOCATION_FAILED) }
+                var out = Writer::new(DONE)
+                out.word(id as u256, bytes: 4)
+                out
+            },
+            REVERT => {
+                let id = reader.count()
+                if !reader.complete() { return Writer::new(BAD_REQUEST) }
+                if id >= self.snapshots.len() { return Writer::new(NO_SNAPSHOT) }
+                // The snapshot stays, so a host can revert to it again.
+                match self.snapshots[id].try_clone() {
+                    Option::Some(world) => {
+                        self.world = world
+                        self.snapshots.truncate(id + 1)
+                        Writer::new(DONE)
+                    },
+                    Option::None => Writer::new(ALLOCATION_FAILED),
+                }
+            },
+            _ => Writer::new(BAD_REQUEST),
+        }
+    }
+}
+
+// Serves requests until stdin ends. Returns the exit status.
+pub fn serve() -> i32 uses (input: mut Stdin, out: mut Stdout) {
+    var session = Session {
+        world: WorldState::empty(),
+        block: default_block_env(),
+        config: Config::osaka(),
+        buffers: FrameBuffers::new(),
+        snapshots: MemVec::new(),
+    }
+    var header = MemBuffer::alloc(4)
+    while read_exact(header.span()) {
+        let len: usize = header.read_be<u32>(0) as usize
+        var data = MemBuffer::empty()
+        if !data.try_resize(len) {
+            // Drain the request to stay in step with the host.
+            var left = len
+            var chunk = MemBuffer::alloc(4096)
+            while left > 0 {
+                let part = if left < 4096 { left } else { 4096 }
+                if !read_exact(chunk.slice(offset: 0, len: part)) { return 1 }
+                left -= part
+            }
+            if !Writer::new(ALLOCATION_FAILED).send() { return 1 }
+            continue
+        }
+        if !read_exact(data.span()) { return 1 }
+        var reader = Reader { data, position: 0, failed: false }
+        if !session.handle(mut reader).send() { return 1 }
+    }
+    0
+}

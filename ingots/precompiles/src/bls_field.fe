@@ -74,15 +74,12 @@ impl Fp {
 
     /// A 48-byte big-endian integer from `source` at `offset`, ignoring the top
     /// three bits when `masked` (compressed-point flags); None if not below p.
-    pub fn from_be_bytes<T: ByteSource>(_ source: T, offset: u64, masked: bool) -> Option<Fp> {
+    pub fn from_be_bytes<T: ByteSource>(_ source: T, offset: usize, masked: bool) -> Option<Fp> {
         var limbs: [u64; 6] = [0; 6]
-        var i: u64 = 0
-        while i < 48 {
+        for i in 0..48 {
             var byte = source.byte_at(offset + i)
             if i == 0 && masked { byte &= 0x1f }
-            let limb = (47 - i) / 8
-            limbs[limb as usize] |= (byte as u64) << (((47 - i) % 8) * 8)
-            i += 1
+            limbs[(47 - i) / 8] |= (byte as u64) << (((47 - i) % 8) * 8).downcast_unchecked()
         }
         if at_least(limbs, MODULUS) { return Option::None }
         Option::Some(Fp::from_canonical(limbs))
@@ -109,6 +106,9 @@ impl Fp {
         }
         result
     }
+
+    /// RFC 9380's sgn0: the parity of the canonical value.
+    pub fn sgn0(self) -> bool { self.to_canonical()[0] & 1 == 1 }
 
     /// A square root, if one exists.
     pub fn sqrt(self) -> Option<Fp> {

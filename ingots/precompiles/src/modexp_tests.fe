@@ -46,18 +46,18 @@ const FIELD_PRIME_MINUS_ONE: [u8; 32] = [
 
 #[test]
 fn modexp_eip198_examples() {
-    // Fermat: 3^(p-1) mod p = 1, charged 16 * 255 / 3 gas.
+    // Fermat: 3^(p-1) mod p = 1, charged 16 * 255 gas.
     let fermat = input([3 as u8], FIELD_PRIME_MINUS_ONE, FIELD_PRIME)
-    let result = run(address: 5, input: fermat, gas: 1360)
+    let result = run(address: 5, input: fermat, gas: 4080)
     var one: [u8; 32] = [0; 32]
     one[31] = 1
-    core::assert(result.status == SUCCESS && result.gas_used == 1360 && equals(result.output, one))
-    let short = run(address: 5, input: fermat, gas: 1359)
-    core::assert(short.status == FAILURE && short.gas_used == 1359)
+    core::assert(result.status == SUCCESS && result.gas_used == 4080 && equals(result.output, one))
+    let short = run(address: 5, input: fermat, gas: 4079)
+    core::assert(short.status == FAILURE && short.gas_used == 4079)
     // An empty base is zero.
     let empty: [u8; 0] = []
     let zero_base = input(empty, FIELD_PRIME_MINUS_ONE, FIELD_PRIME)
-    let result = run(address: 5, input: zero_base, gas: 1360)
+    let result = run(address: 5, input: zero_base, gas: 4080)
     let zeros: [u8; 32] = [0; 32]
     core::assert(result.status == SUCCESS && equals(result.output, zeros))
 }
@@ -89,9 +89,9 @@ fn modexp_multi_limb_even_modulus_and_long_base() {
         0x24, 0x23, 0x2a, 0x75, 0x1a, 0x28,
     ]
     let data = input(base, [0x01 as u8, 0xf3, 0xa5, 0xb7, 0xc9], modulus)
-    // 13 words squared, 32 iterations, divided by 3.
-    let result = run(address: 5, input: data, gas: 1802)
-    core::assert(result.status == SUCCESS && result.gas_used == 1802 && equals(result.output, expected))
+    // Twice 13 words squared, 32 iterations.
+    let result = run(address: 5, input: data, gas: 10816)
+    core::assert(result.status == SUCCESS && result.gas_used == 10816 && equals(result.output, expected))
 }
 
 #[test]
@@ -99,22 +99,23 @@ fn modexp_edge_cases() {
     let empty: [u8; 0] = []
     // Zero base and modulus lengths return nothing for the minimum charge.
     let nothing = input(empty, [5 as u8], empty)
-    let result = run(address: 5, input: nothing, gas: 200)
-    core::assert(result.status == SUCCESS && result.gas_used == 200 && result.output.len() == 0)
+    let result = run(address: 5, input: nothing, gas: 500)
+    core::assert(result.status == SUCCESS && result.gas_used == 500 && result.output.len() == 0)
+    core::assert(run(address: 5, input: nothing, gas: 499).status == FAILURE)
     // A zero modulus returns zeros; modulus 1 reduces everything to zero.
     let zero = input([7 as u8], [3 as u8], [0 as u8, 0])
-    let result = run(address: 5, input: zero, gas: 200)
+    let result = run(address: 5, input: zero, gas: 500)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
     let unit = input([7 as u8], empty, [0 as u8, 1])
-    let result = run(address: 5, input: unit, gas: 200)
+    let result = run(address: 5, input: unit, gas: 500)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 0]))
     // A zero exponent gives 1; 0x1234567890abcdef^65537 mod (2^64 - 5) per pow().
     let identity = input([2 as u8], [0 as u8], [0 as u8, 9])
-    let result = run(address: 5, input: identity, gas: 200)
+    let result = run(address: 5, input: identity, gas: 500)
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 1]))
     let single = input([0x12 as u8, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef], [1 as u8, 0, 1],
                        [0xff as u8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb])
-    let result = run(address: 5, input: single, gas: 200)
+    let result = run(address: 5, input: single, gas: 500)
     // 6202122992327880755 = 0x56125e0052fc7033.
     core::assert(result.status == SUCCESS
         && equals(result.output, [0x56 as u8, 0x12, 0x5e, 0x00, 0x52, 0xfc, 0x70, 0x33]))
@@ -124,14 +125,31 @@ fn modexp_edge_cases() {
     append_word(mut truncated, 1)
     append_word(mut truncated, 2)
     append(mut truncated, [3 as u8, 2, 1])
-    let result = run(address: 5, input: truncated, gas: 200)
+    let result = run(address: 5, input: truncated, gas: 500)
     // 3^2 mod 0x0100 = 9.
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 9]))
-    // An absurd base length saturates the charge instead of allocating.
-    var huge = MemBuffer::empty()
-    append_word(mut huge, 1 << 255)
-    append_word(mut huge, 1)
-    append_word(mut huge, 1)
-    let result = run(address: 5, input: huge, gas: 0xffffffffffffffff)
-    core::assert(result.status == FAILURE && result.gas_used == 0xffffffffffffffff)
+}
+
+fn lengths_only(base: u256, exponent: u256, modulus: u256) -> MemBuffer {
+    var buffer = MemBuffer::empty()
+    append_word(mut buffer, base)
+    append_word(mut buffer, exponent)
+    append_word(mut buffer, modulus)
+    buffer
+}
+
+#[test]
+fn modexp_bounds_each_length_at_1024_bytes() {
+    // 1,024-byte base and modulus: twice 128 words squared, one iteration. The
+    // missing bytes read as zero, so the zero modulus gives zeros.
+    let largest = run(address: 5, input: lengths_only(base: 1024, exponent: 0, modulus: 1024), gas: 1_000_000)
+    core::assert(largest.status == SUCCESS && largest.gas_used == 32768 && largest.output.len() == 1024)
+    let longest_exponent = run(address: 5, input: lengths_only(base: 0, exponent: 1024, modulus: 0), gas: 1_000_000)
+    // 16 * (1,024 - 32) iterations of the minimum complexity.
+    core::assert(longest_exponent.status == SUCCESS && longest_exponent.gas_used == 16 * 16 * 992)
+    // One byte more fails whatever the gas, as does an absurd length.
+    for (base, exponent, modulus) in [(1025 as u256, 0 as u256, 0 as u256), (0, 1025, 0), (0, 0, 1025), (1 << 255, 1, 1)] {
+        let result = run(address: 5, input: lengths_only(base, exponent, modulus), gas: 0xffffffffffffffff)
+        core::assert(result.status == FAILURE && result.gas_used == 0xffffffffffffffff)
+    }
 }

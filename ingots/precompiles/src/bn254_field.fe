@@ -1,160 +1,29 @@
-use core::ops::{WrappingMul, WrappingSub}
+use ingot::montgomery::{Modulus, Mont}
+pub use ingot::montgomery::Field
 
 // BN254 (alt_bn128) base field p and the tower Fp2 = Fp[u]/(u^2 + 1),
 // Fp6 = Fp2[v]/(v^3 - (9 + u)), Fp12 = Fp6[w]/(w^2 - v), as in EIP-197.
 pub const MODULUS: u256 = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
 
-// p as little-endian 64-bit limbs, and -p^-1 mod 2^64 for Montgomery reduction.
-const P0: u64 = 0x3c208c16d87cfd47
-const P1: u64 = 0x97816a916871ca8d
-const P2: u64 = 0xb85045b68181585d
-const P3: u64 = 0x30644e72e131a029
-const INV: u64 = 0x87d20782e4866389
-// R^2 mod p with R = 2^256, mapping integers into Montgomery form.
-const R2: u256 = 0x06d89f71cab8351f47ab1eff0a417ff6b5e71911d44501fbf32cfc5b538afa89
+pub struct Bn254Base {}
 
-// Values and operations used generically by the curve arithmetic.
-pub trait Field {
-    fn zero() -> Self
-    fn one() -> Self
-    fn add(self, _ other: Self) -> Self
-    fn sub(self, _ other: Self) -> Self
-    fn mul(self, _ other: Self) -> Self
-    fn square(self) -> Self
-    fn double(self) -> Self
-    fn neg(self) -> Self
-    fn inverse(self) -> Self
-    fn is_zero(self) -> bool
-    fn equals(self, _ other: Self) -> bool
+impl Modulus for Bn254Base {
+    const VALUE: u256 = MODULUS
+    const P0: u64 = 0x3c208c16d87cfd47
+    const P1: u64 = 0x97816a916871ca8d
+    const P2: u64 = 0xb85045b68181585d
+    const P3: u64 = 0x30644e72e131a029
+    const INV: u64 = 0x87d20782e4866389
+    const R2: u256 = 0x06d89f71cab8351f47ab1eff0a417ff6b5e71911d44501fbf32cfc5b538afa89
 }
 
-/// An element of Fp in Montgomery form (x * 2^256 mod p), little-endian limbs.
-pub struct Fp { l0: u64, l1: u64, l2: u64, l3: u64 }
-
-impl Copy for Fp {}
-
-// a * b + c + carry, as (low, high) words.
-fn mac(_ a: u64, _ b: u64, _ c: u64, _ carry: u64) -> (u64, u64) {
-    let t = (a as u128) * (b as u128) + (c as u128) + (carry as u128)
-    (t.downcast_truncate(), (t >> 64).downcast_truncate())
-}
-
-fn adc(_ a: u64, _ b: u64, _ carry: u64) -> (u64, u64) {
-    let t = (a as u128) + (b as u128) + (carry as u128)
-    (t.downcast_truncate(), (t >> 64).downcast_truncate())
-}
-
-// a - b - borrow, as (difference, borrow out).
-fn sbb(_ a: u64, _ b: u64, _ borrow: u64) -> (u64, u64) {
-    let t = (a as u128).wrapping_sub(b as u128).wrapping_sub(borrow as u128)
-    (t.downcast_truncate(), (t >> 127).downcast_truncate())
-}
-
-// One CIOS row: accumulate a * b_i into t, then add a multiple of p that
-// clears the low word and shift down one word.
-fn mont_row(_ a: Fp, _ b: u64, _ t: Fp, _ top: u64) -> (Fp, u64) {
-    let (t0, c) = mac(a.l0, b, t.l0, 0)
-    let (t1, c) = mac(a.l1, b, t.l1, c)
-    let (t2, c) = mac(a.l2, b, t.l2, c)
-    let (t3, c) = mac(a.l3, b, t.l3, c)
-    let (t4, t5) = adc(top, c, 0)
-    let m = t0.wrapping_mul(INV)
-    let (_, c) = mac(m, P0, t0, 0)
-    let (r0, c) = mac(m, P1, t1, c)
-    let (r1, c) = mac(m, P2, t2, c)
-    let (r2, c) = mac(m, P3, t3, c)
-    let (r3, c) = adc(t4, 0, c)
-    (Fp { l0: r0, l1: r1, l2: r2, l3: r3 }, t5 + c)
-}
-
-// Subtract p when the value (with `top` above the four limbs) is at least p.
-fn reduce(_ a: Fp, _ top: u64) -> Fp {
-    let (d0, b) = sbb(a.l0, P0, 0)
-    let (d1, b) = sbb(a.l1, P1, b)
-    let (d2, b) = sbb(a.l2, P2, b)
-    let (d3, b) = sbb(a.l3, P3, b)
-    let (_, b) = sbb(top, 0, b)
-    if b == 1 { a } else { Fp { l0: d0, l1: d1, l2: d2, l3: d3 } }
-}
-
-fn mont_mul(_ a: Fp, _ b: Fp) -> Fp {
-    let zero = Fp { l0: 0, l1: 0, l2: 0, l3: 0 }
-    let (t, top) = mont_row(a, b.l0, zero, 0)
-    let (t, top) = mont_row(a, b.l1, t, top)
-    let (t, top) = mont_row(a, b.l2, t, top)
-    let (t, top) = mont_row(a, b.l3, t, top)
-    reduce(t, top)
-}
-
-fn raw(_ value: u256) -> Fp {
-    Fp {
-        l0: value.downcast_truncate(),
-        l1: (value >> 64).downcast_truncate(),
-        l2: (value >> 128).downcast_truncate(),
-        l3: (value >> 192).downcast_truncate(),
-    }
-}
+pub type Fp = Mont<Bn254Base>
 
 /// The field element of a canonical integer `value < p`.
-pub fn fp(_ value: u256) -> Fp {
-    core::assert(value < MODULUS)
-    mont_mul(raw(value), raw(R2))
-}
+pub fn fp(_ value: u256) -> Fp { Fp::new(value) }
 
 /// The canonical integer of a field element.
-pub fn fp_value(_ a: Fp) -> u256 {
-    let value = mont_mul(a, Fp { l0: 1, l1: 0, l2: 0, l3: 0 })
-    value.l0 as u256 | (value.l1 as u256) << 64 | (value.l2 as u256) << 128 | (value.l3 as u256) << 192
-}
-
-impl Fp {
-    // Square-and-multiply over the bits of `exponent`, most significant first.
-    pub fn pow(self, _ exponent: u256) -> Fp {
-        var result = Fp::one()
-        var bit: u64 = 256
-        while bit > 0 {
-            bit -= 1
-            result = result.square()
-            if (exponent >> bit as u256) & 1 == 1 { result = result.mul(self) }
-        }
-        result
-    }
-}
-
-impl Field for Fp {
-    fn zero() -> Self { Fp { l0: 0, l1: 0, l2: 0, l3: 0 } }
-    fn one() -> Self { fp(1) }
-    fn add(self, _ other: Self) -> Self {
-        // Both operands are below p < 2^254, so the sum needs no fifth limb.
-        let (s0, c) = adc(self.l0, other.l0, 0)
-        let (s1, c) = adc(self.l1, other.l1, c)
-        let (s2, c) = adc(self.l2, other.l2, c)
-        let (s3, _) = adc(self.l3, other.l3, c)
-        reduce(Fp { l0: s0, l1: s1, l2: s2, l3: s3 }, 0)
-    }
-    fn sub(self, _ other: Self) -> Self {
-        let (d0, b) = sbb(self.l0, other.l0, 0)
-        let (d1, b) = sbb(self.l1, other.l1, b)
-        let (d2, b) = sbb(self.l2, other.l2, b)
-        let (d3, b) = sbb(self.l3, other.l3, b)
-        if b == 0 { return Fp { l0: d0, l1: d1, l2: d2, l3: d3 } }
-        let (s0, c) = adc(d0, P0, 0)
-        let (s1, c) = adc(d1, P1, c)
-        let (s2, c) = adc(d2, P2, c)
-        let (s3, _) = adc(d3, P3, c)
-        Fp { l0: s0, l1: s1, l2: s2, l3: s3 }
-    }
-    fn mul(self, _ other: Self) -> Self { mont_mul(self, other) }
-    fn square(self) -> Self { mont_mul(self, self) }
-    fn double(self) -> Self { self.add(self) }
-    fn neg(self) -> Self { Fp::zero().sub(self) }
-    // Fermat inversion; zero maps to zero.
-    fn inverse(self) -> Self { self.pow(MODULUS - 2) }
-    fn is_zero(self) -> bool { self.l0 == 0 && self.l1 == 0 && self.l2 == 0 && self.l3 == 0 }
-    fn equals(self, _ other: Self) -> bool {
-        self.l0 == other.l0 && self.l1 == other.l1 && self.l2 == other.l2 && self.l3 == other.l3
-    }
-}
+pub fn fp_value(_ a: Fp) -> u256 { a.value() }
 
 /// c0 + c1 u with u^2 = -1.
 pub struct Fp2 { pub c0: Fp, pub c1: Fp }

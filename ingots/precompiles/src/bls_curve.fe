@@ -70,6 +70,18 @@ impl<F> Point<F> where F: Field + Copy {
         Point { x, y, z }
     }
 
+    /// The product with a scalar of little-endian 64-bit limbs.
+    pub fn multiply_limbs<const N: usize>(self, _ limbs: [u64; N]) -> Point<F> {
+        var result = Point::identity()
+        var bit: u64 = (N * 64).downcast_unchecked()
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (limbs[(bit / 64) as usize] >> (bit % 64)) & 1 == 1 { result = result.add(self) }
+        }
+        result
+    }
+
     pub fn multiply(self, _ scalar: u256) -> Point<F> {
         var result = Point::identity()
         var bit: u64 = 256
@@ -91,6 +103,15 @@ impl<F> Point<F> where F: Field + Copy {
     pub fn in_subgroup(self) -> bool { self.multiply(ORDER).is_identity() }
 }
 
+/// Whether affine (x, y) is on G1's curve y^2 = x^3 + 4.
+pub fn on_g1(x: Fp, y: Fp) -> bool { y.square().equals(x.square().mul(x).add(Fp::from_montgomery(B_G1))) }
+
+/// Whether affine (x, y) is on G2's twist y^2 = x^3 + 4(u + 1).
+pub fn on_g2(x: Fp2, y: Fp2) -> bool {
+    let four = Fp::from_montgomery(B_G1)
+    y.square().equals(x.square().mul(x).add(Fp2::new(c0: four, c1: four)))
+}
+
 pub fn g1_generator() -> Point<Fp> {
     Point { x: Fp::from_montgomery(G1_X), y: Fp::from_montgomery(G1_Y), z: Fp::one() }
 }
@@ -107,17 +128,15 @@ pub fn g2_generator() -> Point<Fp2> {
 /// decompress_G1 does: the compression flag must be set; the infinity flag
 /// must agree with an all-zero x and excludes the sign flag; x must be below p
 /// and x^3 + 4 a square, and the sign flag selects the larger root.
-pub fn decompress_g1<T: ByteSource>(_ source: T, offset: u64) -> Option<Affine<Fp>> {
+pub fn decompress_g1<T: ByteSource>(_ source: T, offset: usize) -> Option<Affine<Fp>> {
     let flags = source.byte_at(offset)
     let compressed = flags & 0x80 != 0
     let infinity = flags & 0x40 != 0
     let largest = flags & 0x20 != 0
     if !compressed { return Option::None }
     var x_is_zero = flags & 0x1f == 0
-    var i: u64 = 1
-    while i < 48 {
+    for i in 1..48 {
         if source.byte_at(offset + i) != 0 { x_is_zero = false }
-        i += 1
     }
     if infinity != x_is_zero { return Option::None }
     if infinity {

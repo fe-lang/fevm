@@ -1,0 +1,140 @@
+use ingot::montgomery::{Field, Modulus, Mont}
+
+// NIST P-256 (secp256r1): y^2 = x^3 - 3x + b over F_p, with a prime-order
+// group of order n and cofactor 1.
+pub const P: u256 = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+pub const N: u256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+const B: u256 = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
+const GX: u256 = 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296
+const GY: u256 = 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5
+
+pub struct Base {}
+
+impl Modulus for Base {
+    const VALUE: u256 = P
+    const P0: u64 = 0xffffffffffffffff
+    const P1: u64 = 0x00000000ffffffff
+    const P2: u64 = 0
+    const P3: u64 = 0xffffffff00000001
+    const INV: u64 = 1
+    const R2: u256 = 0x4fffffffdfffffffffffffffefffffffbffffffff0000000000000003
+}
+
+pub struct Order {}
+
+impl Modulus for Order {
+    const VALUE: u256 = N
+    const P0: u64 = 0xf3b9cac2fc632551
+    const P1: u64 = 0xbce6faada7179e84
+    const P2: u64 = 0xffffffffffffffff
+    const P3: u64 = 0xffffffff00000000
+    const INV: u64 = 0xccd1c8aaee00bc4f
+    const R2: u256 = 0x66e12d94f3d956202845b2392b6bec594699799c49bd6fa683244c95be79eea2
+}
+
+type Fp = Mont<Base>
+type Scalar = Mont<Order>
+
+// Jacobian coordinates (X / Z^2, Y / Z^3); Z = 0 is the point at infinity.
+struct Point { x: Fp, y: Fp, z: Fp }
+
+impl Copy for Point {}
+
+fn infinity() -> Point { Point { x: Fp::one(), y: Fp::one(), z: Fp::zero() } }
+
+// dbl-2001-b, for a = -3.
+fn double(_ p: Point) -> Point {
+    if p.z.is_zero() || p.y.is_zero() { return infinity() }
+    let delta = p.z.square()
+    let gamma = p.y.square()
+    let beta = p.x.mul(gamma)
+    let t = p.x.sub(delta).mul(p.x.add(delta))
+    let alpha = t.double().add(t)
+    let beta4 = beta.double().double()
+    let x = alpha.square().sub(beta4.double())
+    let z = p.y.add(p.z).square().sub(gamma).sub(delta)
+    let y = alpha.mul(beta4.sub(x)).sub(gamma.square().double().double().double())
+    Point { x, y, z }
+}
+
+// add-2007-bl, falling back to doubling for equal points.
+fn add(_ p: Point, _ q: Point) -> Point {
+    if p.z.is_zero() { return q }
+    if q.z.is_zero() { return p }
+    let z1z1 = p.z.square()
+    let z2z2 = q.z.square()
+    let u1 = p.x.mul(z2z2)
+    let u2 = q.x.mul(z1z1)
+    let s1 = p.y.mul(q.z).mul(z2z2)
+    let s2 = q.y.mul(p.z).mul(z1z1)
+    let h = u2.sub(u1)
+    let r = s2.sub(s1).double()
+    if h.is_zero() { return if r.is_zero() { double(p) } else { infinity() } }
+    let i = h.double().square()
+    let j = h.mul(i)
+    let v = u1.mul(i)
+    let x = r.square().sub(j).sub(v.double())
+    let y = r.mul(v.sub(x)).sub(s1.mul(j).double())
+    Point { x, y, z: p.z.add(q.z).square().sub(z1z1).sub(z2z2).mul(h) }
+}
+
+// u * G + v * Q by Shamir's simultaneous double-and-add.
+fn combination(u: u256, v: u256, q: Point) -> Point {
+    let g = Point { x: Fp::new(GX), y: Fp::new(GY), z: Fp::one() }
+    let both = add(g, q)
+    var result = infinity()
+    var bit: u64 = 256
+    while bit > 0 {
+        bit -= 1
+        result = double(result)
+        let take_u = (u >> bit as u256) & 1 == 1
+        let take_v = (v >> bit as u256) & 1 == 1
+        if take_u && take_v {
+            result = add(result, both)
+        } else if take_u {
+            result = add(result, g)
+        } else if take_v {
+            result = add(result, q)
+        }
+    }
+    result
+}
+
+fn on_curve(x: Fp, y: Fp) -> bool {
+    let x3 = x.square().mul(x)
+    y.square().equals(x3.sub(x.double().add(x)).add(Fp::new(B)))
+}
+
+/// Whether (r, s) is an ECDSA signature of the 32-byte message hash `hash` by
+/// the public key (x, y) (EIP-7951). The signature needs 0 < r, s < n, and
+/// the key coordinates below p on the curve, excluding (0, 0).
+pub fn verify(hash: u256, r: u256, s: u256, x: u256, y: u256) -> bool {
+    if r == 0 || r >= N || s == 0 || s >= N || x >= P || y >= P || (x == 0 && y == 0) { return false }
+    let key = Point { x: Fp::new(x), y: Fp::new(y), z: Fp::one() }
+    if !on_curve(x: key.x, y: key.y) { return false }
+    let w = Scalar::new(s).inverse()
+    let u = Scalar::new(hash % N).mul(w).value()
+    let v = Scalar::new(r).mul(w).value()
+    let point = combination(u, v, q: key)
+    if point.z.is_zero() { return false }
+    // R = u * G + v * Q is valid when its affine x reduces to r modulo n.
+    point.x.mul(point.z.square().inverse()).value() % N == r
+}
+
+#[test]
+fn p256_field_and_group_edges() {
+    // (-1)^2 = 1 and a + a near p wraps, in both moduli.
+    core::assert(Fp::new(P - 1).square().value() == 1 && Fp::new(P - 1).double().value() == P - 2)
+    core::assert(Scalar::new(N - 1).square().value() == 1 && Scalar::new(N - 1).double().value() == N - 2)
+    for x in [1 as u256, 2, 3, P - 1, 0x123456789abcdef0fedcba9876543210] {
+        core::assert(Fp::new(x).mul(Fp::new(x).inverse()).value() == 1)
+        core::assert(Scalar::new(x % N).mul(Scalar::new(x % N).inverse()).value() == 1)
+    }
+    let g = Point { x: Fp::new(GX), y: Fp::new(GY), z: Fp::one() }
+    core::assert(on_curve(x: g.x, y: g.y))
+    // n * G is infinity; (n - 1) * G = -G.
+    core::assert(combination(u: N, v: 0, q: g).z.is_zero())
+    let minus = combination(u: N - 1, v: 0, q: g)
+    let z = minus.z.inverse()
+    core::assert(minus.x.mul(z.square()).value() == GX && minus.y.mul(z.square().mul(z)).value() == P - GY)
+}

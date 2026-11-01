@@ -1,5 +1,5 @@
 use ingot::transaction::Transaction
-use ingot::constants::{ERR_OUT_OF_GAS, OK}
+use ingot::status::{ERR_OUT_OF_GAS, OK}
 use ingot::state::WorldState
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute, execute_vm}
@@ -16,12 +16,14 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     let large = Program::copy_from(bytes, len: i)
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
+    var tracer = ()
     vm.run(
         large,
         empty_bytes(),
         default_call_env(),
         default_block_env(),
         mut state,
+        mut tracer,
     )
     core::assert(
         vm.status == OK && vm.gas_remaining == 998985,
@@ -39,7 +41,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     let small = Program::copy_from(bytes, len: 4)
     var call = default_call_env()
     call.gas_limit = 20
-    vm.run(small, empty_bytes(), call, default_block_env(), mut state)
+    vm.run(small, empty_bytes(), call, default_block_env(), mut state, mut tracer)
     core::assert(vm.status == OK && vm.gas_remaining == 12 && vm.stack.len() == 0)
     core::assert(vm.memory_size == 32 && vm.output.len() == 32)
     core::assert(vm.memory.capacity() == memory_capacity)
@@ -58,6 +60,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         default_call_env(),
         default_block_env(),
         mut state,
+        mut tracer,
     )
     core::assert(vm.status == OK && vm.gas_remaining == 998994)
     core::assert(
@@ -83,12 +86,14 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     let huge = Program::copy_from(bytes, len: 36)
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
+    var tracer = ()
     vm.run(
         huge,
         empty_bytes(),
         default_call_env(),
         default_block_env(),
         mut state,
+        mut tracer,
     )
     core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0)
     core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
@@ -97,7 +102,7 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     let stop = Program::copy_from([0 as u8], len: 1)
     var call = default_call_env()
     call.gas_limit = 0
-    vm.run(stop, empty_bytes(), call, default_block_env(), mut state)
+    vm.run(stop, empty_bytes(), call, default_block_env(), mut state, mut tracer)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack.len() == 0)
     core::assert(vm.halted && !vm.output_valid && vm.memory_size == 0)
     state.finish(commit: true, gas_spent: 0)

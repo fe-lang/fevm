@@ -1,0 +1,8 @@
+[package]
+name = "fevm-client"
+version = "0.1.0"
+edition = "2024"
+description = "Drives fevm's session mode (`fevm serve`) from Rust"
+publish = false
+
+[dependencies]

@@ -1,0 +1,142 @@
+// Hooks for watching a transaction run, and a tracer that records them.
+use core::{MemBuffer, MemSpan, MemVec}
+
+/// Hooks that `transact` and `simulate` call as a transaction runs. Each hook
+/// does nothing by default. `()` keeps every default, so an untraced
+/// transaction compiles to no tracing code.
+pub trait Tracer {
+    /// Before each opcode runs.
+    fn step(mut self, _ step: Step) {}
+    /// When a call or creation enters its frame, with its input: calldata, or
+    /// initcode for a creation.
+    fn enter(mut self, _ call: CallStart, input: MemSpan) {}
+    /// When a call or creation leaves its frame, with its output.
+    fn leave(mut self, _ call: CallEnd, output: MemSpan) {}
+}
+
+impl Tracer for () {}
+
+/// One opcode about to run: its `pc` and the gas, stack depth and memory size
+/// before it, in a frame at call `depth` (zero for the transaction's).
+pub struct Step {
+    pub pc: usize,
+    pub op: u8,
+    pub gas: u64,
+    pub stack_len: usize,
+    pub memory_size: u64,
+    pub depth: usize,
+}
+
+impl Copy for Step {}
+
+/// A call or creation entering its frame at call `depth`: the opcode (`kind`:
+/// CALL or CREATE for the transaction's own message), caller, target, value
+/// and the gas the frame gets.
+pub struct CallStart {
+    pub kind: u8,
+    pub depth: usize,
+    pub from: u256,
+    pub to: u256,
+    pub value: u256,
+    pub gas: u64,
+}
+
+impl Copy for CallStart {}
+
+/// A call or creation leaving its frame at call `depth`, with its status and
+/// the gas left.
+pub struct CallEnd {
+    pub depth: usize,
+    pub status: i32,
+    pub gas: u64,
+}
+
+impl Copy for CallEnd {}
+
+/// A recorded `CallStart` (`enter`) or `CallEnd`; `steps` counts the steps
+/// recorded before it.
+pub struct CallEvent {
+    pub enter: bool,
+    pub kind: u8,
+    pub depth: usize,
+    pub from: u256,
+    pub to: u256,
+    pub value: u256,
+    pub gas: u64,
+    pub status: i32,
+    pub steps: usize,
+    data_start: usize,
+    data_len: usize,
+}
+
+impl Copy for CallEvent {}
+
+/// A tracer that records a transaction's steps, its calls, or both, in
+/// execution order. Recording never fails a transaction: `complete` is false
+/// if memory ran out and records were dropped.
+pub struct Trace {
+    record_steps: bool,
+    record_calls: bool,
+    steps: MemVec<Step>,
+    calls: MemVec<CallEvent>,
+    // Call inputs and outputs, back to back.
+    data: MemBuffer,
+    pub complete: bool,
+}
+
+impl Trace {
+    pub fn new(steps: bool, calls: bool) -> Self {
+        Trace {
+            record_steps: steps, record_calls: calls, steps: MemVec::new(), calls: MemVec::new(),
+            data: MemBuffer::empty(), complete: true,
+        }
+    }
+
+    pub fn step_count(self) -> usize { self.steps.len() }
+    pub fn step(self, _ index: usize) -> Step { self.steps[index] }
+    pub fn call_count(self) -> usize { self.calls.len() }
+    pub fn call(self, _ index: usize) -> CallEvent { self.calls[index] }
+    /// An entering call's input, or a leaving one's output.
+    pub fn call_data(self, _ index: usize) -> ref MemSpan {
+        let event = self.calls[index]
+        self.data.slice(offset: event.data_start, len: event.data_len)
+    }
+
+    fn add_call(mut self, _ event: CallEvent, data: MemSpan) {
+        var event = event
+        event.data_start = self.data.len()
+        event.data_len = data.len()
+        if !self.data.try_reserve(data.len()) {
+            self.complete = false
+            return
+        }
+        self.data.extend_from(data)
+        if self.calls.try_push(event).is_err() { self.complete = false }
+    }
+}
+
+impl Tracer for Trace {
+    // Out of line, so the traced opcode handlers stay small.
+    #[inline(never)]
+    fn step(mut self, _ step: Step) {
+        if self.record_steps && self.steps.try_push(step).is_err() { self.complete = false }
+    }
+
+    fn enter(mut self, _ call: CallStart, input: MemSpan) {
+        if !self.record_calls { return }
+        let event = CallEvent {
+            enter: true, kind: call.kind, depth: call.depth, from: call.from, to: call.to, value: call.value,
+            gas: call.gas, status: 0, steps: self.steps.len(), data_start: 0, data_len: 0,
+        }
+        self.add_call(event, data: input)
+    }
+
+    fn leave(mut self, _ call: CallEnd, output: MemSpan) {
+        if !self.record_calls { return }
+        let event = CallEvent {
+            enter: false, kind: 0, depth: call.depth, from: 0, to: 0, value: 0, gas: call.gas,
+            status: call.status, steps: self.steps.len(), data_start: 0, data_len: 0,
+        }
+        self.add_call(event, data: output)
+    }
+}

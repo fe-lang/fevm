@@ -1,5 +1,5 @@
 use core::MemBuffer
-use ingot::constants::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
 use ingot::{InputData, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
 use ingot::vm::Vm
 
@@ -12,9 +12,10 @@ pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
     // PUSH2 9000; CALLDATALOAD; CALLDATASIZE.
     let program = Program::copy_from([0x61 as u8, 0x23, 0x28, 0x35, 0x36], len: 5)
     var vm = Vm::new()
+    var tracer = ()
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     for _ in 0..2 {
-        vm.run(program, input, default_call_env(), default_block_env(), mut tx)
+        vm.run(program, input, default_call_env(), default_block_env(), mut tx, mut tracer)
         core::assert(vm.status == OK && vm.stack.len() == 2)
         core::assert(vm.stack[0] == (42 << 248) && vm.stack[1] == 9001)
     }
@@ -25,13 +26,14 @@ pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
 pub fn vm_input_failure_preserves_the_transaction_setup_phase() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
+    var tracer = ()
     for failed_code in [true, false] {
         let program = if failed_code {
             Program::new(InputData::new(MemBuffer::empty(), status: ERR_HOST_ALLOCATION))
         } else { Program::copy_from([0 as u8], len: 1) }
         let input = if failed_code { empty_bytes() }
             else { InputData::new(MemBuffer::empty(), status: ERR_HOST_ALLOCATION) }
-        vm.run(program, input, default_call_env(), default_block_env(), mut tx)
+        vm.run(program, input, default_call_env(), default_block_env(), mut tx, mut tracer)
         core::assert(vm.status == ERR_HOST_ALLOCATION && tx.depth() == 0)
         core::assert(vm.gas_remaining == default_call_env().gas_limit)
         // A rejected input has not begun EVM execution.
@@ -44,11 +46,12 @@ pub fn vm_input_failure_preserves_the_transaction_setup_phase() {
 pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
+    var tracer = ()
     var code = MemBuffer::empty()
     core::assert(code.try_resize(8193))
     code[0] = 0x38
     vm.run(Program::new(InputData::new(code, status: OK)), empty_bytes(),
-                 default_call_env(), default_block_env(), mut tx)
+                 default_call_env(), default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 8193)
     core::assert(vm.gas_remaining == 999998)
     for into_push_data in [false, true] {
@@ -63,7 +66,7 @@ pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
         code[8193] = 0x60
         code[8194] = 42
         vm.run(Program::new(InputData::new(code, status: OK)), empty_bytes(),
-                     default_call_env(), default_block_env(), mut tx)
+                     default_call_env(), default_block_env(), mut tx, mut tracer)
         if into_push_data {
             core::assert(vm.status == ERR_INVALID_JUMP && vm.gas_remaining == 0)
         } else {

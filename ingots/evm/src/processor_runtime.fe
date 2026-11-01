@@ -1,0 +1,233 @@
+use core::Option
+use ingot::address::create_address
+use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
+use ingot::state::WorldState
+use ingot::status::{
+    ERR_OUT_OF_GAS,
+    INVALID_CHAIN_ID,
+    INVALID_FEE_CAP,
+    INVALID_INITCODE_SIZE,
+    INVALID_NONCE,
+    INVALID_SENDER_CODE,
+    OK,
+    VALID,
+}
+use ingot::trace::{Step, Trace, Tracer}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+use ingot::vm::FrameBuffers
+
+const SENDER: u256 = 0x1000
+
+fn funded() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    world
+}
+
+fn block() -> BlockEnv {
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    block.chainid = 1
+    block
+}
+
+fn call(to: u256) -> TxEnv {
+    TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to, creates: false, nonce: 0,
+        gas_limit: 100_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+}
+
+fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
+    var buffers = FrameBuffers::new()
+    var tracer = ()
+    transact(world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
+}
+
+// Initcode that returns `len` zero bytes as the new code: PUSH3 len; PUSH0; RETURN.
+fn deployer(len: u32) -> InputData {
+    let bytes: [u8; 6] = [
+        0x62, (len >> 16).downcast_unchecked(), ((len >> 8) & 0xff).downcast_unchecked(),
+        (len & 0xff).downcast_unchecked(), 0x5f, 0xf3,
+    ]
+    InputData::copy_from(bytes, offset: 0, len: 6)
+}
+
+#[test]
+fn config_checks_can_be_skipped() {
+    var env = call(to: 0xbb)
+    env.chain_id = Option::Some(2)
+    var config = Config::osaka()
+    let wrong_chain = send(funded(), env, empty_bytes(), block(), config)
+    core::assert(wrong_chain.receipt.invalid == INVALID_CHAIN_ID)
+    config.check_chain_id = false
+    core::assert(send(wrong_chain.state, env, empty_bytes(), block(), config).receipt.invalid == VALID)
+
+    env = call(to: 0xbb)
+    env.nonce = 5
+    config = Config::osaka()
+    let wrong_nonce = send(funded(), env, empty_bytes(), block(), config)
+    core::assert(wrong_nonce.receipt.invalid == INVALID_NONCE)
+    config.check_nonce = false
+    let applied = send(wrong_nonce.state, env, empty_bytes(), block(), config)
+    // The sender's nonce still increments.
+    core::assert(applied.receipt.invalid == VALID && applied.state.nonce(SENDER) == 1)
+
+    var world = funded()
+    core::assert(world.set_code(address: SENDER, code: [0x00 as u8]) == OK)
+    config = Config::osaka()
+    let with_code = send(world, call(to: 0xbb), empty_bytes(), block(), config)
+    core::assert(with_code.receipt.invalid == INVALID_SENDER_CODE)
+    config.check_sender_code = false
+    core::assert(send(with_code.state, call(to: 0xbb), empty_bytes(), block(), config).receipt.invalid == VALID)
+}
+
+#[test]
+fn config_admits_prices_below_the_base_fee() {
+    var block = block()
+    block.basefee = 10
+    block.coinbase = 0xc0
+    var env = call(to: 0xbb)
+    env.kind = TX_FEE_MARKET
+    env.gas_price = 4
+    env.max_priority_fee_per_gas = 4
+    var config = Config::osaka()
+    let rejected = send(funded(), env, empty_bytes(), block, config)
+    core::assert(rejected.receipt.invalid == INVALID_FEE_CAP)
+    config.check_base_fee = false
+    let applied = send(rejected.state, env, empty_bytes(), block, config)
+    // The transaction pays its fee cap and the coinbase no priority fee.
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.gas_used == 21_000)
+    core::assert(applied.state.balance(SENDER) == 1_000_000_000_000 - 21_000 * 4)
+    core::assert(applied.state.balance(0xc0) == 0)
+}
+
+#[test]
+fn config_sets_code_size_limits() {
+    var env = call(to: 0)
+    env.creates = true
+    env.gas_limit = 16_000_000
+    // 30,000 bytes exceeds EIP-170's 24,576, which the deposit charges as out of gas.
+    let osaka = send(funded(), env, deployer(len: 30_000), block(), Config::osaka())
+    core::assert(osaka.receipt.invalid == VALID && osaka.receipt.status == ERR_OUT_OF_GAS)
+    core::assert(osaka.receipt.created.is_none())
+    var config = Config::osaka()
+    config.max_code_size = 32_768
+    env.nonce = 1
+    let raised = send(osaka.state, env, deployer(len: 30_000), block(), config)
+    let created = create_address(sender: SENDER, nonce: 1)
+    core::assert(raised.receipt.status == OK && raised.state.code_size(created) == 30_000)
+    core::assert(raised.receipt.created.unwrap_or(default: 0) == created)
+
+    // EIP-3860's initcode limit is 49,152 bytes; zero bytes are STOPs.
+    let initcode: [u8; 49_153] = [0; 49_153]
+    env.nonce = 2
+    let rejected = send(raised.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), Config::osaka())
+    core::assert(rejected.receipt.invalid == INVALID_INITCODE_SIZE)
+    config.max_initcode_size = 65_536
+    let applied = send(rejected.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), config)
+    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+}
+
+#[test]
+fn receipt_reports_the_refund() {
+    var world = funded()
+    // SSTORE(0, 0) on a slot holding 1: a cold reset that refunds 4,800.
+    core::assert(world.set_code(address: 0xbb, code: [0x5f as u8, 0x5f, 0x55]) == OK)
+    core::assert(world.storage_store(0xbb, 0, 1))
+    let applied = send(world, call(to: 0xbb), empty_bytes(), block(), Config::osaka())
+    let receipt = applied.receipt
+    // 21,000 intrinsic, two PUSH0 and a cold SSTORE reset (2,100 + 2,900).
+    let spent: u64 = 21_000 + 2 + 2 + 5_000
+    core::assert(receipt.status == OK && receipt.gas_refunded == 4_800 && receipt.gas_used == spent - 4_800)
+    core::assert(receipt.created.is_none())
+}
+
+#[test]
+fn simulate_gives_the_receipt_and_keeps_the_state() {
+    var world = funded()
+    // SSTORE(0, 1); LOG0(0, 0).
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
+    var buffers = FrameBuffers::new()
+    var tracer = ()
+    let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+                             Config::osaka(), mut buffers, mut tracer)
+    let receipt = simulated.receipt
+    core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.logs.len() == 1)
+    let state = simulated.state
+    core::assert(state.storage_load(0xbb, 0) == 0 && state.nonce(SENDER) == 0)
+    core::assert(state.balance(SENDER) == 1_000_000_000_000)
+    let applied = transact(state, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+                           Config::osaka(), mut buffers, mut tracer)
+    core::assert(applied.receipt.gas_used == receipt.gas_used && applied.receipt.logs.len() == 1)
+    core::assert(applied.state.storage_load(0xbb, 0) == 1 && applied.state.nonce(SENDER) == 1)
+}
+
+// A calls B, the identity precompile and the codeless 0xcc, each with
+// CALL(gas, to, 0, 0, 0, 0, 0) and POP, then stops. B is PUSH1 1; STOP.
+fn calling_world() -> WorldState {
+    var world = funded()
+    let a: [u8; 31] = [
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1, 0x50,
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0x04, 0x5a, 0xf1, 0x50,
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xcc, 0x5a, 0xf1, 0x50, 0x00,
+    ]
+    core::assert(world.set_code(address: 0xaa, code: a) == OK)
+    core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x00]) == OK)
+    world
+}
+
+fn traced<T: Tracer>(_ world: own WorldState, nonce: u256, _ tracer: mut T) -> Applied {
+    var env = call(to: 0xaa)
+    env.nonce = nonce
+    var buffers = FrameBuffers::new()
+    transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
+}
+
+#[test]
+fn trace_records_steps_and_calls_in_order() {
+    var none = ()
+    let untraced = traced(calling_world(), nonce: 0, mut none)
+    core::assert(untraced.receipt.status == OK)
+    var trace = Trace::new(steps: true, calls: true)
+    let applied = traced(untraced.state, nonce: 1, mut trace)
+    core::assert(applied.receipt.status == OK && applied.receipt.gas_used == untraced.receipt.gas_used)
+    core::assert(trace.complete)
+    // A runs 28 opcodes and B two.
+    core::assert(trace.step_count() == 30)
+    let first = trace.step(0)
+    core::assert(first.pc == 0 && first.op == 0x5f && first.depth == 0 && first.gas == 100_000 - 21_000)
+    let in_b = trace.step(8)
+    core::assert(in_b.pc == 0 && in_b.op == 0x60 && in_b.depth == 1 && in_b.stack_len == 0)
+    core::assert(trace.step(10).pc == 9 && trace.step(10).op == 0x50 && trace.step(10).depth == 0)
+    // Enter A, then enter and leave B, the precompile and 0xcc, then leave A.
+    core::assert(trace.call_count() == 8)
+    let enter_a = trace.call(0)
+    core::assert(enter_a.enter && enter_a.kind == 0xf1 && enter_a.depth == 0 && enter_a.to == 0xaa && enter_a.steps == 0)
+    let enter_b = trace.call(1)
+    core::assert(enter_b.enter && enter_b.kind == 0xf1 && enter_b.depth == 1 && enter_b.from == 0xaa && enter_b.to == 0xbb)
+    core::assert(enter_b.steps == 8 && trace.call(2).steps == 10 && !trace.call(2).enter && trace.call(2).status == OK)
+    core::assert(trace.call(3).to == 0x04 && trace.call(3).steps == 19 && trace.call(4).steps == 19)
+    core::assert(trace.call(5).to == 0xcc && !trace.call(6).enter)
+    let leave_a = trace.call(7)
+    core::assert(!leave_a.enter && leave_a.depth == 0 && leave_a.steps == 30)
+
+    var calls = Trace::new(steps: false, calls: true)
+    let _ = traced(applied.state, nonce: 2, mut calls)
+    core::assert(calls.step_count() == 0 && calls.call_count() == 8 && calls.call(7).steps == 0)
+}
+
+// Counts the opcodes run at each call depth, and keeps the other hooks' defaults.
+struct DepthCounter { counts: [usize; 2] }
+
+impl Tracer for DepthCounter {
+    fn step(mut self, _ step: Step) { self.counts[step.depth] += 1 }
+}
+
+#[test]
+fn trace_runs_a_custom_tracer() {
+    var counter = DepthCounter { counts: [0, 0] }
+    let applied = traced(calling_world(), nonce: 0, mut counter)
+    core::assert(applied.receipt.status == OK)
+    core::assert(counter.counts[0] == 28 && counter.counts[1] == 2)
+}

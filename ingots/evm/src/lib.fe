@@ -1,13 +1,16 @@
-use std::native::Args
-pub use constants::{ERR_REVERT, OK}
+use std::env::Args
+use std::io::{Stdin, Stdout}
+pub use status::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
 pub use logs::{LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
+pub use trace::{CallEvent, Step, Trace}
 pub use types::{
     BlockEnv,
     InputData,
     CallEnv,
+    Config,
     ExecutionResult,
     Program,
     default_block_env,
@@ -15,12 +18,10 @@ pub use types::{
     empty_bytes,
 }
 pub use vm::{self, FrameBuffers, execute}
-pub use processor::{self, Applied, Receipt, TxEnv, TxRequest, transact}
+pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 
-pub fn main(argc: i32, argv: **u8) -> i32 {
-    // Native main supplies live NUL-terminated arguments for this process.
-    let args = unsafe { Args::new(argc, argv) }
-    cli::run(args)
+pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
+    cli::run()
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use core::Option
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
+use ingot::constants::MAX_U256
 
 // At 2^42 bytes, the quadratic term alone exceeds a u64 frame gas budget.
 // Affordable ranges therefore fit u64 before any host allocation is attempted.
@@ -80,7 +81,7 @@ pub fn copy_expansion(current: u64, dest: u256, source: u256, len: u256) -> Opti
     }
 }
 
-/// Cancun's three gas per copied word, excluding opcode and expansion charges.
+/// Three gas per copied word, excluding opcode and expansion charges.
 pub fn copy_gas(_ len: u256) -> Option<u64> {
     let words = len / 32 + if len % 32 == 0 { 0 } else { 1 }
     // Even the maximum EVM length needs fewer than 2^252 words.
@@ -134,7 +135,7 @@ fn small_memory_cost_matches_expansion() {
 
 #[test]
 fn memory_empty_and_unpayable_ranges() {
-    let max = !(0 as u256)
+    let max = MAX_U256
     match copy_expansion(current: 64, dest: max, source: max, len: 0) {
         Option::Some(plan,) => core::assert(plan.size == 64 && plan.gas == 0),
         Option::None => core::panic(),

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -68,7 +69,7 @@ struct Case
 Case decode(const bytes& data)
 {
     Reader reader{data};
-    if (reader.word(1) != 1)
+    if (reader.word(1) != 4)
         std::abort();
     Case result;
     auto& block = result.block;
@@ -80,6 +81,8 @@ Case decode(const bytes& data)
     block.base_fee = static_cast<uint64_t>(reader.word(32));
     block.blob_base_fee = reader.word(32);
     block.chain_id = static_cast<uint64_t>(reader.word(32));
+    // evmone applies the EIP-7825 cap from Osaka, and this runner executes Cancun.
+    reader.word(8);
     for (auto accounts = reader.count(); accounts != 0; --accounts)
     {
         auto& account = result.pre[reader.addr()];
@@ -95,6 +98,11 @@ Case decode(const bytes& data)
     }
     auto& tx = result.tx;
     tx.type = static_cast<state::Transaction::Type>(static_cast<uint8_t>(reader.word(1)));
+    const auto signed_chain = reader.word(1) == 1;
+    tx.chain_id = static_cast<uint64_t>(reader.word(32));
+    // evmone takes a legacy transaction's v of 35 or more as signing a chain ID.
+    if (signed_chain && tx.type == state::Transaction::Type::legacy)
+        tx.v = 35;
     tx.sender = reader.addr();
     const auto creates = reader.word(1) == 1;
     const auto to = reader.addr();
@@ -117,7 +125,21 @@ Case decode(const bytes& data)
     }
     for (auto blobs = reader.count(); blobs != 0; --blobs)
         tx.blob_hashes.push_back(reader.word32());
-    tx.chain_id = block.chain_id;
+    // Out-of-range nonces and y parities saturate, which keeps them invalid.
+    for (auto authorizations = reader.count(); authorizations != 0; --authorizations)
+    {
+        auto& auth = tx.authorization_list.emplace_back();
+        auth.chain_id = reader.word(32);
+        auth.addr = reader.addr();
+        const auto nonce = reader.word(32);
+        auth.nonce = nonce > std::numeric_limits<uint64_t>::max() ?
+                         std::numeric_limits<uint64_t>::max() :
+                         static_cast<uint64_t>(nonce);
+        const auto y_parity = reader.word(32);
+        auth.y_parity = y_parity > 0xff ? uint8_t{0xff} : static_cast<uint8_t>(y_parity);
+        auth.r = reader.word(32);
+        auth.s = reader.word(32);
+    }
     if (reader.position != data.size())
         std::abort();
     return result;

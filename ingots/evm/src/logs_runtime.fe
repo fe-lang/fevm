@@ -1,6 +1,6 @@
 use core::MemBuffer
 use ingot::{LogBuffer, OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
-use ingot::constants::{ERR_OUT_OF_GAS, ERR_STATIC_WRITE}
+use ingot::status::{ERR_OUT_OF_GAS, ERR_STATIC_WRITE}
 use ingot::transaction_runtime::{checkpoint, program}
 use ingot::vm::Vm
 
@@ -81,9 +81,10 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
             code[size] = (0xa0 + count).downcast_unchecked()
             var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
             var vm = Vm::new()
+            var tracer = ()
             var call = default_call_env()
             call.gas_limit = gas
-            vm.run(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx)
+            vm.run(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
             core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
             if gas < cost {
                 core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
@@ -100,10 +101,11 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
 fn log_copies_frame_memory_and_preserves_topic_stack_order() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
+    var tracer = ()
     // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
     vm.run(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
                     0x60, 1, 0x5f, 0xa2, 0x60, 0xcd, 0x5f, 0x53]),
-           empty_bytes(), default_call_env(), default_block_env(), mut tx)
+           empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && vm.memory[0] == 0xcd)
     core::assert(tx.logs().byte_at(entry: 0, index: 0) == 0xab)
     core::assert(tx.logs().entry(0).topics[0] == 0x22 && tx.logs().entry(0).topics[1] == 0x11)
@@ -122,10 +124,11 @@ fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     tx.revert(point)
     core::assert(tx.blob_hash(1) == second)
     var vm = Vm::new()
+    var tracer = ()
     var call = default_call_env()
     call.is_static = true
     call.gas_limit = 5
-    vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx)
+    vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack[0] == first)
     let next = Transaction::new(tx.finish(commit: true, gas_spent: 5).state, sender: 0, destination: 0, coinbase: 0)
     core::assert(next.blob_hash(0) == 0)

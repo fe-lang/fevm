@@ -22,15 +22,14 @@ fn input_word<T: ByteSource>(_ input: T, offset: u256, len: u64) -> u256 {
     value
 }
 
-fn saturating_mul(_ a: u256, _ b: u256) -> u256 {
-    if a != 0 && b > MAX_U256 / a { MAX_U256 } else { a * b }
-}
-
-fn bit_length(_ value: u256) -> u256 {
-    var bits: u256 = 0
-    while bits < 256 && value >> bits != 0 { bits += 1 }
+fn bit_length(_ value: u256) -> u64 {
+    var bits: u64 = 0
+    while bits < 256 && value >> bits as u256 != 0 { bits += 1 }
     bits
 }
+
+// EIP-7823 bounds each of the three lengths.
+const MAX_LENGTH: u256 = 1024
 
 struct Lengths { base: u256, exponent: u256, modulus: u256 }
 
@@ -42,27 +41,18 @@ fn lengths<T: ByteSource>(_ input: T) -> Lengths {
     }
 }
 
-// EIP-2565 gas. Lengths that make the cost exceed any u64 gas return only a
-// lower bound above u64, and saturating arithmetic covers absurd lengths.
-fn gas_cost<T: ByteSource>(_ input: T) -> u256 {
-    let sizes = lengths(input)
-    let longest = if sizes.base > sizes.modulus { sizes.base } else { sizes.modulus }
-    let words = longest / 8 + if longest % 8 == 0 { 0 } else { 1 }
-    let complexity = saturating_mul(words, words)
-    // At least one iteration is charged, so this bound decides affordability by
-    // itself; below it the base length is small enough to locate the exponent.
-    if complexity / 3 > 0xffffffffffffffff { return complexity / 3 }
-    let head_len: u64 = if sizes.exponent < 32 { sizes.exponent.downcast_unchecked() } else { 32 }
-    let head = input_word(input, offset: 96 + sizes.base, len: head_len)
+// EIP-7883 gas for lengths within the EIP-7823 bounds, which keep it below 2^30.
+fn gas_cost<T: ByteSource>(_ input: T, _ sizes: Lengths) -> u64 {
+    let longest: u64 = (if sizes.base > sizes.modulus { sizes.base } else { sizes.modulus }).downcast_unchecked()
+    let words = (longest + 7) / 8
+    let complexity = if longest > 32 { 2 * words * words } else { 16 }
+    let exponent: u64 = sizes.exponent.downcast_unchecked()
+    let head = input_word(input, offset: 96 + sizes.base, len: if exponent < 32 { exponent } else { 32 })
     let head_bits = bit_length(head)
     let top_bits = if head_bits > 0 { head_bits - 1 } else { 0 }
-    let count = if sizes.exponent <= 32 { top_bits } else {
-        let tail = saturating_mul(8, sizes.exponent - 32)
-        if tail > MAX_U256 - top_bits { MAX_U256 } else { tail + top_bits }
-    }
-    let iterations = if count == 0 { 1 } else { count }
-    let cost = saturating_mul(complexity, iterations) / 3
-    if cost < 200 { 200 } else { cost }
+    let count = if exponent <= 32 { top_bits } else { 16 * (exponent - 32) + top_bits }
+    let cost = complexity * if count == 0 { 1 } else { count }
+    if cost < 500 { 500 } else { cost }
 }
 
 // One limb of a big-endian number of `len` bytes at `offset`; limb 0 is least significant.
@@ -82,15 +72,14 @@ fn host_allocation(_ gas_used: u64) -> Output {
     Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
 }
 
-/// MODEXP (EIP-198 with EIP-2565 gas): `base ** exponent % modulus`, as
-/// exactly modulus-length big-endian bytes.
+/// MODEXP (EIP-198, with EIP-7883 gas and EIP-7823 bounds): `base ** exponent
+/// % modulus`, as exactly modulus-length big-endian bytes. A length above
+/// 1,024 bytes is an exceptional failure.
 pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
-    let cost = gas_cost(input)
-    if cost > gas as u256 { return Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() } }
-    let gas_used: u64 = cost.downcast_unchecked()
     let sizes = lengths(input)
-    // The charged cost bounds the base and modulus lengths below 2^36 bytes and
-    // the exponent length below 2^63 bytes.
+    let bounded = sizes.base <= MAX_LENGTH && sizes.exponent <= MAX_LENGTH && sizes.modulus <= MAX_LENGTH
+    let gas_used = if bounded { gas_cost(input, sizes) } else { 0 }
+    if !bounded || gas_used > gas { return Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() } }
     let modulus_len: u64 = sizes.modulus.downcast_unchecked()
     var output = MemBuffer::empty()
     if sizes.base == 0 && sizes.modulus == 0 { return Output { status: SUCCESS, gas_used, output } }
