@@ -5,8 +5,8 @@ fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
     transaction.checkpoint(is_static: false)
 }
 
-// Linked with vm_allocator.c, FAIL_AT=1 and WATCH_SIZE=100352. Growing the
-// journal to 1,024 changes of 98 bytes fails once; its earlier changes must
+// Linked with vm_allocator.c, FAIL_AT=1 and WATCH_SIZE=131072. Growing the
+// journal to 1,024 changes of 128 bytes fails once; its earlier changes must
 // survive.
 pub fn main() -> i32 {
     var world = WorldState::empty()

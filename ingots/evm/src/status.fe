@@ -1,5 +1,4 @@
 // Execution statuses and transaction validity codes, with their names.
-use std::io::{Write, write}
 
 // Outcomes defined by the EVM.
 pub const OK: i32 = 0
@@ -41,23 +40,23 @@ pub fn is_evm_outcome(_ status: i32) -> bool {
     status == OK || status == ERR_REVERT || exceptional(status)
 }
 
-pub fn write_status_name(_ status: i32) uses (w: mut Write) {
+pub fn status_name(_ status: i32) -> String<20> {
     match status {
-        OK => write("success"),
-        ERR_REVERT => write("revert"),
-        ERR_STACK_UNDERFLOW => write("stack_underflow"),
-        ERR_STACK_OVERFLOW => write("stack_overflow"),
-        ERR_OUT_OF_GAS => write("out_of_gas"),
-        ERR_INVALID_JUMP => write("invalid_jump"),
-        ERR_INVALID_OPCODE => write("invalid_opcode"),
-        ERR_RETURN_DATA_OOB => write("return_data_oob"),
-        ERR_STATIC_WRITE => write("static_write"),
-        ERR_CODE_PREFIX => write("code_prefix"),
-        ERR_PRECOMPILE => write("precompile_failure"),
-        ERR_ADDRESS_COLLISION => write("address_collision"),
-        ERR_HOST_ALLOCATION => write("host_allocation"),
-        ERR_BALANCE_OVERFLOW => write("balance_overflow"),
-        _ => write("unknown"),
+        OK => "success",
+        ERR_REVERT => "revert",
+        ERR_STACK_UNDERFLOW => "stack_underflow",
+        ERR_STACK_OVERFLOW => "stack_overflow",
+        ERR_OUT_OF_GAS => "out_of_gas",
+        ERR_INVALID_JUMP => "invalid_jump",
+        ERR_INVALID_OPCODE => "invalid_opcode",
+        ERR_RETURN_DATA_OOB => "return_data_oob",
+        ERR_STATIC_WRITE => "static_write",
+        ERR_CODE_PREFIX => "code_prefix",
+        ERR_PRECOMPILE => "precompile_failure",
+        ERR_ADDRESS_COLLISION => "address_collision",
+        ERR_HOST_ALLOCATION => "host_allocation",
+        ERR_BALANCE_OVERFLOW => "balance_overflow",
+        _ => "unknown",
     }
 }
 
@@ -83,27 +82,27 @@ pub const INVALID_GAS_LIMIT_CAP: i32 = 16
 pub const INVALID_CHAIN_ID: i32 = 17
 pub const INVALID_NO_AUTHORIZATIONS: i32 = 18
 
-pub fn write_invalid_name(_ invalid: i32) uses (w: mut Write) {
+pub fn invalid_name(_ invalid: i32) -> String<20> {
     match invalid {
-        VALID => write("valid"),
-        INVALID_INTRINSIC_GAS => write("intrinsic_gas"),
-        INVALID_INITCODE_SIZE => write("initcode_size"),
-        INVALID_NONCE_LIMIT => write("nonce_limit"),
-        INVALID_PRIORITY_FEE => write("priority_fee"),
-        INVALID_GAS_LIMIT => write("gas_limit"),
-        INVALID_BLOB_COUNT => write("blob_count"),
-        INVALID_FEE_CAP => write("fee_cap"),
-        INVALID_CREATE => write("create"),
-        INVALID_NO_BLOBS => write("no_blobs"),
-        INVALID_BLOB_VERSION => write("blob_version"),
-        INVALID_BLOB_FEE_CAP => write("blob_fee_cap"),
-        INVALID_NONCE => write("nonce"),
-        INVALID_BALANCE => write("balance"),
-        INVALID_SENDER_CODE => write("sender_code"),
-        INVALID_TX_TYPE => write("tx_type"),
-        INVALID_GAS_LIMIT_CAP => write("gas_limit_cap"),
-        INVALID_CHAIN_ID => write("chain_id"),
-        INVALID_NO_AUTHORIZATIONS => write("no_authorizations"),
-        _ => write("unknown"),
+        VALID => "valid",
+        INVALID_INTRINSIC_GAS => "intrinsic_gas",
+        INVALID_INITCODE_SIZE => "initcode_size",
+        INVALID_NONCE_LIMIT => "nonce_limit",
+        INVALID_PRIORITY_FEE => "priority_fee",
+        INVALID_GAS_LIMIT => "gas_limit",
+        INVALID_BLOB_COUNT => "blob_count",
+        INVALID_FEE_CAP => "fee_cap",
+        INVALID_CREATE => "create",
+        INVALID_NO_BLOBS => "no_blobs",
+        INVALID_BLOB_VERSION => "blob_version",
+        INVALID_BLOB_FEE_CAP => "blob_fee_cap",
+        INVALID_NONCE => "nonce",
+        INVALID_BALANCE => "balance",
+        INVALID_SENDER_CODE => "sender_code",
+        INVALID_TX_TYPE => "tx_type",
+        INVALID_GAS_LIMIT_CAP => "gas_limit_cap",
+        INVALID_CHAIN_ID => "chain_id",
+        INVALID_NO_AUTHORIZATIONS => "no_authorizations",
+        _ => "unknown",
     }
 }

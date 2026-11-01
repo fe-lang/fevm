@@ -2,20 +2,13 @@
 // response to each on stdout. Every frame is a big-endian u32 length and that
 // many bytes. native/client/README.md specifies the requests and responses.
 use core::{MemBuffer, MemSpan, MemVec, Option}
-use core::ptr::offset_bytes
+use std::io::{Stdin, Stdout}
 use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::OK
 use ingot::trace::{Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
 use ingot::vm::FrameBuffers
-
-extern {
-    // POSIX descriptor I/O. std::io reads and writes one character at a time
-    // and cannot flush, and a host waits for each whole response.
-    fn read(_ fd: i32, _ buf: *u8, _ count: i64) -> i64
-    fn write(_ fd: i32, _ buf: *u8, _ count: i64) -> i64
-}
 
 // Requests.
 const CONFIGURE: u8 = 1
@@ -42,25 +35,17 @@ const COMMIT: u8 = 1
 const TRACE_CALLS: u8 = 2
 const TRACE_STEPS: u8 = 4
 
-// Fills `len` bytes at `buf` from stdin; false at the end of input.
-fn read_exact(_ buf: *u8, _ len: usize) -> bool {
+// Fills `buf` from stdin; false at the end of input.
+fn read_exact(_ buf: mut MemSpan) -> bool uses (input: mut Stdin) {
     var done: usize = 0
-    while done < len {
-        let count: i64 = (len - done).downcast_unchecked()
-        let read = unsafe { read(0, offset_bytes(buf, done), count) }
-        if read <= 0 { return false }
-        done += read.downcast_unchecked()
-    }
-    true
-}
-
-fn write_all(_ buf: *u8, _ len: usize) -> bool {
-    var done: usize = 0
-    while done < len {
-        let count: i64 = (len - done).downcast_unchecked()
-        let written = unsafe { write(1, offset_bytes(buf, done), count) }
-        if written <= 0 { return false }
-        done += written.downcast_unchecked()
+    while done < buf.len() {
+        match input.read_stdin(buf.tail(done)) {
+            Option::Some(count) => {
+                if count == 0 { return false }
+                done += count
+            },
+            Option::None => return false,
+        }
     }
     true
 }
@@ -125,7 +110,7 @@ impl Writer {
     }
     // Writes the frame; a response that could not be built becomes
     // ALLOCATION_FAILED. False if stdout is closed.
-    fn send(self) -> bool {
+    fn send(self) -> bool uses (out: mut Stdout) {
         var frame = MemVec<u8>::new()
         let ok = !self.failed && frame.try_reserve(self.bytes.len() + 4)
         let len = if ok { self.bytes.len() } else { 1 }
@@ -135,7 +120,7 @@ impl Writer {
         } else {
             frame.push(ALLOCATION_FAILED)
         }
-        write_all(frame.ptr(), frame.len())
+        out.write_stdout(frame.as_slice())
     }
 }
 
@@ -407,7 +392,7 @@ impl Session {
 }
 
 // Serves requests until stdin ends. Returns the exit status.
-pub fn serve() -> i32 {
+pub fn serve() -> i32 uses (input: mut Stdin, out: mut Stdout) {
     var session = Session {
         world: WorldState::empty(),
         block: default_block_env(),
@@ -416,7 +401,7 @@ pub fn serve() -> i32 {
         snapshots: MemVec::new(),
     }
     var header = MemBuffer::alloc(4)
-    while read_exact(header.ptr(), 4) {
+    while read_exact(header.span()) {
         let len: usize = header.read_be<u32>(0) as usize
         var data = MemBuffer::empty()
         if !data.try_resize(len) {
@@ -425,13 +410,13 @@ pub fn serve() -> i32 {
             var chunk = MemBuffer::alloc(4096)
             while left > 0 {
                 let part = if left < 4096 { left } else { 4096 }
-                if !read_exact(chunk.ptr(), part) { return 1 }
+                if !read_exact(chunk.slice(offset: 0, len: part)) { return 1 }
                 left -= part
             }
             if !Writer::new(ALLOCATION_FAILED).send() { return 1 }
             continue
         }
-        if !read_exact(data.ptr(), len) { return 1 }
+        if !read_exact(data.span()) { return 1 }
         var reader = Reader { data, position: 0, failed: false }
         if !session.handle(mut reader).send() { return 1 }
     }

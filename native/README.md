@@ -13,10 +13,10 @@ needed.
 
 ## Compiler
 
-[`toolchain.json`](toolchain.json) pins Fe
-[`5e882e0a2`](https://github.com/argotorg/fe/tree/5e882e0a215af088156fdc12cefec09d80d8c1bf)
-([argotorg/fe#1895](https://github.com/argotorg/fe/pull/1895) on master
-`e572b31ac`), its Cargo.lock's Sonatina revision and hash, and Rust 1.99.0.
+[`toolchain.json`](toolchain.json) pins Fe master
+[`431b440c3`](https://github.com/argotorg/fe/tree/431b440c3459ceeedc917b48512609b1126a4299)
+([argotorg/fe#1900](https://github.com/argotorg/fe/pull/1900)), its
+Cargo.lock's Sonatina revision and hash, and Rust 1.99.0.
 
 ```sh
 python3 native/bootstrap.py --out native/out/toolchain --toolchain 1.99.0

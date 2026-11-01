@@ -1,6 +1,7 @@
+use core::MemBuffer
+use std::env::{Arg, Args}
+use std::io::{Display, Stdin, Stdout}
 use ingot::transaction::Transaction
-use std::io::{Write, host, write, write_char, writeln}
-use std::native::Args
 use ingot::session::serve
 use ingot::hex::{
     ERR_BAD_HEX,
@@ -8,91 +9,96 @@ use ingot::hex::{
     parse_hex_bytes,
     parse_hex_program,
     write_hex_bytes,
-    write_hex_u256,
+    write_hex_word,
 }
 use ingot::state::WorldState
-use ingot::status::{ERR_HOST_ALLOCATION, ERR_REVERT, OK, write_status_name}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_REVERT, OK, status_name}
 use ingot::types::{default_block_env, default_call_env, empty_bytes}
 use ingot::vm::{Vm, execute_vm}
 
 const ERR_USAGE: i32 = 2
 
-fn usage() -> i32 uses (w: mut Write) {
-    writeln("usage: fevm <hex-bytecode> [hex-calldata] | fevm serve")
-    ERR_USAGE
-}
-
-fn write_parse_error(_ status: i32) uses (w: mut Write) {
+fn write_parse_error(_ status: i32) uses (text: mut MemBuffer) {
     match status {
-        ERR_BAD_HEX => writeln("invalid hex bytecode"),
-        ERR_ODD_HEX => writeln("hex bytecode has an odd number of digits"),
-        ERR_HOST_ALLOCATION => writeln("host allocation failed"),
-        _ => writeln("failed to parse bytecode"),
+        ERR_BAD_HEX => "invalid hex bytecode\n".fmt(mut text),
+        ERR_ODD_HEX => "hex bytecode has an odd number of digits\n".fmt(mut text),
+        ERR_HOST_ALLOCATION => "host allocation failed\n".fmt(mut text),
+        _ => "failed to parse bytecode\n".fmt(mut text),
     }
 }
 
-fn write_vm_error(_ vm: Vm) uses (w: mut Write) {
-    write_status_name(vm.status)
+fn write_vm_error(_ vm: Vm) uses (text: mut MemBuffer) {
+    status_name(vm.status).fmt(mut text)
     if vm.status == ERR_REVERT {
-        write(" ")
-        write_hex_bytes(vm.output)
-    } else {
-        write_char(10)
+        " ".fmt(mut text)
+        write_hex_bytes(vm.output.span())
     }
+    "\n".fmt(mut text)
 }
 
-fn write_result(_ vm: Vm) uses (w: mut Write) {
+fn write_result(_ vm: Vm) uses (text: mut MemBuffer) {
     if vm.output_valid {
-        write_hex_bytes(vm.output)
+        write_hex_bytes(vm.output.span())
     } else if vm.stack.len() == 0 {
-        writeln("empty")
+        "empty".fmt(mut text)
     } else {
-        write_hex_u256(vm.stack[vm.stack.len() - 1])
+        write_hex_word(vm.stack[vm.stack.len() - 1])
     }
+    "\n".fmt(mut text)
 }
 
-pub fn run(_ args: Args) -> i32 {
-    with (Write = host()) {
-        if args.len() != 2 && args.len() != 3 {
-            return usage()
-        }
-        let first = args.get(1)
-        let serve_word: [u8; 5] = [0x73, 0x65, 0x72, 0x76, 0x65]
-        var serving = args.len() == 2 && first.len() == 5
-        for i in 0..5 {
-            serving = serving && first.byte_at(i) == serve_word[i]
-        }
-        if serving {
-            return serve()
-        }
-
-        let program = parse_hex_program(args.get(1))
-        if program.status != OK {
-            write_parse_error(program.status)
-            return program.status
-        }
-
-        let calldata = if args.len() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
-        if calldata.status != OK {
-            write_parse_error(calldata.status)
-            return calldata.status
-        }
-
-        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
-        let vm = execute_vm(
-            program,
-            calldata,
-            default_call_env(),
-            default_block_env(),
-            mut state,
-        )
-        state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining)
-        if vm.status != OK {
-            write_vm_error(vm)
-            return vm.status
-        }
-
-        write_result(vm)
-        OK
+fn is_serve(_ arg: Arg) -> bool {
+    let bytes = arg.span()
+    let serve_word: [u8; 5] = [0x73, 0x65, 0x72, 0x76, 0x65]
+    var serving = bytes.len() == 5
+    for i in 0..5 {
+        serving = serving && bytes[i] == serve_word[i]
     }
+    serving
+}
+
+pub fn run() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
+    if args.count() == 2 && is_serve(args.get(1)) {
+        return serve()
+    }
+    var text = MemBuffer::empty()
+    let status = with (mut text) { execute() }
+    print!(text)
+    status
+}
+
+// Runs the bytecode in the arguments and writes its result or error.
+fn execute() -> i32 uses (args: Args, text: mut MemBuffer) {
+    if args.count() != 2 && args.count() != 3 {
+        "usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n".fmt(mut text)
+        return ERR_USAGE
+    }
+    let program = parse_hex_program(args.get(1))
+    if program.status != OK {
+        write_parse_error(program.status)
+        return program.status
+    }
+
+    let calldata = if args.count() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
+    if calldata.status != OK {
+        write_parse_error(calldata.status)
+        return calldata.status
+    }
+
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    let vm = execute_vm(
+        program,
+        calldata,
+        default_call_env(),
+        default_block_env(),
+        mut state,
+    )
+    state.finish(commit: vm.status == OK, gas_spent: default_call_env().gas_limit - vm.gas_remaining)
+    if vm.status != OK {
+        write_vm_error(vm)
+        return vm.status
+    }
+
+    write_result(vm)
+    OK
 }

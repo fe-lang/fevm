@@ -1,72 +1,59 @@
-use core::Option
-use std::io::{Write, host, write, write_char, writeln}
-use std::native::Args
+use core::{MemBuffer, Option}
+use std::env::Args
+use std::io::{Display, Stdout}
 use fevm::{Transaction, WorldState, default_block_env, default_call_env}
-use fevm::hex::{parse_decimal, parse_hex_bytes, parse_hex_program, write_hex_byte, write_hex_word}
-use fevm::status::{ERR_REVERT, OK, is_evm_outcome, write_status_name}
+use fevm::hex::{parse_decimal, parse_hex_bytes, parse_hex_program, write_hex_bytes, write_hex_word}
+use fevm::status::{ERR_REVERT, OK, is_evm_outcome, status_name}
 use fevm::vm::{Vm, execute_vm}
 
-pub fn write_gas(_ value: u64) uses (w: mut Write) {
-    var divisor: u64 = 1
-    while value / divisor >= 10 {
-        divisor *= 10
-    }
-    while divisor != 0 {
-        write_char((48 + (value / divisor) % 10).downcast_unchecked())
-        divisor /= 10
-    }
-}
-
-pub fn write_frame(_ vm: Vm) uses (w: mut Write) {
+pub fn write_frame(_ vm: Vm) uses (text: mut MemBuffer) {
     let completed = vm.status == OK || vm.status == ERR_REVERT
-    write("{\"outcome\":\"")
+    "{\"outcome\":\"".fmt(mut text)
     if completed {
-        write_status_name(vm.status)
+        status_name(vm.status).fmt(mut text)
     } else {
-        write("exceptional")
+        "exceptional".fmt(mut text)
     }
-    write("\",\"reason\":")
+    "\",\"reason\":".fmt(mut text)
     if completed {
-        write("null")
+        "null".fmt(mut text)
     } else {
-        write("\"")
-        write_status_name(vm.status)
-        write("\"")
+        "\"".fmt(mut text)
+        status_name(vm.status).fmt(mut text)
+        "\"".fmt(mut text)
     }
-    write(",\"gas_remaining\":")
-    write_gas(vm.gas_remaining)
-    write(",\"stack\":")
+    ",\"gas_remaining\":".fmt(mut text)
+    vm.gas_remaining.fmt(mut text)
+    ",\"stack\":".fmt(mut text)
     if completed {
-        write("[")
+        "[".fmt(mut text)
         var i: usize = 0
         while i < vm.stack.len() {
-            if i != 0 { write(",") }
-            write("\"")
+            if i != 0 { ",".fmt(mut text) }
+            "\"".fmt(mut text)
             write_hex_word(vm.stack[i])
-            write("\"")
+            "\"".fmt(mut text)
             i += 1
         }
-        write("]")
+        "]".fmt(mut text)
     } else {
-        write("null")
+        "null".fmt(mut text)
     }
-    write(",\"memory\":")
+    ",\"memory\":".fmt(mut text)
     if completed {
-        write("\"0x")
-        for byte in vm.memory.slice(offset: 0, len: vm.memory_size as usize) { write_hex_byte(byte as i32) }
-        write("\"")
+        "\"".fmt(mut text)
+        write_hex_bytes(vm.memory.slice(offset: 0, len: vm.memory_size as usize))
+        "\"".fmt(mut text)
     } else {
-        write("null")
+        "null".fmt(mut text)
     }
-    write(",\"output\":\"0x")
-    for byte in vm.output.span() { write_hex_byte(byte as i32) }
-    writeln("\"}")
+    ",\"output\":\"".fmt(mut text)
+    write_hex_bytes(vm.output.span())
+    "\"}\n".fmt(mut text)
 }
 
-pub fn main(argc: i32, argv: **u8) -> i32 {
-    // Native main supplies live NUL-terminated arguments for this process.
-    let args = unsafe { Args::new(argc, argv) }
-    if args.len() != 4 {
+pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
+    if args.count() != 4 {
         return 2
     }
     let program = parse_hex_program(args.get(1))
@@ -87,8 +74,10 @@ pub fn main(argc: i32, argv: **u8) -> i32 {
     if !is_evm_outcome(vm.status) {
         return 3
     }
-    with (Write = host()) {
+    var text = MemBuffer::empty()
+    with (mut text) {
         write_frame(vm)
     }
+    print!(text)
     0
 }

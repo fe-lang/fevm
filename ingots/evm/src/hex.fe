@@ -1,6 +1,6 @@
-use core::{MemBuffer, Option}
-use std::io::{Write, write, write_char}
-use std::native::Arg
+use core::{MemBuffer, MemSpan, Option}
+use std::env::Arg
+use std::io::Display
 use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::types::{InputData, Program}
 
@@ -8,47 +8,40 @@ use ingot::types::{InputData, Program}
 pub const ERR_BAD_HEX: i32 = 3
 pub const ERR_ODD_HEX: i32 = 4
 
-fn hex_digit(_ value: u8) -> i32 {
-    if value < 10 {
-        (value as i32) + 48
-    } else {
-        (value as i32) + 87
+fn hex_digit(_ value: u8) -> u8 {
+    if value < 10 { value + 48 } else { value + 87 }
+}
+
+/// Appends `0x` and the 64 hex digits of `value`.
+pub fn write_hex_word(_ value: u256) uses (text: mut MemBuffer) {
+    "0x".fmt(mut text)
+    var shift: u256 = 256
+    while shift > 0 {
+        shift -= 4
+        text.push(hex_digit(((value >> shift) & 15).downcast_unchecked()))
     }
 }
 
-pub fn write_hex_u256(_ value: u256) uses (w: mut Write) {
-    write_hex_word(value)
-    write_char(10)
+/// Appends the two hex digits of `value`.
+pub fn write_hex_byte(_ value: u8) uses (text: mut MemBuffer) {
+    text.push(hex_digit(value >> 4))
+    text.push(hex_digit(value & 15))
 }
 
-pub fn write_hex_word(_ value: u256) uses (w: mut Write) {
-    write("0x")
-    var i: usize = 0
-    while i < 64 {
-        let shift = ((63 - i) as u256) * 4
-        let nibble: u8 = ((value >> shift) & 15).downcast_unchecked()
-        write_char(hex_digit(nibble))
-        i += 1
+/// Appends `0x` and the hex digits of `bytes`.
+pub fn write_hex_bytes(_ bytes: MemSpan) uses (text: mut MemBuffer) {
+    // Grow once. Doubling would pass through the VM's power-of-two buffer
+    // sizes, which the CLI allocation fixtures count.
+    text.reserve(2 + 2 * bytes.len())
+    "0x".fmt(mut text)
+    for byte in bytes {
+        write_hex_byte(byte)
     }
-}
-
-pub fn write_hex_byte(_ value: i32) uses (w: mut Write) {
-    let hi: u8 = (value / 16).downcast_unchecked()
-    let lo: u8 = (value % 16).downcast_unchecked()
-    write_char(hex_digit(hi))
-    write_char(hex_digit(lo))
-}
-
-pub fn write_hex_bytes(_ bytes: MemBuffer) uses (w: mut Write) {
-    write("0x")
-    for byte in bytes.span() {
-        write_hex_byte(byte as i32)
-    }
-    write_char(10)
 }
 
 fn is_prefixed_hex(_ arg: Arg) -> bool {
-    arg.len() >= 2 && arg.byte_at(0) == 48 && (arg.byte_at(1) == 120 || arg.byte_at(1) == 88)
+    let bytes = arg.span()
+    bytes.len() >= 2 && bytes[0] == 48 && (bytes[1] == 120 || bytes[1] == 88)
 }
 
 fn hex_value(_ byte: u8) -> i32 {
@@ -71,7 +64,7 @@ pub fn parse_decimal(_ arg: Arg) -> Option<u64> {
     var value: u64 = 0
     var i: usize = 0
     while i < arg.len() {
-        let byte = arg.byte_at(i)
+        let byte = arg.span()[i]
         if byte < 48 || byte > 57 {
             return Option::None
         }
@@ -105,8 +98,8 @@ pub fn parse_hex_bytes(_ arg: Arg) -> InputData {
     }
     var out_len: u64 = 0
     while i < len {
-        let hi = hex_value(arg.byte_at(i))
-        let lo = hex_value(arg.byte_at(i + 1))
+        let hi = hex_value(arg.span()[i])
+        let lo = hex_value(arg.span()[i + 1])
         if hi < 0 || lo < 0 {
             return InputData::new(bytes, status: ERR_BAD_HEX)
         }

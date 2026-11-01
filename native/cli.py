@@ -11,8 +11,8 @@ import time
 from arith.run import artifacts, command
 
 ROOT = Path(__file__).resolve().parent.parent
-# The bytes of a boxed child `Frame` (packed, with the stack on the heap).
-FRAME_BOX_SIZE = 482
+# The bytes of a boxed child `Frame` (with the stack on the heap).
+FRAME_BOX_SIZE = 576
 CASES = [
     ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n'),
     ('empty', [''], 0, 'empty\n'),
@@ -109,7 +109,7 @@ def main():
         journal.joinpath('build.log').write_bytes(log)
         artifacts(journal / 'fevm_journal', journal_archive, journal, object_name='fevm_journal.o')
         controlled = journal / 'allocation-failure'
-        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1', '-DWATCH_SIZE=100352',
+        command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', '-DFAIL_AT=1', '-DWATCH_SIZE=131072',
                  ROOT / 'native/fixtures/vm_allocator.c', journal / 'fevm_journal.o',
                  '-o', controlled])
         result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
@@ -152,7 +152,7 @@ def main():
         calls.joinpath('build.log').write_bytes(log)
         artifacts(calls / 'fevm_calls', calls_archive, calls, object_name='fevm_calls.o')
         # A depth-two CALL chain allocates one box per child, of the frame's
-        # packed size. Fail each in turn; every success must be released.
+        # size. Fail each in turn; every success must be released.
         for failure_at in [0, 1, 2]:
             controlled = calls / f'allocator-{failure_at}'
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
@@ -190,7 +190,7 @@ def main():
                        '--report', '--report-out', log_archive], timeout=args.build_timeout)
         logs.joinpath('build.log').write_bytes(log)
         artifacts(logs / 'fevm_logs', log_archive, logs, object_name='fevm_logs.o')
-        for mode, size in [('h', 94208), ('b', 128), ('b', 256)]:
+        for mode, size in [('h', 98304), ('b', 128), ('b', 256)]:
             for failure_at in [0, 1]:
                 name = f'log-headers-{failure_at}' if mode == 'h' else f'blob-hashes-{size}-{failure_at}'
                 controlled = logs / name

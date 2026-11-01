@@ -1,39 +1,15 @@
 // Protocol: '@', 8-byte round count, 32-byte lhs, 32-byte rhs; little endian.
 // Reply: 8-byte CPU clock tick count and 32-byte result; little endian.
-use std::io::{HostIo, Read, Write, host, read_char}
+use core::MemBuffer
+use std::io::{Stdin, Stdout, read_to_end}
 use std::native::cpu_clock_ticks
-fn read64() -> u64 uses (input: mut Read) {
-    var value: u64 = 0
-    var i: u64 = 0
-    while i < 8 {
-        let byte = read_char()
-        core::assert(byte >= 0)
-        let bits: u64 = byte.downcast_unchecked()
-        value = value | (bits << (i * 8))
-        i += 1
+fn read_word(_ bytes: MemBuffer, _ offset: usize) -> Word {
+    Word {
+        a: bytes.read_le<u64>(offset),
+        b: bytes.read_le<u64>(offset + 8),
+        c: bytes.read_le<u64>(offset + 16),
+        d: bytes.read_le<u64>(offset + 24),
     }
-    value
-}
-fn write64(_ value: u64) uses (output: mut HostIo) {
-    var i: u64 = 0
-    while i < 8 {
-        output.write_char(c: ((value >> (i * 8)) & 255).downcast_unchecked())
-        core::assert(!output.failed())
-        i += 1
-    }
-}
-fn read_word() -> Word uses (input: mut Read) {
-    let a = read64()
-    let b = read64()
-    let c = read64()
-    let d = read64()
-    Word { a, b, c, d }
-}
-fn write_word(_ x: Word) uses (output: mut HostIo) {
-    write64(x.a)
-    write64(x.b)
-    write64(x.c)
-    write64(x.d)
 }
 fn pack(_ x: Word) -> u256 {
     (x.a as u256) | ((x.b as u256) << 64) | ((x.c as u256) << 128) | ((x.d as u256) << 192)
@@ -46,23 +22,31 @@ fn unpack(_ x: u256) -> Word {
         d: (x >> 192).downcast_truncate(),
     }
 }
-pub fn main() -> i32 {
-    with (Read = host(), HostIo = host()) {
-        var marker = read_char()
-        while marker != -1 {
-            core::assert(marker == 64)
-            let rounds = read64()
-            core::assert(rounds > 0)
-            let lhs = read_word()
-            let rhs = read_word()
-            let started = cpu_clock_ticks()
-            let result = kernel(lhs, rhs, rounds)
-            let ended = cpu_clock_ticks()
-            core::assert(started >= 0 && ended >= started)
-            write64((ended - started).downcast_unchecked())
-            write_word(result)
-            marker = read_char()
-        }
+pub fn main() -> i32 uses (input: mut Stdin, out: mut Stdout) {
+    var requests = MemBuffer::empty()
+    read_to_end(mut requests)
+    var replies = MemBuffer::empty()
+    var offset: usize = 0
+    while offset < requests.len() {
+        core::assert(requests[offset] == 64)
+        let rounds = requests.read_le<u64>(offset + 1)
+        core::assert(rounds > 0)
+        let lhs = read_word(requests, offset + 9)
+        let rhs = read_word(requests, offset + 41)
+        offset += 73
+        let started = cpu_clock_ticks()
+        let result = kernel(lhs, rhs, rounds)
+        let ended = cpu_clock_ticks()
+        core::assert(started >= 0 && ended >= started)
+        let ticks: u64 = (ended - started).downcast_unchecked()
+        let reply = replies.len()
+        replies.resize(reply + 40)
+        replies.write_le(offset: reply, value: ticks)
+        replies.write_le(offset: reply + 8, value: result.a)
+        replies.write_le(offset: reply + 16, value: result.b)
+        replies.write_le(offset: reply + 24, value: result.c)
+        replies.write_le(offset: reply + 32, value: result.d)
     }
+    print!(replies)
     0
 }
