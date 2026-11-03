@@ -14,8 +14,8 @@ needed.
 ## Compiler
 
 [`toolchain.json`](toolchain.json) pins Fe master
-[`431b440c3`](https://github.com/argotorg/fe/tree/431b440c3459ceeedc917b48512609b1126a4299)
-([argotorg/fe#1900](https://github.com/argotorg/fe/pull/1900)), its
+[`9f013eb67`](https://github.com/argotorg/fe/tree/9f013eb679ffbcdbff796eb591d2ed19b48217f6)
+([argotorg/fe#1906](https://github.com/argotorg/fe/pull/1906)), its
 Cargo.lock's Sonatina revision and hash, and Rust 1.99.0.
 
 ```sh
