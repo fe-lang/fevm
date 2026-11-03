@@ -15,8 +15,7 @@ fn initcode(_ first: u8) -> [u8; 10] { [0x60, first, 0x60, 0, 0x53, 0x60, 1, 0x6
 // PUSH10 initcode; MSTORE at 0 (bytes 22..32); then `tail` creates from it.
 fn creator<const N: usize>(_ init: [u8; 10], _ tail: [u8; N]) -> Program {
     let len: u64 = N.downcast_unchecked()
-    var bytes = MemBuffer::empty()
-    core::assert(bytes.try_resize((14 + len) as usize))
+    var bytes = MemBuffer::new((14 + len) as usize)
     bytes[0] = 0x69
     var i: u64 = 0
     while i < 10 {

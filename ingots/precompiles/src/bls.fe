@@ -1,6 +1,6 @@
 use core::{MemBuffer, Option}
 use keccak::ByteSource
-use ingot::{HOST_ALLOCATION, Output, SUCCESS, failure}
+use ingot::{Output, SUCCESS, failure, host_allocation}
 use ingot::bls_curve::{Affine, Point, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_map::{map_to_g1, map_to_g2}
@@ -81,8 +81,7 @@ fn write_fp(_ out: mut MemBuffer, offset: usize, _ value: Fp) {
 }
 
 fn g1_output(_ point: Point<Fp>, gas_used: u64) -> Output {
-    var output = MemBuffer::empty()
-    if !output.try_resize(128) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let Option::Some(var output) = MemBuffer::try_new(128) else { return host_allocation(gas_used) }
     let affine = point.to_affine()
     if !affine.infinity {
         write_fp(mut output, offset: 0, affine.x)
@@ -92,8 +91,7 @@ fn g1_output(_ point: Point<Fp>, gas_used: u64) -> Output {
 }
 
 fn g2_output(_ point: Point<Fp2>, gas_used: u64) -> Output {
-    var output = MemBuffer::empty()
-    if !output.try_resize(256) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let Option::Some(var output) = MemBuffer::try_new(256) else { return host_allocation(gas_used) }
     let affine = point.to_affine()
     if !affine.infinity {
         write_fp(mut output, offset: 0, affine.x.c0)
@@ -165,9 +163,8 @@ fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
         let twist_identity = Affine { x: Fp2::zero(), y: Fp2::zero(), infinity: true }
         f = f.mul(miller_loop(held, held_twist, identity, twist_identity))
     }
-    var output = MemBuffer::empty()
     let used: u64 = cost.downcast_unchecked()
-    if !output.try_resize(32) { return Output { status: HOST_ALLOCATION, gas_used: used, output } }
+    let Option::Some(var output) = MemBuffer::try_new(32) else { return host_allocation(used) }
     if final_exponentiation(f).is_one() { output[31] = 1 }
     Output { status: SUCCESS, gas_used: used, output }
 }

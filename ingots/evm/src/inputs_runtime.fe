@@ -5,8 +5,7 @@ use ingot::vm::Vm
 
 #[test]
 pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
-    var bytes = MemBuffer::empty()
-    core::assert(bytes.try_resize(9001))
+    var bytes = MemBuffer::new(9001)
     bytes[9000] = 42
     let input = InputData::new(bytes, status: OK)
     // PUSH2 9000; CALLDATALOAD; CALLDATASIZE.
@@ -47,16 +46,14 @@ pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     var vm = Vm::new()
     var tracer = ()
-    var code = MemBuffer::empty()
-    core::assert(code.try_resize(8193))
+    var code = MemBuffer::new(8193)
     code[0] = 0x38
     vm.run(Program::new(InputData::new(code, status: OK)), empty_bytes(),
                  default_call_env(), default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 8193)
     core::assert(vm.gas_remaining == 999998)
     for into_push_data in [false, true] {
-        var code = MemBuffer::empty()
-        core::assert(code.try_resize(8195))
+        var code = MemBuffer::new(8195)
         // PUSH2 8192; JUMP. At the destination: JUMPDEST; PUSH1 42.
         code[0] = 0x61
         code[1] = 0x20

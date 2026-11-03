@@ -1,6 +1,6 @@
 use core::{MemArray, MemBuffer, Option}
 use keccak::ByteSource
-use ingot::{FAILURE, HOST_ALLOCATION, Output, SUCCESS}
+use ingot::{FAILURE, Output, SUCCESS, host_allocation}
 use ingot::bignum::Modulus
 
 const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -68,10 +68,6 @@ fn input_limb<T: ByteSource>(_ input: T, offset: u256, len: u256, limb: u256) ->
     value
 }
 
-fn host_allocation(_ gas_used: u64) -> Output {
-    Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
-}
-
 /// MODEXP (EIP-198, with EIP-7883 gas and EIP-7823 bounds): `base ** exponent
 /// % modulus`, as exactly modulus-length big-endian bytes. A length above
 /// 1,024 bytes is an exceptional failure.
@@ -81,14 +77,13 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let gas_used = if bounded { gas_cost(input, sizes) } else { 0 }
     if !bounded || gas_used > gas { return Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() } }
     let modulus_len: u64 = sizes.modulus.downcast_unchecked()
-    var output = MemBuffer::empty()
-    if sizes.base == 0 && sizes.modulus == 0 { return Output { status: SUCCESS, gas_used, output } }
+    if sizes.base == 0 && sizes.modulus == 0 { return Output { status: SUCCESS, gas_used, output: MemBuffer::empty() } }
     let exponent_start = 96 + sizes.base
     let modulus_start = exponent_start + sizes.exponent
     // Locate the modulus's most significant nonzero byte.
     var significant = sizes.modulus
     while significant > 0 && input_byte(input, modulus_start + sizes.modulus - significant) == 0 { significant -= 1 }
-    if !output.try_resize(modulus_len as usize) { return host_allocation(gas_used) }
+    let Option::Some(var output) = MemBuffer::try_new(modulus_len as usize) else { return host_allocation(gas_used) }
     // A zero modulus yields zero bytes.
     if significant == 0 { return Output { status: SUCCESS, gas_used, output } }
     let n: u64 = ((significant + 7) / 8).downcast_unchecked()

@@ -6,8 +6,7 @@ use ingot::vm::Vm
 
 #[test]
 fn logs_copy_data_grow_and_reuse_truncated_storage() {
-    var source = MemBuffer::empty()
-    core::assert(source.try_resize(9))
+    var source = MemBuffer::new(9)
     for i in 0..9 { source[i] = (i + 1).downcast_unchecked() }
     var logs = LogBuffer::new()
     var i: u64 = 0
@@ -35,8 +34,7 @@ fn logs_copy_data_grow_and_reuse_truncated_storage() {
 
 #[test]
 fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
-    var source = MemBuffer::empty()
-    core::assert(source.try_resize(1))
+    var source = MemBuffer::new(1)
     source[0] = 17
     var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
     core::assert(tx.emit_log(address: 1, topics: [1; 4], topic_count: 1, data: source.slice(offset: 0, len: 1)) == OK)
