@@ -54,7 +54,9 @@ def main():
     commands.append(([sys.executable, HERE / 'differential/state_run.py', '--fe', compiler,
                       '--out', out / 'osaka-state',
                       '--toolchain', build['manifest']['rust_version']], 'osaka-state'))
-    commands.append(([sys.executable, HERE / 'client/run.py', '--fe', compiler,
+    commands.append(([compiler, 'build', ROOT, '--ingot', 'fevm_tools', '--backend', 'native', '-O', '2',
+                      '--emit', 'executable', '--out-dir', out / 'tools'], 'tools'))
+    commands.append(([out / 'tools/fevm_tools', 'client', '--fe', compiler,
                       '--out', out / 'session',
                       '--toolchain', build['manifest']['rust_version']], 'session'))
     if args.build_timeout is not None:
@@ -69,7 +71,7 @@ def main():
         started = time.perf_counter()
         with out.joinpath(f'{name}.log').open('wb') as log:
             try:
-                status = subprocess.run([str(x) for x in command], stdout=log, stderr=subprocess.STDOUT,
+                status = subprocess.run([str(x) for x in command], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                         timeout=args.stage_timeout).returncode
             except subprocess.TimeoutExpired:
                 log.write(f'\nAcceptance command exceeded the {args.stage_timeout}-second timeout.\n'.encode())

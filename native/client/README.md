@@ -27,8 +27,8 @@ skip (chain ID, nonce, base fee, EIP-3607). Receipts carry the status,
 validity, gas used and refunded, created address, output and logs, and the
 step and call traces that `set_tracing` asks for.
 
-`run.py` builds fevm and runs the client's tests against it; acceptance runs it
-as the `session` stage.
+`fevm_tools client` builds fevm and runs the client's tests against it;
+acceptance runs it as the `session` stage.
 
 ## Protocol
 

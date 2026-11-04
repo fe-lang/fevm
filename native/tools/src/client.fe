@@ -1,0 +1,42 @@
+use core::{MemBuffer, Option}
+use ingot::{Options, named, succeed}
+use json::parse
+use std::fs::Fs
+use std::process::{Command, Spawn}
+
+const MANIFEST: String<21> = "native/toolchain.json"
+
+// Builds fevm and runs the session client's tests against it.
+pub fn run(_ options: Options) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn)
+{
+    let toolchain = match options.toolchain {
+        Option::Some(ref toolchain) => format!(toolchain),
+        Option::None => {
+            let manifest = named(MANIFEST, fs.read(MANIFEST))?
+            format!(
+                named(MANIFEST, parse(manifest.span()))?["rust_version"].text(),
+            )
+        },
+    }
+    options.create_out()?
+    succeed(
+        "fe build",
+        options.build().arg(".").arg("--ingot").arg("fevm"),
+    )?
+    let out = named(options.out, fs.canonicalize(options.out))?
+    succeed(
+        "cargo test",
+        Command::new("rustup")
+            .arg("run")
+            .arg(toolchain)
+            .arg("cargo")
+            .arg("test")
+            .arg("--locked")
+            .arg("--target-dir")
+            .arg(format!(out, "/target"))
+            .current_dir("native/client")
+            .env("FEVM_BIN", format!(out, "/fevm")),
+    )?
+    Result::Ok(())
+}
