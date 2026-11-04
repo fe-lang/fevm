@@ -78,12 +78,13 @@ def main():
             if not passed:
                 raise AssertionError(f'O{level} {name}: {result!r}')
         # Use the same compiled VM object with a controlled host allocator.
-        # Returning 65,537 bytes requires separate 131,072-byte data buffers.
+        # Returning 65,537 bytes requires a 65,568-byte memory and a 65,537-byte output.
         # The allocator also poisons fresh storage and checks exact releases.
         for failure_at, name in [(0, 'owned-output'), (1, 'memory-allocation-failure'),
                                  (2, 'output-allocation-failure')]:
             controlled = folder / name
             command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+                     '-DWATCH_SIZE=65568', '-DWATCH_SIZE_EXTRA=65537',
                      ROOT / 'native/fixtures/vm_allocator.c', folder / 'fevm.o',
                      '-o', controlled])
             result = subprocess.run([str(controlled), '620100015ff3'],
@@ -129,9 +130,10 @@ def main():
                        '--report', '--report-out', account_archive], timeout=args.build_timeout)
         accounts.joinpath('build.log').write_bytes(log)
         artifacts(accounts / 'fevm_accounts', account_archive, accounts, object_name='fevm_accounts.o')
+        # A record of 65,537 bytes of code takes 64 + 65,537 + 8,193 bytes of arena.
         for failure_at in [0, 1, 2]:
             controlled = accounts / f'allocator-{failure_at}'
-            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=73794',
                      ROOT / 'native/fixtures/vm_allocator.c', accounts / 'fevm_accounts.o',
                      '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
@@ -171,7 +173,7 @@ def main():
         # failures using the already compiled interpreter object.
         for failure_at in [0, 1, 2]:
             controlled = folder / f'log-data-allocator-{failure_at}'
-            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}',
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=65568', '-DWATCH_SIZE_EXTRA=65537',
                      ROOT / 'native/fixtures/vm_allocator.c', folder / 'fevm.o', '-o', controlled])
             result = subprocess.run([str(controlled), '620100015fa0'], capture_output=True, timeout=60)
             expected = b'host_allocation\n' if failure_at else b'empty\n'
