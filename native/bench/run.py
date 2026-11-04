@@ -72,6 +72,18 @@ def transaction_seconds(command, payload, target, repeat):
     return (seconds(command, payload, runs, True, repeat) - seconds(command, payload, runs, False, repeat)) / runs
 
 
+def setup_seconds(command, payload, target, repeat):
+    """CPU seconds to build the pre-state once, which `transaction_seconds`
+    subtracts: code analysis and hashing on the way into the state. Comparing
+    two lengths of run leaves out starting the process."""
+    def cost(runs, repeat):
+        return seconds(command, payload, 2 * runs, False, repeat) - seconds(command, payload, runs, False, repeat)
+    runs = 64
+    while cost(runs, 1) * 4 < target and runs < 1 << 24:
+        runs *= 4
+    return cost(runs, repeat) / runs
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--benchmarks', type=Path, required=True, help='directory of state-test JSON files')
@@ -79,6 +91,7 @@ def main():
     parser.add_argument('--executable', type=Path, help='reuse a built conformance driver')
     parser.add_argument('--revm', type=Path, help='reuse a built revm runner')
     parser.add_argument('--evmone', type=Path, help='also time this evmone runner (see evmone/build.sh)')
+    parser.add_argument('--fevm-only', action='store_true', help='time FeVM alone, for fixtures.py, whose precompiles and gas are Osaka\'s')
     parser.add_argument('--out', type=Path, default=ROOT / 'native' / 'out' / 'bench')
     parser.add_argument('--level', choices=['0', '1', '2'], default='2')
     parser.add_argument('--fork', default='London', help="the fixtures' post-state fork; FeVM executes Osaka, revm and evmone Cancun")
@@ -99,18 +112,21 @@ def main():
                         '-O', args.level, '--out-dir', args.out / 'fevm'], check=True, stdout=subprocess.DEVNULL)
         fevm = args.out / 'fevm' / 'fevm_conformance'
     revm = args.revm
-    if revm is None:
+    if revm is None and not args.fevm_only:
         manifest = HERE / 'revm' / 'Cargo.toml'
         subprocess.run(['cargo', 'build', '--release', '--quiet', '--manifest-path', manifest,
                         '--target-dir', args.out / 'revm'], check=True, cwd=HERE / 'revm')
         revm = args.out / 'revm' / 'release' / 'fevm-bench-revm'
-    engines = {'fevm': fevm, 'revm': revm} | ({'evmone': args.evmone} if args.evmone else {})
+    engines = {'fevm': fevm}
+    if not args.fevm_only:
+        engines |= {'revm': revm} | ({'evmone': args.evmone} if args.evmone else {})
     ratios = {name: [] for name in engines if name != 'fevm'}
     for label, payload, post in cases(args.benchmarks.resolve(), args.fork, args.select):
         outcomes = {name: outcome([path], payload, statuses=name == 'fevm') for name, path in engines.items()}
-        row = {'case': label, 'gas_used': outcomes['fevm'].get('gas_used')}
+        row = {'case': label, 'status': outcomes['fevm'].get('status'), 'gas_used': outcomes['fevm'].get('gas_used')}
         for name, path in engines.items():
             row[f'{name}_us'] = round(transaction_seconds([path], payload, args.target, args.repeat) * 1e6, 2)
+            row[f'{name}_setup_us'] = round(setup_seconds([path], payload, args.target, args.repeat) * 1e6, 2)
         for name, values in ratios.items():
             values.append(row['fevm_us'] / row[f'{name}_us'])
             row[f'fevm/{name}'] = round(values[-1], 3)
