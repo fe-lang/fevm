@@ -400,14 +400,13 @@ pub fn serve() -> i32 uses (input: mut Stdin, out: mut Stdout) {
         buffers: FrameBuffers::new(),
         snapshots: MemVec::new(),
     }
-    var header = MemBuffer::alloc(4)
+    var header = MemBuffer::new(4)
     while read_exact(header.span()) {
         let len: usize = header.read_be<u32>(0) as usize
-        var data = MemBuffer::empty()
-        if !data.try_resize(len) {
+        let Option::Some(var data) = MemBuffer::try_new(len) else {
             // Drain the request to stay in step with the host.
             var left = len
-            var chunk = MemBuffer::alloc(4096)
+            var chunk = MemBuffer::new(4096)
             while left > 0 {
                 let part = if left < 4096 { left } else { 4096 }
                 if !read_exact(chunk.slice(offset: 0, len: part)) { return 1 }

@@ -201,8 +201,7 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
         core::assert(world.set_balance(address, balance))
         core::assert(world.set_nonce(address, nonce))
         let len: u64 = reader.count().downcast_unchecked()
-        var code = MemBuffer::empty()
-        core::assert(code.try_resize(len as usize))
+        var code = MemBuffer::new(len as usize)
         var byte: u64 = 0
         while byte < len {
             code[byte as usize] = reader.word(bytes: 1).downcast_unchecked()

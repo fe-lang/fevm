@@ -24,18 +24,20 @@ pub(ingot) fn failure(_ gas: u64) -> Output {
     Output { status: FAILURE, gas_used: gas, output: MemBuffer::empty() }
 }
 
+pub(ingot) fn host_allocation(_ gas_used: u64) -> Output {
+    Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
+}
+
 // An output of `source`'s bytes.
 fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
-    var output = MemBuffer::empty()
-    if !output.try_resize(source.len()) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let Option::Some(var output) = MemBuffer::try_new(source.len()) else { return host_allocation(gas_used) }
     for i in 0..source.len() { output[i] = source.byte_at(i) }
     Output { status: SUCCESS, gas_used, output }
 }
 
 // An output of big-endian words.
 fn words<const N: usize>(_ values: [u256; N], gas_used: u64) -> Output {
-    var output = MemBuffer::empty()
-    if !output.try_resize(N * 32) { return Output { status: HOST_ALLOCATION, gas_used, output } }
+    let Option::Some(var output) = MemBuffer::try_new(N * 32) else { return host_allocation(gas_used) }
     for i in 0..N { output.write_word(offset: i * 32, value: values[i]) }
     Output { status: SUCCESS, gas_used, output }
 }
@@ -118,8 +120,7 @@ pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {
         let rounds = blake2f::rounds(input)
         if rounds > gas || input.byte_at(212) > 1 { return failure(gas) }
         let state = blake2f::compress(input)
-        var output = MemBuffer::empty()
-        if !output.try_resize(64) { return Output { status: HOST_ALLOCATION, gas_used: rounds, output } }
+        let Option::Some(var output) = MemBuffer::try_new(64) else { return host_allocation(rounds) }
         for i in 0..8 { output.write_le<u64>(offset: i * 8, value: state[i]) }
         return Output { status: SUCCESS, gas_used: rounds, output }
     }

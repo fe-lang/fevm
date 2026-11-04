@@ -36,13 +36,6 @@ fn world() -> WorldState {
     world
 }
 
-fn delegates(_ state: WorldState, authority: u256, to: u256) -> bool {
-    match state.delegate(authority) {
-        Option::Some(delegate) => delegate == to,
-        Option::None => false,
-    }
-}
-
 fn block() -> BlockEnv {
     var block = default_block_env()
     block.gaslimit = 30_000_000
@@ -71,7 +64,7 @@ fn set_code_delegates_and_runs_the_delegate_in_the_authority() {
     core::assert(applied.receipt.gas_used == 21000 + 2 * 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10)
     let state = applied.state
     for (authority, delegate) in [(SIGNER, DELEGATE), (OTHER_SIGNER, 0xd64d5b56749107eb98eabdc6174fc5dc95e32c91)] {
-        core::assert(delegates(state, authority, to: delegate) && state.nonce(authority) == 1)
+        core::assert(state.delegate(authority) == Option::Some(delegate) && state.nonce(authority) == 1)
     }
     core::assert(state.code_size(SIGNER) == 23 && state.storage_load(SIGNER, 0) == 1)
 }
@@ -84,7 +77,7 @@ fn set_code_survives_a_reverted_call_and_refunds_existing_authorities() {
     let applied = set_code(world, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == ERR_REVERT)
     let state = applied.state
-    core::assert(delegates(state, authority: SIGNER, to: DELEGATE) && state.nonce(SIGNER) == 1)
+    core::assert(state.delegate(SIGNER) == Option::Some(DELEGATE) && state.nonce(SIGNER) == 1)
     core::assert(state.storage_load(SIGNER, 0) == 0)
     // 12,500 of the authorization's 25,000 is refunded, within a fifth of the gas spent.
     let spent: u64 = 21000 + 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10 + 1 + 2 + 2
@@ -97,7 +90,7 @@ fn set_code_skips_invalid_authorizations() {
     // whose nonce does not match; the valid one applies.
     let applied = set_code(world(), to: 0xdd, nonce: 0, authorizations: [signed(nonce: 1), signed(nonce: 0)], count: 2)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-    core::assert(delegates(applied.state, authority: SIGNER, to: DELEGATE) && applied.state.nonce(SIGNER) == 1)
+    core::assert(applied.state.delegate(SIGNER) == Option::Some(DELEGATE) && applied.state.nonce(SIGNER) == 1)
     // Replayed, it no longer matches the authority's nonce.
     let repeated = set_code(applied.state, to: 0xdd, nonce: 1, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
     core::assert(repeated.receipt.invalid == VALID && repeated.state.nonce(SIGNER) == 1)

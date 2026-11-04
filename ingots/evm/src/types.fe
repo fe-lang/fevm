@@ -114,9 +114,8 @@ impl InputData {
     pub fn new(_ bytes: own MemBuffer, status: i32) -> Self { Self { bytes, status } }
     pub fn copy_from<T: ByteSource>(_ source: T, offset: usize, len: usize) -> Self {
         core::assert(offset <= source.len() && len <= source.len() - offset)
-        var bytes = MemBuffer::empty()
-        if !bytes.try_resize(len) {
-            return Self { bytes, status: ERR_HOST_ALLOCATION }
+        let Option::Some(var bytes) = MemBuffer::try_new(len) else {
+            return Self { bytes: MemBuffer::empty(), status: ERR_HOST_ALLOCATION }
         }
         for index in 0..len { bytes[index] = source.byte_at(offset + index) }
         Self { bytes, status: OK }
