@@ -20,6 +20,7 @@ The repo is a Fe workspace:
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
   allocation-failure and compiler arithmetic checks
+- `native/tools`: fevm's checks written in Fe
 - `native/accept.py`, `native/bootstrap.py`: the acceptance suite and the
   pinned compiler build
 

@@ -1,0 +1,37 @@
+use core::MemBuffer
+use std::env::Args
+use std::fs::Fs
+use std::io::{Display, Error, Stderr, Stdout}
+use std::process::{Command, Output, Spawn}
+
+// fevm's checks, run from the repository's root.
+pub fn main() -> i32
+uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout, err: mut Stderr)
+{
+    if args.count() > 1 && args.get(1) == "soak" {
+        return soak::run()
+    }
+    eprintln!(
+        "usage: fevm_tools soak --fe <compiler> --out <directory> [--level 0|1|2]",
+    )
+    2
+}
+
+// `result`, with an error's message naming `what`.
+fn named<T, W: Display>(_ what: W, _ result: own Result<Error, T>) -> Result<MemBuffer, T> {
+    match result {
+        Result::Ok(value) => Result::Ok(value),
+        Result::Err(error) => Result::Err(format!(what, ": ", error)),
+    }
+}
+
+// Runs `command` to its end, which must be a success.
+fn succeed<W: Display>(_ what: W, _ command: Command) -> Result<MemBuffer, Output>
+uses (proc: mut Spawn)
+{
+    let output = named(what, proc.output(command))?
+    if !output.status.success() {
+        return Result::Err(format!(what, ": ", output.status))
+    }
+    Result::Ok(output)
+}
