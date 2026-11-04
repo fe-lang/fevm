@@ -1,24 +1,127 @@
-use core::MemBuffer
-use std::env::Args
+use core::{MemBuffer, Option}
+use json::Number
+use std::env::{Arg, Args}
 use std::fs::Fs
-use std::io::{Display, Error, Stderr, Stdout}
+use std::io::{Display, Stderr, Stdout}
 use std::process::{Command, Output, Spawn}
+use std::time::Duration
 
 // fevm's checks, run from the repository's root.
 pub fn main() -> i32
 uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout, err: mut Stderr)
 {
-    if args.count() > 1 && args.get(1) == "soak" {
-        return soak::run()
+    match run() {
+        Result::Ok(()) => 0,
+        Result::Err(message) => {
+            eprintln!(message)
+            1
+        },
     }
-    eprintln!(
-        "usage: fevm_tools soak --fe <compiler> --out <directory> [--level 0|1|2]",
+}
+
+fn run() -> Result<MemBuffer, ()>
+uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout)
+{
+    if args.count() < 2 {
+        return usage()
+    }
+    let tool = args.get(1)
+    if tool == "soak" {
+        soak::run(Options::parse()?)
+    } else if tool == "client" {
+        client::run(Options::parse()?)
+    } else {
+        usage()
+    }
+}
+
+fn usage() -> Result<MemBuffer, ()> {
+    Result::Err(
+        format!(
+            "usage: fevm_tools soak|client --fe <compiler> --out <directory> ",
+            "[--level 0|1|2] [--toolchain <rustup toolchain>] [--build-timeout <seconds>]",
+        ),
     )
-    2
+}
+
+// The options that follow a tool's name.
+struct Options { fe: Arg, out: Arg, level: u8, toolchain: Option<Arg>, build_timeout: Duration }
+
+impl Options {
+    fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var fe: Option<Arg> = Option::None
+        var out: Option<Arg> = Option::None
+        var level: u8 = 2
+        var toolchain: Option<Arg> = Option::None
+        var build_timeout = Duration::from_secs(600)
+        var i: usize = 2
+        while i + 1 < args.count() {
+            let name = args.get(i)
+            let value = args.get(i + 1)
+            if name == "--fe" {
+                fe = Option::Some(value)
+            } else if name == "--out" {
+                out = Option::Some(value)
+            } else if name == "--toolchain" {
+                toolchain = Option::Some(value)
+            } else if name == "--level"
+                && value.len() == 1
+                && value.span()[0] >= 48
+                && value.span()[0] <= 50 {
+                level = value.span()[0] - 48
+            } else if name == "--build-timeout" {
+                match seconds(value) {
+                    Option::Some(limit) => build_timeout = Duration::from_secs(limit),
+                    Option::None => {
+                        return Result::Err(format!("bad option: ", name, " ", value))
+                    },
+                }
+            } else {
+                return Result::Err(format!("bad option: ", name, " ", value))
+            }
+            i += 2
+        }
+        if i != args.count() {
+            return Result::Err(format!("option ", args.get(i), " needs a value"))
+        }
+        match (fe, out) {
+            (Option::Some(fe), Option::Some(out)) => Result::Ok(
+                Options { fe, out, level, toolchain, build_timeout },
+            ),
+            _ => Result::Err(format!("fevm_tools needs --fe and --out")),
+        }
+    }
+
+    // Creates the output directory, which must not exist.
+    fn create_out(self) -> Result<MemBuffer, ()> uses (fs: mut Fs) {
+        if fs.metadata(self.out).is_ok() {
+            return Result::Err(format!(self.out, " already exists"))
+        }
+        named(self.out, fs.create_dir_all(self.out))
+    }
+
+    // `fe build` into the output directory.
+    fn build(self) -> Command {
+        Command::new(self.fe)
+            .arg("build")
+            .arg("--backend")
+            .arg("native")
+            .arg("-O")
+            .arg(self.level)
+            .arg("--emit")
+            .arg("executable")
+            .arg("--out-dir")
+            .arg(self.out)
+            .timeout(self.build_timeout)
+    }
+}
+
+fn seconds(_ value: Arg) -> Option<u64> {
+    Number::parse(value.span())?.as_u64()
 }
 
 // `result`, with an error's message naming `what`.
-fn named<T, W: Display>(_ what: W, _ result: own Result<Error, T>) -> Result<MemBuffer, T> {
+fn named<T, E: Display, W: Display>(_ what: W, _ result: own Result<E, T>) -> Result<MemBuffer, T> {
     match result {
         Result::Ok(value) => Result::Ok(value),
         Result::Err(error) => Result::Err(format!(what, ": ", error)),
