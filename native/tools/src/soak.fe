@@ -1,0 +1,119 @@
+use core::{MemBuffer, Option}
+use ingot::{named, succeed}
+use json::Value
+use std::env::{Arg, Args}
+use std::fs::Fs
+use std::io::{Stderr, Stdout}
+use std::process::{Command, Spawn}
+
+const COUNTS: [u64; 3] = [1000, 10000, 40000]
+// Leaking even 32 bytes per transaction would add more than a mebibyte.
+const MAX_GROWTH: u64 = 1048576
+
+// Runs repeated transactions in one native process and checks that memory stays flat.
+pub fn run() -> i32
+uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout, err: mut Stderr)
+{
+    var fe: Option<Arg> = Option::None
+    var dir: Option<Arg> = Option::None
+    var level: u8 = 2
+    var i: usize = 2
+    while i + 1 < args.count() {
+        let name = args.get(i)
+        let value = args.get(i + 1)
+        if name == "--fe" {
+            fe = Option::Some(value)
+        } else if name == "--out" {
+            dir = Option::Some(value)
+        } else if name == "--level"
+            && value.len() == 1
+            && value.span()[0] >= 48
+            && value.span()[0] <= 50 {
+            level = value.span()[0] - 48
+        } else {
+            eprintln!("bad option: ", name, " ", value)
+            return 2
+        }
+        i += 2
+    }
+    if i != args.count() {
+        eprintln!("option ", args.get(i), " needs a value")
+        return 2
+    }
+    match (fe, dir) {
+        (Option::Some(fe), Option::Some(dir)) => match check(fe, dir, level) {
+            Result::Ok(()) => 0,
+            Result::Err(message) => {
+                eprintln!(message)
+                1
+            },
+        },
+        _ => {
+            eprintln!("soak needs --fe and --out")
+            2
+        },
+    }
+}
+
+fn check(_ fe: Arg, _ dir: Arg, _ level: u8) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
+{
+    if fs.metadata(dir).is_ok() {
+        return Result::Err(format!(dir, " already exists"))
+    }
+    named(dir, fs.create_dir_all(dir))?
+    succeed(
+        "fe build",
+        Command::new(fe)
+            .arg("build")
+            .arg("native/soak")
+            .arg("--backend")
+            .arg("native")
+            .arg("-O")
+            .arg(level)
+            .arg("--emit")
+            .arg("executable")
+            .arg("--out-dir")
+            .arg(dir),
+    )?
+    var runs = Value::array()
+    var first: u64 = 0
+    var last: u64 = 0
+    for count in COUNTS {
+        let rss = succeed(
+            format!(count, " transactions"),
+            Command::new(format!(dir, "/fevm_soak")).arg(count),
+        )?
+            .usage
+            .max_rss
+        var row = Value::object()
+        row.set("transactions", Value::number(count))
+        row.set("peak_rss_bytes", Value::number(rss))
+        runs.push(row)
+        first = if first == 0 { rss } else { first }
+        last = rss
+    }
+    var report = Value::object()
+    report.set("level", Value::string(level))
+    report.set("runs", runs)
+    var text = MemBuffer::empty()
+    report.write_pretty(mut text, indent: 2)
+    text.push(10)
+    let path = format!(dir, "/results.json")
+    named(path, fs.write(path, text.span()))?
+    println!(
+        "peak RSS after ",
+        COUNTS[0],
+        " and ",
+        COUNTS[2],
+        " transactions: ",
+        first,
+        " and ",
+        last,
+        " bytes",
+    )
+    if last > first + MAX_GROWTH {
+        return Result::Err(format!("peak RSS grew by ", last - first, " bytes"))
+    }
+    Result::Ok(())
+}
