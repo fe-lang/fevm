@@ -30,10 +30,20 @@ copied to `<out>/bin/fe`. Use a fresh output directory each time;
 sources without building. Cargo dependencies need network access or a
 populated cache.
 
+## Tools
+
+`native/tools` holds fevm's checks written in Fe, as subcommands of one program
+that runs from the repository's root:
+
+```sh
+native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
+  --emit executable --out-dir native/out/tools
+```
+
 ## Acceptance
 
 ```sh
-python3 native/accept.py --build native/out/toolchain/build.json \
+native/out/tools/fevm_tools accept --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 ```
 
@@ -61,16 +71,6 @@ platform is not a passing result.
 
 The [state-test runner](conformance/README.md) runs execution-spec-tests
 Osaka state tests through `transact`. It is not part of acceptance.
-
-## Tools
-
-`native/tools` holds fevm's checks written in Fe, as subcommands of one program
-that runs from the repository's root:
-
-```sh
-native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
-  --emit executable --out-dir native/out/tools
-```
 
 ## Resident memory
 

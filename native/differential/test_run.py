@@ -11,7 +11,6 @@ from unittest.mock import patch
 import run
 
 sys.path.insert(0, str(run.ROOT / 'native'))
-import accept
 from arith.run import command as captured_command
 
 RUST_VERSION = json.loads((run.ROOT / 'native/toolchain.json').read_text())['rust_version']
@@ -69,33 +68,6 @@ class ReferenceBuildTests(unittest.TestCase):
                 self.assertEqual(report['executable_sha256'], run.digest(binary))
                 self.assertEqual(stale.read_text(), 'stale oracle must never run\n')
                 self.assertFalse(redirected.exists())
-
-    def test_acceptance_passes_bootstrap_rust_version(self):
-        root = Path(tempfile.mkdtemp(prefix='fevm-accept-test-'))
-        compiler = root / 'fe'
-        compiler.write_bytes(b'test compiler')
-        build = root / 'build.json'
-        build.write_text(json.dumps({'complete': True, 'compiler': str(compiler),
-                                     'compiler_sha256': run.digest(compiler),
-                                     'manifest': {'rust_version': 'bootstrap-selected-toolchain'}}))
-        with patch.object(sys, 'argv', ['accept.py', '--build', str(build), '--out', str(root / 'results'),
-                                      '--stage-timeout', '7200', '--build-timeout', '2400']), \
-                patch.object(accept.platform, 'platform', return_value='test host'), \
-                patch.object(accept.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as invoke:
-            with self.assertRaises(SystemExit) as result:
-                accept.main()
-        self.assertEqual(result.exception.code, 0)
-        commands = [call.args[0] for call in invoke.call_args_list]
-        self.assertTrue(all(call.kwargs['timeout'] == 7200 for call in invoke.call_args_list))
-        report = json.loads((root / 'results/acceptance.json').read_text())
-        self.assertEqual(report['stage_timeout_seconds'], 7200)
-        self.assertEqual(report['build_timeout_seconds'], 2400)
-        for runner in ['cli.py', 'differential/run.py', 'differential/state_run.py']:
-            command = next(command for command in commands if str(accept.HERE / runner) in command)
-            self.assertEqual(command[command.index('--build-timeout') + 1], '2400')
-        for runner in ['run.py', 'state_run.py']:
-            command = next(command for command in commands if str(accept.HERE / f'differential/{runner}') in command)
-            self.assertEqual(command[command.index('--toolchain') + 1], 'bootstrap-selected-toolchain')
 
 
 if __name__ == '__main__':

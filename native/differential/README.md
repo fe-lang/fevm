@@ -13,7 +13,7 @@ Specification-derived anchors also check the reference independently.
 
 Use the [compiler manifest](../toolchain.json) and install its Rust version
 with rustup. Both frame and state runners select that version explicitly; `--toolchain` selects another installed toolchain for a
-diagnostic run. `native/accept.py` forwards its bootstrap record's Rust version
+diagnostic run. `fevm_tools accept` forwards its bootstrap record's Rust version
 to both runners. Keep outputs outside temporary storage:
 
 ```sh

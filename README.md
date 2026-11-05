@@ -20,9 +20,8 @@ The repo is a Fe workspace:
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
   allocation-failure and compiler arithmetic checks
-- `native/tools`: fevm's checks written in Fe
-- `native/accept.py`, `native/bootstrap.py`: the acceptance suite and the
-  pinned compiler build
+- `native/tools`: the acceptance suite and fevm's other checks written in Fe
+- `native/bootstrap.py`: the pinned compiler build
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for growable hash tables and [keccak](https://github.com/fe-lang/keccak) for
@@ -157,15 +156,17 @@ from an EVM halt.
 ## Testing
 
 ```sh
-python3 native/accept.py --build native/out/toolchain/build.json \
+native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
+  --emit executable --out-dir native/out/tools
+native/out/tools/fevm_tools accept --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
 python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
   --fixtures <execution-spec-tests>/fixtures/state_tests --out native/out/conformance
 ```
 
-Acceptance runs eight stages: the workspace tests at O0, O1 and O2, CLI and
+Acceptance runs nine stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
-the session client's tests and the arithmetic matrix
+a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 ([native/README.md](native/README.md)). The
 [state-test runner](native/conformance/README.md) is separate; the 23 Osaka
 state tests it does not count have malformed signatures, which fevm, given a
