@@ -1,5 +1,5 @@
 // Relinked into the CLI for RETURN of 65,537 bytes. Its memory and output
-// buffers each request 131,072 bytes, larger than the frame/state descriptors.
+// buffers request 65,568 and 65,537 bytes, larger than the frame/state descriptors.
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
 // The journal fixture uses FAIL_AT=1 and WATCH_SIZE=131072 to check atomic
 // growth failure and undo; the logs fixture watches entry and blob-hash growth.
