@@ -7,7 +7,7 @@ fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
     tx.checkpoint(is_static: false)
 }
 
-// WATCH_SIZE=98304 tests log-entry growth to 512 entries of 192 bytes after a
+// WATCH_SIZE=32768 tests log-entry growth to 512 entries of 64 bytes after a
 // retained first entry.
 fn headers() {
     let data = MemBuffer::empty()

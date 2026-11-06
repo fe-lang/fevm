@@ -192,7 +192,7 @@ def main():
                        '--report', '--report-out', log_archive], timeout=args.build_timeout)
         logs.joinpath('build.log').write_bytes(log)
         artifacts(logs / 'fevm_logs', log_archive, logs, object_name='fevm_logs.o')
-        for mode, size in [('h', 98304), ('b', 128), ('b', 256)]:
+        for mode, size in [('h', 32768), ('b', 128), ('b', 256)]:
             for failure_at in [0, 1]:
                 name = f'log-headers-{failure_at}' if mode == 'h' else f'blob-hashes-{size}-{failure_at}'
                 controlled = logs / name
