@@ -215,6 +215,10 @@ pub struct Vm {
     jumpdests: *u8,
     jump_limit: usize,
     call_depth: usize,
+    // The running code's length and the frame's calldata, for the copy handlers.
+    code_len: usize,
+    calldata: *u8,
+    calldata_len: usize,
 }
 
 impl Vm {
@@ -234,6 +238,9 @@ impl Vm {
             jumpdests: (0 as usize) as *u8,
             jump_limit: 0,
             call_depth: 0,
+            code_len: 0,
+            calldata: (0 as usize) as *u8,
+            calldata_len: 0,
         }
     }
 
@@ -1271,6 +1278,9 @@ impl Vm {
             0x51 => self.op_mload(code, pc, gas, depth, top, mut tracer),
             0x52 => self.op_mstore(code, pc, gas, depth, top, mut tracer),
             0x53 => self.op_mstore8(code, pc, gas, depth, top, mut tracer),
+            0x37 => self.op_calldatacopy(code, pc, gas, depth, top, mut tracer),
+            0x39 => self.op_codecopy(code, pc, gas, depth, top, mut tracer),
+            0x5e => self.op_mcopy(code, pc, gas, depth, top, mut tracer),
             0x56 => self.op_jump(code, pc, gas, depth, top, mut tracer),
             0x57 => self.op_jumpi(code, pc, gas, depth, top, mut tracer),
             0x58 => self.op_pc(code, pc, gas, depth, top, mut tracer),
@@ -1884,6 +1894,78 @@ impl Vm {
         self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
     }
 
+    // The gas of a copy of `len` bytes into memory that holds them, which
+    // grows nothing: 3 and 3 per word. An empty copy grows nothing at any
+    // offset. Zero when the range is not within memory, which the
+    // interpreter loop then handles.
+    fn copy_within_cost(self, dest: u256, len: u256) -> u64 {
+        if len == 0 { return 3 }
+        if len > self.memory_size as u256 { return 0 }
+        let count: u64 = len.downcast_unchecked()
+        if !self.in_memory(dest, len: count) { return 0 }
+        3 + 3 * ((count + 31) / 32)
+    }
+
+    // Copy `len` bytes from `size` bytes at `from`, starting at `source`, into
+    // memory at `dest`, zero past the end; the range is within memory.
+    fn copy_padded(mut self, dest: u256, source: u256, len: u256, from: *u8, size: usize) {
+        let start: usize = dest.downcast_unchecked()
+        let count: usize = len.downcast_unchecked()
+        if count == 0 { return }
+        let copied: usize = if source >= size as u256 { 0 }
+            else if (size as u256) - source < len { size - source.downcast_unchecked() }
+            else { count }
+        if copied != 0 {
+            unsafe {
+                core::ptr::copy_raw(offset_bytes(self.memory.span().ptr(), start), offset_bytes(from, source.downcast_unchecked()), copied)
+            }
+        }
+        if copied < count { self.memory.slice(offset: start + copied, len: count - copied).zero() }
+    }
+
+    // CALLDATACOPY within memory; the interpreter loop handles everything else.
+    fn op_calldatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
+        if cost == 0 || gas < cost {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        self.copy_padded(dest: unsafe { *below(top, 1) }, source: unsafe { *below(top, 2) }, len: unsafe { *below(top, 3) },
+                         from: self.calldata, size: self.calldata_len)
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // CODECOPY within memory; the interpreter loop handles everything else.
+    fn op_codecopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
+        if cost == 0 || gas < cost {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        self.copy_padded(dest: unsafe { *below(top, 1) }, source: unsafe { *below(top, 2) }, len: unsafe { *below(top, 3) },
+                         from: code, size: self.code_len)
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // MCOPY with both ranges within memory; the interpreter loop handles
+    // everything else.
+    fn op_mcopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let dest = if depth < 3 { 0 } else { unsafe { *below(top, 1) } }
+        let source = if depth < 3 { 0 } else { unsafe { *below(top, 2) } }
+        let len = if depth < 3 { 0 } else { unsafe { *below(top, 3) } }
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest, len) }
+        if cost == 0 || gas < cost || self.copy_within_cost(dest: source, len) == 0 {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        if len != 0 { self.move_within(source, dest, len) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // Out of line: the memory view it borrows would keep `op_mcopy` from
+    // tail-calling the next handler.
+    #[inline(never)]
+    fn move_within(mut self, _ source: u256, _ dest: u256, _ len: u256) {
+        self.memory.span().copy_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
+    }
+
     fn op_jump<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 8 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
@@ -1972,6 +2054,9 @@ impl Vm {
         self.jumpdests = program.jumpdest_map()
         self.jump_limit = program.jump_limit()
         self.call_depth = depth
+        self.code_len = program.len()
+        self.calldata = calldata.bytes().ptr()
+        self.calldata_len = calldata.len()
         var pc = self.pc
         var gas = self.gas_remaining
         if self.ok() {
