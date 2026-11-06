@@ -331,7 +331,9 @@ impl Transaction {
             _ => core::panic(),
         }
         if previous == value { return OK }
-        let existed = self.state.exists(address)
+        // Undo deletes an account its write created; transient storage
+        // creates no account.
+        let existed = kind == TRANSIENT || self.state.exists(address)
         if !self.journal.append(Change { kind, address, slot, previous, existed }) {
             return ERR_HOST_ALLOCATION
         }
