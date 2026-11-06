@@ -58,7 +58,7 @@ impl<F> Point<F> where F: Field + Copy {
     // Double-and-add over the scalar's bits, most significant first.
     pub fn multiply(self, _ scalar: u256) -> Self {
         var result = Self::infinity()
-        var bit: u64 = 256
+        var bit: u64 = (256 - core::num::leading_zeros(scalar)).downcast_truncate()
         while bit > 0 {
             bit -= 1
             result = result.double()
