@@ -157,6 +157,23 @@ impl<F> Affine<F> where F: Field + Copy {
     }
 }
 
+/// [s] a + [t] b by one double-and-add over both scalars (Shamir's trick).
+pub fn multiply_two<F: Field + Copy>(_ a: Affine<F>, _ s: u256, _ b: Affine<F>, _ t: u256) -> Point<F> {
+    let sum = Point::from_affine(a).add_affine(b).to_affine()
+    var result = Point::identity()
+    var bit: u64 = 256
+    while bit > 0 {
+        bit -= 1
+        result = result.double()
+        let in_s = (s >> bit as u256) & 1 == 1
+        let in_t = (t >> bit as u256) & 1 == 1
+        if in_s && in_t { result = result.add_affine(sum) }
+        else if in_s { result = result.add_affine(a) }
+        else if in_t { result = result.add_affine(b) }
+    }
+    result
+}
+
 // The window width for Pippenger's method over k points, or 0 when separate
 // double-and-add multiplications cost less. Costs count field
 // multiplications: about 11 for a mixed addition, 16 for an addition and 7
