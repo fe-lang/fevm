@@ -1268,6 +1268,7 @@ impl Vm {
             0x1d => self.op_sar(code, pc, gas, depth, top, mut tracer),
             0x51 => self.op_mload(code, pc, gas, depth, top, mut tracer),
             0x52 => self.op_mstore(code, pc, gas, depth, top, mut tracer),
+            0x53 => self.op_mstore8(code, pc, gas, depth, top, mut tracer),
             0x56 => self.op_jump(code, pc, gas, depth, top, mut tracer),
             0x57 => self.op_jumpi(code, pc, gas, depth, top, mut tracer),
             0x58 => self.op_pc(code, pc, gas, depth, top, mut tracer),
@@ -1804,6 +1805,51 @@ impl Vm {
         self.gas_remaining = gas
         unsafe { self.stack.set_len(depth) }
         self.mstore()
+        let gas = self.gas_remaining
+        if !self.ok() {
+            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
+        }
+        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+    }
+
+    fn op_mstore8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let offset = unsafe { *below(top, 1) }
+        if !self.in_memory(offset, len: 1) {
+            return self.op_mstore8_grow(code, pc, gas - 3, depth, top, mut tracer)
+        }
+        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2, below(top, 2), mut tracer)
+    }
+
+    // As `op_mstore_grow`, for one byte.
+    fn op_mstore8_grow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let offset = unsafe { *below(top, 1) }
+        let size = self.buffered_growth(offset, len: 1)
+        if size == 0 {
+            return self.op_mstore8_slow(code, pc, gas, depth, mut tracer)
+        }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.memory_size = size
+        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
+        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2), below(top, 2), mut tracer)
+    }
+
+    // As `op_mstore_slow`, for one byte.
+    fn op_mstore8_slow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ tracer: mut T) {
+        self.gas_remaining = gas
+        unsafe { self.stack.set_len(depth) }
+        self.mstore8()
         let gas = self.gas_remaining
         if !self.ok() {
             return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
