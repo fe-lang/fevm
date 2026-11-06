@@ -1,0 +1,408 @@
+use core::{MemBuffer, MemSpan, Option}
+use core::abi::DynString
+use core::num::{addmod, mulmod}
+use ingot::conformance::to_hex
+use ingot::named
+use json::Value
+use std::env::{Arg, Args}
+use std::fs::Fs
+use std::io::Display
+use std::text
+
+const SENDER: u256 = 0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b
+const LOOP: u256 = 0xbe7c43a580000000000000000000000000000001
+const GAS: u8 = 0x5a
+const JUMPDEST: u8 = 0x5b
+const JUMPI: u8 = 0x57
+const INVALID: u8 = 0xfe
+const KECCAK256: u8 = 0x20
+const MSTORE: u8 = 0x52
+const POP: u8 = 0x50
+const RETURNDATASIZE: u8 = 0x3d
+const ISZERO: u8 = 0x15
+const STATICCALL: u8 = 0xfa
+const PUSH2: u8 = 0x61
+// The jump to INVALID that `call` leaves for `program` to aim: PUSH2 0xffff.
+const FAIL: u256 = 0x61ffff
+const BN254_P: u256 = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+// 2^255 - 19.
+const SCALAR: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed
+const P256_P: u256 = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+const P256_N: u256 = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+
+// The directory that follows `bench-fixtures --out`.
+pub fn parse() -> Result<MemBuffer, Arg> uses (args: Args) {
+    if args.count() != 4 || args.get(2) != "--out" {
+        return Result::Err(format!("usage: fevm_tools bench-fixtures --out <directory>"))
+    }
+    Result::Ok(args.get(3))
+}
+
+fn word(_ out: mut MemBuffer, _ value: u256) {
+    out.extend_from_word(value, len: 32)
+}
+
+// The shortest PUSH of `value`, at least PUSH1.
+fn push(_ out: mut MemBuffer, _ value: u256) {
+    var len: usize = 1
+    while len < 32 && (value >> (8 * len) as u256) != 0 {
+        len += 1
+    }
+    out.push(0x5f + len.downcast_truncate())
+    out.extend_from_word(value, len)
+}
+
+// Stores `data` from memory offset 0, its length rounded up to whole words.
+fn store(_ data: MemBuffer) -> MemBuffer {
+    var code = MemBuffer::empty()
+    var offset: usize = 0
+    while offset < data.len() {
+        code.push(0x7f)
+        var i: usize = 0
+        while i < 32 {
+            code.push(if offset + i < data.len() { data[offset + i] } else { 0 })
+            i += 1
+        }
+        push(mut code, offset as u256)
+        code.push(MSTORE)
+        offset += 32
+    }
+    code
+}
+
+// STATICCALLs `address` on the first `length` bytes of memory.
+fn call(_ address: u256, _ length: u256, _ output: u256) -> MemBuffer {
+    var code = MemBuffer::empty()
+    push(mut code, output)
+    push(mut code, 1 << 16)
+    push(mut code, length)
+    push(mut code, 0)
+    push(mut code, address)
+    code.push(GAS)
+    code.push(STATICCALL)
+    code.push(ISZERO)
+    code.extend_from_word(FAIL, len: 3)
+    code.push(JUMPI)
+    code.push(RETURNDATASIZE)
+    code.push(ISZERO)
+    code.extend_from_word(FAIL, len: 3)
+    code.push(JUMPI)
+    code
+}
+
+// KECCAK256 of the first `length` bytes of memory.
+fn keccak(_ length: u256) -> MemBuffer {
+    var code = MemBuffer::empty()
+    push(mut code, length)
+    push(mut code, 0)
+    code.push(KECCAK256)
+    code.push(POP)
+    code
+}
+
+// setup; PUSH2 runs; JUMPDEST; body; PUSH1 1; SWAP1; SUB; DUP1; PUSH2 loop;
+// JUMPI; STOP; JUMPDEST; INVALID
+fn program(_ runs: u256, _ setup: MemBuffer, _ body: MemBuffer) -> MemBuffer {
+    let start = setup.len() + 3
+    let tail_len: usize = 10
+    let fail = start + 1 + body.len() + tail_len
+    var code = MemBuffer::from_span(setup.span())
+    code.push(PUSH2)
+    code.extend_from_word(runs, len: 2)
+    code.push(JUMPDEST)
+    var i: usize = 0
+    while i < body.len() {
+        if i + 3 <= body.len() && body[i] == PUSH2 && body[i + 1] == 0xff && body[i + 2] == 0xff {
+            code.push(PUSH2)
+            code.extend_from_word(fail as u256, len: 2)
+            i += 3
+        } else {
+            code.push(body[i])
+            i += 1
+        }
+    }
+    code.push(0x60)
+    code.push(1)
+    code.push(0x90)
+    code.push(0x03)
+    code.push(0x80)
+    code.push(PUSH2)
+    code.extend_from_word(start as u256, len: 2)
+    code.push(JUMPI)
+    code.push(0x00)
+    code.push(JUMPDEST)
+    code.push(INVALID)
+    code
+}
+
+struct Point { x: u256, y: u256 }
+
+impl Copy for Point {}
+
+fn sub_mod(_ a: u256, _ b: u256, _ m: u256) -> u256 {
+    addmod(a, m - b, m)
+}
+
+fn power(_ base: u256, _ exponent: u256, _ m: u256) -> u256 {
+    var result: u256 = 1
+    var square = base % m
+    var rest = exponent
+    while rest != 0 {
+        if rest & 1 != 0 {
+            result = mulmod(result, square, m)
+        }
+        square = mulmod(square, square, m)
+        rest >>= 1
+    }
+    result
+}
+
+// The inverse modulo the prime `m`.
+fn inverse(_ a: u256, _ m: u256) -> u256 {
+    power(a, m - 2, m)
+}
+
+// The sum of two points of secp256r1, where `None` is the point at infinity.
+fn add(_ a: Option<Point>, _ b: Option<Point>) -> Option<Point> {
+    let (a, b) = match (a, b) {
+        (Option::Some(a), Option::Some(b)) => (a, b),
+        (Option::None, _) => return b,
+        (_, Option::None) => return a,
+    }
+    let p = P256_P
+    if a.x == b.x && addmod(a.y, b.y, p) == 0 {
+        return Option::None
+    }
+    let slope = if a.x == b.x {
+        mulmod(sub_mod(mulmod(3, mulmod(a.x, a.x, p), p), 3, p), inverse(mulmod(2, a.y, p), p), p)
+    } else {
+        mulmod(sub_mod(b.y, a.y, p), inverse(sub_mod(b.x, a.x, p), p), p)
+    }
+    let x = sub_mod(sub_mod(mulmod(slope, slope, p), a.x, p), b.x, p)
+    Option::Some(Point { x, y: sub_mod(mulmod(slope, sub_mod(a.x, x, p), p), a.y, p) })
+}
+
+fn multiply(_ k: u256, _ point: Point) -> Point {
+    var result: Option<Point> = Option::None
+    var doubled: Option<Point> = Option::Some(point)
+    var rest = k
+    while rest != 0 {
+        if rest & 1 != 0 {
+            result = add(result, doubled)
+        }
+        doubled = add(doubled, doubled)
+        rest >>= 1
+    }
+    result.unwrap()
+}
+
+// A valid secp256r1 signature, computed here to keep the fixture checkable:
+// the digest, r, s and the public key.
+fn p256_signature() -> MemBuffer {
+    let g = Point {
+        x: 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
+        y: 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5,
+    }
+    let key: u256 = 0x1234567
+    let nonce: u256 = 0x89abcde
+    let digest: u256 = 0xbb5a52f42f9c9261ed4361f59422a1e30036e7c32b270c8807a419feca605023
+    let public = multiply(key, g)
+    let r = multiply(nonce, g).x % P256_N
+    let s = mulmod(inverse(nonce, P256_N), addmod(digest, mulmod(r, key, P256_N), P256_N), P256_N)
+    var out = MemBuffer::empty()
+    word(mut out, digest)
+    word(mut out, r)
+    word(mut out, s)
+    word(mut out, public.x)
+    word(mut out, public.y)
+    out
+}
+
+fn little_endian(_ out: mut MemBuffer, _ value: u256, _ len: usize) {
+    var i: usize = 0
+    while i < len {
+        out.push(((value >> (8 * i) as u256) & 0xff).downcast_truncate())
+        i += 1
+    }
+}
+
+fn blake2f_input(_ rounds: u256) -> MemBuffer {
+    var out = MemBuffer::empty()
+    out.extend_from_word(rounds, len: 4)
+    let iv: [u256; 8] = [
+        0x6a09e667f3bcc908 ^ 0x01010040,
+        0xbb67ae8584caa73b,
+        0x3c6ef372fe94f82b,
+        0xa54ff53a5f1d36f1,
+        0x510e527fade682d1,
+        0x9b05688c2b3e6c1f,
+        0x1f83d9abfb41bd6b,
+        0x5be0cd19137e2179,
+    ]
+    for value in iv {
+        little_endian(mut out, value, 8)
+    }
+    out.extend_from("abc".span())
+    var i: usize = 3
+    while i < 128 {
+        out.push(0)
+        i += 1
+    }
+    little_endian(mut out, 3, 16)
+    out.push(1)
+    out
+}
+
+fn bls_g1() -> MemBuffer {
+    let x: DynString = "17f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb"
+    let y: DynString = "08b3f481e3aaa0f1a09e30ed741d8ae4fcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1"
+    var out = MemBuffer::empty()
+    out.extend_from_word(0, len: 16)
+    out.extend_from(text::decode_hex(x).unwrap().span())
+    out.extend_from_word(0, len: 16)
+    out.extend_from(text::decode_hex(y).unwrap().span())
+    out
+}
+
+fn words<const N: usize>(_ values: [u256; N]) -> MemBuffer {
+    var out = MemBuffer::empty()
+    for value in values {
+        word(mut out, value)
+    }
+    out
+}
+
+fn zeros(_ len: usize) -> MemBuffer {
+    var out = MemBuffer::with_capacity(len)
+    var i: usize = 0
+    while i < len {
+        out.push(0)
+        i += 1
+    }
+    out
+}
+
+fn joined(_ a: MemBuffer, _ b: MemBuffer) -> MemBuffer {
+    var out = MemBuffer::from_span(a.span())
+    out.extend_from(b.span())
+    out
+}
+
+fn address(_ value: u256) -> MemBuffer {
+    format!("0x", text::hex(value, 20))
+}
+
+fn strings<const N: usize>(_ values: [DynString; N]) -> Value {
+    var array = Value::array()
+    for ref value in values {
+        array.push(Value::string(value))
+    }
+    array
+}
+
+fn account(_ balance: String<10>, _ code: MemBuffer) -> Value {
+    var account = Value::object()
+    account.set("balance", Value::string(balance))
+    account.set("code", Value::string(code))
+    account.set("nonce", Value::string("0x00"))
+    account.set("storage", Value::object())
+    account
+}
+
+// A state test that runs `body` `runs` times after storing `memory`.
+fn state_test(_ runs: u256, _ memory: MemBuffer, _ body: MemBuffer) -> Value {
+    let code = program(runs, store(memory), body)
+    var labels = Value::object()
+    labels.set("0", Value::string(format!("n", runs)))
+    var info = Value::object()
+    info.set("labels", labels)
+    var env = Value::object()
+    env.set("currentBaseFee", Value::string("0x01"))
+    env.set("currentCoinbase", Value::string(address(SENDER)))
+    env.set("currentDifficulty", Value::string("0x01"))
+    env.set("currentGasLimit", Value::string("0x3b9aca00"))
+    env.set("currentNumber", Value::string("0x01"))
+    env.set("currentRandom", Value::string(format!("0x", text::hex(1, 32))))
+    env.set("currentTimestamp", Value::string("0x61a8d289"))
+    var indexes = Value::object()
+    indexes.set("data", Value::number(0 as u8))
+    indexes.set("gas", Value::number(0 as u8))
+    indexes.set("value", Value::number(0 as u8))
+    var expected = Value::object()
+    expected.set("indexes", indexes)
+    let empty_logs: DynString = "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
+    expected.set("logs", Value::string(empty_logs))
+    var london = Value::array()
+    london.push(expected)
+    var post = Value::object()
+    post.set("London", london)
+    var pre = Value::object()
+    pre.set(address(SENDER), account("0x3b9aca00", format!("0x")))
+    pre.set(address(LOOP), account("0x00", to_hex(code.span())))
+    var tx = Value::object()
+    tx.set("data", strings(["0x"]))
+    tx.set("gasLimit", strings(["0x3b9aca00"]))
+    tx.set("gasPrice", Value::string("0x01"))
+    tx.set("nonce", Value::string("0x00"))
+    tx.set("sender", Value::string(address(SENDER)))
+    tx.set("to", Value::string(address(LOOP)))
+    tx.set("value", strings(["0x00"]))
+    var test = Value::object()
+    test.set("_info", info)
+    test.set("env", env)
+    test.set("post", post)
+    test.set("pre", pre)
+    test.set("transaction", tx)
+    test
+}
+
+// Writes `<out>/<name>.json`, holding the state test `name`.
+fn write<N: Display>(_ out: Arg, _ name: N, _ test: own Value) -> Result<MemBuffer, ()> uses (fs: mut Fs) {
+    var doc = Value::object()
+    let path = format!(out, "/", name, ".json")
+    doc.set(name, test)
+    var text = MemBuffer::empty()
+    doc.write_pretty(mut text, indent: 1)
+    named(path, fs.write(path, text.span()))
+}
+
+// Writes state tests that loop KECCAK256 and the precompiles on inputs that
+// do their full work, for `bench --fevm-only`. A call that fails or returns
+// nothing hits INVALID, so the transaction halts and the bad input shows in
+// its status.
+pub fn run(_ out: Arg) -> Result<MemBuffer, ()> uses (fs: mut Fs) {
+    named(out, fs.create_dir_all(out))?
+    let g1 = words([1, 2])
+    let g2 = words(
+        [
+            11559732032986387107991004021392285783925812861821192530917403151452391805634,
+            10857046999023057135944570762232829481370756359578518086990519993285655852781,
+            4082367875863433681332203403145435568316851327593401208105741076214120093531,
+            8495653923123431417604973247489272438418190587263600148770280649306958101930,
+        ],
+    )
+    let ecrecover = words(
+        [
+            0x456e9aea5e197a1f1af7a3e85a3212fa4049a3ba34c2289b4c860fc0b0c64ef3,
+            28,
+            0x9242685bf161793cc25603c231bc2f568eb630ea16aa137d2664ac8038825608,
+            0x4f8ae3bd7535248d0bd448298cc2e2071e56992d0774dc340c368ae950852ada,
+        ],
+    )
+    let modexp = words([32, 32, 32, 3, SCALAR, BN254_P])
+    let blake2f = blake2f_input(1000)
+    let scalar = words([SCALAR])
+    write(out, "keccak_32", state_test(20000, words([0]), keccak(32)))?
+    write(out, "keccak_1k", state_test(2000, zeros(1024), keccak(1024)))?
+    write(out, "ecrecover", state_test(200, ecrecover, call(1, 128, 32)))?
+    write(out, "sha256_1k", state_test(2000, zeros(1024), call(2, 1024, 32)))?
+    write(out, "modexp", state_test(200, modexp, call(5, modexp.len() as u256, 32)))?
+    write(out, "ecadd", state_test(2000, joined(g1, g1), call(6, 128, 64)))?
+    write(out, "ecmul", state_test(200, joined(g1, scalar), call(7, 96, 64)))?
+    write(out, "ecpairing", state_test(20, joined(g1, g2), call(8, 192, 32)))?
+    write(out, "blake2f", state_test(200, blake2f, call(9, blake2f.len() as u256, 64)))?
+    write(out, "bls_g1add", state_test(500, joined(bls_g1(), bls_g1()), call(0x0b, 256, 128)))?
+    write(out, "bls_g1msm", state_test(20, joined(bls_g1(), scalar), call(0x0c, 160, 128)))?
+    write(out, "p256verify", state_test(100, p256_signature(), call(0x100, 160, 32)))?
+    Result::Ok(())
+}

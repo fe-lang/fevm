@@ -1,4 +1,5 @@
 use core::{MemBuffer, Option}
+use core::fixed::UFixed
 use std::env::{Arg, Args}
 use std::fs::Fs
 use std::io::{Display, Stderr, Stdout}
@@ -35,6 +36,10 @@ uses (args: Args, fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         accept::run(accept::Options::parse()?)
     } else if tool == "conformance" {
         conformance::run(conformance::Options::parse()?)
+    } else if tool == "bench" {
+        bench::run(bench::Options::parse()?)
+    } else if tool == "bench-fixtures" {
+        bench_fixtures::run(bench_fixtures::parse()?)
     } else {
         usage()
     }
@@ -48,7 +53,11 @@ fn usage() -> Result<MemBuffer, ()> {
             "       fevm_tools accept --build <build.json> --out <directory> [--check-only] ",
             "[--jobs <count>] [--stage-timeout <seconds>] [--build-timeout <seconds>]\n",
             "       fevm_tools conformance --fe <compiler> | --executable <driver> --fixtures <state_tests> ",
-            "--out <directory> [--level 0|1|2] [--jobs <count>] [--timeout <seconds>] [--select <part>...]",
+            "--out <directory> [--level 0|1|2] [--jobs <count>] [--timeout <seconds>] [--select <part>...]\n",
+            "       fevm_tools bench --fe <compiler> | --executable <driver> --benchmarks <state_tests> ",
+            "[--revm <runner>] [--evmone <runner>] [--fevm-only] [--out <directory>] [--level 0|1|2] ",
+            "[--fork <fork>] [--target <seconds>] [--repeat <count>] [--select <part>...]\n",
+            "       fevm_tools bench-fixtures --out <directory>",
         ),
     )
 }
@@ -159,13 +168,8 @@ fn host() -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
 
 // A report's `seconds`, to the millisecond.
 fn seconds(_ took: Duration) -> Value {
-    let ms = took.as_millis()
-    Value::Number(
-        Number::parse(
-            format!(ms / 1000, ".", (ms / 100) % 10, (ms / 10) % 10, ms % 10).span(),
-        )
-            .unwrap(),
-    )
+    let millis = UFixed<3>::from_raw(took.as_millis() as u256)
+    Value::Number(Number::parse(format!(millis).span()).unwrap())
 }
 
 #[test]
@@ -173,4 +177,7 @@ fn seconds_keep_three_decimals() {
     var text = MemBuffer::empty()
     seconds(Duration::from_millis(12005)).write(mut text)
     assert!(text == "12.005")
+    text = MemBuffer::empty()
+    seconds(Duration::from_millis(12500)).write(mut text)
+    assert!(text == "12.5")
 }

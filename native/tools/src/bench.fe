@@ -1,0 +1,503 @@
+use core::{MemBuffer, MemSpan, MemVec, Option}
+use core::abi::DynString
+use core::fixed::{Fixed, SWad, UFixed, Wad}
+use ingot::{named, parse_u64, succeed}
+use ingot::conformance::{Indexes, encode, fixture_files}
+use json::{Number, Value, parse}
+use std::env::{Arg, Args}
+use std::fs::Fs
+use std::io::{Display, Stdout}
+use std::process::{Command, Input, Redirect, Spawn}
+
+// The most runs a timed run grows to while it falls short of the target.
+const MOST_RUNS: i64 = 16777216
+const STDERR_TAIL: usize = 2000
+
+// The options that follow `bench`.
+pub struct Options {
+    benchmarks: Arg,
+    fe: Option<Arg>,
+    executable: Option<Arg>,
+    revm: Option<Arg>,
+    evmone: Option<Arg>,
+    fevm_only: bool,
+    out: MemBuffer,
+    level: u8,
+    fork: MemBuffer,
+    // CPU nanoseconds of transactions per timed run.
+    target: i64,
+    repeat: u64,
+    select: MemVec<Arg>,
+}
+
+impl Options {
+    pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var benchmarks: Option<Arg> = Option::None
+        var fe: Option<Arg> = Option::None
+        var executable: Option<Arg> = Option::None
+        var revm: Option<Arg> = Option::None
+        var evmone: Option<Arg> = Option::None
+        var fevm_only = false
+        var out = format!("native/out/bench")
+        var level: u8 = 2
+        var fork = format!("London")
+        var target: i64 = 300000000
+        var repeat: u64 = 3
+        var select: MemVec<Arg> = MemVec::new()
+        var i: usize = 2
+        while i < args.count() {
+            let name = args.get(i)
+            i += 1
+            if name == "--fevm-only" {
+                fevm_only = true
+                continue
+            }
+            if name == "--select" {
+                while i < args.count() && !args.get(i).span().starts_with("--") {
+                    select.push(args.get(i))
+                    i += 1
+                }
+                continue
+            }
+            if i == args.count() {
+                return Result::Err(format!("option ", name, " needs a value"))
+            }
+            let value = args.get(i)
+            i += 1
+            if name == "--benchmarks" {
+                benchmarks = Option::Some(value)
+            } else if name == "--fe" {
+                fe = Option::Some(value)
+            } else if name == "--executable" {
+                executable = Option::Some(value)
+            } else if name == "--revm" {
+                revm = Option::Some(value)
+            } else if name == "--evmone" {
+                evmone = Option::Some(value)
+            } else if name == "--out" {
+                out = format!(value)
+            } else if name == "--fork" {
+                fork = format!(value)
+            } else if name == "--level" && (value == "0" || value == "1" || value == "2") {
+                level = value.span()[0] - b'0'
+            } else if name == "--target" {
+                // Seconds, to the nanosecond, and at most 1000.
+                let nanos = match UFixed<9>::parse(value) {
+                    Option::Some(seconds) => seconds.raw(),
+                    Option::None => 0,
+                }
+                if nanos == 0 || nanos > 1000000000000 {
+                    return Result::Err(format!("bad option: ", name, " ", value))
+                }
+                target = nanos.downcast_truncate()
+            } else if name == "--repeat" && parse_u64(value).unwrap_or(default: 0) != 0 {
+                repeat = parse_u64(value).unwrap()
+            } else {
+                return Result::Err(format!("bad option: ", name, " ", value))
+            }
+        }
+        if fe.is_some() == executable.is_some() {
+            return Result::Err(format!("fevm_tools bench needs one of --fe and --executable"))
+        }
+        match benchmarks {
+            Option::Some(benchmarks) => Result::Ok(
+                Options {
+                    benchmarks,
+                    fe,
+                    executable,
+                    revm,
+                    evmone,
+                    fevm_only,
+                    out,
+                    level,
+                    fork,
+                    target,
+                    repeat,
+                    select,
+                },
+            ),
+            Option::None => Result::Err(format!("fevm_tools bench needs --benchmarks")),
+        }
+    }
+}
+
+// An engine to time, and the runner that runs it.
+struct Engine { name: String<6>, path: MemBuffer }
+
+// What one run of an engine reports, comparable across engines.
+struct Outcome { invalid: bool, status: MemBuffer, gas_used: u64, logs_hash: MemBuffer }
+
+impl Outcome {
+    fn same(self, _ other: Outcome) -> bool {
+        self.invalid == other.invalid
+            && self.status == other.status
+            && self.gas_used == other.gas_used
+            && self.logs_hash == other.logs_hash
+    }
+
+    fn value(self) -> Value {
+        var value = Value::object()
+        value.set("invalid", Value::Bool(self.invalid))
+        if !self.invalid {
+            value.set("status", Value::string(self.status))
+            value.set("gas_used", Value::number(self.gas_used))
+            value.set("logs_hash", Value::string(self.logs_hash))
+        }
+        value
+    }
+}
+
+// A run of an engine's runner, with the heap settings of a long-running
+// process. Freed setup memory would otherwise return to the OS after every
+// run, and setup-only runs would pay to grow the heap again. Fixing the trim
+// threshold also fixes glibc's otherwise adaptive mmap threshold; at 32 MiB it
+// keeps large buffers on the heap, reused as in a long-running process.
+fn runner(_ path: MemSpan, _ payload: MemBuffer) -> Command {
+    Command::new(path)
+        .env("MALLOC_TRIM_THRESHOLD_", 1099511627776 as u64)
+        .env("MALLOC_MMAP_THRESHOLD_", 33554432 as u64)
+        .stdin(Input::Bytes(MemBuffer::from_span(payload.span())))
+        .stderr(Redirect::Capture)
+}
+
+// The end of what a runner wrote to standard error.
+fn tail(_ bytes: MemBuffer) -> MemBuffer {
+    let len = bytes.len()
+    let start = if len > STDERR_TAIL { len - STDERR_TAIL } else { 0 }
+    MemBuffer::from_span(bytes.span().slice(offset: start, len: len - start))
+}
+
+// The outcome one run of `path` reports for `payload`.
+fn outcome(_ path: MemSpan, _ payload: MemBuffer, statuses: bool) -> Result<MemBuffer, Outcome>
+uses (proc: mut Spawn)
+{
+    let output = named(path, proc.output(runner(path, payload).stdout(Redirect::Capture)))?
+    if !output.status.success() {
+        return Result::Err(format!(path, ": ", output.status, "\n", tail(output.stderr)))
+    }
+    named(path, reported(output.stdout.span(), statuses))
+}
+
+// The outcome in a runner's line of JSON; `statuses` reduces FeVM's status
+// names to revm's success, revert or halt.
+fn reported(_ line: MemSpan, statuses: bool) -> Result<MemBuffer, Outcome> {
+    let result = match parse(line) {
+        Result::Ok(result) => result,
+        Result::Err(error) => return Result::Err(format!(error)),
+    }
+    // FeVM names the reason or writes null; revm and evmone write 1 or 0.
+    let invalid = ref result["invalid"]
+    let valid = invalid.is_null() || invalid.as_u64() == Option::Some(0)
+    if !valid {
+        return Result::Ok(
+            Outcome { invalid: true, status: MemBuffer::empty(), gas_used: 0, logs_hash: MemBuffer::empty() },
+        )
+    }
+    let name = result["status"].as_string().unwrap()
+    let status = if statuses && name != "success" && name != "revert" {
+        format!("halt")
+    } else {
+        match name.index_of(" ") {
+            Option::Some(end) => MemBuffer::from_span(name.slice(offset: 0, len: end)),
+            Option::None => MemBuffer::from_span(name),
+        }
+    }
+    Result::Ok(
+        Outcome {
+            invalid: false,
+            status,
+            gas_used: result["gas_used"].as_u64().unwrap(),
+            logs_hash: MemBuffer::from_span(result["logs_hash"].as_string().unwrap()),
+        },
+    )
+}
+
+// The least CPU time, in nanoseconds, of `repeat` runs of `path RUNS
+// TRANSACT` on `payload`.
+fn cpu(_ path: MemSpan, _ payload: MemBuffer, runs: i64, execute: bool, repeat: u64) -> Result<MemBuffer, i64>
+uses (proc: mut Spawn)
+{
+    var best: i64 = 0
+    var i: u64 = 0
+    while i < repeat {
+        let command = runner(path, payload).arg(runs).arg(execute as u8).stdout(Redirect::Null)
+        let output = named(path, proc.output(command))?
+        if !output.status.success() {
+            return Result::Err(format!(path, ": ", output.status, "\n", tail(output.stderr)))
+        }
+        let elapsed: i64 = (output.usage.user + output.usage.system).as_nanos().downcast_truncate()
+        if i == 0 || elapsed < best {
+            best = elapsed
+        }
+        i += 1
+    }
+    Result::Ok(best)
+}
+
+// Microseconds per transaction: building the pre-state and applying the
+// transaction RUNS times, minus only building it RUNS times.
+fn transaction_micros(_ path: MemSpan, _ payload: MemBuffer, target: i64, repeat: u64) -> Result<MemBuffer, Fixed<2>>
+uses (proc: mut Spawn)
+{
+    var runs: i64 = 8
+    var cost: i64 = 0
+    while true {
+        cost = cpu(path, payload, runs, execute: true, repeat: 1)? - cpu(path, payload, runs, execute: false, repeat: 1)?
+        if cost * 4 >= target || runs >= MOST_RUNS {
+            break
+        }
+        runs *= 4
+    }
+    let scaled = runs * target / (if cost > 1 { cost } else { 1 })
+    if scaled > runs {
+        runs = scaled
+    }
+    let cost = cpu(path, payload, runs, execute: true, repeat)? - cpu(path, payload, runs, execute: false, repeat)?
+    Result::Ok(micros(cost, runs))
+}
+
+// Microseconds to build the pre-state once, which `transaction_micros`
+// subtracts: code analysis and hashing on the way into the state. Comparing
+// two lengths of run leaves out starting the process.
+fn setup_micros(_ path: MemSpan, _ payload: MemBuffer, target: i64, repeat: u64) -> Result<MemBuffer, Fixed<2>>
+uses (proc: mut Spawn)
+{
+    var runs: i64 = 64
+    while setup_cost(path, payload, runs, repeat: 1)? * 4 < target && runs < MOST_RUNS {
+        runs *= 4
+    }
+    Result::Ok(micros(setup_cost(path, payload, runs, repeat)?, runs))
+}
+
+fn setup_cost(_ path: MemSpan, _ payload: MemBuffer, _ runs: i64, repeat: u64) -> Result<MemBuffer, i64>
+uses (proc: mut Spawn)
+{
+    Result::Ok(
+        cpu(path, payload, runs: 2 * runs, execute: false, repeat)? - cpu(path, payload, runs, execute: false, repeat)?,
+    )
+}
+
+// `nanos / runs` in microseconds, rounded to the nearest hundredth.
+fn micros(_ nanos: i64, _ runs: i64) -> Fixed<2> {
+    let unit = runs * 10
+    let half = unit / 2
+    Fixed::from_raw(((if nanos < 0 { nanos - half } else { nanos + half }) / unit) as i256)
+}
+
+// `value` rounded to the nearest thousandth.
+fn thousandths(_ value: Wad) -> UFixed<3> {
+    UFixed::from_raw((value.raw() + 500000000000000) / 1000000000000000)
+}
+
+fn decimal<T: Display>(_ value: T) -> Value {
+    Value::Number(Number::parse(format!(value).span()).unwrap())
+}
+
+// The label of post `post` of test `name`: its data index's label, or the
+// index itself.
+fn label(_ name: MemSpan, _ test: Value, _ post: Value) -> MemBuffer {
+    let index = post["indexes"]["data"].as_u64().unwrap()
+    if let Option::Some(ref info) = test.get("_info")
+        && let Option::Some(ref labels) = info.get("labels")
+        && let Option::Some(ref text) = labels.get(format!(index).span())
+        && let Option::Some(ref text) = text.as_string() {
+        return format!(name, "/", text)
+    }
+    format!(name, "/", index)
+}
+
+// Builds the runners not given, then times every case of the benchmarks'
+// fork on each engine, printing a line of JSON per case and then the
+// geometric means of FeVM's time over each other engine's.
+pub fn run(_ options: Options) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
+{
+    named(options.out, fs.create_dir_all(options.out))?
+    let dir = named(options.out, fs.canonicalize(options.out))?
+    let benchmarks = named(options.benchmarks, fs.canonicalize(options.benchmarks))?
+    var engines: MemVec<Engine> = MemVec::new()
+    let fevm = match options.fe {
+        Option::Some(ref fe) => {
+            let build = format!(dir, "/fevm")
+            succeed(
+                "fe build",
+                Command::new(fe)
+                    .arg("build")
+                    .arg(".")
+                    .arg("--ingot")
+                    .arg("fevm_conformance")
+                    .arg("--backend")
+                    .arg("native")
+                    .arg("-O")
+                    .arg(options.level)
+                    .arg("--out-dir")
+                    .arg(build)
+                    .stdout(Redirect::Null),
+            )?
+            format!(build, "/fevm_conformance")
+        },
+        Option::None => match options.executable {
+            Option::Some(ref path) => named(path, fs.canonicalize(path))?,
+            Option::None => return Result::Err(format!("no driver to run")),
+        },
+    }
+    engines.push(Engine { name: "fevm", path: fevm })
+    if !options.fevm_only {
+        let revm = match options.revm {
+            Option::Some(ref path) => named(path, fs.canonicalize(path))?,
+            Option::None => {
+                let manifest = named("native/bench/revm", fs.canonicalize("native/bench/revm"))?
+                let target = format!(dir, "/revm")
+                // In its directory, for its `.cargo/config.toml`.
+                succeed(
+                    "cargo build",
+                    Command::new("cargo")
+                        .arg("build")
+                        .arg("--release")
+                        .arg("--quiet")
+                        .arg("--manifest-path")
+                        .arg(format!(manifest, "/Cargo.toml"))
+                        .arg("--target-dir")
+                        .arg(target)
+                        .current_dir(manifest),
+                )?
+                format!(target, "/release/fevm-bench-revm")
+            },
+        }
+        engines.push(Engine { name: "revm", path: revm })
+        if let Option::Some(ref path) = options.evmone {
+            engines.push(Engine { name: "evmone", path: named(path, fs.canonicalize(path))? })
+        }
+    }
+    // The sums of the logarithms of FeVM's time over each other engine's, and
+    // how many there are.
+    var logs: MemVec<SWad> = MemVec::new()
+    for _ in 1..engines.len() {
+        logs.push(SWad::zero())
+    }
+    var count: i256 = 0
+    for ref file in fixture_files(benchmarks.span(), MemVec::new())? {
+        let path = format!(benchmarks, "/", file)
+        let source = named(path, fs.read(path))?
+        let doc = match parse(source.span()) {
+            Result::Ok(doc) => doc,
+            Result::Err(error) => return Result::Err(format!(path, ": ", error)),
+        }
+        for ref member in doc.members() {
+            let test = ref member.value
+            let posts = ref test["post"]
+            if !posts.has(options.fork.span()) {
+                continue
+            }
+            for ref post in posts.member(options.fork.span()).items() {
+                let case = label(member.key.span(), test, post)
+                var selected = options.select.is_empty()
+                for ref part in options.select {
+                    selected = selected || case.span().index_of(part.span()).is_some()
+                }
+                if !selected {
+                    continue
+                }
+                // Benchmarks exceed EIP-7825's cap, so the host lifts it.
+                let payload = named(case, encode(test, Indexes::of(post), cap: 18446744073709551615))?
+                var outcomes: MemVec<Outcome> = MemVec::new()
+                for ref engine in engines {
+                    outcomes.push(outcome(engine.path.span(), payload, statuses: engine.name == "fevm")?)
+                }
+                var row = Value::object()
+                row.set("case", Value::string(case))
+                if outcomes[0].invalid {
+                    row.set("status", Value::Null)
+                    row.set("gas_used", Value::Null)
+                } else {
+                    row.set("status", Value::string(outcomes[0].status))
+                    row.set("gas_used", Value::number(outcomes[0].gas_used))
+                }
+                var times: MemVec<Fixed<2>> = MemVec::new()
+                for ref engine in engines {
+                    let time = transaction_micros(engine.path.span(), payload, target: options.target, repeat: options.repeat)?
+                    row.set(format!(engine.name, "_us"), decimal(time))
+                    let setup = setup_micros(engine.path.span(), payload, target: options.target, repeat: options.repeat)?
+                    row.set(format!(engine.name, "_setup_us"), decimal(setup))
+                    times.push(time)
+                }
+                for k in 1..engines.len() {
+                    if times[0] <= Fixed::zero() || times[k] <= Fixed::zero() {
+                        return Result::Err(format!(case, ": a time is not positive"))
+                    }
+                    let ratio = Wad::from_ratio(times[0].to_unsigned().raw(), times[k].to_unsigned().raw())
+                    logs[k - 1] = logs[k - 1] + ratio.ln()
+                    row.set(format!("fevm/", engines[k].name), decimal(thousandths(ratio)))
+                }
+                count += 1
+                var matched = outcomes[0].logs_hash == post["logs"].as_string().unwrap()
+                for ref result in outcomes {
+                    matched = matched && result.same(outcomes[0])
+                }
+                row.set("match", Value::Bool(matched))
+                if !matched {
+                    var reported = Value::object()
+                    for k in 0..engines.len() {
+                        reported.set(engines[k].name, outcomes[k].value())
+                    }
+                    row.set("outcomes", reported)
+                    row.set("expected_logs", Value::string(post["logs"].as_string().unwrap()))
+                }
+                println!(row)
+            }
+        }
+    }
+    var summary = Value::object()
+    if count != 0 {
+        for k in 1..engines.len() {
+            let mean = logs[k - 1].div_int(count).exp()
+            summary.set(format!("geomean fevm/", engines[k].name), decimal(thousandths(mean)))
+        }
+    }
+    println!(summary)
+    Result::Ok(())
+}
+
+#[test]
+fn micros_round_to_hundredths() {
+    assert!(micros(12345, 1) == Fixed::from_raw(1235))
+    assert!(micros(12344, 1) == Fixed::from_raw(1234))
+    assert!(micros(-12345, 1) == Fixed::from_raw(-1235))
+    assert!(micros(1000000, 8) == Fixed::from_raw(12500))
+}
+
+#[test]
+fn thousandths_round_half_up() {
+    assert!(thousandths(Wad::from_ratio(2, 3)) == UFixed::from_raw(667))
+    assert!(thousandths(Wad::from_ratio(1, 8)) == UFixed::from_raw(125))
+    assert!(thousandths(Wad::from_ratio(1, 2000)) == UFixed::from_raw(1))
+}
+
+#[test]
+fn geomean_of_ratios() {
+    // The geometric mean of 2 and 8 is 4.
+    let logs = Wad::from_int(2).ln() + Wad::from_int(8).ln()
+    assert!(thousandths(logs.div_int(2).exp()) == UFixed::from_int(4))
+}
+
+#[test]
+fn labels_name_the_data_index() {
+    let test = parse("{\"_info\": {\"labels\": {\"1\": \"big\"}}}".span()).unwrap()
+    let post = parse("{\"indexes\": {\"data\": 1}}".span()).unwrap()
+    assert!(label("case".span(), test, post) == "case/big")
+    let other = parse("{\"indexes\": {\"data\": 2}}".span()).unwrap()
+    assert!(label("case".span(), test, other) == "case/2")
+}
+
+#[test]
+fn outcomes_compare_across_engines() {
+    let fevm: DynString = "{\"invalid\":null,\"status\":\"out of gas\",\"host_failure\":false,\"gas_used\":21000,\"logs_hash\":\"0x1d\"}"
+    let revm: DynString = "{\"invalid\":0,\"status\":\"halt OutOfGas\",\"gas_used\":21000,\"logs_hash\":\"0x1d\"}"
+    let fevm_outcome = reported(fevm.span(), statuses: true).unwrap()
+    assert!(!fevm_outcome.invalid && fevm_outcome.status == "halt")
+    assert!(fevm_outcome.same(reported(revm.span(), statuses: false).unwrap()))
+    let rejected: DynString = "{\"invalid\":\"nonce too low\"}"
+    assert!(reported(rejected.span(), statuses: true).unwrap().invalid)
+    let revm_rejected: DynString = "{\"invalid\":1}"
+    assert!(reported(revm_rejected.span(), statuses: false).unwrap().invalid)
+}
