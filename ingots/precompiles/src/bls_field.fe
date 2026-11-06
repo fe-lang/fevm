@@ -1,5 +1,6 @@
 use core::Option
 use core::ops::WrappingMul
+use ingot::inversion::invert_384
 use ingot::montgomery::{adc, mac, sbb}
 use keccak::ByteSource
 
@@ -12,7 +13,10 @@ const INV: u64 = 0x89f3fffcfffcfffd
 // 2^384 mod p (one) and 2^768 mod p.
 const R1: [u64; 6] = [0x760900000002fffd, 0xebf4000bc40c0002, 0x5f48985753c758ba, 0x77ce585370525745, 0x5c071a97a256ec6d, 0x15f65ec3fa80e493]
 const R2: [u64; 6] = [0xf4df1f341c341746, 0x0a76e6a609d104f1, 0x8de5476c4c95b6d5, 0x67eb88a9939d83c0, 0x9a793e85b519952d, 0x11988fe592cae3aa]
-const P_MINUS_2: [u64; 6] = [0xb9feffffffffaaa9, 0x1eabfffeb153ffff, 0x6730d2a0f6b0f624, 0x64774b84f38512bf, 0x4b1ba7b6434bacd7, 0x1a0111ea397fe69a]
+// p as signed 62-bit limbs, p^-1 mod 2^62, and 2^1152 mod p (R^3), for inversion.
+const MODULUS_62: [i64; 7] = [0x39feffffffffaaab, 0x3aaffffac54ffffe, 0x330d2a0f6b0f6241, 0x1dd2e13ce144afd9, 0x1ba7b6434bacd764, 0x0447a8e5ff9a692c, 0x1a0]
+const INV62: u64 = 0x360c000300030003
+const R3: [u64; 6] = [0xed48ac6bd94ca1e0, 0x315f831e03a7adf8, 0x9a53352a615e29dd, 0x34c04e5e921e1761, 0x2512d43565724728, 0x0aa6346091755d4d]
 // (p + 1) / 4: p = 3 mod 4, so a^((p+1)/4) is a square root of any square a.
 const SQRT_EXPONENT: [u64; 6] = [0xee7fbfffffffeaab, 0x07aaffffac54ffff, 0xd9cc34a83dac3d89, 0xd91dd2e13ce144af, 0x92c6e9ed90d2eb35, 0x0680447a8e5ff9a6]
 const HALF_MODULUS: [u64; 6] = [0xdcff7fffffffd555, 0x0f55ffff58a9ffff, 0xb39869507b587b12, 0xb23ba5c279c2895f, 0x258dd3db21a5d66b, 0x0d0088f51cbff34d]
@@ -199,6 +203,7 @@ impl Field for Fp {
         Fp { limbs: negated }
     }
 
-    // Fermat inversion; zero maps to zero.
-    fn invert(self) -> Fp { self.pow(P_MINUS_2) }
+    // The inverse of x R is x^-1 R^-1; multiplying by R^3 makes it x^-1 R.
+    // Zero maps to zero.
+    fn invert(self) -> Fp { Fp { limbs: invert_384(self.limbs, MODULUS_62, INV62) }.mul(Fp { limbs: R3 }) }
 }

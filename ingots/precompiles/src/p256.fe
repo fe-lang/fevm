@@ -18,6 +18,9 @@ impl Modulus for Base {
     const P3: u64 = 0xffffffff00000001
     const INV: u64 = 1
     const R2: u256 = 0x4fffffffdfffffffffffffffefffffffbffffffff0000000000000003
+    const SIGNED_62: [i64; 5] = [0x3fffffffffffffff, 0x3ffffffff, 0, 0x3fffffc000000040, 0xff]
+    const INV62: u64 = 0x3fffffffffffffff
+    const R3: u256 = 0x180000000100000005fffffffcffffffedfffffff7fffffffd0000000a
 }
 
 pub struct Order {}
@@ -30,6 +33,9 @@ impl Modulus for Order {
     const P3: u64 = 0xffffffff00000000
     const INV: u64 = 0xccd1c8aaee00bc4f
     const R2: u256 = 0x66e12d94f3d956202845b2392b6bec594699799c49bd6fa683244c95be79eea2
+    const SIGNED_62: [i64; 5] = [0x33b9cac2fc632551, 0x339beab69c5e7a13, 0x3ffffffffffffffb, 0x3fffffc00000003f, 0xff]
+    const INV62: u64 = 0x332e375511ff43b1
+    const R3: u256 = 0x503a54e76407be652543b9246ba5e93f111f28ae0c0555c9ac8ebec90b65a624
 }
 
 type Fp = Mont<Base>

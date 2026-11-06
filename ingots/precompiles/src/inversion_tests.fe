@@ -1,0 +1,33 @@
+use ingot::bls_field::{Field as BlsField, Fp as BlsFp}
+use ingot::bn254_field::{Field, MODULUS, fp}
+
+#[test]
+fn bls_inverses_multiply_to_one() {
+    let p_minus_one: [u64; 6] = [0xb9feffffffffaaaa, 0x1eabfffeb153ffff, 0x6730d2a0f6b0f624, 0x64774b84f38512bf, 0x4b1ba7b6434bacd7, 0x1a0111ea397fe69a]
+    for limbs in [[1, 0, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0], p_minus_one, [0, 0, 0, 0, 0, 1], [0xffffffffffffffff, 0, 0, 0, 0, 0]] {
+        let x = BlsFp::from_canonical(limbs)
+        core::assert(x.mul(x.invert()).equals(BlsFp::one()))
+    }
+    core::assert(BlsFp::zero().invert().is_zero())
+    // A chain of pseudo-random elements, x -> x * c + 1.
+    let c = BlsFp::from_canonical([0x9e3779b97f4a7c15, 0xf39cc0605cedc834, 0x1082276bf3a27251, 0xf86c6a11d0c18e95, 0x2767f0b153d27b7f, 0x0123456789abcdef])
+    var x = c
+    for _ in 0..300 {
+        core::assert(x.mul(x.invert()).equals(BlsFp::one()))
+        x = x.mul(c).add(BlsFp::one())
+    }
+}
+
+#[test]
+fn bn254_inverses_multiply_to_one() {
+    for value in [1 as u256, 2, 3, MODULUS - 1, MODULUS / 3, 1 << 253, 0xffffffffffffffff] {
+        core::assert(fp(value).mul(fp(value).inverse()).equals(fp(1)))
+    }
+    core::assert(fp(0).inverse().is_zero())
+    let c = fp(0x2b3e9f1c7a5d4e6f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7)
+    var x = c
+    for _ in 0..300 {
+        core::assert(x.mul(x.inverse()).equals(fp(1)))
+        x = x.mul(c).add(fp(1))
+    }
+}

@@ -1,4 +1,5 @@
 use core::ops::{WrappingMul, WrappingSub}
+use ingot::inversion::invert_256
 
 // Values and operations used generically by the curve arithmetic.
 pub trait Field {
@@ -25,6 +26,10 @@ pub trait Modulus {
     const P3: u64
     const INV: u64
     const R2: u256
+    /// p as signed 62-bit limbs, p^-1 mod 2^62, and R^3 mod p, for inversion.
+    const SIGNED_62: [i64; 5]
+    const INV62: u64
+    const R3: u256
 }
 
 /// An element of Z/pZ in Montgomery form (x * 2^256 mod p), little-endian limbs.
@@ -150,8 +155,12 @@ impl<M: Modulus> Field for Mont<M> {
     fn square(self) -> Self { self.mul(self) }
     fn double(self) -> Self { self.add(self) }
     fn neg(self) -> Self { Self::zero().sub(self) }
-    // Fermat inversion; zero maps to zero.
-    fn inverse(self) -> Self { self.pow(M::VALUE - 2) }
+    // The inverse of x R is x^-1 R^-1; multiplying by R^3 makes it x^-1 R.
+    // Zero maps to zero.
+    fn inverse(self) -> Self {
+        let limbs = invert_256([self.l0, self.l1, self.l2, self.l3], M::SIGNED_62, M::INV62)
+        Mont { l0: limbs[0], l1: limbs[1], l2: limbs[2], l3: limbs[3] }.mul(raw<M>(M::R3))
+    }
     fn is_zero(self) -> bool { self.l0 == 0 && self.l1 == 0 && self.l2 == 0 && self.l3 == 0 }
     fn equals(self, _ other: Self) -> bool {
         self.l0 == other.l0 && self.l1 == other.l1 && self.l2 == other.l2 && self.l3 == other.l3

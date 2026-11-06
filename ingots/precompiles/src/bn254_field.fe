@@ -15,6 +15,9 @@ impl Modulus for Bn254Base {
     const P3: u64 = 0x30644e72e131a029
     const INV: u64 = 0x87d20782e4866389
     const R2: u256 = 0x06d89f71cab8351f47ab1eff0a417ff6b5e71911d44501fbf32cfc5b538afa89
+    const SIGNED_62: [i64; 5] = [0x3c208c16d87cfd47, 0x1e05aa45a1c72a34, 0x05045b68181585d9, 0x19139cb84c680a6e, 0x30]
+    const INV62: u64 = 0x382df87d1b799c77
+    const R3: u256 = 0x20fd6e902d592544ef7f0b0c0ada0afb62f210e6a7283db6b1cd6dafda1530df
 }
 
 pub type Fp = Mont<Bn254Base>
