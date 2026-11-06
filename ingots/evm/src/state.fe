@@ -13,11 +13,14 @@ struct Account {
     code_offset: usize,
     code_len: usize,
     code_hash: u256,
+    // Nonzero storage slots, so deployability and deletion need not scan
+    // the storage table.
+    storage_slots: u64,
 }
 impl Copy for Account {}
 impl Default for Account {
     fn default() -> Self {
-        Self { balance: 0, nonce: 0, code_offset: 0, code_len: 0, code_hash: EMPTY_CODE_HASH }
+        Self { balance: 0, nonce: 0, code_offset: 0, code_len: 0, code_hash: EMPTY_CODE_HASH, storage_slots: 0 }
     }
 }
 
@@ -140,23 +143,20 @@ impl WorldState {
         let address = address_word(address)
         let empty: [u8; 0] = []
         core::assert(self.set_code(address, code: empty) == OK)
+        var slots = self.accounts.get(address).value.storage_slots
         let _ = self.accounts.remove(address)
         var slot: usize = 0
-        while slot < self.storage.capacity() {
+        while slots > 0 && slot < self.storage.capacity() {
             let entry = self.storage.entry(slot)
-            if entry.occupied && entry.key.address == address { let _ = self.storage.remove(entry.key) }
+            if entry.occupied && entry.key.address == address {
+                let _ = self.storage.remove(entry.key)
+                slots -= 1
+            }
             slot += 1
         }
     }
     pub fn has_storage(self, _ address: u256) -> bool {
-        let address = address_word(address)
-        var slot: usize = 0
-        while slot < self.storage.capacity() {
-            let entry = self.storage.entry(slot)
-            if entry.occupied && entry.key.address == address { return true }
-            slot += 1
-        }
-        false
+        self.accounts.get(address_word(address)).value.storage_slots != 0
     }
     pub fn table_slots(self) -> usize { self.accounts.capacity() }
     pub fn account_at(self, _ slot: usize) -> AccountEntry {
@@ -292,13 +292,24 @@ impl WorldState {
         let address = address_word(address)
         let key = StorageKey { address: address, slot: slot }
         if value == 0 {
-            let _ = self.storage.remove(key)
+            if self.storage.remove(key) {
+                // The slot's account exists, and updating it does not grow the table.
+                var account = self.accounts.get(address).value
+                account.storage_slots -= 1
+                core::assert(self.accounts.try_insert(address, account))
+            }
             return true
         }
-        let existed = self.exists(address)
-        if !self.ensure_account(address) { return false }
-        if !self.storage.try_insert(key, value) {
-            if !existed { core::assert(self.remove_empty_account(address)) }
+        let previous = self.accounts.get(address)
+        let slots = self.storage.len()
+        if !self.storage.try_insert(key, value) { return false }
+        let added = self.storage.len() > slots
+        // A slot's account exists, so a slot that existed needs no account change.
+        if !added { return true }
+        var account = previous.value
+        account.storage_slots += 1
+        if !self.accounts.try_insert(address, account) {
+            let _ = self.storage.remove(key)
             return false
         }
         true
@@ -328,6 +339,24 @@ fn world_state_defaults_to_zero() {
     core::assert(state.nonce(1) == 0)
     core::assert(state.storage_load(1, 2) == 0)
     core::assert(state.block_hash(3) == 0)
+}
+
+#[test]
+fn storage_counts_follow_slots() {
+    var state = WorldState::empty()
+    core::assert(!state.has_storage(0xaa))
+    core::assert(state.storage_store(0xaa, 1, 5) && state.storage_store(0xaa, 2, 6) && state.storage_store(0xaa, 1, 7))
+    core::assert(state.has_storage(0xaa) && !state.has_storage(0xbb))
+    // Clearing one of two slots, and a slot never set, leave the account's storage.
+    core::assert(state.storage_store(0xaa, 1, 0) && state.storage_store(0xaa, 3, 0))
+    core::assert(state.has_storage(0xaa))
+    core::assert(state.storage_store(0xaa, 2, 0))
+    core::assert(!state.has_storage(0xaa))
+    // Deleting an account deletes its slots and no others.
+    core::assert(state.storage_store(0xaa, 4, 1) && state.storage_store(0xbb, 4, 1))
+    state.remove_account(0xaa)
+    core::assert(!state.has_storage(0xaa) && state.storage_load(0xaa, 4) == 0)
+    core::assert(state.has_storage(0xbb) && state.storage_load(0xbb, 4) == 1)
 }
 
 #[test]
