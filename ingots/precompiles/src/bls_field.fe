@@ -169,12 +169,14 @@ impl Field for Fp {
             && self.limbs[3] == other.limbs[3] && self.limbs[4] == other.limbs[4] && self.limbs[5] == other.limbs[5]
     }
 
+    #[inline(always)]
     fn add(self, _ other: Fp) -> Fp {
         // Both operands are below p < 2^382, so the sum fits six limbs.
         let (sum, _) = add_limbs(self.limbs, other.limbs)
         Fp { limbs: reduce(sum, 0) }
     }
 
+    #[inline(always)]
     fn sub(self, _ other: Fp) -> Fp {
         let (difference, borrow) = subtract(self.limbs, other.limbs)
         if borrow == 0 { return Fp { limbs: difference } }
