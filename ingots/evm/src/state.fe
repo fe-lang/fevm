@@ -56,6 +56,13 @@ pub struct AccountEntry {
 }
 pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
 
+/// A balance or nonce replacement: the previous value, whether the account
+/// existed, whether the value changed and whether the table could hold it.
+pub struct Replaced { pub previous: u256, pub found: bool, pub changed: bool, pub written: bool }
+
+/// What validating a sender reads from its account.
+pub struct Sender { pub nonce: u256, pub balance: u256, pub code_len: usize }
+
 impl Copy for StorageKey {}
 
 impl Default for StorageKey {
@@ -195,6 +202,21 @@ impl WorldState {
     }
     pub fn nonce(self, _ address: u256) -> u256 {
         self.accounts.get(address_word(address)).value.nonce
+    }
+    pub fn sender(self, _ address: u256) -> Sender {
+        let account = self.accounts.get(address_word(address)).value
+        Sender { nonce: account.nonce, balance: account.balance, code_len: account.code_len }
+    }
+    /// Sets the balance (or nonce) with one lookup; an absent account stays
+    /// absent for zero.
+    pub fn replace(mut self, balance: bool, _ address: u256, _ value: u256) -> Replaced {
+        let address = address_word(address)
+        let lookup = self.accounts.get(address)
+        var account = lookup.value
+        let previous = if balance { account.balance } else { account.nonce }
+        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true } }
+        if balance { account.balance = value } else { account.nonce = value }
+        Replaced { previous, found: lookup.found, changed: true, written: self.accounts.try_insert(address, account) }
     }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
         let address = address_word(address)

@@ -233,18 +233,18 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
     }
     if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
     if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
-    let nonce = world.nonce(sender)
-    if config.check_nonce && nonce != env.nonce { return INVALID_NONCE }
+    let account = world.sender(sender)
+    if config.check_nonce && account.nonce != env.nonce { return INVALID_NONCE }
     let required = match max_fee {
         Option::Some(fee) => checked_add(fee, env.value),
         Option::None => Option::None,
     }
     match required {
-        Option::Some(required) => if world.balance(sender) < required { return INVALID_BALANCE },
+        Option::Some(required) => if account.balance < required { return INVALID_BALANCE },
         Option::None => return INVALID_BALANCE,
     }
     // EIP-3607, except that an EIP-7702 delegated account may send.
-    if config.check_sender_code && world.code_size(sender) != 0 && world.delegate(sender).is_none() {
+    if config.check_sender_code && account.code_len != 0 && world.delegate(sender).is_none() {
         return INVALID_SENDER_CODE
     }
     VALID

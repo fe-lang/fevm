@@ -157,34 +157,41 @@ impl Transaction {
         self.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
-    // Journaled set membership: warm accounts and slots, touched and doomed accounts.
-    fn marked(self, kind: u8, address: u256, slot: u256) -> bool {
-        match kind {
-            WARM_ACCOUNT => is_precompile(address) || self.warm_accounts.contains(address),
-            WARM_STORAGE => self.warm_storage.contains(StorageKey { address, slot }),
-            TOUCHED => self.touched.contains(address),
-            _ => self.doomed.contains(address),
-        }
-    }
-
+    // Inserts first, with one lookup, and journals only a new member; a
+    // journal that cannot grow removes it again.
     fn mark(mut self, kind: u8, address: u256, slot: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        if self.marked(kind, address, slot) { return OK }
-        if !self.journal.append(Change { kind, address, slot, previous: 0, existed: true }) {
-            return ERR_HOST_ALLOCATION
-        }
+        if kind == WARM_ACCOUNT && is_precompile(address) { return OK }
+        let before = self.marks(kind)
         let inserted = match kind {
             WARM_ACCOUNT => self.warm_accounts.try_insert(address, true),
             WARM_STORAGE => self.warm_storage.try_insert(StorageKey { address, slot }, true),
             TOUCHED => self.touched.try_insert(address, true),
             _ => self.doomed.try_insert(address, true),
         }
-        if !inserted {
-            let _ = self.journal.pop()
+        if !inserted { return ERR_HOST_ALLOCATION }
+        if self.marks(kind) == before { return OK }
+        if !self.journal.append(Change { kind, address, slot, previous: 0, existed: true }) {
+            let _ = match kind {
+                WARM_ACCOUNT => self.warm_accounts.remove(address),
+                WARM_STORAGE => self.warm_storage.remove(StorageKey { address, slot }),
+                TOUCHED => self.touched.remove(address),
+                _ => self.doomed.remove(address),
+            }
             return ERR_HOST_ALLOCATION
         }
         OK
+    }
+
+    // The members of a journaled set.
+    fn marks(self, kind: u8) -> usize {
+        match kind {
+            WARM_ACCOUNT => self.warm_accounts.len(),
+            WARM_STORAGE => self.warm_storage.len(),
+            TOUCHED => self.touched.len(),
+            _ => self.doomed.len(),
+        }
     }
 
     pub fn warm_account(mut self, address: u256) -> i32 {
@@ -323,6 +330,7 @@ impl Transaction {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        if kind == BALANCE || kind == NONCE { return self.write_account(kind, address, value) }
         let previous = match kind {
             BALANCE => self.balance(address),
             NONCE => self.nonce(address),
@@ -346,6 +354,21 @@ impl Transaction {
         }
         if !written {
             let _ = self.journal.pop()
+            return ERR_HOST_ALLOCATION
+        }
+        OK
+    }
+
+    // A balance or nonce write with one account lookup: the store comes first,
+    // and a journal that cannot grow restores the previous value.
+    fn write_account(mut self, kind: u8, address: u256, value: u256) -> i32 {
+        let replaced = self.state.replace(balance: kind == BALANCE, address, value)
+        if !replaced.written { return ERR_HOST_ALLOCATION }
+        if !replaced.changed { return OK }
+        if !self.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
+            // Restoring a value the table holds does not grow it.
+            core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
+            if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
             return ERR_HOST_ALLOCATION
         }
         OK
