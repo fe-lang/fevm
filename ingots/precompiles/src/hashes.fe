@@ -90,17 +90,17 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     var w: [u32; 64] = [0; 64]
     var t: u64 = 0
     while t < 16 {
-        let at = (t * 4) as usize
-        w[t as usize] = (block[at] as u32) << 24 | (block[at + 1] as u32) << 16
+        let at = (t * 4).downcast_truncate()
+        w[t.downcast_truncate()] = (block[at] as u32) << 24 | (block[at + 1] as u32) << 16
             | (block[at + 2] as u32) << 8 | block[at + 3] as u32
         t += 1
     }
     while t < 64 {
-        let x = w[(t - 15) as usize]
-        let y = w[(t - 2) as usize]
+        let x = w[(t - 15).downcast_truncate()]
+        let y = w[(t - 2).downcast_truncate()]
         let s0 = rotate_right(x, by: 7) ^ rotate_right(x, by: 18) ^ (x >> 3)
         let s1 = rotate_right(y, by: 17) ^ rotate_right(y, by: 19) ^ (y >> 10)
-        w[t as usize] = w[(t - 16) as usize].wrapping_add(s0).wrapping_add(w[(t - 7) as usize]).wrapping_add(s1)
+        w[t.downcast_truncate()] = w[(t - 16).downcast_truncate()].wrapping_add(s0).wrapping_add(w[(t - 7).downcast_truncate()]).wrapping_add(s1)
         t += 1
     }
     var a = state[0]
@@ -115,7 +115,7 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     while t < 64 {
         let s1 = rotate_right(e, by: 6) ^ rotate_right(e, by: 11) ^ rotate_right(e, by: 25)
         let choice = (e & f) ^ (!e & g)
-        let first = h.wrapping_add(s1).wrapping_add(choice).wrapping_add(SHA256_K[t as usize]).wrapping_add(w[t as usize])
+        let first = h.wrapping_add(s1).wrapping_add(choice).wrapping_add(SHA256_K[t.downcast_truncate()]).wrapping_add(w[t.downcast_truncate()])
         let s0 = rotate_right(a, by: 2) ^ rotate_right(a, by: 13) ^ rotate_right(a, by: 22)
         let majority = (a & b) ^ (a & c) ^ (b & c)
         let second = s0.wrapping_add(majority)
@@ -163,8 +163,8 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
     var words: [u32; 16] = [0; 16]
     var i: u64 = 0
     while i < 16 {
-        let at = (i * 4) as usize
-        words[i as usize] = block[at] as u32 | (block[at + 1] as u32) << 8
+        let at = (i * 4).downcast_truncate()
+        words[i.downcast_truncate()] = block[at] as u32 | (block[at + 1] as u32) << 8
             | (block[at + 2] as u32) << 16 | (block[at + 3] as u32) << 24
         i += 1
     }
@@ -182,18 +182,18 @@ fn ripemd_compress(_ state: mut [u32; 5], _ block: [u8; 64]) {
     while j < 80 {
         let round = j / 16
         let left = a.wrapping_add(ripemd_f(round, x: b, y: c, z: d))
-            .wrapping_add(words[RIPEMD_LEFT_WORDS[j as usize] as usize])
-            .wrapping_add(RIPEMD_LEFT_K[round as usize])
-        let t = rotate_left(left, by: RIPEMD_LEFT_SHIFTS[j as usize] as u32).wrapping_add(e)
+            .wrapping_add(words[RIPEMD_LEFT_WORDS[j.downcast_truncate()] as usize])
+            .wrapping_add(RIPEMD_LEFT_K[round.downcast_truncate()])
+        let t = rotate_left(left, by: RIPEMD_LEFT_SHIFTS[j.downcast_truncate()] as u32).wrapping_add(e)
         a = e
         e = d
         d = rotate_left(c, by: 10)
         c = b
         b = t
         let right = ar.wrapping_add(ripemd_f(4 - round, x: br, y: cr, z: dr))
-            .wrapping_add(words[RIPEMD_RIGHT_WORDS[j as usize] as usize])
-            .wrapping_add(RIPEMD_RIGHT_K[round as usize])
-        let tr = rotate_left(right, by: RIPEMD_RIGHT_SHIFTS[j as usize] as u32).wrapping_add(er)
+            .wrapping_add(words[RIPEMD_RIGHT_WORDS[j.downcast_truncate()] as usize])
+            .wrapping_add(RIPEMD_RIGHT_K[round.downcast_truncate()])
+        let tr = rotate_left(right, by: RIPEMD_RIGHT_SHIFTS[j.downcast_truncate()] as u32).wrapping_add(er)
         ar = er
         er = dr
         dr = rotate_left(cr, by: 10)

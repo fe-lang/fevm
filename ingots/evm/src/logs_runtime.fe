@@ -66,7 +66,7 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
         for gas in [cost - 1, cost, cost + 1] {
             var code: [u8; 4096] = [0; 4096]
             var size: usize = 0
-            while size < (count + 1) as usize {
+            while size < (count + 1).downcast_truncate() {
                 code[size] = 0x5f
                 size += 1
             }

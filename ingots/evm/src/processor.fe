@@ -209,7 +209,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
     let intrinsic = intrinsic_gas(request)
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
-    if env.creates && request.data().len() > config.max_initcode_size as usize { return INVALID_INITCODE_SIZE }
+    if env.creates && request.data().len() > config.max_initcode_size.downcast_truncate() { return INVALID_INITCODE_SIZE }
     if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }

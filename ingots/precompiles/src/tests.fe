@@ -85,7 +85,7 @@ fn blake2f_known_answers_and_validation() {
     ]
     var i: u64 = 0
     while i < 64 {
-        core::assert(result.output[i as usize] == expected[i as usize])
+        core::assert(result.output[i.downcast_truncate()] == expected[i.downcast_truncate()])
         i += 1
     }
     let non_final = run(address: 9, input: blake2f_input(0), gas: 12)
@@ -97,7 +97,7 @@ fn blake2f_known_answers_and_validation() {
     ]
     i = 0
     while i < 64 {
-        core::assert(non_final.output[i as usize] == expected[i as usize])
+        core::assert(non_final.output[i.downcast_truncate()] == expected[i.downcast_truncate()])
         i += 1
     }
     let short_gas = run(address: 9, input: blake2f_input(1), gas: 11)
@@ -111,10 +111,10 @@ fn signature(hash: u256, v: u256, r: u256, s: u256) -> [u8; 128] {
     var i: u64 = 0
     while i < 32 {
         let shift = ((31 - i) * 8) as u256
-        input[i as usize] = (hash >> shift).downcast_truncate()
-        input[(32 + i) as usize] = (v >> shift).downcast_truncate()
-        input[(64 + i) as usize] = (r >> shift).downcast_truncate()
-        input[(96 + i) as usize] = (s >> shift).downcast_truncate()
+        input[i.downcast_truncate()] = (hash >> shift).downcast_truncate()
+        input[(32 + i).downcast_truncate()] = (v >> shift).downcast_truncate()
+        input[(64 + i).downcast_truncate()] = (r >> shift).downcast_truncate()
+        input[(96 + i).downcast_truncate()] = (s >> shift).downcast_truncate()
         i += 1
     }
     input
@@ -126,7 +126,7 @@ fn recovered_address(_ input: [u8; 128], gas: u64) -> u256 {
     var value: u256 = 0
     var i: u64 = 0
     while i < 32 {
-        value = (value << 8) | result.output[i as usize] as u256
+        value = (value << 8) | result.output[i.downcast_truncate()] as u256
         i += 1
     }
     value
@@ -173,11 +173,11 @@ fn p256_input(hash: u256, r: u256, s: u256, x: u256, y: u256) -> [u8; 160] {
     var i: u64 = 0
     while i < 32 {
         let shift = ((31 - i) * 8) as u256
-        input[i as usize] = (hash >> shift).downcast_truncate()
-        input[(32 + i) as usize] = (r >> shift).downcast_truncate()
-        input[(64 + i) as usize] = (s >> shift).downcast_truncate()
-        input[(96 + i) as usize] = (x >> shift).downcast_truncate()
-        input[(128 + i) as usize] = (y >> shift).downcast_truncate()
+        input[i.downcast_truncate()] = (hash >> shift).downcast_truncate()
+        input[(32 + i).downcast_truncate()] = (r >> shift).downcast_truncate()
+        input[(64 + i).downcast_truncate()] = (s >> shift).downcast_truncate()
+        input[(96 + i).downcast_truncate()] = (x >> shift).downcast_truncate()
+        input[(128 + i).downcast_truncate()] = (y >> shift).downcast_truncate()
         i += 1
     }
     input

@@ -356,7 +356,7 @@ impl Vm {
 
     // Copies pad past their source with zeros.
     fn zero_memory(mut self, from: u64, to: u64) {
-        self.memory.slice(offset: from as usize, len: (to - from) as usize).zero()
+        self.memory.slice(offset: from.downcast_truncate(), len: (to - from).downcast_truncate()).zero()
     }
 
     // Grows memory to a planned size, at least its current one. A buffer
@@ -365,8 +365,8 @@ impl Vm {
         let len: u64 = self.memory.len().downcast_unchecked()
         if size > len {
             let doubled = 2 * len
-            if !(doubled > size && self.memory.try_resize(doubled as usize))
-                && !self.memory.try_resize(size as usize) {
+            if !(doubled > size && self.memory.try_resize(doubled.downcast_truncate()))
+                && !self.memory.try_resize(size.downcast_truncate()) {
                 self.fault(ERR_HOST_ALLOCATION)
                 return false
             }
@@ -420,7 +420,8 @@ impl Vm {
         }
         let start: u64 = offset.downcast_unchecked()
         let size = (start + len + 31) / 32 * 32
-        if size as usize > self.memory.len() { 0 } else { size }
+        let bytes: usize = size.downcast_truncate()
+        if bytes > self.memory.len() { 0 } else { size }
     }
 
     // Grows memory to cover a range that `in_memory` rejected. Below
@@ -492,8 +493,8 @@ impl Vm {
         }
         let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
         if copied != 0 {
-            self.memory.slice(offset: dest as usize, len: copied as usize)
-                .copy_from(program.bytes().slice(offset: source.downcast_unchecked(), len: copied as usize))
+            self.memory.slice(offset: dest.downcast_truncate(), len: copied.downcast_truncate())
+                .copy_from(program.bytes().slice(offset: source.downcast_unchecked(), len: copied.downcast_truncate()))
         }
         self.zero_memory(from: dest + copied, to: dest + count)
     }
@@ -566,8 +567,8 @@ impl Vm {
         }
         let copied: u64 = if (count as u256) < available { count } else { available.downcast_unchecked() }
         if copied != 0 {
-            self.memory.slice(offset: dest as usize, len: copied as usize)
-                .copy_from(calldata.bytes().slice(offset: source.downcast_unchecked(), len: copied as usize))
+            self.memory.slice(offset: dest.downcast_truncate(), len: copied.downcast_truncate())
+                .copy_from(calldata.bytes().slice(offset: source.downcast_unchecked(), len: copied.downcast_truncate()))
         }
         self.zero_memory(from: dest + copied, to: dest + count)
     }
@@ -713,8 +714,8 @@ impl Vm {
         let copied: u64 = (if len < available { len } else { available }).downcast_unchecked()
         let dest: u64 = dest.downcast_unchecked()
         if copied != 0 {
-            self.memory.slice(offset: dest as usize, len: copied as usize)
-                .copy_from(code.slice(offset: source.downcast_unchecked(), len: copied as usize))
+            self.memory.slice(offset: dest.downcast_truncate(), len: copied.downcast_truncate())
+                .copy_from(code.slice(offset: source.downcast_unchecked(), len: copied.downcast_truncate()))
         }
         self.zero_memory(from: dest + copied, to: dest + len.downcast_unchecked())
     }
@@ -739,13 +740,13 @@ impl Vm {
         var topics: [u256; 4] = [0; 4]
         var topic: u64 = 0
         while topic < topics_count {
-            topics[topic as usize] = self.pop()
+            topics[topic.downcast_truncate()] = self.pop()
             topic += 1
         }
         if !self.ok() || !self.expand_memory(plan.size) { return }
         let start: usize = if length == 0 { 0 } else { offset.downcast_unchecked() }
         self.fault(state.emit_log(address: call.address, topics, topic_count: topics_count,
-                                  data: self.memory.slice(offset: start, len: length as usize)))
+                                  data: self.memory.slice(offset: start, len: length.downcast_truncate())))
     }
 
     /// BALANCE, EXTCODESIZE and EXTCODEHASH, charging for a cold account.
@@ -911,8 +912,9 @@ impl Vm {
             if result.status == OK { return }
         } else {
             let available = result.output.len()
-            let count = if (child.len as usize) < available { child.len as usize } else { available }
-            self.memory.slice(offset: child.offset as usize, len: count).copy_from(result.output.slice(offset: 0, len: count))
+            let wanted: usize = child.len.downcast_truncate()
+            let count = if wanted < available { wanted } else { available }
+            self.memory.slice(offset: child.offset.downcast_truncate(), len: count).copy_from(result.output.slice(offset: 0, len: count))
             self.push_bool(result.status == OK)
         }
         self.return_data = result.output

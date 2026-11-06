@@ -25,13 +25,13 @@ impl LogBuffer {
         Self { entries: MemVec::new(), data: MemBuffer::empty() }
     }
     pub fn len(self) -> u64 { self.entries.len().downcast_unchecked() }
-    pub fn entry(self, _ index: u64) -> LogEntry { self.entries[index as usize] }
+    pub fn entry(self, _ index: u64) -> LogEntry { self.entries[index.downcast_truncate()] }
     pub fn payload(self, _ entry: u64) -> ref MemSpan {
-        let entry = self.entries[entry as usize]
-        self.data.slice(offset: entry.start as usize, len: entry.len as usize)
+        let entry = self.entries[entry.downcast_truncate()]
+        self.data.slice(offset: entry.start.downcast_truncate(), len: entry.len.downcast_truncate())
     }
     pub fn byte_at(self, entry: u64, index: u64) -> u8 {
-        self.payload(entry)[index as usize]
+        self.payload(entry)[index.downcast_truncate()]
     }
     pub fn append(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> bool {
         core::assert(topic_count <= 4)
@@ -39,7 +39,7 @@ impl LogBuffer {
         let start: u64 = self.data.len().downcast_unchecked()
         self.data.extend_from(data)
         var kept: [u256; 4] = [0; 4]
-        for topic in 0..(topic_count as usize) {
+        for topic in 0..topic_count.downcast_truncate() {
             kept[topic] = topics[topic]
         }
         self.entries.push(LogEntry {
@@ -50,10 +50,10 @@ impl LogBuffer {
     pub fn truncate(mut self, _ count: u64) {
         core::assert(count <= self.len())
         let end = if count == 0 { 0 } else {
-            let last = self.entries[(count - 1) as usize]
+            let last = self.entries[(count - 1).downcast_truncate()]
             last.start + last.len
         }
-        self.data.truncate(end as usize)
-        self.entries.truncate(count as usize)
+        self.data.truncate(end.downcast_truncate())
+        self.entries.truncate(count.downcast_truncate())
     }
 }

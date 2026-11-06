@@ -75,7 +75,7 @@ fn write_fp(_ out: mut MemBuffer, offset: usize, _ value: Fp) {
     let limbs = value.to_canonical()
     var i: u64 = 0
     while i < 48 {
-        out[offset + 16 + i as usize] = (limbs[((47 - i) / 8) as usize] >> (((47 - i) % 8) * 8)).downcast_truncate()
+        out[offset + 16 + i.downcast_truncate()] = (limbs[((47 - i) / 8).downcast_truncate()] >> (((47 - i) % 8) * 8)).downcast_truncate()
         i += 1
     }
 }
