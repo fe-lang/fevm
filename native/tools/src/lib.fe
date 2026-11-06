@@ -1,14 +1,15 @@
 use core::{MemBuffer, Option}
-use json::Number
 use std::env::{Arg, Args}
 use std::fs::Fs
 use std::io::{Display, Stderr, Stdout}
-use std::process::{Command, Output, Spawn}
-use std::time::Duration
+use json::{Number, Value}
+use std::process::{Command, Output, Redirect, Spawn}
+use std::text
+use std::time::{Clock, Duration}
 
 // fevm's checks, run from the repository's root.
 pub fn main() -> i32
-uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout, err: mut Stderr)
+uses (args: Args, fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout, err: mut Stderr)
 {
     match run() {
         Result::Ok(()) => 0,
@@ -20,7 +21,7 @@ uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout, err: mut Stderr)
 }
 
 fn run() -> Result<MemBuffer, ()>
-uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout)
+uses (args: Args, fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
 {
     if args.count() < 2 {
         return usage()
@@ -30,6 +31,10 @@ uses (args: Args, fs: mut Fs, proc: mut Spawn, out: mut Stdout)
         soak::run(Options::parse()?)
     } else if tool == "client" {
         client::run(Options::parse()?)
+    } else if tool == "accept" {
+        accept::run(accept::Options::parse()?)
+    } else if tool == "conformance" {
+        conformance::run(conformance::Options::parse()?)
     } else {
         usage()
     }
@@ -39,7 +44,11 @@ fn usage() -> Result<MemBuffer, ()> {
     Result::Err(
         format!(
             "usage: fevm_tools soak|client --fe <compiler> --out <directory> ",
-            "[--level 0|1|2] [--toolchain <rustup toolchain>] [--build-timeout <seconds>]",
+            "[--level 0|1|2] [--toolchain <rustup toolchain>] [--build-timeout <seconds>]\n",
+            "       fevm_tools accept --build <build.json> --out <directory> [--check-only] ",
+            "[--jobs <count>] [--stage-timeout <seconds>] [--build-timeout <seconds>]\n",
+            "       fevm_tools conformance --fe <compiler> | --executable <driver> --fixtures <state_tests> ",
+            "--out <directory> [--level 0|1|2] [--jobs <count>] [--timeout <seconds>] [--select <part>...]",
         ),
     )
 }
@@ -70,7 +79,7 @@ impl Options {
                 && value.span()[0] <= 50 {
                 level = value.span()[0] - 48
             } else if name == "--build-timeout" {
-                match seconds(value) {
+                match parse_u64(value) {
                     Option::Some(limit) => build_timeout = Duration::from_secs(limit),
                     Option::None => {
                         return Result::Err(format!("bad option: ", name, " ", value))
@@ -116,8 +125,8 @@ impl Options {
     }
 }
 
-fn seconds(_ value: Arg) -> Option<u64> {
-    Number::parse(value.span())?.as_u64()
+fn parse_u64(_ value: Arg) -> Option<u64> {
+    text::parse_uint(value.span())?.downcast()
 }
 
 // `result`, with an error's message naming `what`.
@@ -137,4 +146,31 @@ uses (proc: mut Spawn)
         return Result::Err(format!(what, ": ", output.status))
     }
     Result::Ok(output)
+}
+
+// This host's name, kernel and machine.
+fn host() -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
+    let output = succeed(
+        "uname",
+        Command::new("uname").arg("-srm").stdout(Redirect::Capture),
+    )?
+    Result::Ok(MemBuffer::from_span(output.stdout.span().trim()))
+}
+
+// A report's `seconds`, to the millisecond.
+fn seconds(_ took: Duration) -> Value {
+    let ms = took.as_millis()
+    Value::Number(
+        Number::parse(
+            format!(ms / 1000, ".", (ms / 100) % 10, (ms / 10) % 10, ms % 10).span(),
+        )
+            .unwrap(),
+    )
+}
+
+#[test]
+fn seconds_keep_three_decimals() {
+    var text = MemBuffer::empty()
+    seconds(Duration::from_millis(12005)).write(mut text)
+    assert!(text == "12.005")
 }

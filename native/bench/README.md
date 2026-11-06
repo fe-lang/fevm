@@ -13,7 +13,7 @@ python3 native/bench/run.py --fe native/out/toolchain/bin/fe --benchmarks evm-be
 ```
 
 Each engine runs one case in the binary format of FeVM's conformance driver
-(see `native/conformance/run.py`) and takes the same arguments: `RUNS
+(see `encode` in `run.py`) and takes the same arguments: `RUNS
 [TRANSACT]` decodes the case and builds its pre-state RUNS more times,
 applying the transaction to each one unless TRANSACT is 0, then applies it once
 more and prints the outcome. The time of a transaction is the CPU time of RUNS

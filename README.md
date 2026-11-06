@@ -15,14 +15,14 @@ The repo is a Fe workspace:
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the Osaka precompiled contracts
 - `native/client`: a Rust client for `fevm serve`, the session mode
-- `native/conformance`: the Ethereum state-test runner and its driver
+- `native/conformance`: the Ethereum state-test driver
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
   allocation-failure and compiler arithmetic checks
-- `native/tools`: fevm's checks written in Fe
-- `native/accept.py`, `native/bootstrap.py`: the acceptance suite and the
-  pinned compiler build
+- `native/tools`: the acceptance suite, the state-test runner and fevm's other
+  checks written in Fe
+- `native/bootstrap.py`: the pinned compiler build
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for growable hash tables and [keccak](https://github.com/fe-lang/keccak) for
@@ -30,8 +30,8 @@ Keccak-256; `ingots/evm/fe.toml` pins both to Git revisions.
 
 ## Building
 
-fevm needs Fe master `3554a486b`
-([argotorg/fe#1917](https://github.com/argotorg/fe/pull/1917)) with its pinned
+fevm needs Fe master `3d155bd35`
+([argotorg/fe#1940](https://github.com/argotorg/fe/pull/1940)) with its pinned
 Sonatina and Rust 1.99.0.
 [`native/toolchain.json`](native/toolchain.json) records the revisions and lock
 hash, and bootstrap builds that compiler. Native hosts are x86_64 Linux and
@@ -157,15 +157,17 @@ from an EVM halt.
 ## Testing
 
 ```sh
-python3 native/accept.py --build native/out/toolchain/build.json \
+native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
+  --emit executable --out-dir native/out/tools
+native/out/tools/fevm_tools accept --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
-python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
+native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
   --fixtures <execution-spec-tests>/fixtures/state_tests --out native/out/conformance
 ```
 
-Acceptance runs eight stages: the workspace tests at O0, O1 and O2, CLI and
+Acceptance runs nine stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
-the session client's tests and the arithmetic matrix
+a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 ([native/README.md](native/README.md)). The
 [state-test runner](native/conformance/README.md) is separate; the 23 Osaka
 state tests it does not count have malformed signatures, which fevm, given a

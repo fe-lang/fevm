@@ -42,7 +42,7 @@ pub fn write_frame(_ vm: Vm) uses (text: mut MemBuffer) {
     ",\"memory\":".fmt(mut text)
     if completed {
         "\"".fmt(mut text)
-        write_hex_bytes(vm.memory.slice(offset: 0, len: vm.memory_size as usize))
+        write_hex_bytes(vm.memory.slice(offset: 0, len: vm.memory_size.downcast_truncate()))
         "\"".fmt(mut text)
     } else {
         "null".fmt(mut text)

@@ -19,10 +19,11 @@ impl Modulus {
     /// The first `len` limbs of `value`, normalized, or `None` when their
     /// limbs cannot be allocated.
     pub fn try_new(_ value: MemArray<u64>, len: u64) -> Option<Self> {
-        core::assert(len > 0 && (len as usize) <= value.len() && value[(len - 1) as usize] != 0)
-        let shift = leading_zeros(value[(len - 1) as usize])
-        var limbs = MemArray<u64>::try_new_zeroed(len as usize)?
-        for i in 0..(len as usize) {
+        let count: usize = len.downcast_truncate()
+        core::assert(len > 0 && count <= value.len() && value[(len - 1).downcast_truncate()] != 0)
+        let shift = leading_zeros(value[(len - 1).downcast_truncate()])
+        var limbs = MemArray<u64>::try_new_zeroed(len.downcast_truncate())?
+        for i in 0..len.downcast_truncate() {
             let high = value[i] << shift
             let low = if shift == 0 || i == 0 { 0 } else { value[i - 1] >> (64 - shift) }
             limbs[i] = high | low
@@ -33,39 +34,40 @@ impl Modulus {
     /// Reduce the `len`-limb value in `work` (with room for one more limb) in
     /// place; the remainder occupies limbs `0..self.len`, the rest are cleared.
     pub fn reduce(self, _ work: mut MemArray<u64>, len: u64) {
-        core::assert((len as usize) < work.len())
+        let count: usize = len.downcast_truncate()
+        core::assert(count < work.len())
         let n = self.len
         if len < n {
             // Fewer limbs than the modulus: already reduced.
             var i = len
             while i <= n {
-                work[i as usize] = 0
+                work[i.downcast_truncate()] = 0
                 i += 1
             }
             return
         }
         // Normalize the dividend by the divisor's shift, adding a top limb.
-        work[len as usize] = 0
+        work[len.downcast_truncate()] = 0
         if self.shift != 0 {
             var i = len
             while i > 0 {
-                work[i as usize] = work[i as usize] | (work[(i - 1) as usize] >> (64 - self.shift))
-                work[(i - 1) as usize] = work[(i - 1) as usize] << self.shift
+                work[i.downcast_truncate()] = work[i.downcast_truncate()] | (work[(i - 1).downcast_truncate()] >> (64 - self.shift))
+                work[(i - 1).downcast_truncate()] = work[(i - 1).downcast_truncate()] << self.shift
                 i -= 1
             }
         }
-        let top = self.limbs[(n - 1) as usize] as u128
-        let second = if n > 1 { self.limbs[(n - 2) as usize] as u128 } else { 0 }
+        let top = self.limbs[(n - 1).downcast_truncate()] as u128
+        let second = if n > 1 { self.limbs[(n - 2).downcast_truncate()] as u128 } else { 0 }
         var i: u64 = 0
         var j = len + 1 - n
         while j > 0 {
             j -= 1
             // Estimate this quotient digit from the top two dividend limbs.
-            let head = ((work[(j + n) as usize] as u128) << 64) | work[(j + n - 1) as usize] as u128
+            let head = ((work[(j + n).downcast_truncate()] as u128) << 64) | work[(j + n - 1).downcast_truncate()] as u128
             var qhat = head / top
             var rhat = head % top
             while qhat >= LIMB_BASE
-                || (n > 1 && qhat * second > ((rhat << 64) | work[(j + n - 2) as usize] as u128)) {
+                || (n > 1 && qhat * second > ((rhat << 64) | work[(j + n - 2).downcast_truncate()] as u128)) {
                 qhat -= 1
                 rhat += top
                 if rhat >= LIMB_BASE { break }
@@ -75,50 +77,50 @@ impl Modulus {
             var borrow: u128 = 0
             i = 0
             while i < n {
-                let product = qhat * self.limbs[i as usize] as u128 + carry
+                let product = qhat * self.limbs[i.downcast_truncate()] as u128 + carry
                 carry = product >> 64
                 let subtrahend = (product & 0xffffffffffffffff) + borrow
-                let limb = work[(i + j) as usize] as u128
+                let limb = work[(i + j).downcast_truncate()] as u128
                 if limb >= subtrahend {
-                    work[(i + j) as usize] = (limb - subtrahend).downcast_unchecked()
+                    work[(i + j).downcast_truncate()] = (limb - subtrahend).downcast_unchecked()
                     borrow = 0
                 } else {
-                    work[(i + j) as usize] = (limb + LIMB_BASE - subtrahend).downcast_unchecked()
+                    work[(i + j).downcast_truncate()] = (limb + LIMB_BASE - subtrahend).downcast_unchecked()
                     borrow = 1
                 }
                 i += 1
             }
             let subtrahend = carry + borrow
-            let limb = work[(j + n) as usize] as u128
+            let limb = work[(j + n).downcast_truncate()] as u128
             if limb >= subtrahend {
-                work[(j + n) as usize] = (limb - subtrahend).downcast_unchecked()
+                work[(j + n).downcast_truncate()] = (limb - subtrahend).downcast_unchecked()
             } else {
                 // The estimate was one too large: add the divisor back once.
-                work[(j + n) as usize] = (limb + LIMB_BASE - subtrahend).downcast_unchecked()
+                work[(j + n).downcast_truncate()] = (limb + LIMB_BASE - subtrahend).downcast_unchecked()
                 var add: u128 = 0
                 i = 0
                 while i < n {
-                    let sum = work[(i + j) as usize] as u128 + self.limbs[i as usize] as u128 + add
-                    work[(i + j) as usize] = (sum & 0xffffffffffffffff).downcast_unchecked()
+                    let sum = work[(i + j).downcast_truncate()] as u128 + self.limbs[i.downcast_truncate()] as u128 + add
+                    work[(i + j).downcast_truncate()] = (sum & 0xffffffffffffffff).downcast_unchecked()
                     add = sum >> 64
                     i += 1
                 }
-                let sum = work[(j + n) as usize] as u128 + add
-                work[(j + n) as usize] = (sum & 0xffffffffffffffff).downcast_unchecked()
+                let sum = work[(j + n).downcast_truncate()] as u128 + add
+                work[(j + n).downcast_truncate()] = (sum & 0xffffffffffffffff).downcast_unchecked()
             }
         }
         // The normalized remainder is below the divisor, so limb n is zero.
         // Undo the normalization and clear the quotient limbs.
         i = 0
         while i < n {
-            let low = work[i as usize] >> self.shift
-            let high = if self.shift == 0 { 0 } else { work[(i + 1) as usize] << (64 - self.shift) }
-            work[i as usize] = low | high
+            let low = work[i.downcast_truncate()] >> self.shift
+            let high = if self.shift == 0 { 0 } else { work[(i + 1).downcast_truncate()] << (64 - self.shift) }
+            work[i.downcast_truncate()] = low | high
             i += 1
         }
         i = n
         while i <= len {
-            work[i as usize] = 0
+            work[i.downcast_truncate()] = 0
             i += 1
         }
     }
@@ -129,21 +131,21 @@ impl Modulus {
         let n = self.len
         var i: u64 = 0
         while i < 2 * n {
-            work[i as usize] = 0
+            work[i.downcast_truncate()] = 0
             i += 1
         }
         i = 0
         while i < n {
             var carry: u128 = 0
-            let left = a[i as usize] as u128
+            let left = a[i.downcast_truncate()] as u128
             var j: u64 = 0
             while j < n {
-                let t = left * b[j as usize] as u128 + work[(i + j) as usize] as u128 + carry
-                work[(i + j) as usize] = (t & 0xffffffffffffffff).downcast_unchecked()
+                let t = left * b[j.downcast_truncate()] as u128 + work[(i + j).downcast_truncate()] as u128 + carry
+                work[(i + j).downcast_truncate()] = (t & 0xffffffffffffffff).downcast_unchecked()
                 carry = t >> 64
                 j += 1
             }
-            work[(i + n) as usize] = carry.downcast_unchecked()
+            work[(i + n).downcast_truncate()] = carry.downcast_unchecked()
             i += 1
         }
         self.reduce(mut work, len: 2 * n)

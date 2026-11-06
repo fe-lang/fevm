@@ -83,34 +83,34 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
     // Locate the modulus's most significant nonzero byte.
     var significant = sizes.modulus
     while significant > 0 && input_byte(input, modulus_start + sizes.modulus - significant) == 0 { significant -= 1 }
-    let Option::Some(var output) = MemBuffer::try_new(modulus_len as usize) else { return host_allocation(gas_used) }
+    let Option::Some(var output) = MemBuffer::try_new(modulus_len.downcast_truncate()) else { return host_allocation(gas_used) }
     // A zero modulus yields zero bytes.
     if significant == 0 { return Output { status: SUCCESS, gas_used, output } }
     let n: u64 = ((significant + 7) / 8).downcast_unchecked()
-    let Option::Some(var value) = MemArray<u64>::try_new_zeroed(n as usize) else { return host_allocation(gas_used) }
-    for i in 0..(n as usize) {
+    let Option::Some(var value) = MemArray<u64>::try_new_zeroed(n.downcast_truncate()) else { return host_allocation(gas_used) }
+    for i in 0..n.downcast_truncate() {
         value[i] = input_limb(input, offset: modulus_start, len: sizes.modulus, limb: i as u256)
     }
     let Option::Some(modulus) = Modulus::try_new(value, len: n) else { return host_allocation(gas_used) }
     // A product of two reduced values, and a limb more for normalizing it.
-    let Option::Some(var work) = MemArray<u64>::try_new_zeroed((2 * n + 1) as usize) else {
+    let Option::Some(var work) = MemArray<u64>::try_new_zeroed((2 * n + 1).downcast_truncate()) else {
         return host_allocation(gas_used)
     }
-    let Option::Some(var base) = MemArray<u64>::try_new_zeroed(n as usize) else { return host_allocation(gas_used) }
-    let Option::Some(var result) = MemArray<u64>::try_new_zeroed(n as usize) else { return host_allocation(gas_used) }
+    let Option::Some(var base) = MemArray<u64>::try_new_zeroed(n.downcast_truncate()) else { return host_allocation(gas_used) }
+    let Option::Some(var result) = MemArray<u64>::try_new_zeroed(n.downcast_truncate()) else { return host_allocation(gas_used) }
     // Reduce the base limb by limb, most significant first.
     var limb = (sizes.base + 7) / 8
     while limb > 0 {
         limb -= 1
-        work.as_slice().slice(offset: 1, len: n as usize).copy_from(base.as_slice())
+        work.as_slice().slice(offset: 1, len: n.downcast_truncate()).copy_from(base.as_slice())
         work[0] = input_limb(input, offset: 96, len: sizes.base, limb)
         modulus.reduce(mut work, len: n + 1)
-        base.as_slice().copy_from(work.as_slice().head(n as usize))
+        base.as_slice().copy_from(work.as_slice().head(n.downcast_truncate()))
     }
     // Left-to-right square and multiply from the exponent's top set bit.
     work[0] = 1
     modulus.reduce(mut work, len: 1)
-    result.as_slice().copy_from(work.as_slice().head(n as usize))
+    result.as_slice().copy_from(work.as_slice().head(n.downcast_truncate()))
     var started = false
     var index: u256 = 0
     while index < sizes.exponent {
@@ -121,12 +121,12 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
                 bit -= 1
                 if started {
                     modulus.mul_mod(result, result, mut work)
-                    result.as_slice().copy_from(work.as_slice().head(n as usize))
+                    result.as_slice().copy_from(work.as_slice().head(n.downcast_truncate()))
                 }
                 if ((byte >> bit) & 1) == 1 {
                     if started {
                         modulus.mul_mod(result, base, mut work)
-                        result.as_slice().copy_from(work.as_slice().head(n as usize))
+                        result.as_slice().copy_from(work.as_slice().head(n.downcast_truncate()))
                     } else {
                         result.as_slice().copy_from(base.as_slice())
                         started = true
@@ -141,7 +141,7 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
         let position = modulus_len - 1 - i
         let limb_index = position / 8
         if limb_index < n {
-            output[i as usize] = (result[limb_index as usize] >> ((position % 8) * 8)).downcast_truncate()
+            output[i.downcast_truncate()] = (result[limb_index.downcast_truncate()] >> ((position % 8) * 8)).downcast_truncate()
         }
         i += 1
     }

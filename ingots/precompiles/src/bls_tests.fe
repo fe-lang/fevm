@@ -10,7 +10,7 @@ fn append_fp(_ buffer: mut MemBuffer, _ value: Fp) {
     let limbs = value.to_canonical()
     var i: u64 = 0
     while i < 48 {
-        buffer[start + 16 + i as usize] = (limbs[((47 - i) / 8) as usize] >> (((47 - i) % 8) * 8)).downcast_truncate()
+        buffer[start + 16 + i.downcast_truncate()] = (limbs[((47 - i) / 8).downcast_truncate()] >> (((47 - i) % 8) * 8)).downcast_truncate()
         i += 1
     }
 }

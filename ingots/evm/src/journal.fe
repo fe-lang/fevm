@@ -23,7 +23,7 @@ impl Journal {
         self.changes.try_push(change).is_ok()
     }
 
-    pub fn change(self, _ index: u64) -> Change { self.changes[index as usize] }
+    pub fn change(self, _ index: u64) -> Change { self.changes[index.downcast_truncate()] }
 
     pub fn pop(mut self) -> Change { self.changes.pop().unwrap() }
 }

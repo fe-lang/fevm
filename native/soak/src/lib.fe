@@ -1,5 +1,6 @@
 use core::Option
 use std::env::Args
+use std::text
 use fevm::{Config, FrameBuffers, OK, WorldState, default_block_env, empty_bytes}
 use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, transact}
 use fevm::status::VALID
@@ -16,10 +17,7 @@ const CALLER: [u8; 42] = [
 const CALLEE: [u8; 11] = [0x60, 0x07, 0x61, 0x40, 0x00, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3]
 
 pub fn main() -> i32 uses (args: Args) {
-    var count: u256 = 0
-    for digit in args.get(1).span() {
-        count = count * 10 + (digit - 48) as u256
-    }
+    let count = text::parse_uint(args.get(1).span()).unwrap()
     var world = WorldState::empty()
     core::assert(world.set_balance(0x1000, 1 << 200))
     core::assert(world.set_code(address: 0xaa, code: CALLER) == OK)

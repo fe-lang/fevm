@@ -14,16 +14,16 @@ impl Reader {
     fn word(mut self, bytes: u64) -> u256 {
         core::assert(bytes <= 32)
         var value: u256 = 0
-        for byte in self.data.slice(offset: self.position, len: bytes as usize) {
+        for byte in self.data.slice(offset: self.position, len: bytes.downcast_truncate()) {
             value = (value << 8) | byte as u256
         }
-        self.position += bytes as usize
+        self.position += bytes.downcast_truncate()
         value
     }
     fn count(mut self) -> u64 { self.word(bytes: 4).downcast_unchecked() }
     fn input(mut self, len: u64) -> InputData {
-        let input = InputData::copy_bytes(self.data.slice(offset: self.position, len: len as usize))
-        self.position += len as usize
+        let input = InputData::copy_bytes(self.data.slice(offset: self.position, len: len.downcast_truncate()))
+        self.position += len.downcast_truncate()
         input
     }
 }
@@ -83,7 +83,7 @@ fn logs_hash(_ logs: LogBuffer) -> u256 {
         hash.update_word((0x94 << 160) | log.address, len: 21)
         let topics: usize = (log.topic_count * 33).downcast_unchecked()
         update_header(mut hash, payload: topics, base: 0xc0)
-        for topic in 0..(log.topic_count as usize) {
+        for topic in 0..log.topic_count.downcast_truncate() {
             hash.update_word(0xa0, len: 1)
             hash.update_word(log.topics[topic], len: 32)
         }

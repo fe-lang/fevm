@@ -62,7 +62,7 @@ pub fn compress<T: ByteSource>(_ input: T) -> [u64; 8] {
     let total = rounds(input)
     var round: u64 = 0
     while round < total {
-        let s = ((round % 10) * 16) as usize
+        let s = ((round % 10) * 16).downcast_truncate()
         mix(mut v, a: 0, b: 4, c: 8, d: 12, x: m[SIGMA[s] as usize], y: m[SIGMA[s + 1] as usize])
         mix(mut v, a: 1, b: 5, c: 9, d: 13, x: m[SIGMA[s + 2] as usize], y: m[SIGMA[s + 3] as usize])
         mix(mut v, a: 2, b: 6, c: 10, d: 14, x: m[SIGMA[s + 4] as usize], y: m[SIGMA[s + 5] as usize])

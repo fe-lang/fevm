@@ -41,7 +41,7 @@ fn at_least(_ a: [u64; 6], _ b: [u64; 6]) -> bool {
     var i: u64 = 6
     while i > 0 {
         i -= 1
-        if a[i as usize] != b[i as usize] { return a[i as usize] > b[i as usize] }
+        if a[i.downcast_truncate()] != b[i.downcast_truncate()] { return a[i.downcast_truncate()] > b[i.downcast_truncate()] }
     }
     true
 }
@@ -52,11 +52,11 @@ fn subtract(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 6] {
     var borrow: u64 = 0
     var i: u64 = 0
     while i < 6 {
-        let x = a[i as usize]
-        let y = b[i as usize]
+        let x = a[i.downcast_truncate()]
+        let y = b[i.downcast_truncate()]
         let difference = x.wrapping_sub(y).wrapping_sub(borrow)
         borrow = if x < y || (x == y && borrow == 1) { 1 } else { 0 }
-        out[i as usize] = difference
+        out[i.downcast_truncate()] = difference
         i += 1
     }
     out
@@ -102,7 +102,7 @@ impl Fp {
         while i > 0 {
             i -= 1
             result = result.square()
-            if (exponent[(i / 64) as usize] >> (i % 64)) & 1 == 1 { result = result.mul(self) }
+            if (exponent[(i / 64).downcast_truncate()] >> (i % 64)) & 1 == 1 { result = result.mul(self) }
         }
         result
     }
@@ -136,8 +136,8 @@ impl Field for Fp {
         var carry: u64 = 0
         var i: u64 = 0
         while i < 6 {
-            let sum = self.limbs[i as usize] as u128 + other.limbs[i as usize] as u128 + carry as u128
-            out[i as usize] = sum.downcast_truncate()
+            let sum = self.limbs[i.downcast_truncate()] as u128 + other.limbs[i.downcast_truncate()] as u128 + carry as u128
+            out[i.downcast_truncate()] = sum.downcast_truncate()
             carry = (sum >> 64).downcast_truncate()
             i += 1
         }
@@ -156,12 +156,12 @@ impl Field for Fp {
         var t: [u64; 8] = [0; 8]
         var i: u64 = 0
         while i < 6 {
-            let b = other.limbs[i as usize] as u128
+            let b = other.limbs[i.downcast_truncate()] as u128
             var carry: u64 = 0
             var j: u64 = 0
             while j < 6 {
-                let s = t[j as usize] as u128 + (self.limbs[j as usize] as u128) * b + carry as u128
-                t[j as usize] = s.downcast_truncate()
+                let s = t[j.downcast_truncate()] as u128 + (self.limbs[j.downcast_truncate()] as u128) * b + carry as u128
+                t[j.downcast_truncate()] = s.downcast_truncate()
                 carry = (s >> 64).downcast_truncate()
                 j += 1
             }
@@ -173,8 +173,8 @@ impl Field for Fp {
             carry = (s >> 64).downcast_truncate()
             j = 1
             while j < 6 {
-                s = t[j as usize] as u128 + m * MODULUS[j as usize] as u128 + carry as u128
-                t[(j - 1) as usize] = s.downcast_truncate()
+                s = t[j.downcast_truncate()] as u128 + m * MODULUS[j.downcast_truncate()] as u128 + carry as u128
+                t[(j - 1).downcast_truncate()] = s.downcast_truncate()
                 carry = (s >> 64).downcast_truncate()
                 j += 1
             }

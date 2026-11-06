@@ -39,7 +39,7 @@ fn sample() -> Fp12 {
     while i < 6 {
         let c0 = seed
         seed = seed.mul(step).add(Fp::one())
-        parts[i as usize] = Fp2::new(c0, c1: seed)
+        parts[i.downcast_truncate()] = Fp2::new(c0, c1: seed)
         seed = seed.mul(step).add(Fp::one())
         i += 1
     }
@@ -58,7 +58,7 @@ fn bls_tower_frobenius_inverse_and_sparse_products_agree() {
     while bit > 0 {
         bit -= 1
         power = power.square()
-        if (P_LIMBS[(bit / 64) as usize] >> (bit % 64)) & 1 == 1 { power = power.mul(f) }
+        if (P_LIMBS[(bit / 64).downcast_truncate()] >> (bit % 64)) & 1 == 1 { power = power.mul(f) }
     }
     core::assert(f.frobenius().equals(power))
     core::assert(f.mul(f.invert()).is_one())
@@ -118,7 +118,7 @@ fn bls_compressed_g1_points_follow_zcash_encoding() {
     var big: [u8; 48] = [0; 48]
     var i: u64 = 0
     while i < 48 {
-        big[i as usize] = (P_LIMBS[((47 - i) / 8) as usize] >> (((47 - i) % 8) * 8)).downcast_truncate()
+        big[i.downcast_truncate()] = (P_LIMBS[((47 - i) / 8).downcast_truncate()] >> (((47 - i) % 8) * 8)).downcast_truncate()
         i += 1
     }
     big[0] |= 0x80
@@ -131,8 +131,8 @@ fn assert_output(_ result: own Output) {
     var modulus: u256 = 0
     var i: u64 = 0
     while i < 32 {
-        value = (value << 8) | result.output[i as usize] as u256
-        modulus = (modulus << 8) | result.output[(32 + i) as usize] as u256
+        value = (value << 8) | result.output[i.downcast_truncate()] as u256
+        modulus = (modulus << 8) | result.output[(32 + i).downcast_truncate()] as u256
         i += 1
     }
     core::assert(value == 4096 && modulus == BLS_MODULUS)

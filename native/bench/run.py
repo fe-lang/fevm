@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Time FeVM, revm and evmone on state-test benchmarks such as ipsilon/evm-benchmarks."""
 import argparse
-import importlib.util
 import json
 import math
 import os
@@ -11,9 +10,91 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-_spec = importlib.util.spec_from_file_location('conformance', HERE.parent / 'conformance' / 'run.py')
-conformance = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(conformance)
+# The fork FeVM executes, whose blob schedule sets the blob base fee.
+OSAKA = 'Osaka'
+# BPO2's, for fixtures without a blob schedule.
+BLOB_BASE_FEE_UPDATE_FRACTION = 11684671
+
+
+def number(value):
+    return int(value, 16) if isinstance(value, str) else int(value)
+
+
+def be(value, width):
+    return number(value).to_bytes(width, 'big')
+
+
+def blob_base_fee(excess, fraction):
+    # EIP-4844 fake_exponential(MIN_BLOB_GASPRICE, excess, UPDATE_FRACTION).
+    output, accumulator, i = 0, fraction, 1
+    while accumulator > 0:
+        output += accumulator
+        accumulator = accumulator * excess // (fraction * i)
+        i += 1
+    return output // fraction
+
+
+def blob(value):
+    return bytes.fromhex(value[2:] if value.startswith('0x') else value)
+
+
+def tx_kind(transaction):
+    if 'authorizationList' in transaction:
+        return 4
+    if 'blobVersionedHashes' in transaction:
+        return 3
+    if 'maxFeePerGas' in transaction:
+        return 2
+    return 1 if 'accessLists' in transaction else 0
+
+
+def encode(test, indexes, tx_gas_limit_cap):
+    """The driver's binary case format; integers and lengths are big endian."""
+    env, tx = test['env'], test['transaction']
+    out = bytearray([4])
+    out += be(env['currentCoinbase'], 20)
+    out += be(env['currentNumber'], 32)
+    out += be(env['currentTimestamp'], 32)
+    out += be(env.get('currentRandom', env.get('currentDifficulty', '0x0')), 32)
+    out += be(env['currentGasLimit'], 32)
+    out += be(env.get('currentBaseFee', '0x0'), 32)
+    schedule = test.get('config', {}).get('blobSchedule', {}).get(OSAKA, {})
+    fraction = number(schedule.get('baseFeeUpdateFraction', BLOB_BASE_FEE_UPDATE_FRACTION))
+    out += blob_base_fee(number(env.get('currentExcessBlobGas', '0x0')), fraction).to_bytes(32, 'big')
+    out += be(test.get('config', {}).get('chainid', '0x1'), 32)
+    out += tx_gas_limit_cap.to_bytes(8, 'big')
+    pre = test['pre']
+    out += len(pre).to_bytes(4, 'big')
+    for address, account in pre.items():
+        code = blob(account.get('code', '0x'))
+        storage = [(slot, value) for slot, value in account.get('storage', {}).items() if number(value)]
+        out += be(address, 20) + be(account.get('balance', '0x0'), 32) + be(account.get('nonce', '0x0'), 32)
+        out += len(code).to_bytes(4, 'big') + code + len(storage).to_bytes(4, 'big')
+        for slot, value in storage:
+            out += be(slot, 32) + be(value, 32)
+    kind = tx_kind(tx)
+    out += bytes([kind, 'chainId' in tx]) + be(tx.get('chainId', '0x0'), 32) + be(tx['sender'], 20)
+    creates = tx['to'] in ('', '0x')
+    out += bytes([1 if creates else 0]) + (bytes(20) if creates else be(tx['to'], 20))
+    out += be(tx['nonce'], 32) + be(tx['gasLimit'][indexes['gas']], 8)
+    out += be(tx['maxFeePerGas'] if kind >= 2 else tx['gasPrice'], 32)
+    out += be(tx.get('maxPriorityFeePerGas', '0x0'), 32) + be(tx.get('maxFeePerBlobGas', '0x0'), 32)
+    out += be(tx['value'][indexes['value']], 32)
+    data = blob(tx['data'][indexes['data']])
+    out += len(data).to_bytes(4, 'big') + data
+    access = (tx.get('accessLists') or [None] * (indexes['data'] + 1))[indexes['data']] or []
+    out += len(access).to_bytes(4, 'big')
+    for entry in access:
+        out += be(entry['address'], 20) + len(entry['storageKeys']).to_bytes(4, 'big')
+        out += b''.join(be(key, 32) for key in entry['storageKeys'])
+    hashes = tx.get('blobVersionedHashes', [])
+    out += len(hashes).to_bytes(4, 'big') + b''.join(be(value, 32) for value in hashes)
+    authorizations = tx.get('authorizationList', [])
+    out += len(authorizations).to_bytes(4, 'big')
+    for entry in authorizations:
+        out += be(entry['chainId'], 32) + be(entry['address'], 20) + be(entry['nonce'], 32)
+        out += be(entry.get('yParity', entry.get('v')), 32) + be(entry['r'], 32) + be(entry['s'], 32)
+    return bytes(out)
 
 
 def cases(benchmarks, fork, selection):
@@ -25,7 +106,7 @@ def cases(benchmarks, fork, selection):
                 label = f'{name}/{labels.get(str(index), index)}'
                 if not selection or any(part in label for part in selection):
                     # Benchmarks exceed EIP-7825's cap, so the host lifts it.
-                    yield label, conformance.encode(test, post['indexes'], tx_gas_limit_cap=2**64 - 1), post
+                    yield label, encode(test, post['indexes'], tx_gas_limit_cap=2**64 - 1), post
 
 
 def outcome(command, payload, statuses):

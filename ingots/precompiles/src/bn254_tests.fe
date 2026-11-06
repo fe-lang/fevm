@@ -17,13 +17,13 @@ const G2: [u256; 4] = [
 fn put<const N: usize>(_ bytes: mut [u8; N], offset: u64, value: u256) {
     var i: u64 = 0
     while i < 32 {
-        bytes[(offset + i) as usize] = (value >> ((31 - i) * 8) as u256).downcast_truncate()
+        bytes[(offset + i).downcast_truncate()] = (value >> ((31 - i) * 8) as u256).downcast_truncate()
         i += 1
     }
 }
 
 fn output_word(_ output: MemBuffer, offset: u64) -> u256 {
-    output.read_word(offset as usize)
+    output.read_word(offset.downcast_truncate())
 }
 
 // A 192-byte pairing input of G1 (x, y) with G2 words g2.
@@ -33,7 +33,7 @@ fn pair(_ bytes: mut [u8; 384], index: u64, x: u256, y: u256, g2: [u256; 4]) {
     put(mut bytes, offset: base + 32, value: y)
     var i: u64 = 0
     while i < 4 {
-        put(mut bytes, offset: base + 64 + i * 32, value: g2[i as usize])
+        put(mut bytes, offset: base + 64 + i * 32, value: g2[i.downcast_truncate()])
         i += 1
     }
 }

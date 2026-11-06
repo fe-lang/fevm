@@ -81,7 +81,7 @@ fn write_logs(_ logs: LogBuffer) uses (text: mut MemBuffer) {
         while topic < entry.topic_count {
             if topic != 0 { ",".fmt(mut text) }
             "\"".fmt(mut text)
-            write_hex_word(entry.topics[topic as usize])
+            write_hex_word(entry.topics[topic.downcast_truncate()])
             "\"".fmt(mut text)
             topic += 1
         }
@@ -201,10 +201,10 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
         core::assert(world.set_balance(address, balance))
         core::assert(world.set_nonce(address, nonce))
         let len: u64 = reader.count().downcast_unchecked()
-        var code = MemBuffer::new(len as usize)
+        var code = MemBuffer::new(len.downcast_truncate())
         var byte: u64 = 0
         while byte < len {
-            code[byte as usize] = reader.word(bytes: 1).downcast_unchecked()
+            code[byte.downcast_truncate()] = reader.word(bytes: 1).downcast_unchecked()
             byte += 1
         }
         core::assert(world.set_code(address, code) == 0)

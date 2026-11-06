@@ -1,0 +1,482 @@
+use core::{MemBuffer, MemSpan, MemVec, Option}
+use core::hash::sha256_word
+use ingot::{host, named, parse_u64, seconds, succeed}
+use json::{Value, parse}
+use std::env::{Arg, Args}
+use std::fs::Fs
+use std::io::{Display, Stdout}
+use std::process::{Command, Redirect, Spawn, Status}
+use std::text
+use std::time::{Clock, Duration}
+
+// The options that follow `accept`.
+pub struct Options {
+    build: Arg,
+    out: Arg,
+    check_only: bool,
+    jobs: u64,
+    stage_timeout: u64,
+    build_timeout: Option<u64>,
+}
+
+impl Options {
+    pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var build: Option<Arg> = Option::None
+        var out: Option<Arg> = Option::None
+        var check_only = false
+        var jobs: u64 = 1
+        var stage_timeout: u64 = 3600
+        var build_timeout: Option<u64> = Option::None
+        var i: usize = 2
+        while i < args.count() {
+            let name = args.get(i)
+            if name == "--check-only" {
+                check_only = true
+                i += 1
+                continue
+            }
+            if i + 1 == args.count() {
+                return Result::Err(format!("option ", name, " needs a value"))
+            }
+            let value = args.get(i + 1)
+            if name == "--build" {
+                build = Option::Some(value)
+            } else if name == "--out" {
+                out = Option::Some(value)
+            } else {
+                let number = parse_u64(value).unwrap_or(default: 0)
+                if number == 0 {
+                    return Result::Err(format!("bad option: ", name, " ", value))
+                }
+                if name == "--jobs" {
+                    jobs = number
+                } else if name == "--stage-timeout" {
+                    stage_timeout = number
+                } else if name == "--build-timeout" {
+                    build_timeout = Option::Some(number)
+                } else {
+                    return Result::Err(format!("bad option: ", name, " ", value))
+                }
+            }
+            i += 2
+        }
+        match (build, out) {
+            (Option::Some(build), Option::Some(out)) => Result::Ok(
+                Options { build, out, check_only, jobs, stage_timeout, build_timeout },
+            ),
+            _ => Result::Err(format!("fevm_tools accept needs --build and --out")),
+        }
+    }
+}
+
+// A stage's name and command line.
+struct Stage { name: MemBuffer, argv: MemVec<MemBuffer> }
+
+impl Stage {
+    fn new<N: Display, P: Display>(_ name: N, _ program: P) -> Self {
+        var argv = MemVec::new()
+        argv.push(format!(program))
+        Stage { name: format!(name), argv }
+    }
+
+    fn arg<A: Display>(var own self, _ value: A) -> Self {
+        self.argv.push(format!(value))
+        self
+    }
+
+    fn python<N: Display, S: Display>(_ name: N, _ script: S) -> Self {
+        Stage::new(name, "python3").arg(script)
+    }
+
+    // `--build-timeout`, if `limit` overrides the runner's own.
+    fn build_timeout(own self, _ limit: Option<u64>) -> Self {
+        match limit {
+            Option::Some(limit) => self.arg("--build-timeout").arg(limit),
+            Option::None => self,
+        }
+    }
+
+    fn command(self) -> Command {
+        var command = Command::new(self.argv[0])
+        var i: usize = 1
+        while i < self.argv.len() {
+            command = command.arg(self.argv[i])
+            i += 1
+        }
+        command
+    }
+}
+
+// The acceptance stages, in order.
+fn stages(
+    compiler: MemSpan,
+    out: MemSpan,
+    toolchain: MemSpan,
+    jobs: u64,
+    check_only: bool,
+    build_timeout: Option<u64>,
+) -> MemVec<Stage> {
+    var stages = MemVec::new()
+    for level in [0 as u8, 1, 2] {
+        stages
+            .push(
+                Stage::new(format!("workspace-O", level), compiler)
+                    .arg("test")
+                    .arg("--backend")
+                    .arg("native")
+                    .arg("--jobs")
+                    .arg(jobs)
+                    .arg("-O")
+                    .arg(level)
+                    .arg("."),
+            )
+    }
+    stages
+        .push(
+            Stage::python("cli-smoke", "native/cli.py")
+                .arg("--fe")
+                .arg(compiler)
+                .arg("--out")
+                .arg(format!(out, "/cli"))
+                .build_timeout(build_timeout),
+        )
+    stages
+        .push(
+            Stage::python("osaka-frames", "native/differential/run.py")
+                .arg("--fe")
+                .arg(compiler)
+                .arg("--out")
+                .arg(format!(out, "/osaka-frames"))
+                .arg("--toolchain")
+                .arg(toolchain)
+                .build_timeout(build_timeout),
+        )
+    stages
+        .push(
+            Stage::python("osaka-state", "native/differential/state_run.py")
+                .arg("--fe")
+                .arg(compiler)
+                .arg("--out")
+                .arg(format!(out, "/osaka-state"))
+                .arg("--toolchain")
+                .arg(toolchain)
+                .build_timeout(build_timeout),
+        )
+    stages
+        .push(
+            Stage::new("tools", compiler)
+                .arg("build")
+                .arg(".")
+                .arg("--ingot")
+                .arg("fevm_tools")
+                .arg("--backend")
+                .arg("native")
+                .arg("-O")
+                .arg("2")
+                .arg("--emit")
+                .arg("executable")
+                .arg("--out-dir")
+                .arg(format!(out, "/tools")),
+        )
+    stages
+        .push(
+            Stage::new("session", format!(out, "/tools/fevm_tools"))
+                .arg("client")
+                .arg("--fe")
+                .arg(compiler)
+                .arg("--out")
+                .arg(format!(out, "/session"))
+                .arg("--toolchain")
+                .arg(toolchain)
+                .build_timeout(build_timeout),
+        )
+    var arithmetic = Stage::python("arithmetic", "native/arith/run.py")
+        .arg("--fe")
+        .arg(compiler)
+        .arg("--out")
+        .arg(format!(out, "/arithmetic"))
+    if check_only {
+        arithmetic = arithmetic.arg("--check-only")
+    }
+    stages.push(arithmetic)
+    stages
+}
+
+// A finished stage.
+struct Check { name: MemBuffer, status: i32, took: Duration }
+
+fn checks_value(_ checks: MemVec<Check>) -> Value {
+    var value = Value::array()
+    for ref check in checks {
+        var entry = Value::object()
+        entry.set("name", Value::string(check.name))
+        entry.set("status", Value::number(check.status))
+        entry.set("seconds", seconds(check.took))
+        value.push(entry)
+    }
+    value
+}
+
+fn write_report(_ path: MemSpan, _ record: Value) -> Result<MemBuffer, ()>
+uses (fs: mut Fs)
+{
+    var text = MemBuffer::empty()
+    record.write_pretty(mut text, indent: 2)
+    text.push(b'\n')
+    named(path, fs.write(path, text.span()))
+}
+
+// Runs `stage` with its output in the file at `log`, to a status as `sh` gives.
+fn run_stage(_ stage: Stage, log: MemBuffer, limit: u64) -> Result<MemBuffer, i32>
+uses (fs: mut Fs, proc: mut Spawn)
+{
+    let output = match proc.output(
+        stage
+            .command()
+            .stdout(Redirect::File(MemBuffer::from_span(log.span())))
+            .stderr(Redirect::Stdout)
+            .timeout(Duration::from_secs(limit)),
+    ) {
+        Result::Ok(output) => output,
+        Result::Err(error) => {
+            // Such as `session` after `tools` failed to build its program.
+            let note = format!(stage.argv[0], ": ", error, "\n")
+            named(log, fs.append(log, note.span()))?
+            return Result::Ok(127)
+        },
+    }
+    match output.status {
+        Status::Exited(code) => Result::Ok(code),
+        Status::Signaled(signal) => Result::Ok(-signal),
+        Status::TimedOut => {
+            let note = format!(
+                "\nAcceptance command exceeded the ",
+                limit,
+                "-second timeout.\n",
+            )
+            named(log, fs.append(log, note.span()))?
+            Result::Ok(124)
+        },
+    }
+}
+
+// Whether the compiler at `path` has the hash its build recorded.
+fn matches_hash(_ path: MemSpan, _ expected: MemSpan) -> Result<MemBuffer, bool>
+uses (fs: Fs)
+{
+    let compiler = named(path, fs.read(path))?
+    Result::Ok(text::hex(sha256_word(compiler), 32) == expected)
+}
+
+// Checks the compiler's hash, then runs the stages and reports them in `acceptance.json`.
+pub fn run(_ options: Options) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
+{
+    let source = named(options.build, fs.read(options.build))?
+    let build = named(options.build, parse(source.span()))?
+    if !build.has("complete") || build["complete"].as_bool() != Option::Some(true) {
+        return Result::Err(format!("compiler bootstrap is incomplete"))
+    }
+    let compiler = MemBuffer::from_span(build["compiler"].text())
+    let toolchain = MemBuffer::from_span(build["manifest"]["rust_version"].text())
+    if !matches_hash(compiler.span(), build["compiler_sha256"].text())? {
+        return Result::Err(format!("compiler hash does not match the build record"))
+    }
+    named(options.out, fs.create_dir_all(options.out))?
+    let dir = named(options.out, fs.canonicalize(options.out))?
+    let report = format!(dir, "/acceptance.json")
+    if fs.metadata(report).is_ok() {
+        return Result::Err(
+            format!(
+                "acceptance.json already exists; choose a fresh --out directory",
+            ),
+        )
+    }
+    var record = Value::object()
+    record.set("schema", Value::number(1 as u64))
+    record.set("build", build)
+    record.set("host", Value::string(host()?))
+    record.set("complete", Value::Bool(false))
+    record
+        .set(
+            "scope",
+            Value::string(
+                "native workspace tests, CLI smoke, Osaka frame/state results, session client, numeric kernels; not state-test conformance",
+            ),
+        )
+    record.set(
+            "stage_timeout_seconds",
+            Value::number(options.stage_timeout),
+        )
+    record
+        .set(
+            "build_timeout_seconds",
+            match options.build_timeout {
+                Option::Some(limit) => Value::number(limit),
+                Option::None => Value::Null,
+            },
+        )
+    record.set("checks", Value::array())
+    write_report(report.span(), record)?
+    var checks: MemVec<Check> = MemVec::new()
+    var complete = true
+    for ref stage in stages(
+        compiler: compiler.span(),
+        out: dir.span(),
+        toolchain: toolchain.span(),
+        jobs: options.jobs,
+        check_only: options.check_only,
+        build_timeout: options.build_timeout,
+    ) {
+        let started = clock.instant()
+        let status = run_stage(
+            stage,
+            log: format!(dir, "/", stage.name, ".log"),
+            limit: options.stage_timeout,
+        )?
+        let took = clock.instant().duration_since(started)
+        checks.push(
+                Check { name: MemBuffer::from_span(stage.name.span()), status, took },
+            )
+        record.set("checks", checks_value(checks))
+        write_report(report.span(), record)?
+        println!(
+            stage.name,
+            if status == 0 { ": passed" } else { ": FAILED" },
+        )
+        complete = complete && status == 0
+    }
+    record.set("complete", Value::Bool(complete))
+    write_report(report.span(), record)?
+    if complete {
+        Result::Ok(())
+    } else {
+        Result::Err(format!("acceptance failed"))
+    }
+}
+
+// Whether `stage`'s command line holds `flag` followed by `value`.
+fn has_option<V: Display>(_ stage: Stage, _ flag: V, _ value: MemSpan) -> bool {
+    var i: usize = 0
+    while i + 1 < stage.argv.len() {
+        if stage.argv[i].span() == format!(flag).span() && stage.argv[i + 1].span() == value {
+            return true
+        }
+        i += 1
+    }
+    false
+}
+
+fn has_flag<V: Display>(_ stage: Stage, _ flag: V) -> bool {
+    for ref arg in stage.argv {
+        if arg.span() == format!(flag).span() {
+            return true
+        }
+    }
+    false
+}
+
+fn named_stage(_ stages: MemVec<Stage>, _ name: MemBuffer) -> ref Stage {
+    for ref stage in stages {
+        if stage.name.span() == name.span() {
+            return ref stage
+        }
+    }
+    core::panic()
+}
+
+fn test_stages(check_only: bool, build_timeout: Option<u64>) -> MemVec<Stage> {
+    stages(
+        compiler: format!("/fe").span(),
+        out: format!("/out").span(),
+        toolchain: format!("1.99.0").span(),
+        jobs: 4,
+        check_only,
+        build_timeout,
+    )
+}
+
+#[test]
+fn stages_run_in_order() {
+    let stages = test_stages(check_only: false, build_timeout: Option::None)
+    let names = [
+        "workspace-O0",
+        "workspace-O1",
+        "workspace-O2",
+        "cli-smoke",
+        "osaka-frames",
+        "osaka-state",
+        "tools",
+        "session",
+        "arithmetic",
+    ]
+    assert!(stages.len() == 9)
+    for i in 0 .. 9 {
+        assert!(stages[i].name.span() == format!(names[i]).span())
+    }
+}
+
+#[test]
+fn workspace_stages_run_at_each_level() {
+    let stages = test_stages(check_only: false, build_timeout: Option::None)
+    let jobs = format!("4")
+    for (i, level) in [(0 as usize, "0"), (1, "1"), (2, "2")] {
+        let level = format!(level)
+        assert!(has_option(stages[i], "-O", level.span()))
+        assert!(has_option(stages[i], "--jobs", jobs.span()))
+    }
+}
+
+#[test]
+fn build_timeout_reaches_the_runners_that_build() {
+    let limit = format!("2400")
+    let stages = test_stages(check_only: false, build_timeout: Option::Some(2400))
+    for stage in ["cli-smoke", "osaka-frames", "osaka-state", "session"] {
+        assert!(
+            has_option(
+                named_stage(stages, format!(stage)),
+                "--build-timeout",
+                limit.span(),
+            ),
+        )
+    }
+    for stage in ["workspace-O0", "tools", "arithmetic"] {
+        assert!(
+            !has_flag(named_stage(stages, format!(stage)), "--build-timeout"),
+        )
+    }
+    let without = test_stages(check_only: false, build_timeout: Option::None)
+    assert!(
+        !has_flag(
+            named_stage(without, format!("cli-smoke")),
+            "--build-timeout",
+        ),
+    )
+}
+
+#[test]
+fn toolchain_reaches_the_runners_that_use_cargo() {
+    let toolchain = format!("1.99.0")
+    let stages = test_stages(check_only: false, build_timeout: Option::None)
+    for stage in ["osaka-frames", "osaka-state", "session"] {
+        assert!(
+            has_option(
+                named_stage(stages, format!(stage)),
+                "--toolchain",
+                toolchain.span(),
+            ),
+        )
+    }
+}
+
+#[test]
+fn check_only_reaches_arithmetic() {
+    let quiet = test_stages(check_only: true, build_timeout: Option::None)
+    assert!(
+        has_flag(named_stage(quiet, format!("arithmetic")), "--check-only"),
+    )
+    let timed = test_stages(check_only: false, build_timeout: Option::None)
+    assert!(
+        !has_flag(named_stage(timed, format!("arithmetic")), "--check-only"),
+    )
+}
