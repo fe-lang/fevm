@@ -160,3 +160,42 @@ fn bls_subgroup_checks_match_multiplication_by_the_order() {
     core::assert(!q.in_subgroup() && !q.multiply(ORDER).is_identity())
     core::assert(!q.add(g2).in_subgroup() && !q.multiply(5).in_subgroup())
 }
+
+#[test]
+fn bls_msm_matches_separate_multiplications() {
+    let scalars: [u256; 8] = [
+        0, 1, ORDER - 1, ORDER + 5, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, 1 << 254, 0xd201000000010000,
+    ]
+    // Below and above the size where Pippenger's method takes over.
+    for k in [3 as usize, 9, 40] {
+        var input = MemBuffer::empty()
+        var expected = Point<Fp>::identity()
+        for i in 0..k {
+            let point = if i == 4 { Point<Fp>::identity() } else { g1_generator().multiply(i as u256 * 7 + 3) }
+            let scalar = scalars[i % 8] ^ (i / 8) as u256
+            append_g1(mut input, point)
+            append_scalar(mut input, scalar)
+            expected = expected.add(point.multiply(scalar % ORDER))
+        }
+        var want = MemBuffer::empty()
+        append_g1(mut want, expected)
+        let output = run(address: 0x0c, input, gas: 1000000000)
+        core::assert(output.status == SUCCESS && same(output.output, want))
+    }
+    for k in [3 as usize, 12] {
+        var input = MemBuffer::empty()
+        var expected = Point<Fp2>::identity()
+        for i in 0..k {
+            let point = if i == 4 { Point<Fp2>::identity() } else { g2_generator().multiply(i as u256 * 7 + 3) }
+            let scalar = scalars[i % 8] ^ (i / 8) as u256
+            append_g2(mut input, point)
+            append_scalar(mut input, scalar)
+            expected = expected.add(point.multiply(scalar % ORDER))
+        }
+        var want = MemBuffer::empty()
+        append_g2(mut want, expected)
+        let output = run(address: 0x0e, input, gas: 1000000000)
+        core::assert(output.status == SUCCESS && same(output.output, want))
+    }
+}

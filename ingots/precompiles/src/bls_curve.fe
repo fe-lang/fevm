@@ -1,4 +1,4 @@
-use core::Option
+use core::{MemArray, Option}
 use keccak::ByteSource
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_tower::Fp2
@@ -80,6 +80,27 @@ impl<F> Point<F> where F: Field + Copy {
         Point { x, y, z }
     }
 
+    // madd-2007-bl: the sum with an affine point.
+    pub fn add_affine(self, _ other: Affine<F>) -> Point<F> {
+        if other.infinity { return self }
+        if self.is_identity() { return Point::from_affine(other) }
+        let z1z1 = self.z.square()
+        let u2 = other.x.mul(z1z1)
+        let s2 = other.y.mul(self.z).mul(z1z1)
+        let h = u2.sub(self.x)
+        let r = s2.sub(self.y).double()
+        if h.is_zero() {
+            return if r.is_zero() { self.double() } else { Point::identity() }
+        }
+        let hh = h.square()
+        let i = hh.double().double()
+        let j = h.mul(i)
+        let v = self.x.mul(i)
+        let x = r.square().sub(j).sub(v.double())
+        let y = r.mul(v.sub(x)).sub(self.y.mul(j).double())
+        Point { x, y, z: self.z.add(h).square().sub(z1z1).sub(hh) }
+    }
+
     /// The product with a scalar of little-endian 64-bit limbs.
     pub fn multiply_limbs<const N: usize>(self, _ limbs: [u64; N]) -> Point<F> {
         var result = Point::identity()
@@ -129,6 +150,88 @@ impl<F> Point<F> where F: Field + Copy {
         let z2z2 = other.z.square()
         self.x.mul(z2z2).equals(other.x.mul(z1z1)) && self.y.mul(z2z2.mul(other.z)).equals(other.y.mul(z1z1.mul(self.z)))
     }
+}
+
+impl<F> Affine<F> where F: Field + Copy {
+    pub fn identity() -> Affine<F> { Affine { x: F::zero(), y: F::zero(), infinity: true } }
+    pub fn neg(self) -> Affine<F> { Affine { x: self.x, y: self.y.neg(), infinity: self.infinity } }
+
+    /// The product with a scalar, by double-and-add with mixed additions.
+    pub fn multiply(self, _ scalar: u256) -> Point<F> {
+        var result = Point::identity()
+        var bit: u64 = 256
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (scalar >> bit as u256) & 1 == 1 { result = result.add_affine(self) }
+        }
+        result
+    }
+}
+
+// The window width for Pippenger's method over k points, or 0 when separate
+// double-and-add multiplications cost less. Costs count field
+// multiplications: about 11 for a mixed addition, 16 for an addition and 7
+// for a doubling.
+fn msm_window(_ k: usize) -> usize {
+    var best: usize = 0
+    var best_cost = k * (255 * 7 + 128 * 11)
+    var c: usize = 2
+    while c <= 12 {
+        let cost = (255 / c + 1) * (k * 11 + (1 << (c - 1)) * 32) + 255 * 7
+        if cost < best_cost {
+            best = c
+            best_cost = cost
+        }
+        c += 1
+    }
+    best
+}
+
+/// The sum of [scalars[i]] points[i] for scalars below 2^255, by Pippenger's
+/// bucket method over Booth-recoded c-bit digits in [-2^(c-1), 2^(c-1)];
+/// None when the buckets cannot be allocated.
+pub fn msm<F: Field + Copy>(_ points: MemArray<Affine<F>>, _ scalars: MemArray<u256>) -> Option<Point<F>> {
+    let k = points.len()
+    let c = msm_window(k)
+    if c == 0 {
+        var sum = Point::identity()
+        for i in 0..k { sum = sum.add(points[i].multiply(scalars[i])) }
+        return Option::Some(sum)
+    }
+    let count: usize = 1 << (c - 1)
+    var buckets = MemArray::try_from_fn(count, |_| Point<F>::identity())?
+    let mask: u256 = (1 << (c + 1) as u256) - 1
+    var result = Point::identity()
+    var window = 255 / c + 1
+    while window > 0 {
+        window -= 1
+        for _ in 0..c { result = result.double() }
+        for b in 0..count { buckets[b] = Point::identity() }
+        for i in 0..k {
+            // Bits c window - 1 through c window + c - 1 of the scalar give the
+            // digit (w & 1) + (w >> 1) - 2^c (w >> c).
+            let w: usize = (((scalars[i] << 1) >> (c * window) as u256) & mask).downcast_truncate()
+            let magnitude = (w & 1) + (w >> 1)
+            if w >> c == 0 {
+                if magnitude != 0 { buckets[magnitude - 1] = buckets[magnitude - 1].add_affine(points[i]) }
+            } else if magnitude != 1 << c {
+                let negated = (1 << c) - magnitude
+                buckets[negated - 1] = buckets[negated - 1].add_affine(points[i].neg())
+            }
+        }
+        // The sum of (b + 1) buckets[b], by running sums from the top.
+        var running = Point::identity()
+        var total = Point::identity()
+        var b = count
+        while b > 0 {
+            b -= 1
+            running = running.add(buckets[b])
+            total = total.add(running)
+        }
+        result = result.add(total)
+    }
+    Option::Some(result)
 }
 
 impl Point<Fp> {
