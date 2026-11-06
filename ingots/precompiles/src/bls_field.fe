@@ -1,5 +1,6 @@
 use core::Option
-use core::ops::{WrappingMul, WrappingSub}
+use core::ops::WrappingMul
+use ingot::montgomery::{adc, mac, sbb}
 use keccak::ByteSource
 
 // BLS12-381 base field: p = 0x1a0111ea...ffaaab (381 bits). Elements are six
@@ -38,28 +39,62 @@ impl Copy for Fp {}
 
 // a >= b over six limbs.
 fn at_least(_ a: [u64; 6], _ b: [u64; 6]) -> bool {
-    var i: u64 = 6
-    while i > 0 {
-        i -= 1
-        if a[i.downcast_truncate()] != b[i.downcast_truncate()] { return a[i.downcast_truncate()] > b[i.downcast_truncate()] }
-    }
-    true
+    let (_, borrow) = subtract(a, b)
+    borrow == 0
 }
 
-// a - b with the final borrow, for limbs where the caller knows the sign.
-fn subtract(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 6] {
-    var out: [u64; 6] = [0; 6]
-    var borrow: u64 = 0
-    var i: u64 = 0
-    while i < 6 {
-        let x = a[i.downcast_truncate()]
-        let y = b[i.downcast_truncate()]
-        let difference = x.wrapping_sub(y).wrapping_sub(borrow)
-        borrow = if x < y || (x == y && borrow == 1) { 1 } else { 0 }
-        out[i.downcast_truncate()] = difference
-        i += 1
-    }
-    out
+// a - b over six limbs, with the borrow out.
+#[inline(always)]
+fn subtract(_ a: [u64; 6], _ b: [u64; 6]) -> ([u64; 6], u64) {
+    let (d0, borrow) = sbb(a[0], b[0], 0)
+    let (d1, borrow) = sbb(a[1], b[1], borrow)
+    let (d2, borrow) = sbb(a[2], b[2], borrow)
+    let (d3, borrow) = sbb(a[3], b[3], borrow)
+    let (d4, borrow) = sbb(a[4], b[4], borrow)
+    let (d5, borrow) = sbb(a[5], b[5], borrow)
+    ([d0, d1, d2, d3, d4, d5], borrow)
+}
+
+// a + b over six limbs, with the carry out.
+#[inline(always)]
+fn add_limbs(_ a: [u64; 6], _ b: [u64; 6]) -> ([u64; 6], u64) {
+    let (s0, carry) = adc(a[0], b[0], 0)
+    let (s1, carry) = adc(a[1], b[1], carry)
+    let (s2, carry) = adc(a[2], b[2], carry)
+    let (s3, carry) = adc(a[3], b[3], carry)
+    let (s4, carry) = adc(a[4], b[4], carry)
+    let (s5, carry) = adc(a[5], b[5], carry)
+    ([s0, s1, s2, s3, s4, s5], carry)
+}
+
+// Subtract p from `t`, with `top` above its six limbs, when the value is at least p.
+#[inline(always)]
+fn reduce(_ t: [u64; 6], _ top: u64) -> [u64; 6] {
+    let (d, borrow) = subtract(t, MODULUS)
+    let (_, borrow) = sbb(top, 0, borrow)
+    if borrow == 1 { t } else { d }
+}
+
+// One CIOS row: accumulate a * b into t, then add the multiple of p that
+// clears the low word and shift down one word.
+#[inline(always)]
+fn row(_ a: [u64; 6], _ b: u64, _ t: [u64; 6], _ top: u64) -> ([u64; 6], u64) {
+    let (t0, c) = mac(a[0], b, t[0], 0)
+    let (t1, c) = mac(a[1], b, t[1], c)
+    let (t2, c) = mac(a[2], b, t[2], c)
+    let (t3, c) = mac(a[3], b, t[3], c)
+    let (t4, c) = mac(a[4], b, t[4], c)
+    let (t5, c) = mac(a[5], b, t[5], c)
+    let (t6, t7) = adc(top, c, 0)
+    let m = t0.wrapping_mul(INV)
+    let (_, c) = mac(m, MODULUS[0], t0, 0)
+    let (r0, c) = mac(m, MODULUS[1], t1, c)
+    let (r1, c) = mac(m, MODULUS[2], t2, c)
+    let (r2, c) = mac(m, MODULUS[3], t3, c)
+    let (r3, c) = mac(m, MODULUS[4], t4, c)
+    let (r4, c) = mac(m, MODULUS[5], t5, c)
+    let (r5, c) = adc(t6, 0, c)
+    ([r0, r1, r2, r3, r4, r5], t7 + c)
 }
 
 impl Fp {
@@ -132,65 +167,37 @@ impl Field for Fp {
 
     fn add(self, _ other: Fp) -> Fp {
         // Both operands are below p < 2^382, so the sum fits six limbs.
-        var out: [u64; 6] = [0; 6]
-        var carry: u64 = 0
-        var i: u64 = 0
-        while i < 6 {
-            let sum = self.limbs[i.downcast_truncate()] as u128 + other.limbs[i.downcast_truncate()] as u128 + carry as u128
-            out[i.downcast_truncate()] = sum.downcast_truncate()
-            carry = (sum >> 64).downcast_truncate()
-            i += 1
-        }
-        if at_least(out, MODULUS) { out = subtract(out, MODULUS) }
-        Fp { limbs: out }
+        let (sum, _) = add_limbs(self.limbs, other.limbs)
+        Fp { limbs: reduce(sum, 0) }
     }
 
     fn sub(self, _ other: Fp) -> Fp {
-        if at_least(self.limbs, other.limbs) { return Fp { limbs: subtract(self.limbs, other.limbs) } }
-        // self - other + p, computed as p - (other - self).
-        Fp { limbs: subtract(MODULUS, subtract(other.limbs, self.limbs)) }
+        let (difference, borrow) = subtract(self.limbs, other.limbs)
+        if borrow == 0 { return Fp { limbs: difference } }
+        let (wrapped, _) = add_limbs(difference, MODULUS)
+        Fp { limbs: wrapped }
     }
 
     // Montgomery multiplication (CIOS): a * b * 2^-384 mod p.
     fn mul(self, _ other: Fp) -> Fp {
-        var t: [u64; 8] = [0; 8]
-        var i: u64 = 0
-        while i < 6 {
-            let b = other.limbs[i.downcast_truncate()] as u128
-            var carry: u64 = 0
-            var j: u64 = 0
-            while j < 6 {
-                let s = t[j.downcast_truncate()] as u128 + (self.limbs[j.downcast_truncate()] as u128) * b + carry as u128
-                t[j.downcast_truncate()] = s.downcast_truncate()
-                carry = (s >> 64).downcast_truncate()
-                j += 1
-            }
-            let top = t[6] as u128 + carry as u128
-            t[6] = top.downcast_truncate()
-            t[7] = (top >> 64).downcast_truncate()
-            let m = t[0].wrapping_mul(INV) as u128
-            var s = t[0] as u128 + m * MODULUS[0] as u128
-            carry = (s >> 64).downcast_truncate()
-            j = 1
-            while j < 6 {
-                s = t[j.downcast_truncate()] as u128 + m * MODULUS[j.downcast_truncate()] as u128 + carry as u128
-                t[(j - 1).downcast_truncate()] = s.downcast_truncate()
-                carry = (s >> 64).downcast_truncate()
-                j += 1
-            }
-            s = t[6] as u128 + carry as u128
-            t[5] = s.downcast_truncate()
-            t[6] = t[7] + (s >> 64).downcast_truncate()
-            i += 1
-        }
-        var out: [u64; 6] = [t[0], t[1], t[2], t[3], t[4], t[5]]
-        if t[6] != 0 || at_least(out, MODULUS) { out = subtract(out, MODULUS) }
-        Fp { limbs: out }
+        let a = self.limbs
+        let b = other.limbs
+        let (t, top) = row(a, b[0], [0; 6], 0)
+        let (t, top) = row(a, b[1], t, top)
+        let (t, top) = row(a, b[2], t, top)
+        let (t, top) = row(a, b[3], t, top)
+        let (t, top) = row(a, b[4], t, top)
+        let (t, top) = row(a, b[5], t, top)
+        Fp { limbs: reduce(t, top) }
     }
 
     fn square(self) -> Fp { self.mul(self) }
     fn double(self) -> Fp { self.add(self) }
-    fn neg(self) -> Fp { if self.is_zero() { self } else { Fp { limbs: subtract(MODULUS, self.limbs) } } }
+    fn neg(self) -> Fp {
+        if self.is_zero() { return self }
+        let (negated, _) = subtract(MODULUS, self.limbs)
+        Fp { limbs: negated }
+    }
 
     // Fermat inversion; zero maps to zero.
     fn invert(self) -> Fp { self.pow(P_MINUS_2) }

@@ -33,18 +33,22 @@ pub struct Mont<M> { l0: u64, l1: u64, l2: u64, l3: u64 }
 impl<M> Copy for Mont<M> {}
 
 // a * b + c + carry, as (low, high) words.
-fn mac(_ a: u64, _ b: u64, _ c: u64, _ carry: u64) -> (u64, u64) {
+#[inline(always)]
+pub fn mac(_ a: u64, _ b: u64, _ c: u64, _ carry: u64) -> (u64, u64) {
     let t = (a as u128) * (b as u128) + (c as u128) + (carry as u128)
     (t.downcast_truncate(), (t >> 64).downcast_truncate())
 }
 
-fn adc(_ a: u64, _ b: u64, _ carry: u64) -> (u64, u64) {
+// a + b + carry, as (sum, carry out).
+#[inline(always)]
+pub fn adc(_ a: u64, _ b: u64, _ carry: u64) -> (u64, u64) {
     let t = (a as u128) + (b as u128) + (carry as u128)
     (t.downcast_truncate(), (t >> 64).downcast_truncate())
 }
 
 // a - b - borrow, as (difference, borrow out).
-fn sbb(_ a: u64, _ b: u64, _ borrow: u64) -> (u64, u64) {
+#[inline(always)]
+pub fn sbb(_ a: u64, _ b: u64, _ borrow: u64) -> (u64, u64) {
     let t = (a as u128).wrapping_sub(b as u128).wrapping_sub(borrow as u128)
     (t.downcast_truncate(), (t >> 127).downcast_truncate())
 }
@@ -73,6 +77,7 @@ impl<M: Modulus> Mont<M> {
 
     // One CIOS row: accumulate self * b into t, then add a multiple of p that
     // clears the low word and shift down one word.
+    #[inline(always)]
     fn row(self, _ b: u64, _ t: Self, _ top: u64) -> (Self, u64) {
         let (t0, c) = mac(self.l0, b, t.l0, 0)
         let (t1, c) = mac(self.l1, b, t.l1, c)
@@ -89,6 +94,7 @@ impl<M: Modulus> Mont<M> {
     }
 
     // Subtract p when the value, with `top` above the four limbs, is at least p.
+    #[inline(always)]
     fn reduce(self, _ top: u64) -> Self {
         let (d0, b) = sbb(self.l0, M::P0, 0)
         let (d1, b) = sbb(self.l1, M::P1, b)
