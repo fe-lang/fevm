@@ -20,8 +20,8 @@ The repo is a Fe workspace:
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
   allocation-failure and compiler arithmetic checks
-- `native/tools`: the acceptance suite, the state-test runner and fevm's other
-  checks written in Fe
+- `native/tools`: the acceptance suite, the state-test and benchmark runners and
+  fevm's other checks written in Fe
 - `native/bootstrap.py`: the pinned compiler build
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)

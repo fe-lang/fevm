@@ -155,7 +155,7 @@ fn hex_bytes(_ digits: MemSpan) -> Result<MemBuffer, MemBuffer> {
 }
 
 // `0x` and the bytes' hex digits.
-fn to_hex(_ bytes: MemSpan) -> MemBuffer {
+pub fn to_hex(_ bytes: MemSpan) -> MemBuffer {
     var out = MemBuffer::with_capacity(2 + 2 * bytes.len())
     out.extend_from("0x".span())
     for byte in bytes {
@@ -257,12 +257,12 @@ fn tx_kind(_ tx: Value) -> u8 {
 }
 
 // A case's selection among the transaction's data, gas limits and values.
-struct Indexes { data: usize, gas: usize, value: usize }
+pub struct Indexes { data: usize, gas: usize, value: usize }
 
 impl Copy for Indexes {}
 
 impl Indexes {
-    fn of(_ post: Value) -> Self {
+    pub fn of(_ post: Value) -> Self {
         let indexes = ref post["indexes"]
         Indexes {
             data: indexes["data"].as_u64().unwrap().downcast_truncate(),
@@ -273,7 +273,7 @@ impl Indexes {
 }
 
 // The driver's binary case format; integers and lengths are big endian.
-fn encode(_ test: Value, _ indexes: Indexes, cap: u64) -> Result<MemBuffer, MemBuffer> {
+pub fn encode(_ test: Value, _ indexes: Indexes, cap: u64) -> Result<MemBuffer, MemBuffer> {
     let env = ref test["env"]
     let tx = ref test["transaction"]
     var out = MemBuffer::empty()
@@ -630,7 +630,7 @@ fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, 
 
 // The `.json` files under `root`, relative to it, in the order of their path
 // components; with a selection, only paths that hold one of its parts.
-fn fixture_files(_ root: MemSpan, _ select: MemVec<Arg>) -> Result<MemBuffer, MemVec<MemBuffer>>
+pub fn fixture_files(_ root: MemSpan, _ select: MemVec<Arg>) -> Result<MemBuffer, MemVec<MemBuffer>>
 uses (fs: Fs)
 {
     var files: MemVec<MemBuffer> = MemVec::new()

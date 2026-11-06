@@ -144,7 +144,7 @@ fn allocation_failure() -> i32 uses (out: mut Stdout) {
 
 // With arguments `RUNS [TRANSACT]`, the driver first decodes the case and
 // builds its pre-state RUNS more times, applying the transaction to each one
-// unless TRANSACT is 0. native/bench/run.py times both modes and takes the
+// unless TRANSACT is 0. `fevm_tools bench` times both modes and takes the
 // difference as the cost of the transactions.
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     if args.count() > 3 {

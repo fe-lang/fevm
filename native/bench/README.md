@@ -1,6 +1,6 @@
 # State-test benchmarks
 
-`run.py` times FeVM, revm and, optionally, evmone on the transactions of
+`fevm_tools bench` times FeVM, revm and, optionally, evmone on the transactions of
 state-test benchmark fixtures, such as
 [ipsilon/evm-benchmarks](https://github.com/ipsilon/evm-benchmarks) (evmone's
 suite): snailtracer, blake2b, sha1, weierstrudel, swap_math and
@@ -9,17 +9,22 @@ SIGNEXTEND.
 
 ```sh
 git clone https://github.com/ipsilon/evm-benchmarks
-python3 native/bench/run.py --fe native/out/toolchain/bin/fe --benchmarks evm-benchmarks/benchmarks
+native/out/tools/fevm_tools bench --fe native/out/toolchain/bin/fe --benchmarks evm-benchmarks/benchmarks
 ```
 
+Build `fevm_tools` as in the [README](../../README.md#testing) and run it from the
+repository's root. It prints a line of JSON per case, then the geometric mean
+of FeVM's time over each other engine's.
+
 Each engine runs one case in the binary format of FeVM's conformance driver
-(see `encode` in `run.py`) and takes the same arguments: `RUNS
+(see `encode` in `native/tools/src/conformance.fe`) and takes the same arguments: `RUNS
 [TRANSACT]` decodes the case and builds its pre-state RUNS more times,
 applying the transaction to each one unless TRANSACT is 0, then applies it once
 more and prints the outcome. The time of a transaction is the CPU time of RUNS
 applications minus that of RUNS setups, divided by RUNS. `--target` sets the
-CPU seconds RUNS aims for and `--repeat` how many timed runs of each mode to
-take the least of. The runner disables glibc heap trimming, which would charge
+CPU seconds RUNS aims for (default 0.3) and `--repeat` how many timed runs of
+each mode to take the least of (default 3). Times are in microseconds, rounded
+to the nearest hundredth, and ratios to the nearest thousandth. The runner disables glibc heap trimming, which would charge
 setup-only runs for regrowing the heap, and serves allocations up to 32 MiB
 from the heap rather than fresh mappings, as a long-running process would.
 
@@ -41,14 +46,14 @@ or Keccak, shows only there.
 
 ## Precompiles and Keccak
 
-The benchmark suite runs no precompiles and little Keccak. `fixtures.py` writes
+The benchmark suite runs no precompiles and little Keccak. `bench-fixtures` writes
 state tests that loop `KECCAK256` and each precompile on an input that does its
 full work; a call that fails or returns nothing halts the transaction, which
 shows in its `status`:
 
 ```sh
-python3 native/bench/fixtures.py native/out/bench-fixtures
-python3 native/bench/run.py --benchmarks native/out/bench-fixtures --fe native/out/toolchain/bin/fe --fevm-only
+native/out/tools/fevm_tools bench-fixtures --out native/out/bench-fixtures
+native/out/tools/fevm_tools bench --benchmarks native/out/bench-fixtures --fe native/out/toolchain/bin/fe --fevm-only
 ```
 
 `--fevm-only` times FeVM alone: these fixtures use Osaka's precompiles and gas,
@@ -59,8 +64,9 @@ and the revm and evmone runners run Cancun.
 - FeVM: the conformance driver, built by `--fe` at `--level` (default O2), or
   `--executable`.
 - revm: `revm/`, revm 33.1.0 at the same `sbillig/revm` revision as the
-  differential reference, with fat LTO and `target-cpu=native`. `run.py`
-  builds it unless `--revm` names a binary.
+  differential reference, with fat LTO and `target-cpu=native`. `bench`
+  builds it under `--out` (default `native/out/bench`) unless `--revm` names a
+  binary.
 - evmone: `evmone/runner.cpp` drives evmone's state transition with its
   baseline interpreter. Build evmone with its test utilities, then the runner,
   and pass it with `--evmone`:
