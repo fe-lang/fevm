@@ -47,6 +47,24 @@ impl<F> Point<F> where F: Field + Copy {
 
     pub fn neg(self) -> Self { Point { x: self.x, y: self.y.neg(), z: self.z } }
 
+    // madd-2007-bl: the sum with an affine point (x2, y2).
+    pub fn add_affine(self, x2: F, y2: F) -> Self {
+        if self.is_infinity() { return Point::affine(x: x2, y: y2) }
+        let z1z1 = self.z.square()
+        let u2 = x2.mul(z1z1)
+        let s2 = y2.mul(self.z).mul(z1z1)
+        let h = u2.sub(self.x)
+        let r = s2.sub(self.y).double()
+        if h.is_zero() { return if r.is_zero() { self.double() } else { Self::infinity() } }
+        let hh = h.square()
+        let i = hh.double().double()
+        let j = h.mul(i)
+        let v = self.x.mul(i)
+        let x = r.square().sub(j).sub(v.double())
+        let y = r.mul(v.sub(x)).sub(self.y.mul(j).double())
+        Point { x, y, z: self.z.add(h).square().sub(z1z1).sub(hh) }
+    }
+
     /// Whether two points are equal: x1 z2^2 = x2 z1^2 and y1 z2^3 = y2 z1^3.
     pub fn equals(self, _ other: Self) -> bool {
         if self.is_infinity() || other.is_infinity() { return self.is_infinity() && other.is_infinity() }
