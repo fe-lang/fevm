@@ -114,9 +114,7 @@ const G2_Y_DEN: [[[u64; 6]; 2]; 3] = [
     [[0x66b10000003affc5, 0xcb1400e764ec0030, 0xa73e5eb56fa5d106, 0x8984c913a0fe09a9, 0x11e10afb78ad7f13, 0x05429d0e3e918f52], [0x534dffffffc4aae6, 0x5397ff174c67ffcf, 0xbff273eb870b251d, 0xdaf2827152870915, 0x393a9cbaca9e2dc3, 0x14be74dbfaee5748]],
 ]
 
-// h_eff for G2 as little-endian limbs; G1's is 1 - x = 0xd201000000010001.
-const G2_COFACTOR: [u64; 10] = [0xe8020005aaa95551, 0x59894c0adebbf6b4, 0xe954cbc06689f6a3, 0x2ec0ec69d7477c1a, 0x6d82bf015d1212b0, 0x329c2f178731db95, 0x9986ff031508ffe1, 0x88e2a8e9145ad768, 0x584c6a0ea91b3528, 0x0bc69f08f2ee75b3]
-
+// G1's h_eff, 1 - x.
 const G1_COFACTOR: u256 = 0xd201000000010001
 
 /// Square roots and RFC 9380's sgn0 in Fp and Fp2.
@@ -198,7 +196,7 @@ pub fn map_to_g2(_ u: Fp2) -> Point<Fp2> {
     let p = sswu(u, a: fp2(G2_A), b: fp2(G2_B), z: fp2(G2_Z))
     let mapped = isogeny(p, x_num: fp2_poly(G2_X_NUM, x: p.x, monic: false), x_den: fp2_poly(G2_X_DEN, x: p.x, monic: true),
                          y_num: fp2_poly(G2_Y_NUM, x: p.x, monic: false), y_den: fp2_poly(G2_Y_DEN, x: p.x, monic: true))
-    mapped.multiply_limbs(G2_COFACTOR)
+    mapped.clear_cofactor()
 }
 
 // evmone's vectors, as canonical limbs.

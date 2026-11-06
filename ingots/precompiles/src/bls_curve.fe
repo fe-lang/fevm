@@ -101,18 +101,6 @@ impl<F> Point<F> where F: Field + Copy {
         Point { x, y, z: self.z.add(h).square().sub(z1z1).sub(hh) }
     }
 
-    /// The product with a scalar of little-endian 64-bit limbs.
-    pub fn multiply_limbs<const N: usize>(self, _ limbs: [u64; N]) -> Point<F> {
-        var result = Point::identity()
-        var bit: u64 = (N * 64).downcast_unchecked()
-        while bit > 0 {
-            bit -= 1
-            result = result.double()
-            if (limbs[(bit / 64).downcast_truncate()] >> (bit % 64)) & 1 == 1 { result = result.add(self) }
-        }
-        result
-    }
-
     pub fn multiply(self, _ scalar: u256) -> Point<F> {
         var result = Point::identity()
         var bit: u64 = 256
@@ -246,14 +234,27 @@ impl Point<Fp> {
 }
 
 impl Point<Fp2> {
-    /// Whether a point of the twist is in G2: psi(Q) = [x] Q, the test of
-    /// https://eprint.iacr.org/2021/1130 section 4.
-    pub fn in_subgroup(self) -> bool {
+    /// The untwist-Frobenius-twist endomorphism psi.
+    pub fn psi(self) -> Point<Fp2> {
         let psi_x = Fp2::new(c0: Fp::zero(), c1: Fp::from_montgomery(PSI_X1))
         let psi_y = Fp2::new(c0: Fp::from_montgomery(PSI_Y0), c1: Fp::from_montgomery(PSI_Y1))
-        let psi = Point { x: self.x.conjugate().mul(psi_x), y: self.y.conjugate().mul(psi_y), z: self.z.conjugate() }
-        // x is negative.
-        psi.equals(self.multiply_by_x_abs().neg())
+        Point { x: self.x.conjugate().mul(psi_x), y: self.y.conjugate().mul(psi_y), z: self.z.conjugate() }
+    }
+
+    /// [x] self; x is negative.
+    fn multiply_by_x(self) -> Point<Fp2> { self.multiply_by_x_abs().neg() }
+
+    /// Whether a point of the twist is in G2: psi(Q) = [x] Q, the test of
+    /// https://eprint.iacr.org/2021/1130 section 4.
+    pub fn in_subgroup(self) -> bool { self.psi().equals(self.multiply_by_x()) }
+
+    /// [h_eff] self, as RFC 9380's clear_cofactor_bls12381_g2 (appendix G.3):
+    /// [x^2 - x - 1] P + [x - 1] psi(P) + psi^2([2] P).
+    pub fn clear_cofactor(self) -> Point<Fp2> {
+        let t1 = self.multiply_by_x()
+        let t2 = self.psi()
+        let t3 = self.double().psi().psi().add(t2.neg())
+        t3.add(t1.add(t2).multiply_by_x()).add(t1.neg()).add(self.neg())
     }
 }
 
