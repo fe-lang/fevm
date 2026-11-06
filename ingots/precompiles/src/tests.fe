@@ -1,3 +1,4 @@
+use core::MemBuffer
 use ingot::{FAILURE, SUCCESS, run}
 use ingot::hashes::{ripemd160, sha256}
 
@@ -48,6 +49,20 @@ fn hash_precompiles_charge_per_word_and_return_padded_digests() {
     let empty: [u8; 0] = []
     let none = run(address: 4, input: empty, gas: 15)
     core::assert(none.status == SUCCESS && none.gas_used == 15 && none.output.len() == 0)
+}
+
+#[test]
+fn identity_copies_every_length() {
+    var input: [u8; 100] = [0; 100]
+    for i in 0..100 { input[i] = (i * 7 + 3).downcast_truncate() }
+    for len in [8 as usize, 9, 17, 100] {
+        var bytes = MemBuffer::empty()
+        bytes.resize(len)
+        for i in 0..len { bytes[i] = input[i] }
+        let copy = run(address: 4, input: bytes, gas: 1000)
+        core::assert(copy.status == SUCCESS && copy.output.len() == len)
+        for i in 0..len { core::assert(copy.output[i] == input[i]) }
+    }
 }
 
 // EIP-152 test vectors 4 and 5 (12 rounds, final and non-final block).
