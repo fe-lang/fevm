@@ -67,10 +67,12 @@ impl<F> Point<F> where F: Field + Copy {
         result
     }
 
-    /// The affine x coordinate of a finite point.
-    pub fn affine_x(self) -> F { self.x.mul(self.z.square().inverse()) }
-    /// The affine y coordinate of a finite point.
-    pub fn affine_y(self) -> F { self.y.mul(self.z.square().mul(self.z).inverse()) }
+    /// The affine coordinates of a finite point, with one inversion.
+    pub fn to_affine(self) -> (F, F) {
+        let z_inv = self.z.inverse()
+        let z_inv2 = z_inv.square()
+        (self.x.mul(z_inv2), self.y.mul(z_inv2.mul(z_inv)))
+    }
 }
 
 /// Whether affine (x, y) satisfies y^2 = x^3 + b.

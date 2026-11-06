@@ -44,7 +44,8 @@ fn g2_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp2>> {
 // EIP-196 G1 output: the affine coordinates, (0, 0) for infinity.
 fn encode(_ point: Point<Fp>) -> [u256; 2] {
     if point.is_infinity() { return [0, 0] }
-    [fp_value(point.affine_x()), fp_value(point.affine_y())]
+    let (x, y) = point.to_affine()
+    [fp_value(x), fp_value(y)]
 }
 
 /// ECADD (0x06): the encoded sum of two G1 points, or None for invalid input.
