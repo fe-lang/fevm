@@ -1,7 +1,7 @@
 // Little-endian u64 limb arithmetic modulo a modulus of any size. Operands
 // are arrays of as many limbs as the modulus; a product takes twice as many,
 // and one more.
-use core::{MemArray, Option}
+use core::{MemArray, MemSlice, Option}
 
 const LIMB_BASE: u128 = 0x10000000000000000
 
@@ -149,5 +149,74 @@ impl Modulus {
             i += 1
         }
         self.reduce(mut work, len: 2 * n)
+    }
+}
+
+/// An odd modulus for Montgomery multiplication with R = 2^(64 len).
+pub struct Montgomery { pub limbs: MemArray<u64>, pub len: u64, inverse: u64 }
+
+impl Montgomery {
+    /// The first `len` limbs of an odd `value`.
+    #[arithmetic(unchecked)]
+    pub fn new(_ value: own MemArray<u64>, len: u64) -> Self {
+        let low = value[0]
+        // m^-1 mod 2^64 by Newton's iteration: an odd m is its own inverse
+        // modulo 8, and each step doubles the correct low bits.
+        var inverse = low
+        for _ in 0..5 { inverse = inverse * (2 - low * inverse) }
+        Self { limbs: value, len, inverse: 0 - inverse }
+    }
+
+    /// a b / R mod m for a, b < m, left in limbs `0..len` of `t`, which holds
+    /// `len + 2` limbs (CIOS).
+    #[arithmetic(unchecked)]
+    pub fn mul(self, _ a: MemSlice<u64>, _ b: MemSlice<u64>, _ t: mut MemArray<u64>) {
+        let n: usize = self.len.downcast_truncate()
+        for j in 0..n + 2 { t[j] = 0 }
+        for i in 0..n {
+            let factor = b[i] as u128
+            var carry: u64 = 0
+            for j in 0..n {
+                let sum = t[j] as u128 + a[j] as u128 * factor + carry as u128
+                t[j] = sum.downcast_truncate()
+                carry = (sum >> 64).downcast_truncate()
+            }
+            let top = t[n] as u128 + carry as u128
+            t[n] = top.downcast_truncate()
+            t[n + 1] = (top >> 64).downcast_truncate()
+            // Add the multiple of m that clears the low limb, and shift down a limb.
+            let m = (t[0] * self.inverse) as u128
+            var sum = t[0] as u128 + m * self.limbs[0] as u128
+            carry = (sum >> 64).downcast_truncate()
+            for j in 1..n {
+                sum = t[j] as u128 + m * self.limbs[j] as u128 + carry as u128
+                t[j - 1] = sum.downcast_truncate()
+                carry = (sum >> 64).downcast_truncate()
+            }
+            sum = t[n] as u128 + carry as u128
+            t[n - 1] = sum.downcast_truncate()
+            t[n] = t[n + 1] + (sum >> 64).downcast_truncate()
+        }
+        // t < 2m: subtract m once if t is at least m.
+        var at_least = t[n] != 0
+        if !at_least {
+            at_least = true
+            var j = n
+            while j > 0 {
+                j -= 1
+                if t[j] != self.limbs[j] {
+                    at_least = t[j] > self.limbs[j]
+                    break
+                }
+            }
+        }
+        if at_least {
+            var borrow: u64 = 0
+            for j in 0..n {
+                let difference = t[j] as u128 - self.limbs[j] as u128 - borrow as u128
+                t[j] = difference.downcast_truncate()
+                borrow = (difference >> 127).downcast_truncate()
+            }
+        }
     }
 }
