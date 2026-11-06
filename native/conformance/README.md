@@ -1,22 +1,30 @@
 # Ethereum state tests
 
-`run.py` runs the Osaka cases of an
+`fevm_tools conformance` ([`native/tools`](../tools/src/conformance.fe)) runs
+the Osaka cases of an
 [execution-specs](https://github.com/ethereum/execution-specs) test fixture
 release through FeVM's `transact`. Each case starts a fresh native
 `fevm_conformance` process, which reads one binary-encoded case from stdin and
-prints the transaction outcome, the logs hash and the complete post-state.
+prints the transaction outcome, the logs hash and the complete post-state. Run
+it from the repository's root:
 
 ```sh
 gh release download tests@v21.0.1 -R ethereum/execution-specs -p fixtures.tar.gz
 tar -xzf fixtures.tar.gz fixtures/state_tests
-python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
+native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
+  --emit executable --out-dir native/out/tools
+native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
   --fixtures fixtures/state_tests --out native/out/conformance-run
 ```
 
-`--select` limits the run to fixture paths containing any given substring,
-`--level` picks the driver's optimization level (default O2), `--jobs` sets the
-number of parallel cases and `--timeout` the per-case limit in seconds.
-`--executable` reuses an already built driver. Each output directory must be new.
+`--fe` builds the driver; `--executable` reuses an already built one instead.
+`--select` limits the run to fixture paths containing any of the substrings
+that follow it, `--level` picks the driver's optimization level (default O2),
+`--jobs` sets the number of parallel cases (default: two fewer than the host's
+processors) and `--timeout` the per-case limit in seconds (default 120). Each
+output directory must be new. The runner reads one fixture file at a time, and
+`results.json`'s `seconds` covers reading the fixtures as well as running the
+cases.
 
 Given `RUNS [TRANSACT]` arguments, the driver repeats the case RUNS times
 before the reported run, skipping the transaction when TRANSACT is 0; the

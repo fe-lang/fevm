@@ -1,7 +1,7 @@
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::hash::sha256_word
-use ingot::{named, parse_u64, succeed}
-use json::{Number, Value, parse}
+use ingot::{host, named, parse_u64, seconds, succeed}
+use json::{Value, parse}
 use std::env::{Arg, Args}
 use std::fs::Fs
 use std::io::{Display, Stdout}
@@ -205,17 +205,6 @@ fn stages(
 // A finished stage.
 struct Check { name: MemBuffer, status: i32, took: Duration }
 
-// The report's `seconds`, to the millisecond.
-fn seconds(_ took: Duration) -> Value {
-    let ms = took.as_millis()
-    Value::Number(
-        Number::parse(
-            format!(ms / 1000, ".", (ms / 100) % 10, (ms / 10) % 10, ms % 10).span(),
-        )
-            .unwrap(),
-    )
-}
-
 fn checks_value(_ checks: MemVec<Check>) -> Value {
     var value = Value::array()
     for ref check in checks {
@@ -277,20 +266,6 @@ uses (fs: Fs)
 {
     let compiler = named(path, fs.read(path))?
     Result::Ok(text::hex(sha256_word(compiler), 32) == expected)
-}
-
-// This host's name, kernel and machine.
-fn host() -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
-    let output = succeed(
-        "uname",
-        Command::new("uname").arg("-srm").stdout(Redirect::Capture),
-    )?
-    let len = output.stdout.len()
-    Result::Ok(
-        MemBuffer::from_span(
-            output.stdout.slice(offset: 0, len: if len == 0 { 0 } else { len - 1 }),
-        ),
-    )
 }
 
 // Checks the compiler's hash, then runs the stages and reports them in `acceptance.json`.
@@ -504,11 +479,4 @@ fn check_only_reaches_arithmetic() {
     assert!(
         !has_flag(named_stage(timed, format!("arithmetic")), "--check-only"),
     )
-}
-
-#[test]
-fn seconds_keep_three_decimals() {
-    var text = MemBuffer::empty()
-    seconds(Duration::from_millis(12005)).write(mut text)
-    assert!(text == "12.005")
 }

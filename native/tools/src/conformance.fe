@@ -1,0 +1,1069 @@
+use core::{HashMap, MemBuffer, MemSlice, MemSpan, MemVec, Option}
+use core::hash::sha256_word
+use core::num::IntDowncast
+use ingot::{host, named, parse_u64, seconds, succeed}
+use json::{Key, Value, parse}
+use std::abi::DynString
+use std::env::Arg
+use std::env::Args
+use std::fs::{FileType, Fs}
+use std::io::Stdout
+use std::process::{Child, Command, Input, Output, Redirect, Spawn, Status}
+use std::text
+use std::time::{Clock, Duration, Instant}
+
+const FORK: String<5> = "Osaka"
+// BPO2's, for fixtures without a blob schedule.
+const BLOB_BASE_FEE_UPDATE_FRACTION: u256 = 11684671
+// EIP-7825's limit on a transaction's gas.
+const TX_GAS_LIMIT_CAP: u64 = 16777216
+// The most of a crashed driver's standard error to keep.
+const STDERR_TAIL: usize = 2000
+
+// The outcomes, as indexes into a count of each.
+const PASSED: usize = 0
+const SIGNATURE: usize = 1
+const FAILED: usize = 2
+const HOST_ERROR: usize = 3
+const CRASH: usize = 4
+const TIMEOUT: usize = 5
+const OUTCOMES: usize = 6
+
+fn outcome_name(_ outcome: usize) -> DynString {
+    if outcome == PASSED {
+        "passed"
+    } else if outcome == SIGNATURE {
+        "signature"
+    } else if outcome == FAILED {
+        "failed"
+    } else if outcome == HOST_ERROR {
+        "host_error"
+    } else if outcome == CRASH {
+        "crash"
+    } else {
+        "timeout"
+    }
+}
+
+// The options that follow `conformance`.
+pub struct Options {
+    fe: Option<Arg>,
+    executable: Option<Arg>,
+    fixtures: Arg,
+    out: Arg,
+    level: u8,
+    jobs: Option<u64>,
+    timeout: u64,
+    select: MemVec<Arg>,
+}
+
+impl Options {
+    pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var fe: Option<Arg> = Option::None
+        var executable: Option<Arg> = Option::None
+        var fixtures: Option<Arg> = Option::None
+        var out: Option<Arg> = Option::None
+        var level: u8 = 2
+        var jobs: Option<u64> = Option::None
+        var timeout: u64 = 120
+        var select: MemVec<Arg> = MemVec::new()
+        var i: usize = 2
+        while i < args.count() {
+            let name = args.get(i)
+            i += 1
+            if name == "--select" {
+                while i < args.count() && !args.get(i).span().starts_with("--") {
+                    select.push(args.get(i))
+                    i += 1
+                }
+                continue
+            }
+            if i == args.count() {
+                return Result::Err(format!("option ", name, " needs a value"))
+            }
+            let value = args.get(i)
+            i += 1
+            if name == "--fe" {
+                fe = Option::Some(value)
+            } else if name == "--executable" {
+                executable = Option::Some(value)
+            } else if name == "--fixtures" {
+                fixtures = Option::Some(value)
+            } else if name == "--out" {
+                out = Option::Some(value)
+            } else if name == "--level" && (value == "0" || value == "1" || value == "2") {
+                level = value.span()[0] - b'0'
+            } else {
+                let number = parse_u64(value).unwrap_or(default: 0)
+                if number == 0 {
+                    return Result::Err(format!("bad option: ", name, " ", value))
+                }
+                if name == "--jobs" {
+                    jobs = Option::Some(number)
+                } else if name == "--timeout" {
+                    timeout = number
+                } else {
+                    return Result::Err(format!("bad option: ", name, " ", value))
+                }
+            }
+        }
+        if fe.is_some() == executable.is_some() {
+            return Result::Err(format!("fevm_tools conformance needs one of --fe and --executable"))
+        }
+        match (fixtures, out) {
+            (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
+                Options { fe, executable, fixtures, out, level, jobs, timeout, select },
+            ),
+            _ => Result::Err(format!("fevm_tools conformance needs --fixtures and --out")),
+        }
+    }
+}
+
+// The integer in hex digits, such as `0x0a`.
+fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
+    match text::parse_hex_uint(digits) {
+        Option::Some(number) => Result::Ok(number),
+        Option::None => Result::Err(format!("not a hex integer: ", digits)),
+    }
+}
+
+// The integer a fixture writes as a hex string or a JSON number.
+fn number(_ value: Value) -> Result<MemBuffer, u256> {
+    if let Option::Some(ref digits) = value.as_string() {
+        return hex_number(digits)
+    }
+    match value.as_u256() {
+        Option::Some(number) => Result::Ok(number),
+        Option::None => Result::Err(format!("not an integer: ", value)),
+    }
+}
+
+// `object[key]` as a number, or `default` without one.
+fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBuffer, u256> {
+    match object.get(key) {
+        Option::Some(ref value) => number(value),
+        Option::None => Result::Ok(default),
+    }
+}
+
+// The bytes of hex digits such as `0x6000`.
+fn hex_bytes(_ digits: MemSpan) -> Result<MemBuffer, MemBuffer> {
+    match text::decode_hex(digits) {
+        Option::Some(decoded) => Result::Ok(MemBuffer::from_span(decoded.span())),
+        Option::None => Result::Err(format!("not hex bytes: ", digits)),
+    }
+}
+
+// `0x` and the bytes' hex digits.
+fn to_hex(_ bytes: MemSpan) -> MemBuffer {
+    var out = MemBuffer::with_capacity(2 + 2 * bytes.len())
+    out.extend_from("0x".span())
+    for byte in bytes {
+        out.extend_from(text::hex(byte as u256, 1).span())
+    }
+    out
+}
+
+// `0x` and the value's hex digits, without leading zeros.
+fn short_hex(_ value: u256) -> MemBuffer {
+    var digits: usize = 1
+    while digits < 64 && (value >> (digits * 4) as u256) != 0 {
+        digits += 1
+    }
+    let padded = text::hex(value, (digits + 1) / 2)
+    format!("0x", padded.span().slice(offset: digits % 2, len: digits))
+}
+
+// Appends `value` as `width` big-endian bytes, which must hold it.
+fn put(_ out: mut MemBuffer, _ value: u256, _ width: usize) -> Result<MemBuffer, ()> {
+    if width < 32 && (value >> (width * 8) as u256) != 0 {
+        return Result::Err(format!(value, " does not fit in ", width, " bytes"))
+    }
+    out.extend_from_word(value, len: width)
+    Result::Ok(())
+}
+
+fn put_number(_ out: mut MemBuffer, _ value: Value, _ width: usize) -> Result<MemBuffer, ()> {
+    put(mut out, number(value)?, width)
+}
+
+// A count or length, as four bytes.
+fn put_len(_ out: mut MemBuffer, _ len: usize) -> Result<MemBuffer, ()> {
+    put(mut out, len as u256, 4)
+}
+
+// The count, then each 32-byte word, of the list `object[key]`, which may be
+// missing.
+fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result<MemBuffer, ()> {
+    match object.get(key) {
+        Option::Some(ref words) => {
+            put_len(mut out, words.items().len())?
+            for ref word in words.items() {
+                put_number(mut out, word, 32)?
+            }
+        },
+        Option::None => put_len(mut out, 0)?,
+    }
+    Result::Ok(())
+}
+
+// EIP-4844's `fake_exponential(MIN_BLOB_GASPRICE, excess, fraction)`.
+fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
+    var output: u256 = 0
+    var accumulator = fraction
+    var i: u256 = 1
+    while accumulator > 0 {
+        if output > u256::max() - accumulator || (excess != 0 && accumulator > u256::max() / excess) {
+            return Result::Err(format!("the blob base fee for excess ", excess, " overflows"))
+        }
+        output += accumulator
+        accumulator = accumulator * excess / (fraction * i)
+        i += 1
+    }
+    Result::Ok(output / fraction)
+}
+
+// The fixture's Osaka blob base fee update fraction, or BPO2's.
+fn update_fraction(_ test: Value) -> Result<MemBuffer, u256> {
+    if let Option::Some(ref config) = test.get("config") {
+        if let Option::Some(ref schedule) = config.get("blobSchedule") {
+            if let Option::Some(ref fork) = schedule.get(FORK) {
+                return number_or(fork, "baseFeeUpdateFraction", BLOB_BASE_FEE_UPDATE_FRACTION)
+            }
+        }
+    }
+    Result::Ok(BLOB_BASE_FEE_UPDATE_FRACTION)
+}
+
+fn chain_id(_ test: Value) -> Result<MemBuffer, u256> {
+    match test.get("config") {
+        Option::Some(ref config) => number_or(config, "chainid", 1),
+        Option::None => Result::Ok(1),
+    }
+}
+
+fn tx_kind(_ tx: Value) -> u8 {
+    if tx.has("authorizationList") {
+        4
+    } else if tx.has("blobVersionedHashes") {
+        3
+    } else if tx.has("maxFeePerGas") {
+        2
+    } else if tx.has("accessLists") {
+        1
+    } else {
+        0
+    }
+}
+
+// A case's selection among the transaction's data, gas limits and values.
+struct Indexes { data: usize, gas: usize, value: usize }
+
+impl Copy for Indexes {}
+
+impl Indexes {
+    fn of(_ post: Value) -> Self {
+        let indexes = ref post["indexes"]
+        Indexes {
+            data: indexes["data"].as_u64().unwrap().downcast_truncate(),
+            gas: indexes["gas"].as_u64().unwrap().downcast_truncate(),
+            value: indexes["value"].as_u64().unwrap().downcast_truncate(),
+        }
+    }
+}
+
+// The driver's binary case format; integers and lengths are big endian.
+fn encode(_ test: Value, _ indexes: Indexes, cap: u64) -> Result<MemBuffer, MemBuffer> {
+    let env = ref test["env"]
+    let tx = ref test["transaction"]
+    var out = MemBuffer::empty()
+    out.push(4)
+    put_number(mut out, env["currentCoinbase"], 20)?
+    put_number(mut out, env["currentNumber"], 32)?
+    put_number(mut out, env["currentTimestamp"], 32)?
+    let random = if env.has("currentRandom") {
+        number(env["currentRandom"])?
+    } else {
+        number_or(env, "currentDifficulty", 0)?
+    }
+    put(mut out, random, 32)?
+    put_number(mut out, env["currentGasLimit"], 32)?
+    put(mut out, number_or(env, "currentBaseFee", 0)?, 32)?
+    let excess = number_or(env, "currentExcessBlobGas", 0)?
+    put(mut out, blob_base_fee(excess, update_fraction(test)?)?, 32)?
+    put(mut out, chain_id(test)?, 32)?
+    put(mut out, cap as u256, 8)?
+    let pre = ref test["pre"].members()
+    put_len(mut out, pre.len())?
+    for ref member in pre {
+        let account = ref member.value
+        let code = match account.get("code") {
+            Option::Some(ref code) => hex_bytes(code.text())?,
+            Option::None => MemBuffer::empty(),
+        }
+        var storage: MemVec<(u256, u256)> = MemVec::new()
+        if let Option::Some(ref entries) = account.get("storage") {
+            for ref entry in entries.members() {
+                let value = number(entry.value)?
+                if value != 0 {
+                    storage.push((hex_number(entry.key.span())?, value))
+                }
+            }
+        }
+        put(mut out, hex_number(member.key.span())?, 20)?
+        put(mut out, number_or(account, "balance", 0)?, 32)?
+        put(mut out, number_or(account, "nonce", 0)?, 32)?
+        put_len(mut out, code.len())?
+        out.extend_from(code.span())
+        put_len(mut out, storage.len())?
+        for (slot, value) in storage {
+            put(mut out, slot, 32)?
+            put(mut out, value, 32)?
+        }
+    }
+    let kind = tx_kind(tx)
+    out.push(kind)
+    out.push(tx.has("chainId") as u8)
+    put(mut out, number_or(tx, "chainId", 0)?, 32)?
+    put_number(mut out, tx["sender"], 20)?
+    let to = tx["to"].text()
+    if to == "" || to == "0x" {
+        out.push(1)
+        put(mut out, 0, 20)?
+    } else {
+        out.push(0)
+        put_number(mut out, tx["to"], 20)?
+    }
+    put_number(mut out, tx["nonce"], 32)?
+    put_number(mut out, tx["gasLimit"][indexes.gas], 8)?
+    if kind >= 2 {
+        put_number(mut out, tx["maxFeePerGas"], 32)?
+    } else {
+        put_number(mut out, tx["gasPrice"], 32)?
+    }
+    put(mut out, number_or(tx, "maxPriorityFeePerGas", 0)?, 32)?
+    put(mut out, number_or(tx, "maxFeePerBlobGas", 0)?, 32)?
+    put_number(mut out, tx["value"][indexes.value], 32)?
+    let data = hex_bytes(tx["data"][indexes.data].text())?
+    put_len(mut out, data.len())?
+    out.extend_from(data.span())
+    // The access list of the selected data, if the transaction has lists.
+    var listed = false
+    if let Option::Some(ref lists) = tx.get("accessLists") {
+        if lists.items().len() != 0 && !lists[indexes.data].is_null() {
+            let entries = ref lists[indexes.data].items()
+            put_len(mut out, entries.len())?
+            for ref entry in entries {
+                put_number(mut out, entry["address"], 20)?
+                put_words(mut out, entry, "storageKeys")?
+            }
+            listed = true
+        }
+    }
+    if !listed {
+        put_len(mut out, 0)?
+    }
+    put_words(mut out, tx, "blobVersionedHashes")?
+    match tx.get("authorizationList") {
+        Option::Some(ref list) => {
+            put_len(mut out, list.items().len())?
+            for ref entry in list.items() {
+                put_number(mut out, entry["chainId"], 32)?
+                put_number(mut out, entry["address"], 20)?
+                put_number(mut out, entry["nonce"], 32)?
+                if entry.has("yParity") {
+                    put_number(mut out, entry["yParity"], 32)?
+                } else {
+                    put_number(mut out, entry["v"], 32)?
+                }
+                put_number(mut out, entry["r"], 32)?
+                put_number(mut out, entry["s"], 32)?
+            }
+        },
+        Option::None => put_len(mut out, 0)?,
+    }
+    Result::Ok(out)
+}
+
+// An account's balance, nonce, code and nonzero storage.
+struct Account { balance: u256, nonce: u256, code: MemBuffer, storage: HashMap<u256, u256> }
+
+impl Account {
+    fn empty() -> Self {
+        Account { balance: 0, nonce: 0, code: MemBuffer::empty(), storage: HashMap::new() }
+    }
+
+    fn describe(self) -> MemBuffer {
+        format!(
+            "balance ",
+            self.balance,
+            ", nonce ",
+            self.nonce,
+            ", code ",
+            to_hex(self.code.span()),
+            ", ",
+            self.storage.len(),
+            if self.storage.len() == 1 { " storage slot" } else { " storage slots" },
+        )
+    }
+}
+
+// The post-state a fixture expects.
+fn expected_state(_ alloc: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
+    var accounts: HashMap<u256, Account> = HashMap::new()
+    for ref member in alloc.members() {
+        let entry = ref member.value
+        var account = Account {
+            balance: number_or(entry, "balance", 0)?,
+            nonce: number_or(entry, "nonce", 0)?,
+            code: match entry.get("code") {
+                Option::Some(ref code) => hex_bytes(code.text())?,
+                Option::None => MemBuffer::empty(),
+            },
+            storage: HashMap::new(),
+        }
+        if let Option::Some(ref storage) = entry.get("storage") {
+            for ref slot in storage.members() {
+                let value = number(slot.value)?
+                if value != 0 {
+                    let _ = account.storage.insert(hex_number(slot.key.span())?, value)
+                }
+            }
+        }
+        let _ = accounts.insert(hex_number(member.key.span())?, account)
+    }
+    Result::Ok(accounts)
+}
+
+// The post-state the driver reports. Storage of an address without an
+// account record is stale, and shows up as a difference.
+fn observed_state(_ result: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
+    var accounts: HashMap<u256, Account> = HashMap::new()
+    for ref entry in result["accounts"].items() {
+        let account = Account {
+            balance: hex_number(entry[1].text())?,
+            nonce: hex_number(entry[2].text())?,
+            code: hex_bytes(entry[3].text())?,
+            storage: HashMap::new(),
+        }
+        let _ = accounts.insert(hex_number(entry[0].text())?, account)
+    }
+    for ref entry in result["storage"].items() {
+        let value = hex_number(entry[2].text())?
+        if value != 0 {
+            let address = hex_number(entry[0].text())?
+            let slot = hex_number(entry[1].text())?
+            let account = mut accounts.get_or_insert(address, Account::empty())
+            let _ = account.storage.insert(slot, value)
+        }
+    }
+    Result::Ok(accounts)
+}
+
+fn address_text(_ address: u256) -> MemBuffer {
+    format!("0x", text::hex(address, 20))
+}
+
+// The keys of both maps, in order, each once.
+fn union_keys<V>(_ a: HashMap<u256, V>, _ b: HashMap<u256, V>) -> MemVec<u256> {
+    var keys: MemVec<u256> = MemVec::new()
+    for key in a.keys() {
+        keys.push(key)
+    }
+    for key in b.keys() {
+        if !a.contains_key(key) {
+            keys.push(key)
+        }
+    }
+    keys.sort()
+    keys
+}
+
+fn slot_value(_ storage: HashMap<u256, u256>, _ slot: u256) -> u256 {
+    match storage.get(slot) {
+        Option::Some(value) => value,
+        Option::None => 0,
+    }
+}
+
+// Each difference between the expected and the observed post-state.
+fn state_difference(
+    _ expected: HashMap<u256, Account>,
+    _ observed: HashMap<u256, Account>,
+    _ problems: mut MemVec<MemBuffer>,
+) {
+    for address in union_keys(expected, observed) {
+        let name = address_text(address)
+        if let Option::Some(ref want) = expected.get(address) {
+            if let Option::Some(ref got) = observed.get(address) {
+                if want.balance != got.balance {
+                    problems.push(format!(name, " balance: expected ", want.balance, ", got ", got.balance))
+                }
+                if want.nonce != got.nonce {
+                    problems.push(format!(name, " nonce: expected ", want.nonce, ", got ", got.nonce))
+                }
+                if want.code != got.code {
+                    problems.push(
+                        format!(name, " code: expected ", to_hex(want.code.span()), ", got ", to_hex(got.code.span())),
+                    )
+                }
+                for slot in union_keys(want.storage, got.storage) {
+                    let a = slot_value(want.storage, slot)
+                    let b = slot_value(got.storage, slot)
+                    if a != b {
+                        problems.push(
+                            format!(name, "[", short_hex(slot), "]: expected ", short_hex(a), ", got ", short_hex(b)),
+                        )
+                    }
+                }
+            } else {
+                problems.push(format!(name, ": expected ", want.describe(), ", got absent"))
+            }
+        } else if let Option::Some(ref got) = observed.get(address) {
+            problems.push(format!(name, ": expected absent, got ", got.describe()))
+        }
+    }
+}
+
+// What a case's post entry expects.
+struct Expect {
+    exception: Option<MemBuffer>,
+    // The fixture's logs hash, as written there, and its value.
+    logs: MemBuffer,
+    logs_hash: u256,
+    state: HashMap<u256, Account>,
+}
+
+impl Expect {
+    fn of(_ post: Value) -> Result<MemBuffer, Self> {
+        let logs = ref post["logs"]
+        Result::Ok(
+            Expect {
+                exception: match post.get("expectException") {
+                    Option::Some(ref exception) => Option::Some(MemBuffer::from_span(exception.text())),
+                    Option::None => Option::None,
+                },
+                logs: match logs.as_string() {
+                    Option::Some(ref text) => MemBuffer::from_span(text),
+                    Option::None => format!(logs),
+                },
+                logs_hash: number(logs)?,
+                state: expected_state(post["state"])?,
+            },
+        )
+    }
+
+    // FeVM takes a transaction's recovered sender; rejecting a malformed
+    // signature belongs to the host that decodes the signed transaction.
+    fn malformed_signature(self) -> bool {
+        let signature: DynString = "TransactionException.INVALID_SIGNATURE_VRS"
+        match self.exception {
+            Option::Some(ref exception) => exception.span().index_of(signature).is_some(),
+            Option::None => false,
+        }
+    }
+}
+
+// A case's outcome and the problems found.
+struct Verdict { outcome: usize, problems: MemVec<MemBuffer> }
+
+impl Verdict {
+    fn new(_ outcome: usize) -> Self {
+        Verdict { outcome, problems: MemVec::new() }
+    }
+
+    fn with<T: std::io::Display>(var own self, _ problem: T) -> Self {
+        self.problems.push(format!(problem))
+        self
+    }
+}
+
+// The last `STDERR_TAIL` bytes of `bytes`.
+fn tail(_ bytes: MemBuffer) -> MemBuffer {
+    let len = bytes.len()
+    let from = if len > STDERR_TAIL { len - STDERR_TAIL } else { 0 }
+    MemBuffer::from_span(bytes.span().slice(offset: from, len: len - from))
+}
+
+// Judges the driver's output for a case.
+fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+    if let Status::TimedOut = output.status {
+        return Result::Ok(Verdict::new(TIMEOUT).with(format!("exceeded ", timeout, " seconds")))
+    }
+    let result = match parse(output.stdout.span()) {
+        Result::Ok(result) => result,
+        Result::Err(_) => {
+            return Result::Ok(Verdict::new(CRASH).with(output.status).with(tail(output.stderr)))
+        },
+    }
+    if let Option::Some(ref error) = result.get("host_error") {
+        return Result::Ok(Verdict::new(HOST_ERROR).with(error.text()))
+    }
+    if !output.status.success() {
+        return Result::Ok(Verdict::new(CRASH).with(output.status))
+    }
+    let status = result["status"].text()
+    if result["host_failure"].as_bool() == Option::Some(true) {
+        return Result::Ok(Verdict::new(HOST_ERROR).with(status))
+    }
+    // The first problem, the execution's status, is filled in if there are others.
+    var verdict = Verdict::new(FAILED).with("")
+    let invalid = ref result["invalid"]
+    let expected = match expect.exception {
+        Option::Some(ref exception) => format!("invalid (", exception, ")"),
+        Option::None => format!("valid"),
+    }
+    if expect.exception.is_some() == invalid.is_null() {
+        let got = if invalid.is_null() { format!("valid") } else { format!("invalid ", invalid.text()) }
+        verdict.problems.push(format!("expected ", expected, ", got ", got))
+    }
+    if hex_number(result["logs_hash"].text())? != expect.logs_hash {
+        verdict.problems.push(format!("logs hash ", result["logs_hash"].text(), " != ", expect.logs))
+    }
+    state_difference(expect.state, observed_state(result)?, mut verdict.problems)
+    if verdict.problems.len() == 1 {
+        return Result::Ok(Verdict::new(PASSED))
+    }
+    verdict.problems.set(0, format!("execution status ", status, ", gas used ", result["gas_used"]))
+    Result::Ok(verdict)
+}
+
+// The `.json` files under `root`, relative to it, in the order of their path
+// components; with a selection, only paths that hold one of its parts.
+fn fixture_files(_ root: MemSpan, _ select: MemVec<Arg>) -> Result<MemBuffer, MemVec<MemBuffer>>
+uses (fs: Fs)
+{
+    var files: MemVec<MemBuffer> = MemVec::new()
+    walk(root, MemBuffer::empty(), mut files)?
+    if select.is_empty() {
+        return Result::Ok(files)
+    }
+    var selected: MemVec<MemBuffer> = MemVec::new()
+    for ref file in files {
+        var keep = false
+        for ref part in select {
+            keep = keep || file.span().index_of(part.span()).is_some()
+        }
+        if keep {
+            selected.push(MemBuffer::from_span(file.span()))
+        }
+    }
+    Result::Ok(selected)
+}
+
+// A directory entry, ordered by name.
+struct Entry { name: MemBuffer, dir: bool }
+
+impl core::ops::Ord for Entry {
+    fn lt(self, _ other: Entry) -> bool { self.name < other.name }
+    fn le(self, _ other: Entry) -> bool { self.name <= other.name }
+    fn gt(self, _ other: Entry) -> bool { self.name > other.name }
+    fn ge(self, _ other: Entry) -> bool { self.name >= other.name }
+}
+
+fn walk(_ root: MemSpan, _ prefix: MemBuffer, _ files: mut MemVec<MemBuffer>) -> Result<MemBuffer, ()>
+uses (fs: Fs)
+{
+    let dir = format!(root, "/", prefix)
+    var entries: MemVec<Entry> = MemVec::new()
+    for ref entry in named(dir, fs.read_dir(dir))? {
+        let file_type = entry.file_type()
+        let is_dir = match file_type {
+            FileType::Dir => true,
+            _ => false,
+        }
+        let is_file = match file_type {
+            FileType::File => true,
+            _ => false,
+        }
+        if is_dir || (is_file && entry.name().ends_with(".json")) {
+            entries.push(Entry { name: MemBuffer::from_span(entry.name()), dir: is_dir })
+        }
+    }
+    entries.sort()
+    for ref entry in entries {
+        let path = if prefix.is_empty() { format!(entry.name) } else { format!(prefix, "/", entry.name) }
+        if entry.dir {
+            walk(root, path, mut files)?
+        } else {
+            files.push(path)
+        }
+    }
+    Result::Ok(())
+}
+
+// The first two components of a fixture's path, which name its group.
+fn group_of(_ file: MemSpan) -> MemBuffer {
+    var slashes: usize = 0
+    var i: usize = 0
+    while i < file.len() {
+        if file[i] == b'/' {
+            slashes += 1
+            if slashes == 2 {
+                return MemBuffer::from_span(file.slice(offset: 0, len: i))
+            }
+        }
+        i += 1
+    }
+    MemBuffer::from_span(file)
+}
+
+// A case's place in its fixture file.
+struct Case { file: MemBuffer, name: MemBuffer, index: usize, indexes: Indexes }
+
+impl Case {
+    // Its line of `cases.jsonl`.
+    fn row(self, _ verdict: Verdict, took: Duration) -> MemBuffer {
+        var row = Value::object()
+        row.set("file", Value::string(self.file))
+        row.set("name", Value::string(self.name))
+        row.set("index", Value::number(self.index))
+        var indexes = Value::object()
+        indexes.set("data", Value::number(self.indexes.data))
+        indexes.set("gas", Value::number(self.indexes.gas))
+        indexes.set("value", Value::number(self.indexes.value))
+        row.set("indexes", indexes)
+        row.set("outcome", Value::string(outcome_name(verdict.outcome)))
+        row.set("seconds", seconds(took))
+        var problems = Value::array()
+        for ref problem in verdict.problems {
+            problems.push(Value::string(problem))
+        }
+        row.set("problems", problems)
+        var line = MemBuffer::empty()
+        row.write(mut line)
+        line.push(b'\n')
+        line
+    }
+}
+
+// A driver running a case, and the line of `cases.jsonl` it fills.
+struct Running { line: usize, case: Case, expect: Expect, started: Instant }
+
+// The outcomes counted overall and by group.
+struct Tally { totals: [u64; 6], groups: HashMap<MemBuffer, [u64; 6]> }
+
+impl Tally {
+    fn count(mut self, _ file: MemSpan, _ outcome: usize) {
+        self.totals[outcome] += 1
+        let group = mut self.groups.get_or_insert(group_of(file), [0; 6])
+        group[outcome] += 1
+    }
+}
+
+// The nonzero counts, by outcome name.
+fn counts_value(_ counts: [u64; 6]) -> Value {
+    var value = Value::object()
+    for outcome in 0..OUTCOMES {
+        if counts[outcome] != 0 {
+            value.set(outcome_name(outcome), Value::number(counts[outcome]))
+        }
+    }
+    value
+}
+
+fn trimmed(_ bytes: MemBuffer) -> MemBuffer {
+    MemBuffer::from_span(bytes.span().trim())
+}
+
+fn file_sha256(_ path: MemSpan) -> Result<MemBuffer, MemBuffer> uses (fs: Fs) {
+    Result::Ok(format!(text::hex(sha256_word(named(path, fs.read(path))?), 32)))
+}
+
+// Runs `command` and returns what it wrote, without its trailing whitespace.
+fn captured(_ what: String<3>, _ command: own Command) -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
+    Result::Ok(trimmed(succeed(what, command.stdout(Redirect::Capture))?.stdout))
+}
+
+// Two fewer jobs than the host has processors, and at least one.
+fn default_jobs() -> Result<MemBuffer, u64> uses (proc: mut Spawn) {
+    let online = captured("cpu", Command::new("getconf").arg("_NPROCESSORS_ONLN"))?
+    let count: u64 = match text::parse_uint(online.span()) {
+        Option::Some(count) => count.downcast_truncate(),
+        Option::None => 1,
+    }
+    Result::Ok(if count > 3 { count - 2 } else { 1 })
+}
+
+// Builds the driver unless given one, runs every Osaka case of the fixtures
+// through it, and reports in `results.json` and `cases.jsonl`.
+pub fn run(_ options: Options) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
+{
+    if fs.metadata(options.out).is_ok() {
+        return Result::Err(format!(options.out, " already exists"))
+    }
+    named(options.out, fs.create_dir_all(options.out))?
+    let dir = named(options.out, fs.canonicalize(options.out))?
+    let fixtures = named(options.fixtures, fs.canonicalize(options.fixtures))?
+    let jobs: usize = match options.jobs {
+        Option::Some(jobs) => jobs,
+        Option::None => default_jobs()?,
+    }
+        .downcast_truncate()
+    var report = Value::object()
+    report.set("schema", Value::number(1 as u64))
+    report.set("fork", Value::string(FORK))
+    report.set("host", Value::string(host()?))
+    report.set("fixtures", Value::string(fixtures))
+    report.set("revision", Value::string(captured("git", Command::new("git").arg("rev-parse").arg("HEAD"))?))
+    let changes = captured(
+        "git",
+        Command::new("git").arg("status").arg("--porcelain").arg("--untracked-files=no"),
+    )?
+    report.set("dirty", Value::Bool(!changes.is_empty()))
+    report.set("level", Value::string(options.level))
+    var select = Value::array()
+    for ref part in options.select {
+        select.push(Value::string(part))
+    }
+    report.set("select", select)
+    let executable = match options.fe {
+        Option::Some(ref fe) => {
+            let compiler = named(fe, fs.canonicalize(fe))?
+            report.set("compiler_sha256", Value::string(file_sha256(compiler.span())?))
+            report.set("compiler_version", Value::string(captured("fe", Command::new(compiler).arg("--version"))?))
+            let started = clock.instant()
+            let build = format!(dir, "/build")
+            succeed(
+                format!("fe build, see ", dir, "/build.log"),
+                Command::new(compiler)
+                    .arg("build")
+                    .arg(".")
+                    .arg("--ingot")
+                    .arg("fevm_conformance")
+                    .arg("--backend")
+                    .arg("native")
+                    .arg("-O")
+                    .arg(options.level)
+                    .arg("--out-dir")
+                    .arg(build)
+                    .stdout(Redirect::File(format!(dir, "/build.log")))
+                    .stderr(Redirect::Stdout),
+            )?
+            report.set("build_seconds", seconds(clock.instant().duration_since(started)))
+            format!(build, "/fevm_conformance")
+        },
+        Option::None => match options.executable {
+            Option::Some(ref path) => named(path, fs.canonicalize(path))?,
+            Option::None => return Result::Err(format!("no driver to run")),
+        },
+    }
+    report.set("executable_sha256", Value::string(file_sha256(executable.span())?))
+    let files = fixture_files(fixtures.span(), options.select)?
+    let started = clock.instant()
+    var lines: MemVec<MemBuffer> = MemVec::new()
+    var tally = Tally { totals: [0; 6], groups: HashMap::new() }
+    var children: MemVec<Child> = MemVec::new()
+    var running: MemVec<Running> = MemVec::new()
+    // The next case is post `post` of test `test` of `doc`, read from the
+    // file before `next_file`.
+    var doc = Value::object()
+    var file = MemBuffer::empty()
+    var next_file: usize = 0
+    var test: usize = 0
+    var post: usize = 0
+    while true {
+        var found = false
+        while !found && children.len() < jobs {
+            if test < doc.members().len() {
+                let posts = ref doc.members()[test].value["post"]
+                if posts.has(FORK) && post < posts[FORK].items().len() {
+                    found = true
+                } else {
+                    test += 1
+                    post = 0
+                }
+            } else if next_file < files.len() {
+                file = MemBuffer::from_span(files[next_file].span())
+                let path = format!(fixtures, "/", file)
+                let source = named(path, fs.read(path))?
+                doc = named(path, parse(source.span()))?
+                next_file += 1
+                test = 0
+                post = 0
+            } else {
+                break
+            }
+        }
+        if found {
+            let member = ref doc.members()[test]
+            let entry = ref member.value["post"][FORK][post]
+            let case = Case {
+                file: MemBuffer::from_span(file.span()),
+                name: MemBuffer::from_span(member.key.span()),
+                index: post,
+                indexes: Indexes::of(entry),
+            }
+            let expect = named(path_case(file, member.key), Expect::of(entry))?
+            post += 1
+            let line = lines.len()
+            if expect.malformed_signature() {
+                tally.count(case.file.span(), SIGNATURE)
+                lines.push(case.row(Verdict::new(SIGNATURE), took: Duration::from_nanos(0)))
+                continue
+            }
+            let input = named(
+                path_case(file, member.key),
+                encode(member.value, case.indexes, cap: TX_GAS_LIMIT_CAP),
+            )?
+            let child = named(
+                executable,
+                proc.spawn(
+                    Command::new(executable)
+                        .stdin(Input::Bytes(input))
+                        .stdout(Redirect::Capture)
+                        .stderr(Redirect::Capture)
+                        .timeout(Duration::from_secs(options.timeout)),
+                ),
+            )?
+            lines.push(MemBuffer::empty())
+            children.push(child)
+            running.push(Running { line, case, expect, started: clock.instant() })
+            continue
+        }
+        if children.is_empty() {
+            break
+        }
+        let index = named(executable, proc.wait_any(mut children.as_slice()))?
+        let output = named(executable, proc.wait(children.swap_remove(index)))?
+        let done = running.swap_remove(index)
+        let took = clock.instant().duration_since(done.started)
+        let verdict = named(path_case(done.case.file, done.case.name), check(done.expect, output, timeout: options.timeout))?
+        tally.count(done.case.file.span(), verdict.outcome)
+        lines.set(done.line, done.case.row(verdict, took))
+    }
+    report.set("seconds", seconds(clock.instant().duration_since(started)))
+    report.set("cases", Value::number(lines.len()))
+    report.set("totals", counts_value(tally.totals))
+    var names: MemVec<MemBuffer> = MemVec::new()
+    for ref name in tally.groups.keys() {
+        names.push(MemBuffer::from_span(name.span()))
+    }
+    names.sort()
+    var groups = Value::object()
+    for ref name in names {
+        groups.set(name, counts_value(tally.groups[name]))
+    }
+    report.set("groups", groups)
+    var rows = MemBuffer::empty()
+    for ref line in lines {
+        rows.extend_from(line.span())
+    }
+    let cases = format!(dir, "/cases.jsonl")
+    named(cases, fs.write(cases, rows.span()))?
+    var text = MemBuffer::empty()
+    report.write_pretty(mut text, indent: 2)
+    text.push(b'\n')
+    let results = format!(dir, "/results.json")
+    named(results, fs.write(results, text.span()))?
+    println!(counts_value(tally.totals))
+    let passing = tally.totals[PASSED] + tally.totals[SIGNATURE]
+    let total: u64 = lines.len().downcast_truncate()
+    if passing != total {
+        return Result::Err(format!(total - passing, " of ", total, " cases did not pass"))
+    }
+    Result::Ok(())
+}
+
+// A case's file and test name, for messages.
+fn path_case(_ file: MemBuffer, _ name: MemBuffer) -> MemBuffer {
+    format!(file, " ", name)
+}
+
+#[test]
+fn encode_matches_the_python_encoder() {
+    let source: DynString = "{\"env\":{\"currentCoinbase\":\"0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba\",\"currentNumber\":\"0x01\",\"currentTimestamp\":\"0x03e8\",\"currentRandom\":\"0x0000000000000000000000000000000000000000000000000000000000020000\",\"currentGasLimit\":\"0x016345785d8a0000\",\"currentBaseFee\":\"0x07\",\"currentExcessBlobGas\":\"0x0c0000\"},\"config\":{\"chainid\":\"0x01\",\"blobSchedule\":{\"Osaka\":{\"target\":\"0x06\",\"max\":\"0x09\",\"baseFeeUpdateFraction\":\"0x4c6964\"}}},\"pre\":{\"0x1000000000000000000000000000000000000000\":{\"nonce\":\"0x01\",\"balance\":\"0x00\",\"code\":\"0x600160005500\",\"storage\":{\"0x00\":\"0x00\",\"0x01\":\"0x02\"}},\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\":{\"nonce\":\"0x00\",\"balance\":\"0x3635c9adc5dea00000\",\"code\":\"0x\",\"storage\":{}}},\"transaction\":{\"nonce\":\"0x00\",\"maxFeePerGas\":\"0x0a\",\"maxPriorityFeePerGas\":\"0x01\",\"gasLimit\":[\"0x0186a0\",\"0x05f5e100\"],\"to\":\"0x1000000000000000000000000000000000000000\",\"value\":[\"0x00\",\"0x01\"],\"data\":[\"0x\",\"0xabcdef\"],\"accessLists\":[[],[{\"address\":\"0x1000000000000000000000000000000000000000\",\"storageKeys\":[\"0x01\",\"0x02\"]}]],\"sender\":\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\"chainId\":\"0x01\"}}"
+    let test = parse(source.span()).unwrap()
+    let encoded = encode(test, Indexes { data: 1, gas: 0, value: 1 }, cap: TX_GAS_LIMIT_CAP).unwrap()
+    let expected: DynString = "0x042adc25665018aa1fe0e6bc666dac8fc2697ff9ba000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000100000000000002100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000066001600055000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002a94f5374fce5edbc8e2a8697c15331677e6ebf0b00000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000000000000000000000000000000000000000000000000000000000000002010000000000000000000000000000000000000000000000000000000000000001a94f5374fce5edbc8e2a8697c15331677e6ebf0b001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000186a0000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000003abcdef00000001100000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000"
+    assert!(to_hex(encoded.span()).span() == expected.span())
+}
+
+#[test]
+fn blob_base_fee_follows_eip_4844() {
+    assert!(blob_base_fee(0, BLOB_BASE_FEE_UPDATE_FRACTION).unwrap() == 1)
+    assert!(blob_base_fee(0xc0000, 0x4c6964).unwrap() == 1)
+    assert!(blob_base_fee(1 << 22, 3338477).unwrap() == 3)
+    assert!(blob_base_fee(100000000, 3338477).unwrap() == 10203769476395)
+    assert!(blob_base_fee(1 << 200, 1).is_err())
+}
+
+#[test]
+fn short_hex_drops_leading_zeros() {
+    assert!(short_hex(0) == "0x0")
+    assert!(short_hex(0xa) == "0xa")
+    assert!(short_hex(0xff) == "0xff")
+    assert!(short_hex(0x1f0) == "0x1f0")
+    let max: DynString = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    assert!(short_hex(u256::max()).span() == max.span())
+}
+
+#[test]
+fn groups_are_the_first_two_components() {
+    assert!(group_of("for_osaka/berlin/eip2929/call.json".span()) == "for_osaka/berlin")
+    assert!(group_of("for_osaka/call.json".span()) == "for_osaka/call.json")
+    assert!(group_of("call.json".span()) == "call.json")
+}
+
+fn post_entry() -> Value {
+    let source: DynString = "{\"state\":{\"0x0000000000000000000000000000000000000001\":{\"balance\":\"0x01\",\"nonce\":\"0x00\",\"code\":\"0x6000\",\"storage\":{\"0x01\":\"0x02\",\"0x03\":\"0x00\"}}},\"logs\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"indexes\":{\"data\":0,\"gas\":0,\"value\":0}}"
+    parse(source.span()).unwrap()
+}
+
+fn output(_ stdout: DynString, _ status: Status) -> Output {
+    Output {
+        status,
+        stdout: MemBuffer::from_span(stdout.span()),
+        stderr: MemBuffer::empty(),
+        usage: std::process::Usage { user: Duration::from_nanos(0), system: Duration::from_nanos(0), max_rss: 0 },
+    }
+}
+
+fn verdict(_ stdout: DynString) -> Verdict {
+    check(Expect::of(post_entry()).unwrap(), output(stdout, Status::Exited(0)), timeout: 1).unwrap()
+}
+
+#[test]
+fn check_compares_the_post_state() {
+    let passing = verdict(
+        "{\"invalid\":null,\"status\":\"success\",\"host_failure\":false,\"gas_used\":21000,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x6000\"]],\"storage\":[[\"0x01\",\"0x1\",\"0x2\"],[\"0x01\",\"0x4\",\"0x0\"]]}",
+    )
+    assert!(passing.outcome == PASSED && passing.problems.is_empty())
+    let failing = verdict(
+        "{\"invalid\":\"INTRINSIC_GAS\",\"status\":\"success\",\"host_failure\":false,\"gas_used\":0,\"logs_hash\":\"0x00\",\"accounts\":[[\"0x01\",\"0x2\",\"0x0\",\"0x60\"]],\"storage\":[[\"0x01\",\"0x1\",\"0x3\"],[\"0x02\",\"0x1\",\"0x1\"]]}",
+    )
+    assert!(failing.outcome == FAILED && failing.problems.len() == 7)
+    assert!(failing.problems[0] == "execution status success, gas used 0")
+    assert!(failing.problems[1] == "expected valid, got invalid INTRINSIC_GAS")
+    let logs: DynString = "logs hash 0x00 != 0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
+    assert!(failing.problems[2].span() == logs.span())
+    let address: DynString = "0x0000000000000000000000000000000000000001"
+    assert!(failing.problems[3].span() == format!(address, " balance: expected 1, got 2").span())
+    assert!(failing.problems[4].span() == format!(address, " code: expected 0x6000, got 0x60").span())
+    assert!(failing.problems[5].span() == format!(address, "[0x1]: expected 0x2, got 0x3").span())
+    let stale: DynString = "0x0000000000000000000000000000000000000002: expected absent, got balance 0, nonce 0, code 0x, 1 storage slot"
+    assert!(failing.problems[6].span() == stale.span())
+}
+
+#[test]
+fn check_reports_drivers_that_fail() {
+    let expect = Expect::of(post_entry()).unwrap()
+    let crashed = check(expect, output("", Status::Signaled(11)), timeout: 1).unwrap()
+    assert!(crashed.outcome == CRASH && crashed.problems[0] == "signal 11")
+    let timed_out = check(expect, output("", Status::TimedOut), timeout: 7).unwrap()
+    assert!(timed_out.outcome == TIMEOUT && timed_out.problems[0] == "exceeded 7 seconds")
+    let host = check(expect, output("{\"host_error\":\"pre-state allocation failed\"}", Status::Exited(1)), timeout: 1).unwrap()
+    assert!(host.outcome == HOST_ERROR)
+    let failure = check(expect, output("{\"invalid\":null,\"status\":\"balance overflow\",\"host_failure\":true}", Status::Exited(0)), timeout: 1).unwrap()
+    assert!(failure.outcome == HOST_ERROR && failure.problems[0] == "balance overflow")
+    let exited = check(expect, output("{\"invalid\":null,\"status\":\"success\",\"host_failure\":false}", Status::Exited(2)), timeout: 1).unwrap()
+    assert!(exited.outcome == CRASH && exited.problems[0] == "exit status 2")
+}
+
+#[test]
+fn signature_cases_are_not_run() {
+    let source: DynString = "{\"expectException\":\"TransactionException.INTRINSIC_GAS_TOO_LOW|TransactionException.INVALID_SIGNATURE_VRS\",\"state\":{},\"logs\":\"0x00\"}"
+    assert!(Expect::of(parse(source.span()).unwrap()).unwrap().malformed_signature())
+    assert!(!Expect::of(post_entry()).unwrap().malformed_signature())
+}

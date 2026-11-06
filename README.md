@@ -15,12 +15,13 @@ The repo is a Fe workspace:
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the Osaka precompiled contracts
 - `native/client`: a Rust client for `fevm serve`, the session mode
-- `native/conformance`: the Ethereum state-test runner and its driver
+- `native/conformance`: the Ethereum state-test driver
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
   allocation-failure and compiler arithmetic checks
-- `native/tools`: the acceptance suite and fevm's other checks written in Fe
+- `native/tools`: the acceptance suite, the state-test runner and fevm's other
+  checks written in Fe
 - `native/bootstrap.py`: the pinned compiler build
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
@@ -160,7 +161,7 @@ native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
   --emit executable --out-dir native/out/tools
 native/out/tools/fevm_tools accept --build native/out/toolchain/build.json \
   --out native/out/acceptance --check-only
-python3 native/conformance/run.py --fe native/out/toolchain/bin/fe \
+native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
   --fixtures <execution-spec-tests>/fixtures/state_tests --out native/out/conformance
 ```
 
