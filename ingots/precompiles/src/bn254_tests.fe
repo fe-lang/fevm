@@ -27,7 +27,7 @@ fn output_word(_ output: MemBuffer, offset: u64) -> u256 {
 }
 
 // A 192-byte pairing input of G1 (x, y) with G2 words g2.
-fn pair(_ bytes: mut [u8; 384], index: u64, x: u256, y: u256, g2: [u256; 4]) {
+fn pair<const N: usize>(_ bytes: mut [u8; N], index: u64, x: u256, y: u256, g2: [u256; 4]) {
     let base = index * 192
     put(mut bytes, offset: base, value: x)
     put(mut bytes, offset: base + 32, value: y)
@@ -136,4 +136,24 @@ fn bn254_pairing_checks_bilinearity_and_subgroups() {
     core::assert(outside.status == FAILURE)
     let short_gas = run(address: 8, input, gas: 112999)
     core::assert(short_gas.status == FAILURE && short_gas.gas_used == 112999)
+}
+
+#[test]
+fn bn254_pairing_spans_chunks_and_checks_every_pair() {
+    // Three pairs (G1, G2) and three (-G1, G2) around an identity pair: one.
+    var input: [u8; 1344] = [0; 1344]
+    for index in [0 as u64, 1, 2] { pair(mut input, index, x: 1, y: 2, g2: G2) }
+    for index in [4 as u64, 5, 6] { pair(mut input, index, x: 1, y: P_MINUS_TWO, g2: G2) }
+    let holds = run(address: 8, input, gas: 45000 + 34000 * 7)
+    core::assert(holds.status == SUCCESS && output_word(holds.output, offset: 0) == 1)
+    // Without the last (-G1, G2), the product is e(G1, G2).
+    var unbalanced: [u8; 1152] = [0; 1152]
+    for index in [0 as u64, 1, 2] { pair(mut unbalanced, index, x: 1, y: 2, g2: G2) }
+    for index in [4 as u64, 5] { pair(mut unbalanced, index, x: 1, y: P_MINUS_TWO, g2: G2) }
+    let fails = run(address: 8, input: unbalanced, gas: 45000 + 34000 * 6)
+    core::assert(fails.status == SUCCESS && output_word(fails.output, offset: 0) == 0)
+    // An invalid point after valid pairs fails the call.
+    pair(mut unbalanced, index: 5, x: 1, y: 3, g2: G2)
+    let invalid = run(address: 8, input: unbalanced, gas: 45000 + 34000 * 6)
+    core::assert(invalid.status == FAILURE)
 }

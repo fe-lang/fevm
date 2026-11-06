@@ -2,10 +2,10 @@ use core::Option
 use keccak::ByteSource
 use ingot::bn254_curve::{Point, on_curve}
 use ingot::bn254_field::{Field, Fp, Fp2, Fp12, MODULUS, fp, fp_value}
-use ingot::bn254_pairing::{final_exponentiation, miller_loop, twist_b}
+use ingot::bn254_pairing::{CHUNK, Pair, final_exponentiation, frobenius, miller_loop, twist_b}
 
-// The prime order r of G1 and of the G2 subgroup.
-const CURVE_ORDER: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+// 6x^2 = p - 1 mod r, the eigenvalue of the Frobenius on G2.
+const SIX_X_SQUARED: u256 = 0x6f4d8248eeb859fbf83e9682e87cfd46
 
 // A big-endian word at `offset`; bytes past the input read as zero.
 fn word<T: ByteSource>(_ input: T, offset: usize) -> u256 {
@@ -63,28 +63,55 @@ pub fn mul<T: ByteSource>(_ input: T) -> Option<[u256; 2]> {
     }
 }
 
+// Whether a twist point is in G2: pi(Q) = [6x^2] Q (https://eprint.iacr.org/2022/352
+// section 4.3). Frobenius satisfies pi^2 - t pi + p = 0 with t = 6x^2 + 1, so a
+// passing point has [p - t + 1] Q = [r] Q = O.
+fn in_g2(_ q: Point<Fp2>) -> bool {
+    if q.is_infinity() { return true }
+    let (x, y) = frobenius(q.x, q.y)
+    q.multiply(SIX_X_SQUARED).equals(Point::affine(x, y))
+}
+
 /// ECPAIRING (0x08): whether the product of the pairings of 192-byte (G1, G2)
 /// pairs is one, or None for invalid input. G1 has cofactor one, so on-curve
 /// points are in the subgroup; G2 points must have order r.
 pub fn pairing<T: ByteSource>(_ input: T) -> Option<bool> {
     let len = input.len()
     if len % 192 != 0 { return Option::None }
-    var product = Fp12::one()
+    // Check every pair before the Miller loops, which an invalid pair voids.
     var offset: usize = 0
     while offset < len {
-        let p = match g1_point(input, offset) {
-            Option::Some(p) => p,
+        if g1_point(input, offset).is_none() { return Option::None }
+        match g2_point(input, offset: offset + 64) {
+            Option::Some(q) => if !in_g2(q) { return Option::None },
             Option::None => return Option::None,
-        }
-        let q = match g2_point(input, offset: offset + 64) {
-            Option::Some(q) => q,
-            Option::None => return Option::None,
-        }
-        if !q.multiply(CURVE_ORDER).is_infinity() { return Option::None }
-        if !p.is_infinity() && !q.is_infinity() {
-            product = product.mul(miller_loop(qx: q.x, qy: q.y, px: p.x, py: p.y))
         }
         offset += 192
     }
+    // Pairs with the identity contribute one; with none left, so does the product.
+    var product = Fp12::one()
+    var used = false
+    var chunk = [Pair { px: Fp::zero(), py: Fp::zero(), qx: Fp2::zero(), qy: Fp2::zero() }; 4]
+    var count: usize = 0
+    offset = 0
+    while offset < len {
+        let p = g1_point(input, offset).unwrap()
+        let q = g2_point(input, offset: offset + 64).unwrap()
+        if !p.is_infinity() && !q.is_infinity() {
+            chunk[count] = Pair { px: p.x, py: p.y, qx: q.x, qy: q.y }
+            count += 1
+            if count == CHUNK {
+                product = product.mul(miller_loop(chunk, count))
+                used = true
+                count = 0
+            }
+        }
+        offset += 192
+    }
+    if count > 0 {
+        product = product.mul(miller_loop(chunk, count))
+        used = true
+    }
+    if !used { return Option::Some(true) }
     Option::Some(final_exponentiation(product).equals(Fp12::one()))
 }

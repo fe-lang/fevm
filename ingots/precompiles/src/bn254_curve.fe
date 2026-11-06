@@ -47,6 +47,14 @@ impl<F> Point<F> where F: Field + Copy {
 
     pub fn neg(self) -> Self { Point { x: self.x, y: self.y.neg(), z: self.z } }
 
+    /// Whether two points are equal: x1 z2^2 = x2 z1^2 and y1 z2^3 = y2 z1^3.
+    pub fn equals(self, _ other: Self) -> bool {
+        if self.is_infinity() || other.is_infinity() { return self.is_infinity() && other.is_infinity() }
+        let z1z1 = self.z.square()
+        let z2z2 = other.z.square()
+        self.x.mul(z2z2).equals(other.x.mul(z1z1)) && self.y.mul(z2z2.mul(other.z)).equals(other.y.mul(z1z1.mul(self.z)))
+    }
+
     // Double-and-add over the scalar's bits, most significant first.
     pub fn multiply(self, _ scalar: u256) -> Self {
         var result = Self::infinity()
