@@ -171,14 +171,10 @@ impl Transaction {
     // Adds `mark` to `address`'s marks, unjournaled; false, changing nothing,
     // if the table cannot grow.
     fn add_mark(mut self, _ address: u256, _ mark: u8) -> bool {
-        match self.marks.find(address) {
-            Option::Some(slot) => {
-                let marks = mut self.marks.value_at(slot)
-                marks |= mark
-                true
-            },
-            Option::None => self.marks.try_insert(address, mark),
-        }
+        let Option::Some(slot) = self.marks.try_find_or_insert(address) else { return false }
+        let marks = mut self.marks.value_at(slot)
+        marks |= mark
+        true
     }
 
     // Clears `mark` from `address`'s marks, which it has an entry for; an
@@ -201,14 +197,11 @@ impl Transaction {
         let address = address_word(address)
         if kind == WARM_ACCOUNT && self.always_warm(address) { return OK }
         let mark = mark_of(kind)
-        match self.marks.find(address) {
-            Option::Some(slot) => {
-                let marks = mut self.marks.value_at(slot)
-                if marks & mark != 0 { return OK }
-                marks |= mark
-            },
-            Option::None => if !self.marks.try_insert(address, mark) { return ERR_HOST_ALLOCATION },
-        }
+        // A new address gets an entry without marks first.
+        let Option::Some(slot) = self.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
+        let marks = mut self.marks.value_at(slot)
+        if marks & mark != 0 { return OK }
+        marks |= mark
         if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
             core::assert(self.unmark(address, mark))
             return ERR_HOST_ALLOCATION
