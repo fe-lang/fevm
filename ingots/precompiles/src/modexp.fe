@@ -165,6 +165,12 @@ fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
         if exponent.top == total && !unit { result[0] = 1 }
         return Option::Some(result)
     }
+    // A single squaring does not pay for converting to and from Montgomery form.
+    if total - exponent.top == 2 && exponent_bit(input, start, index: total - 1) == 0 {
+        modulus.mul_mod(base, base, mut work)
+        result.as_slice().copy_from(work.as_slice().head(size))
+        return Option::Some(result)
+    }
     let width = window_width(total - exponent.top)
     let entries: usize = (1 << (width - 1)).downcast_truncate()
     var table = MemArray<u64>::try_new_zeroed(entries * size)?
@@ -175,9 +181,11 @@ fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
     }
     modulus.reduce(mut work, len: 2 * n)
     table.as_slice().head(size).copy_from(work.as_slice().head(size))
-    montgomery.mul(table.as_slice().head(size), table.as_slice().head(size), mut work)
     var squared = MemArray<u64>::try_new_zeroed(size)?
-    squared.as_slice().copy_from(work.as_slice().head(size))
+    if entries > 1 {
+        montgomery.mul(table.as_slice().head(size), table.as_slice().head(size), mut work)
+        squared.as_slice().copy_from(work.as_slice().head(size))
+    }
     for k in 1..entries {
         montgomery.mul(table.as_slice().slice(offset: (k - 1) * size, len: size), squared.as_slice(), mut work)
         table.as_slice().slice(offset: k * size, len: size).copy_from(work.as_slice().head(size))
