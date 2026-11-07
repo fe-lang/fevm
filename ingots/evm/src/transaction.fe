@@ -122,6 +122,9 @@ impl Transaction {
         if index >= self.blob_hashes.len() as u256 { return 0 }
         self.blob_hashes[index.downcast_unchecked()]
     }
+    // The blob hashes, for the VM's BLOBHASH handler; fixed once the transaction starts.
+    pub(ingot) fn blob_hash_ptr(self) -> *u256 { self.blob_hashes.ptr() }
+    pub(ingot) fn blob_count(self) -> usize { self.blob_hashes.len() }
 
     pub fn refund(self) -> i128 { self.refund }
     pub fn add_refund(mut self, _ amount: i128) { self.refund += amount }

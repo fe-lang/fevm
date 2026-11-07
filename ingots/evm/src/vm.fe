@@ -225,6 +225,9 @@ pub struct Vm {
     // The frame's call and the block, which the environment handlers push.
     call: CallEnv,
     block: BlockEnv,
+    // The transaction's blob hashes, for BLOBHASH.
+    blob_hashes: *u256,
+    blob_count: usize,
 }
 
 impl Vm {
@@ -251,6 +254,8 @@ impl Vm {
             block: BlockEnv {
                 coinbase: 0, timestamp: 0, number: 0, prevrandao: 0, gaslimit: 0, chainid: 0, basefee: 0, blobbasefee: 0,
             },
+            blob_hashes: (0 as usize) as *u256,
+            blob_count: 0,
         }
     }
 
@@ -541,25 +546,6 @@ impl Vm {
                 len: len.downcast_unchecked(),
             )
         }
-    }
-
-    fn calldataload(mut self, _ calldata: InputData) {
-        let offset = self.pop()
-        if !self.ok() { return }
-        let len = calldata.len()
-        // Most loads read one whole word within the calldata.
-        if offset <= len as u256 && len as u256 - offset >= 32 {
-            self.push(calldata.bytes().read_word(offset.downcast_unchecked()))
-            return
-        }
-        // Bytes past the end read as zero.
-        var value: u256 = 0
-        if offset < len as u256 {
-            let start: usize = offset.downcast_unchecked()
-            for index in start..len { value = (value << 8) | calldata.byte_at(index) as u256 }
-            value <<= ((32 - (len - start)) * 8) as u256
-        }
-        self.push(value)
     }
 
     fn calldatacopy(mut self, _ calldata: InputData) {
@@ -1322,6 +1308,8 @@ impl Vm {
             0x59 => self.op_msize(code, pc, gas, depth, top, mut tracer),
             0x5a => self.op_gas(code, pc, gas, depth, top, mut tracer),
             0x5b => self.op_jumpdest(code, pc, gas, depth, top, mut tracer),
+            0x35 => self.op_calldataload(code, pc, gas, depth, top, mut tracer),
+            0x49 => self.op_blobhash(code, pc, gas, depth, top, mut tracer),
             0x30 => self.op_address(code, pc, gas, depth, top, mut tracer),
             0x32 => self.op_origin(code, pc, gas, depth, top, mut tracer),
             0x33 => self.op_caller(code, pc, gas, depth, top, mut tracer),
@@ -1966,6 +1954,58 @@ impl Vm {
         if copied < count { self.memory.slice(offset: start + copied, len: count - copied).zero() }
     }
 
+    // CALLDATALOAD: the calldata word at the offset on top, bytes past the end
+    // reading as zero.
+    fn op_calldataload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let slot = below(top, 1)
+        let offset = unsafe { *slot }
+        let len = self.calldata_len
+        // Most loads read one whole word within the calldata.
+        unsafe {
+            *slot = if offset <= len as u256 && len as u256 - offset >= 32 {
+                read_code<u256>(self.calldata, offset.downcast_unchecked())
+            } else { self.calldata_tail(offset) }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+    }
+
+    // The calldata word at `offset`, which runs past the end: its bytes
+    // within the calldata, then zeros.
+    #[inline(never)]
+    fn calldata_tail(self, _ offset: u256) -> u256 {
+        let len = self.calldata_len
+        if offset >= len as u256 { return 0 }
+        let start: usize = offset.downcast_unchecked()
+        var value: u256 = 0
+        for index in start..len { value = (value << 8) | unsafe { read_code<u8>(self.calldata, index) } as u256 }
+        value << ((32 - (len - start)) * 8) as u256
+    }
+
+    // BLOBHASH: the transaction's blob hash at the index on top, or zero.
+    fn op_blobhash<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let slot = below(top, 1)
+        let index = unsafe { *slot }
+        unsafe {
+            *slot = if index < self.blob_count as u256 {
+                let at: usize = index.downcast_unchecked()
+                *offset_bytes(self.blob_hashes, at * 32)
+            } else { 0 }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+    }
+
     // CALLDATACOPY within memory; the interpreter loop handles everything else.
     fn op_calldatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
@@ -2173,6 +2213,8 @@ impl Vm {
         self.code_len = program.len()
         self.calldata = calldata.bytes().ptr()
         self.calldata_len = calldata.len()
+        self.blob_hashes = state.blob_hash_ptr()
+        self.blob_count = state.blob_count()
         var pc = self.pc
         var gas = self.gas_remaining
         if self.ok() {
@@ -2210,10 +2252,6 @@ impl Vm {
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         },
-                        0x35 => {
-                            self.calldataload(calldata)
-                            if !self.ok() { break }
-                        },
                         0x37 => {
                             self.gas_remaining = gas
                             self.calldatacopy(calldata)
@@ -2247,10 +2285,6 @@ impl Vm {
                             if !self.pushed(hash) { break }
                         },
                         0x47 => if !self.pushed(state.balance(call.address)) { break },
-                        0x49 => {
-                            let index = self.pop()
-                            if !self.ok() || !self.pushed(state.blob_hash(index)) { break }
-                        },
                         0x53 => {
                             self.gas_remaining = gas
                             self.mstore8()
