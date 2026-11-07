@@ -44,7 +44,7 @@ pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
 pub const TX_SET_CODE: u8 = 4
 
-const GAS_PER_BLOB: u256 = 131072
+const GAS_PER_BLOB: u64 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
 const MAX_BLOBS_PER_TX: u64 = 6
@@ -132,8 +132,12 @@ pub struct Receipt {
 
 pub struct Applied { pub state: WorldState, pub receipt: Receipt }
 
-fn checked_mul(_ a: u256, _ b: u256) -> Option<u256> {
-    if a != 0 && b > MAX_U256 / a { Option::None } else { Option::Some(a * b) }
+// `a * b`, or none past 256 bits. With `b` split at bit 64, `a` times the
+// high part fits in 256 bits and times the low part in 128.
+fn checked_mul(_ a: u64, _ b: u256) -> Option<u256> {
+    let high = (b >> 64) * a as u256
+    let low = (b & 0xffffffffffffffff) * a as u256
+    if high >> 192 != 0 || low > MAX_U256 - (high << 64) { Option::None } else { Option::Some((high << 64) + low) }
 }
 
 fn checked_add(_ a: u256, _ b: u256) -> Option<u256> {
@@ -194,7 +198,7 @@ fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
 }
 
 fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
-    checked_mul(request.blob_count() as u256 * GAS_PER_BLOB, price)
+    checked_mul(request.blob_count() * GAS_PER_BLOB, price)
 }
 
 /// The Osaka includability checks, in specification order.
@@ -218,7 +222,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
         return INVALID_CHAIN_ID
     }
     if config.check_base_fee && env.gas_price < block.basefee { return INVALID_FEE_CAP }
-    var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
+    var max_fee = checked_mul(env.gas_limit, env.gas_price)
     if env.kind == TX_BLOB {
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
         if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
@@ -274,7 +278,7 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
         if !tx.add_blob_hash(hash) { return ERR_HOST_ALLOCATION }
     }
     let sender = address_word(request.env.sender)
-    let fee = request.env.gas_limit as u256 * price + request.blob_count() as u256 * GAS_PER_BLOB * blob_price
+    let fee = request.env.gas_limit as u256 * price + (request.blob_count() * GAS_PER_BLOB) as u256 * blob_price
     let status = tx.increment_nonce(sender)
     if status != OK { return status }
     tx.set_balance(address: sender, value: tx.balance(sender) - fee)

@@ -1,9 +1,11 @@
 use core::Option
 use ingot::address::create_address
+use ingot::constants::MAX_U256
 use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::{
     ERR_OUT_OF_GAS,
+    INVALID_BALANCE,
     INVALID_CHAIN_ID,
     INVALID_FEE_CAP,
     INVALID_INITCODE_SIZE,
@@ -127,6 +129,26 @@ fn config_sets_code_size_limits() {
     config.max_initcode_size = 65_536
     let applied = send(rejected.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), config)
     core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+}
+
+#[test]
+fn fees_past_256_bits_are_unaffordable() {
+    let limit: u256 = 100_000
+    let price = MAX_U256 / limit
+    // The gas, then the gas and the value, fill 256 bits exactly; one more wei
+    // of either overflows the sum, and of the price the low product.
+    for (gas_price, value, valid) in [
+        (price, MAX_U256 - price * limit, true), (price, MAX_U256 - price * limit + 1, false),
+        (price + 1, 0, false), (MAX_U256, 0, false),
+    ] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(SENDER, MAX_U256))
+        var env = call(to: 0xbb)
+        env.gas_price = gas_price
+        env.value = value
+        let receipt = send(world, env, empty_bytes(), block(), Config::osaka()).receipt
+        core::assert(receipt.invalid == if valid { VALID } else { INVALID_BALANCE })
+    }
 }
 
 #[test]
