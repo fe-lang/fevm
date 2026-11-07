@@ -49,9 +49,11 @@ pub struct Transaction {
     journal: Journal,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
-    // Warm accounts, other than those `always_warm` names; touched accounts,
-    // whose balance, nonce or code a frame modified, which settlement removes
-    // if left empty (the specification's modify_state deletion rule);
+    // Warm accounts, other than those `always_warm` names; touched accounts
+    // whose balance or nonce a frame wrote unchanged, or that a call touched
+    // (changed balances, nonces and code are touches in the journal), which
+    // settlement removes if left empty (the specification's modify_state
+    // deletion rule);
     // accounts created by this transaction (created_accounts); and the
     // self-destructed ones among those, which settlement deletes.
     marks: SwissTable<u256, u8>,
@@ -363,8 +365,6 @@ impl Transaction {
             return self.journal_account(kind, address, self.state.replace(balance: kind == BALANCE, address, value))
         }
         let previous = match kind {
-            BALANCE => self.balance(address),
-            NONCE => self.nonce(address),
             STORAGE => self.storage_load(address, slot),
             TRANSIENT => self.transient_load(address, slot),
             _ => core::panic(),
@@ -377,8 +377,6 @@ impl Transaction {
             return ERR_HOST_ALLOCATION
         }
         let written = match kind {
-            BALANCE => self.state.set_balance(address, value),
-            NONCE => self.state.set_nonce(address, value),
             STORAGE => self.state.storage_store(address, slot, value),
             TRANSIENT => self.write_transient(address, slot, value),
             _ => core::panic(),
@@ -390,11 +388,12 @@ impl Transaction {
         OK
     }
 
-    // Journals a balance or nonce write the world already made; a journal
-    // that cannot grow restores the previous value.
+    // Journals a balance or nonce write the world already made, which touches
+    // the account; a journal that cannot grow restores the previous value. An
+    // unchanged value still touches it.
     fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
         if !replaced.written { return ERR_HOST_ALLOCATION }
-        if !replaced.changed { return OK }
+        if !replaced.changed { return self.touch(address) }
         if !self.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
             // Restoring a value the record holds needs no allocation.
             core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
@@ -407,8 +406,7 @@ impl Transaction {
     // Adds `amount` to a balance or nonce, or subtracts it, touching the
     // account, with one account lookup.
     fn adjust(mut self, kind: u8, address: u256, amount: u256, add: bool) -> i32 {
-        let status = self.touch(address)
-        if status != OK { return status }
+        self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let replaced = self.state.adjust(balance: kind == BALANCE, address, amount, add)
@@ -418,13 +416,9 @@ impl Transaction {
 
     // Balance, nonce and code writes touch their account even when unchanged.
     pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
-        let status = self.touch(address)
-        if status != OK { return status }
         self.write(kind: BALANCE, address, slot: 0, value)
     }
     pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
-        let status = self.touch(address)
-        if status != OK { return status }
         self.write(kind: NONCE, address, slot: 0, value)
     }
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
@@ -445,8 +439,6 @@ impl Transaction {
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
         core::assert(self.state.code_size(address) == 0)
-        let status = self.touch(address)
-        if status != OK { return status }
         if !self.journal.append(Change { kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address) }) {
             return ERR_HOST_ALLOCATION
         }
@@ -461,8 +453,6 @@ impl Transaction {
         let address = address_word(address)
         let previous = self.state.delegate(address)
         core::assert(self.state.code_size(address) == 0 || previous.is_some())
-        let status = self.touch(address)
-        if status != OK { return status }
         let (was_delegated, previous_delegate): (u256, u256) = match previous {
             Option::Some(previous) => (1, previous),
             Option::None => (0, 0),
@@ -500,12 +490,15 @@ impl Transaction {
     // updates are not journaled.
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
-        // The journal holds one entry for each mark that survived its frames.
+        // The journal holds the changes and marks that survived their frames:
+        // each touch, as a mark or as a balance, nonce or code change.
         var position: u64 = 0
         while position < self.journal.len() {
             let change = self.journal.change(position)
-            if change.kind == DOOMED { self.state.remove_account(change.address) }
-            if change.kind == TOUCHED { self.state.remove_if_empty(change.address) }
+            let kind = change.kind
+            if kind == DOOMED { self.state.remove_account(change.address) }
+            let touched = kind == TOUCHED || kind == BALANCE || kind == NONCE || kind == CODE || kind == DELEGATION
+            if touched { self.state.remove_if_empty(change.address) }
             position += 1
         }
     }
