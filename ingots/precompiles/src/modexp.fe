@@ -20,8 +20,18 @@ fn input_word<T: ByteSource>(_ input: T, offset: u256, len: u64) -> u256 {
     } else { len }
     if present == 0 { return 0 }
     let start: usize = offset.downcast_unchecked()
+    let count: usize = present.downcast_truncate()
+    // Whole lanes, then the remaining bytes.
     var value: u256 = 0
-    for i in 0..present.downcast_truncate() { value = (value << 8) | input.byte_at(start + i) as u256 }
+    var i: usize = 0
+    while i + 8 <= count {
+        value = (value << 64) | swap_bytes(input.lane_at(start + i)) as u256
+        i += 8
+    }
+    while i < count {
+        value = (value << 8) | input.byte_at(start + i) as u256
+        i += 1
+    }
     value << ((len - present) * 8) as u256
 }
 
@@ -432,24 +442,25 @@ fn even_power(_ exponent: Exponent, _ base: MemArray<u64>, _ value: MemArray<u64
     var correction = MemArray<u64>::try_new_zeroed(low)?
     var correct: usize = 1
     while correct < low {
-        // inverse (2 - q inverse), modulo 2^(64 low).
-        low_product(q.as_slice(), inverse.as_slice(), mut scratch.as_slice())
+        // inverse (2 - q inverse), at the precision this step makes correct.
+        let next = if 2 * correct < low { 2 * correct } else { low }
+        low_product(q.as_slice(), inverse.as_slice(), mut scratch.as_slice().head(next))
         var carry: u64 = 1
-        for i in 0..low {
+        for i in 0..next {
             let negated = (~scratch[i]) as u128 + carry as u128
             correction[i] = negated.downcast_truncate()
             carry = (negated >> 64).downcast_truncate()
         }
         // 2 - q inverse = (-(q inverse)) + 2.
         var add: u64 = 2
-        for i in 0..low {
+        for i in 0..next {
             let sum = correction[i] as u128 + add as u128
             correction[i] = sum.downcast_truncate()
             add = (sum >> 64).downcast_truncate()
         }
-        low_product(inverse.as_slice(), correction.as_slice(), mut scratch.as_slice())
-        inverse.as_slice().copy_from(scratch.as_slice())
-        correct *= 2
+        low_product(inverse.as_slice(), correction.as_slice(), mut scratch.as_slice().head(next))
+        inverse.as_slice().head(next).copy_from(scratch.as_slice().head(next))
+        correct = next
     }
     // h = t q^-1 mod 2^k, then x + q h.
     var h = MemArray<u64>::try_new_zeroed(low)?
@@ -482,6 +493,20 @@ fn even_power(_ exponent: Exponent, _ base: MemArray<u64>, _ value: MemArray<u64
 fn low_power(_ exponent: Exponent, _ base: MemArray<u64>, _ low: usize,
                             _ mask: u64) -> Option<MemArray<u64>> {
     var result = MemArray<u64>::try_new_zeroed(low)?
+    if low == 1 {
+        // One limb: wrapping products, masked.
+        let factor = base[0] & mask
+        var power: u64 = 1
+        var index = exponent.top
+        while index < exponent.total && power != 0 {
+            power = power * power
+            if exponent.bit(index) == 1 { power = power * factor }
+            power &= mask
+            index += 1
+        }
+        result[0] = power
+        return Option::Some(result)
+    }
     var factor = MemArray<u64>::try_new_zeroed(low)?
     var work = MemArray<u64>::try_new_zeroed(low)?
     for i in 0..low { factor[i] = base[i] }
@@ -514,13 +539,27 @@ fn low_product(_ a: MemSlice<u64>, _ b: MemSlice<u64>, _ out: mut MemSlice<u64>)
     let bp = b.ptr()
     let op = out.ptr()
     for j in 0..len { unsafe { *limb(op, j) = 0 } }
-    for i in 0..len {
+    // Zero high limbs add nothing.
+    var a_len = len
+    while a_len > 0 && unsafe { *limb(ap, a_len - 1) } == 0 { a_len -= 1 }
+    var b_len = len
+    while b_len > 0 && unsafe { *limb(bp, b_len - 1) } == 0 { b_len -= 1 }
+    for i in 0..a_len {
         let factor = unsafe { *limb(ap, i) } as u128
         var carry: u64 = 0
-        for j in 0..len - i {
+        let end = if len - i < b_len { len - i } else { b_len }
+        for j in 0..end {
             let sum = unsafe { *limb(op, i + j) } as u128 + factor * unsafe { *limb(bp, j) } as u128 + carry as u128
             unsafe { *limb(op, i + j) = sum.downcast_truncate() }
             carry = (sum >> 64).downcast_truncate()
+        }
+        // The row's carry, within the limbs kept.
+        var at = i + end
+        while carry != 0 && at < len {
+            let sum = unsafe { *limb(op, at) } as u128 + carry as u128
+            unsafe { *limb(op, at) = sum.downcast_truncate() }
+            carry = (sum >> 64).downcast_truncate()
+            at += 1
         }
     }
 }
