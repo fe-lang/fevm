@@ -3,6 +3,6 @@ name = "fevm"
 version = "0.1.0"
 
 [dependencies]
-swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "c8c2d82ebc5feae94361e44adf396df78dffc302" }
+swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "208012f19ddce04a0f1ab3e97e731ab5d522f157" }
 keccak = { source = "https://github.com/fe-lang/keccak", rev = "ed46c791c920c168742ddafe19f449b886bd2b78" }
 fevm_precompiles = true

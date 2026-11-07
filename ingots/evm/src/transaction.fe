@@ -135,17 +135,16 @@ impl Transaction {
     // Access-list initialization precedes all frames and is never rolled back.
     pub fn access_list_account(mut self, address: u256) -> bool {
         core::assert(!self.started)
-        let address = address_word(address)
-        self.marks.try_insert(address, self.marks.get(address).value | MARK_WARM)
+        self.add_mark(address_word(address), MARK_WARM)
     }
 
     pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
         core::assert(!self.started)
         let address = address_word(address)
-        let marks = self.marks.get(address).value
-        if !self.marks.try_insert(address, marks | MARK_WARM) { return false }
+        let was_warm = self.marked(address, MARK_WARM)
+        if !self.add_mark(address, MARK_WARM) { return false }
         if !self.warm_storage.try_insert(StorageKey { address, slot }, true) {
-            core::assert(self.restore_marks(address, marks))
+            if !was_warm { core::assert(self.unmark(address, MARK_WARM)) }
             return false
         }
         true
@@ -153,7 +152,34 @@ impl Transaction {
 
     pub fn account_is_warm(self, _ address: u256) -> bool {
         let address = address_word(address)
-        is_precompile(address) || self.marks.get(address).value & MARK_WARM != 0
+        is_precompile(address) || self.marked(address, MARK_WARM)
+    }
+
+    // Whether `address`, an address word, has `mark`.
+    fn marked(self, _ address: u256, _ mark: u8) -> bool {
+        self.marks.get(address).value & mark != 0
+    }
+
+    // Adds `mark` to `address`'s marks, unjournaled; false, changing nothing,
+    // if the table cannot grow.
+    fn add_mark(mut self, _ address: u256, _ mark: u8) -> bool {
+        match self.marks.find(address) {
+            Option::Some(slot) => {
+                let marks = mut self.marks.value_at(slot)
+                marks |= mark
+                true
+            },
+            Option::None => self.marks.try_insert(address, mark),
+        }
+    }
+
+    // Clears `mark` from `address`'s marks, which it has an entry for; an
+    // address left without marks loses its entry. Neither grows the table.
+    fn unmark(mut self, _ address: u256, _ mark: u8) -> bool {
+        let Option::Some(slot) = self.marks.find(address) else { return false }
+        let marks = mut self.marks.value_at(slot)
+        marks &= ~mark
+        marks != 0 || self.marks.remove(address)
     }
 
     pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
@@ -167,20 +193,19 @@ impl Transaction {
         let address = address_word(address)
         if kind == WARM_ACCOUNT && is_precompile(address) { return OK }
         let mark = mark_of(kind)
-        let marks = self.marks.get(address).value
-        if marks & mark != 0 { return OK }
-        if !self.marks.try_insert(address, marks | mark) { return ERR_HOST_ALLOCATION }
+        match self.marks.find(address) {
+            Option::Some(slot) => {
+                let marks = mut self.marks.value_at(slot)
+                if marks & mark != 0 { return OK }
+                marks |= mark
+            },
+            Option::None => if !self.marks.try_insert(address, mark) { return ERR_HOST_ALLOCATION },
+        }
         if !self.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
-            core::assert(self.restore_marks(address, marks))
+            core::assert(self.unmark(address, mark))
             return ERR_HOST_ALLOCATION
         }
         OK
-    }
-
-    // Sets `address`'s marks, which it has an entry for, to `marks`; an
-    // address left without marks loses its entry. Neither grows the table.
-    fn restore_marks(mut self, _ address: u256, _ marks: u8) -> bool {
-        if marks == 0 { self.marks.remove(address) } else { self.marks.try_insert(address, marks) }
     }
 
     pub fn warm_account(mut self, address: u256) -> i32 {
@@ -212,12 +237,11 @@ impl Transaction {
     }
 
     pub fn mark_created(mut self, _ address: u256) -> i32 {
-        let address = address_word(address)
-        if self.marks.try_insert(address, self.marks.get(address).value | MARK_CREATED) { OK } else { ERR_HOST_ALLOCATION }
+        if self.add_mark(address_word(address), MARK_CREATED) { OK } else { ERR_HOST_ALLOCATION }
     }
 
     pub fn was_created(self, _ address: u256) -> bool {
-        self.marks.get(address_word(address)).value & MARK_CREATED != 0
+        self.marked(address_word(address), MARK_CREATED)
     }
 
     pub fn original_storage(self, address: u256, slot: u256) -> u256 {
@@ -270,9 +294,7 @@ impl Transaction {
                 NONCE => self.state.set_nonce(change.address, change.previous),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
-                WARM_ACCOUNT | TOUCHED | DOOMED => self.restore_marks(
-                    change.address, self.marks.get(change.address).value & ~mark_of(change.kind),
-                ),
+                WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
                 WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
                 CODE => {
                     let empty: [u8; 0] = []
