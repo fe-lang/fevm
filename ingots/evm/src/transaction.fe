@@ -369,24 +369,15 @@ impl Transaction {
         if kind == BALANCE || kind == NONCE {
             return self.journal_account(kind, address, self.state.replace(balance: kind == BALANCE, address, value))
         }
-        let previous = match kind {
-            STORAGE => self.storage_load(address, slot),
-            TRANSIENT => self.transient_load(address, slot),
-            _ => core::panic(),
-        }
+        core::assert(kind == STORAGE)
+        let previous = self.storage_load(address, slot)
         if previous == value { return OK }
-        // Undo deletes an account its write created; transient storage
-        // creates no account.
-        let existed = kind == TRANSIENT || self.state.exists(address)
+        // Undo deletes an account its write created.
+        let existed = self.state.exists(address)
         if !self.buffers.journal.append(Change { kind, address, slot, previous, existed }) {
             return ERR_HOST_ALLOCATION
         }
-        let written = match kind {
-            STORAGE => self.state.storage_store(address, slot, value),
-            TRANSIENT => self.write_transient(address, slot, value),
-            _ => core::panic(),
-        }
-        if !written {
+        if !self.state.storage_store(address, slot, value) {
             let _ = self.buffers.journal.pop()
             return ERR_HOST_ALLOCATION
         }
@@ -487,8 +478,32 @@ impl Transaction {
         if status == OK { self.refund += charge.refund }
         status
     }
+    // TSTORE's write, journaled, with one search of the transient table when
+    // the value is not zero. The table holds no zeros, so an entry the search
+    // finds at zero is the one it just inserted.
     pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
-        self.write(kind: TRANSIENT, address, slot, value)
+        self.started = true
+        if self.is_static { return ERR_STATIC_WRITE }
+        let key = StorageKey { address: address_word(address), slot }
+        if value == 0 {
+            let Option::Some(at) = self.transient.find(key) else { return OK }
+            let previous = self.transient.value_at(at)
+            if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
+                return ERR_HOST_ALLOCATION
+            }
+            let _ = self.transient.remove(key)
+            return OK
+        }
+        let Option::Some(at) = self.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
+        let previous = self.transient.value_at(at)
+        if previous == value { return OK }
+        if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
+            if previous == 0 { let _ = self.transient.remove(key) }
+            return ERR_HOST_ALLOCATION
+        }
+        let stored = mut self.transient.value_at(at)
+        stored = value
+        OK
     }
 
     // End-of-transaction deletions, after every frame has closed and fees are
