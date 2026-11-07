@@ -2,7 +2,7 @@ use core::{MemArray, MemBuffer, MemSlice, Option}
 use core::num::swap_bytes
 use keccak::ByteSource
 use ingot::{FAILURE, Output, SUCCESS, host_allocation}
-use ingot::bignum::{Modulus, Montgomery}
+use ingot::bignum::{Modulus, Montgomery, limb}
 use ingot::inversion::trailing_zeros
 
 // Input bytes beyond the calldata read as zero (EIP-198 right padding).
@@ -381,13 +381,18 @@ fn low_power(_ exponent: Exponent, _ base: MemArray<u64>, _ low: usize,
 #[arithmetic(unchecked)]
 fn low_product(_ a: MemSlice<u64>, _ b: MemSlice<u64>, _ out: mut MemSlice<u64>) {
     let len = out.len()
-    for j in 0..len { out[j] = 0 }
+    // With every length checked here, the loops read and write unchecked.
+    core::assert(a.len() >= len && b.len() >= len)
+    let ap = a.ptr()
+    let bp = b.ptr()
+    let op = out.ptr()
+    for j in 0..len { unsafe { *limb(op, j) = 0 } }
     for i in 0..len {
-        let factor = a[i] as u128
+        let factor = unsafe { *limb(ap, i) } as u128
         var carry: u64 = 0
         for j in 0..len - i {
-            let sum = out[i + j] as u128 + factor * b[j] as u128 + carry as u128
-            out[i + j] = sum.downcast_truncate()
+            let sum = unsafe { *limb(op, i + j) } as u128 + factor * unsafe { *limb(bp, j) } as u128 + carry as u128
+            unsafe { *limb(op, i + j) = sum.downcast_truncate() }
             carry = (sum >> 64).downcast_truncate()
         }
     }
