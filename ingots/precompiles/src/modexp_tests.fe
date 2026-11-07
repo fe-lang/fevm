@@ -128,6 +128,15 @@ fn modexp_edge_cases() {
     let result = run(address: 5, input: truncated, gas: 500)
     // 3^2 mod 0x0100 = 9.
     core::assert(result.status == SUCCESS && equals(result.output, [0 as u8, 9]))
+    // Input that ends inside the modulus length: its missing last byte makes
+    // 0x01 a length of 0x0100, and the missing modulus is zero.
+    let cut: [u8; 95] = [0; 95]
+    var header = MemBuffer::empty()
+    append(mut header, cut)
+    header[94] = 1
+    let result = run(address: 5, input: header, gas: 2048)
+    core::assert(result.status == SUCCESS && result.gas_used == 2048 && result.output.len() == 256)
+    core::assert(run(address: 5, input: header, gas: 2047).status == FAILURE)
 }
 
 fn lengths_only(base: u256, exponent: u256, modulus: u256) -> MemBuffer {

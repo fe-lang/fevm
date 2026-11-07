@@ -3,8 +3,6 @@ use keccak::ByteSource
 use ingot::{FAILURE, Output, SUCCESS, host_allocation}
 use ingot::bignum::{Modulus, Montgomery}
 
-const MAX_U256: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-
 // Input bytes beyond the calldata read as zero (EIP-198 right padding).
 fn input_byte<T: ByteSource>(_ input: T, _ index: u256) -> u8 {
     if index < input.len() as u256 { input.byte_at(index.downcast_unchecked()) } else { 0 }
@@ -12,20 +10,20 @@ fn input_byte<T: ByteSource>(_ input: T, _ index: u256) -> u8 {
 
 // A big-endian integer of `len` (at most 32) bytes starting at `offset`.
 fn input_word<T: ByteSource>(_ input: T, offset: u256, len: u64) -> u256 {
+    // Only the bytes within the input can be nonzero.
+    let end = input.len() as u256
+    let present: u64 = if offset >= end { 0 } else if end - offset < len as u256 {
+        (end - offset).downcast_unchecked()
+    } else { len }
+    if present == 0 { return 0 }
+    let start: usize = offset.downcast_unchecked()
     var value: u256 = 0
-    var i: u64 = 0
-    while i < len {
-        let index = if offset > MAX_U256 - i as u256 { MAX_U256 } else { offset + i as u256 }
-        value = (value << 8) | input_byte(input, index) as u256
-        i += 1
-    }
-    value
+    for i in 0..present.downcast_truncate() { value = (value << 8) | input.byte_at(start + i) as u256 }
+    value << ((len - present) * 8) as u256
 }
 
 fn bit_length(_ value: u256) -> u64 {
-    var bits: u64 = 0
-    while bits < 256 && value >> bits as u256 != 0 { bits += 1 }
-    bits
+    (256 - core::num::leading_zeros(value)).downcast_truncate()
 }
 
 // EIP-7823 bounds each of the three lengths.
