@@ -77,10 +77,10 @@ fn input_limb<T: ByteSource>(_ input: T, offset: u256, len: u256, limb: u256) ->
 
 // The sliding window width for an exponent of `bits` bits: 2^(w - 1) table
 // products against about bits / (w + 1) window products.
-fn window_width(_ bits: u256) -> u256 {
-    var best: u256 = 1
+fn window_width(_ bits: usize) -> usize {
+    var best: usize = 1
     var best_cost = bits / 2
-    var w: u256 = 2
+    var w: usize = 2
     while w <= 7 {
         let cost = (1 << (w - 1)) + bits / (w + 1)
         if cost < best_cost {
@@ -144,24 +144,46 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
 
 // The exponent's limbs, least significant first, with its first set bit
 // `top` (`total` if it is zero) of its `total` bits, from the most significant.
-struct Exponent { limbs: MemArray<u64>, top: u256, total: u256 }
+struct Exponent { limbs: MemArray<u64>, top: usize, total: usize }
+
+// A step of a left-to-right sliding-window walk: up to bit `end`, square
+// once per bit, then, for a window ending in a set bit, multiply by the odd
+// power at `entry` of the table of odd powers.
+struct Window { end: usize, entry: usize, odd: bool }
 
 impl Exponent {
     // The `len` big-endian bytes at `start`; none if allocation fails.
     fn try_read<T: ByteSource>(_ input: T, start: u256, len: u256) -> Option<Self> {
         let count: usize = ((len + 7) / 8).downcast_unchecked()
+        let total: usize = (len * 8).downcast_unchecked()
         var limbs = MemArray<u64>::try_new_zeroed(count)?
-        var top = len * 8
+        var top = total
         for i in 0..count {
             limbs[i] = input_limb(input, offset: start, len, limb: i as u256)
-            if limbs[i] != 0 { top = len * 8 - 1 - (i as u256 * 64 + 255 - core::num::leading_zeros(limbs[i] as u256)) }
+            if limbs[i] != 0 {
+                let highest: usize = (255 - core::num::leading_zeros(limbs[i] as u256)).downcast_truncate()
+                top = total - 1 - (i * 64 + highest)
+            }
         }
-        Option::Some(Self { limbs, top, total: len * 8 })
+        Option::Some(Self { limbs, top, total })
     }
-    // Bit `index` from the most significant.
-    fn bit(self, _ index: u256) -> u256 {
+    // Bit `index` from the most significant, which the exponent has.
+    #[inline(always)]
+    #[arithmetic(unchecked)]
+    fn bit(self, _ index: usize) -> usize {
         let position = self.total - 1 - index
-        ((self.limbs[(position / 64).downcast_unchecked()] >> (position % 64).downcast_truncate()) & 1) as u256
+        let shift: u64 = (position & 63).downcast_truncate()
+        ((unsafe { *limb(self.limbs.ptr(), position >> 6) } >> shift) & 1).downcast_truncate()
+    }
+    // The step from bit `index`: a zero bit, or a window of at most `width` bits.
+    #[arithmetic(unchecked)]
+    fn window(self, _ index: usize, _ width: usize) -> Window {
+        if self.bit(index) == 0 { return Window { end: index + 1, entry: 0, odd: false } }
+        var end = if self.total - index < width { self.total } else { index + width }
+        while self.bit(end - 1) == 0 { end -= 1 }
+        var digit: usize = 0
+        for bit in index..end { digit = (digit << 1) | self.bit(bit) }
+        Window { end, entry: (digit - 1) / 2, odd: true }
     }
 }
 
@@ -208,39 +230,28 @@ fn odd_power(_ exponent: Exponent, _ base: MemArray<u64>, _ modulus: Modulus,
         montgomery.mul(table.as_slice().slice(offset: (k - 1) * size, len: size), squared.as_slice(), mut work)
         table.as_slice().slice(offset: k * size, len: size).copy_from(work.as_slice().head(size))
     }
-    // Left to right, each window of at most `width` bits ending in a set bit.
+    // Left to right; the first window starts at the top bit.
     var index = exponent.top
     var started = false
     while index < total {
-        if exponent.bit(index) == 0 {
-            montgomery.mul(result.as_slice(), result.as_slice(), mut work)
-            result.as_slice().copy_from(work.as_slice().head(size))
-            index += 1
-            continue
-        }
-        var end = if total - index < width { total } else { index + width }
-        while exponent.bit(end - 1) == 0 { end -= 1 }
-        var digit: u256 = 0
-        var bit = index
-        while bit < end {
-            digit = (digit << 1) | exponent.bit(bit)
-            bit += 1
-        }
-        let entry: usize = ((digit - 1) / 2).downcast_truncate()
+        let window = exponent.window(index, width)
         if started {
-            var squarings = end - index
-            while squarings > 0 {
+            for _ in index..window.end {
                 montgomery.mul(result.as_slice(), result.as_slice(), mut work)
                 result.as_slice().copy_from(work.as_slice().head(size))
-                squarings -= 1
             }
-            montgomery.mul(result.as_slice(), table.as_slice().slice(offset: entry * size, len: size), mut work)
-            result.as_slice().copy_from(work.as_slice().head(size))
-        } else {
-            result.as_slice().copy_from(table.as_slice().slice(offset: entry * size, len: size))
-            started = true
         }
-        index = end
+        if window.odd {
+            let entry = table.as_slice().slice(offset: window.entry * size, len: size)
+            if started {
+                montgomery.mul(result.as_slice(), entry, mut work)
+                result.as_slice().copy_from(work.as_slice().head(size))
+            } else {
+                result.as_slice().copy_from(entry)
+                started = true
+            }
+        }
+        index = window.end
     }
     // Out of Montgomery form: result * 1 / R.
     squared.zero()
@@ -342,37 +353,20 @@ fn small_power(_ exponent: Exponent, _ base: MemArray<u64>, _ modulus: Modulus, 
         let squared = small.mul(table[0], table[0])
         for k in 1..entries { table[k] = small.mul(table[k - 1], squared) }
     }
-    // Left to right, each window of at most `width` bits ending in a set bit.
+    // Left to right; the first window starts at the top bit.
     var power = table[0]
     var index = exponent.top
     var started = false
     while index < exponent.total {
-        if exponent.bit(index) == 0 {
-            power = small.mul(power, power)
-            index += 1
-            continue
-        }
-        var end = if exponent.total - index < width { exponent.total } else { index + width }
-        while exponent.bit(end - 1) == 0 { end -= 1 }
-        var digit: u256 = 0
-        var bit = index
-        while bit < end {
-            digit = (digit << 1) | exponent.bit(bit)
-            bit += 1
-        }
-        let entry: usize = ((digit - 1) / 2).downcast_truncate()
+        let window = exponent.window(index, width)
         if started {
-            var squarings = end - index
-            while squarings > 0 {
-                power = small.mul(power, power)
-                squarings -= 1
-            }
-            power = small.mul(power, table[entry])
-        } else {
-            power = table[entry]
+            for _ in index..window.end { power = small.mul(power, power) }
+        }
+        if window.odd {
+            power = if started { small.mul(power, table[window.entry]) } else { table[window.entry] }
             started = true
         }
-        index = end
+        index = window.end
     }
     // Out of Montgomery form: power * 1 / R.
     let out = small.mul(power, Wide { l0: 1, l1: 0, l2: 0, l3: 0 })
