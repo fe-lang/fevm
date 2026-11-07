@@ -222,6 +222,9 @@ pub struct Vm {
     code_len: usize,
     calldata: *u8,
     calldata_len: usize,
+    // The frame's call and the block, which the environment handlers push.
+    call: CallEnv,
+    block: BlockEnv,
 }
 
 impl Vm {
@@ -244,6 +247,10 @@ impl Vm {
             code_len: 0,
             calldata: (0 as usize) as *u8,
             calldata_len: 0,
+            call: default_call_env(),
+            block: BlockEnv {
+                coinbase: 0, timestamp: 0, number: 0, prevrandao: 0, gaslimit: 0, chainid: 0, basefee: 0, blobbasefee: 0,
+            },
         }
     }
 
@@ -786,7 +793,6 @@ struct Frame {
     vm: Vm,
     program: Program,
     calldata: InputData,
-    call: CallEnv,
     // None once the frame is closed and its allocation waits in the pool.
     checkpoint: Option<Checkpoint>,
     output_offset: u64,
@@ -802,30 +808,30 @@ impl Frame {
     fn idle() -> Self {
         Frame {
             vm: Vm::new(), program: Program::new(empty_bytes()), calldata: empty_bytes(),
-            call: default_call_env(), checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false,
+            checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false,
         }
     }
 
     fn start(mut self, gas: u64, _ program: own Program, _ calldata: own InputData, _ call: CallEnv,
-             _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64, creates: bool) {
+             _ block: BlockEnv, _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64, creates: bool) {
         self.vm.reset(gas)
         self.program = program
         self.calldata = calldata
-        self.call = call
+        self.vm.call = call
+        self.vm.block = block
         self.checkpoint = Option::Some(checkpoint)
         self.output_offset = output_offset
         self.output_len = output_len
         self.creates = creates
     }
 
-    fn resume<T: Tracer>(mut self, _ block: BlockEnv, _ state: mut Transaction, depth: usize,
-                         _ tracer: mut T) -> Option<Box<Frame>> {
-        self.vm.run_until_child(self.program, self.calldata, self.call, block, mut state, depth, mut tracer)
+    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        self.vm.run_until_child(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
     fn finish(mut self, _ state: mut Transaction) -> ChildResult {
         let creates = self.creates
-        let address = self.call.address
+        let address = self.vm.call.address
         if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         let checkpoint = self.checkpoint.take().unwrap()
         if self.vm.status == OK { state.commit(checkpoint) }
@@ -1072,7 +1078,7 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: child_gas, program, calldata, child_call, checkpoint,
+        frame.get().start(gas: child_gas, program, calldata, child_call, block: self.block, checkpoint,
                           output_offset: out_offset, output_len: out_len, creates: false)
         Option::Some(frame)
     }
@@ -1156,7 +1162,7 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: create_gas, program, empty_bytes(), child_call, checkpoint,
+        frame.get().start(gas: create_gas, program, empty_bytes(), child_call, block: self.block, checkpoint,
                           output_offset: 0, output_len: 0, creates: true)
         Option::Some(frame)
     }
@@ -1291,6 +1297,22 @@ impl Vm {
             0x59 => self.op_msize(code, pc, gas, depth, top, mut tracer),
             0x5a => self.op_gas(code, pc, gas, depth, top, mut tracer),
             0x5b => self.op_jumpdest(code, pc, gas, depth, top, mut tracer),
+            0x30 => self.op_address(code, pc, gas, depth, top, mut tracer),
+            0x32 => self.op_origin(code, pc, gas, depth, top, mut tracer),
+            0x33 => self.op_caller(code, pc, gas, depth, top, mut tracer),
+            0x34 => self.op_callvalue(code, pc, gas, depth, top, mut tracer),
+            0x36 => self.op_calldatasize(code, pc, gas, depth, top, mut tracer),
+            0x38 => self.op_codesize(code, pc, gas, depth, top, mut tracer),
+            0x3a => self.op_gasprice(code, pc, gas, depth, top, mut tracer),
+            0x3d => self.op_returndatasize(code, pc, gas, depth, top, mut tracer),
+            0x41 => self.op_coinbase(code, pc, gas, depth, top, mut tracer),
+            0x42 => self.op_timestamp(code, pc, gas, depth, top, mut tracer),
+            0x43 => self.op_number(code, pc, gas, depth, top, mut tracer),
+            0x44 => self.op_prevrandao(code, pc, gas, depth, top, mut tracer),
+            0x45 => self.op_gaslimit(code, pc, gas, depth, top, mut tracer),
+            0x46 => self.op_chainid(code, pc, gas, depth, top, mut tracer),
+            0x48 => self.op_basefee(code, pc, gas, depth, top, mut tracer),
+            0x4a => self.op_blobbasefee(code, pc, gas, depth, top, mut tracer),
             _ => self.op_other(code, pc, gas, depth, top, mut tracer),
         }
     }
@@ -2022,6 +2044,80 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, (gas - 2) as u256)
     }
 
+    // The environment opcodes push a word of the call, the block or the frame for two gas.
+    #[inline(always)]
+    fn push_environment<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                   _ tracer: mut T, _ value: u256) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, value)
+    }
+
+    fn op_address<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.address)
+    }
+
+    fn op_origin<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.origin)
+    }
+
+    fn op_caller<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.caller)
+    }
+
+    fn op_callvalue<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.callvalue)
+    }
+
+    fn op_calldatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.calldata_len as u256)
+    }
+
+    fn op_codesize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.code_len as u256)
+    }
+
+    fn op_gasprice<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.gasprice)
+    }
+
+    fn op_returndatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.return_data.len() as u256)
+    }
+
+    fn op_coinbase<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.coinbase)
+    }
+
+    fn op_timestamp<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.timestamp)
+    }
+
+    fn op_number<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.number)
+    }
+
+    fn op_prevrandao<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.prevrandao)
+    }
+
+    fn op_gaslimit<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.gaslimit)
+    }
+
+    fn op_chainid<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.chainid)
+    }
+
+    fn op_basefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.basefee)
+    }
+
+    fn op_blobbasefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.blobbasefee)
+    }
+
     fn op_jumpdest<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 1 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
@@ -2041,9 +2137,9 @@ impl Vm {
         byte & (1 << bit) != 0
     }
 
-    fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData,
-                                  _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
+    fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ state: mut Transaction,
                                   depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        let call = self.call
         // Pushes skip the capacity check, so the stack holds its limit first.
         if !self.stack.try_reserve(STACK_LIMIT - self.stack.len()) {
             self.fault(ERR_HOST_ALLOCATION)
@@ -2078,118 +2174,6 @@ impl Vm {
                 // `pc` stays within the code and its padding, far from overflow.
                 pc = pc.wrapping_add(1)
                 match op {
-                    0x30 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.address) { break }
-                    },
-                    0x32 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.origin) { break }
-                    },
-                    0x33 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.caller) { break }
-                    },
-                    0x34 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.callvalue) { break }
-                    },
-                    0x36 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(calldata.len() as u256) { break }
-                    },
-                    0x38 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(program.len() as u256) { break }
-                    },
-                    0x3a => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.gasprice) { break }
-                    },
-                    0x3d => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(self.return_data.len() as u256) { break }
-                    },
-                    0x41 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.coinbase) { break }
-                    },
-                    0x42 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.timestamp) { break }
-                    },
-                    0x43 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.number) { break }
-                    },
-                    0x44 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.prevrandao) { break }
-                    },
-                    0x45 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.gaslimit) { break }
-                    },
-                    0x46 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.chainid) { break }
-                    },
-                    0x48 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.basefee) { break }
-                    },
-                    0x4a => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.blobbasefee) { break }
-                    },
                     // The rest charge their base cost from the table and dispatch
                     // again; those that call out charge more through `self`.
                     _ => {
@@ -2241,7 +2225,7 @@ impl Vm {
                         0x40 => {
                             let number = self.pop()
                             if !self.ok() { break }
-                            let hash = if number < block.number && block.number - number <= 256 {
+                            let hash = if number < self.block.number && self.block.number - number <= 256 {
                                 state.block_hash(number)
                             } else { 0 }
                             if !self.pushed(hash) { break }
@@ -2340,7 +2324,7 @@ impl Vm {
     }
 
     fn run_children<T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
-                               _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
+                               _ state: mut Transaction, _ tracer: mut T) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
         var frames: MemVec<Box<Frame>> = MemVec::new()
@@ -2377,9 +2361,9 @@ impl Vm {
             }
             let depth = frames.len()
             next = if depth == 0 {
-                self.run_until_child(program, calldata, call, block, mut state, depth: 0, mut tracer)
+                self.run_until_child(program, calldata, mut state, depth: 0, mut tracer)
             } else {
-                frames[depth - 1].get().resume(block, mut state, depth, mut tracer)
+                frames[depth - 1].get().resume(mut state, depth, mut tracer)
             }
         }
     }
@@ -2407,8 +2391,10 @@ impl Vm {
         }
         let refund_before = state.refund()
         let checkpoint = state.checkpoint(is_static: call.is_static)
-        match self.run_until_child(program, calldata, call, block, mut state, depth: 0, mut tracer) {
-            Option::Some(first) => self.run_children(first, program, calldata, call, block, mut state, mut tracer),
+        self.call = call
+        self.block = block
+        match self.run_until_child(program, calldata, mut state, depth: 0, mut tracer) {
+            Option::Some(first) => self.run_children(first, program, calldata, mut state, mut tracer),
             Option::None => {},
         }
         if creates && self.status == OK { self.deposit_code(address: call.address, mut state) }

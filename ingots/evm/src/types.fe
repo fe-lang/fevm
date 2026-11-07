@@ -198,6 +198,8 @@ pub struct BlockEnv {
     pub blobbasefee: u256,
 }
 
+impl Copy for BlockEnv {}
+
 pub struct ExecutionResult {
     pub status: i32,
     pub output: MemBuffer,
