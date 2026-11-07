@@ -2,19 +2,80 @@
 // are arrays of as many limbs as the modulus; a product takes twice as many,
 // and one more.
 use core::{MemArray, MemSlice, Option}
+use core::num::leading_zeros
 use core::ptr::offset_bytes
 
 const LIMB_BASE: u128 = 0x10000000000000000
 
-fn leading_zeros(_ value: u64) -> u64 {
-    var count: u64 = 0
-    while count < 64 && ((value >> (63 - count)) & 1) == 0 { count += 1 }
-    count
+// floor((2^128 - 1) / d) - 2^64 for a d with its top bit set (Moller and
+// Granlund, "Improved division by invariant integers", 2011).
+fn reciprocal_2by1(_ d: u64) -> u64 {
+    let all: u128 = 0xffffffffffffffffffffffffffffffff
+    (all / d as u128 - LIMB_BASE).downcast_truncate()
+}
+
+// The reciprocal of the two-limb (d1, d0), d1's top bit set, for `div_3by2`
+// (ibid., algorithm 6).
+#[arithmetic(unchecked)]
+fn reciprocal_3by2(_ d1: u64, _ d0: u64) -> u64 {
+    var v = reciprocal_2by1(d1)
+    var p = d1 * v + d0
+    if p < d0 {
+        v -= 1
+        if p >= d1 {
+            v -= 1
+            p -= d1
+        }
+        p -= d1
+    }
+    let t = v as u128 * d0 as u128
+    let t1: u64 = (t >> 64).downcast_truncate()
+    let t0: u64 = t.downcast_truncate()
+    p += t1
+    if p < t1 {
+        v -= 1
+        if p > d1 || (p == d1 && t0 >= d0) { v -= 1 }
+    }
+    v
+}
+
+// floor((u2, u1, u0) / (d1, d0)) for (u2, u1) < (d1, d0), with `v` the
+// divisor's `reciprocal_3by2` (ibid., algorithm 5).
+#[arithmetic(unchecked)]
+fn div_3by2(_ u2: u64, _ u1: u64, _ u0: u64, _ d1: u64, _ d0: u64, _ v: u64) -> u64 {
+    let q = v as u128 * u2 as u128 + ((u2 as u128) << 64 | u1 as u128)
+    var q1: u64 = (q >> 64).downcast_truncate()
+    let q0: u64 = q.downcast_truncate()
+    let r1 = u1 - q1 * d1
+    let d = (d1 as u128) << 64 | d0 as u128
+    var r = ((r1 as u128) << 64 | u0 as u128) - d0 as u128 * q1 as u128 - d
+    q1 += 1
+    let high: u64 = (r >> 64).downcast_truncate()
+    if high >= q0 {
+        q1 -= 1
+        r += d
+    }
+    if r >= d { q1 += 1 }
+    q1
+}
+
+// (u1, u0) mod d for u1 < d, with `v` d's `reciprocal_2by1` (ibid., algorithm 4).
+#[arithmetic(unchecked)]
+fn rem_2by1(_ u1: u64, _ u0: u64, _ d: u64, _ v: u64) -> u64 {
+    let q = v as u128 * u1 as u128 + ((u1 as u128) << 64 | u0 as u128)
+    let high: u64 = (q >> 64).downcast_truncate()
+    let q1 = high + 1
+    let q0: u64 = q.downcast_truncate()
+    var r = u0 - q1 * d
+    if r > q0 { r += d }
+    if r >= d { r -= d }
+    r
 }
 
 /// A modulus normalized for Knuth division: shifted left until its top limb's
-/// high bit is set. `len` is its significant limb count, at least one.
-pub struct Modulus { pub limbs: MemArray<u64>, pub len: u64, pub shift: u64 }
+/// high bit is set. `len` is its significant limb count, at least one, and
+/// `reciprocal` that of its top limb, or of its top two limbs if it has two.
+pub struct Modulus { pub limbs: MemArray<u64>, pub len: u64, pub shift: u64, reciprocal: u64 }
 
 impl Modulus {
     /// The first `len` limbs of `value`, normalized, or `None` when their
@@ -22,14 +83,17 @@ impl Modulus {
     pub fn try_new(_ value: MemArray<u64>, len: u64) -> Option<Self> {
         let count: usize = len.downcast_truncate()
         core::assert(len > 0 && count <= value.len() && value[(len - 1).downcast_truncate()] != 0)
-        let shift = leading_zeros(value[(len - 1).downcast_truncate()])
+        let shift: u64 = (leading_zeros(value[(len - 1).downcast_truncate()] as u256) - 192).downcast_truncate()
         var limbs = MemArray<u64>::try_new_zeroed(len.downcast_truncate())?
         for i in 0..len.downcast_truncate() {
             let high = value[i] << shift
             let low = if shift == 0 || i == 0 { 0 } else { value[i - 1] >> (64 - shift) }
             limbs[i] = high | low
         }
-        Option::Some(Self { limbs, len, shift })
+        let reciprocal = if count == 1 { reciprocal_2by1(limbs[0]) } else {
+            reciprocal_3by2(limbs[count - 1], limbs[count - 2])
+        }
+        Option::Some(Self { limbs, len, shift, reciprocal })
     }
 
     /// Reduce the `len`-limb value in `work` (with room for one more limb) in
@@ -60,27 +124,37 @@ impl Modulus {
                 i -= 1
             }
         }
-        let top = unsafe { *limb(mp, n - 1) } as u128
-        let second = if n > 1 { unsafe { *limb(mp, n - 2) } as u128 } else { 0 }
+        if n == 1 {
+            // Remainders of two limbs by one, from the top.
+            let d = unsafe { *mp }
+            var r: u64 = 0
+            var i = count + 1
+            while i > 0 {
+                i -= 1
+                r = rem_2by1(r, unsafe { *limb(wp, i) }, d, self.reciprocal)
+                unsafe { *limb(wp, i) = 0 }
+            }
+            unsafe { *wp = r >> shift }
+            return
+        }
+        let d1 = unsafe { *limb(mp, n - 1) }
+        let d0 = unsafe { *limb(mp, n - 2) }
         var j = count + 1 - n
         while j > 0 {
             j -= 1
-            // Estimate this quotient digit from the top two dividend limbs.
+            // This quotient digit from the top three dividend limbs, which is
+            // exact or one too large. The window is below the divisor times
+            // 2^64, so top two limbs equal to the divisor's make it 2^64 - 1.
             let high = unsafe { *limb(wp, j + n) }
-            let head = ((high as u128) << 64) | unsafe { *limb(wp, j + n - 1) } as u128
-            var qhat = head / top
-            var rhat = head - qhat * top
-            while qhat >= LIMB_BASE
-                || (n > 1 && qhat * second > ((rhat << 64) | unsafe { *limb(wp, j + n - 2) } as u128)) {
-                qhat -= 1
-                rhat += top
-                if rhat >= LIMB_BASE { break }
+            let next = unsafe { *limb(wp, j + n - 1) }
+            let qhat: u64 = if high == d1 && next == d0 { 0xffffffffffffffff } else {
+                div_3by2(high, next, unsafe { *limb(wp, j + n - 2) }, d1, d0, self.reciprocal)
             }
             // Subtract qhat times the divisor at limb j.
             var carry: u64 = 0
             var borrow: u64 = 0
             for i in 0..n {
-                let product = qhat * unsafe { *limb(mp, i) } as u128 + carry as u128
+                let product = qhat as u128 * unsafe { *limb(mp, i) } as u128 + carry as u128
                 carry = (product >> 64).downcast_truncate()
                 let low: u64 = product.downcast_truncate()
                 let difference = unsafe { *limb(wp, i + j) } as u128 - low as u128 - borrow as u128
