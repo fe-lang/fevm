@@ -21,6 +21,10 @@ const TOUCHED: u8 = 7
 const DOOMED: u8 = 8
 // An EIP-7702 delegation: `slot` is 1 when the code was a designator to `previous`.
 const DELEGATION: u8 = 9
+// A touch without a mark, for touches gas bounds to a few per transaction:
+// writes that leave their value, and the transaction's own call. Undo has
+// nothing to restore.
+const TOUCHED_ONCE: u8 = 10
 
 // An address's marks, the bits of its `marks` entry. Undo clears the warm,
 // touched and doomed marks a frame set; creation marks survive rollback.
@@ -49,11 +53,10 @@ pub struct Transaction {
     journal: Journal,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
-    // Warm accounts, other than those `always_warm` names; touched accounts
-    // whose balance or nonce a frame wrote unchanged, or that a call touched
-    // (changed balances, nonces and code are touches in the journal), which
-    // settlement removes if left empty (the specification's modify_state
-    // deletion rule);
+    // Warm accounts, other than those `always_warm` names; accounts that
+    // calls from code touched, which settlement removes if left empty with
+    // the journal's other touches, its balance, nonce and code changes and
+    // TOUCHED_ONCE entries (the specification's modify_state deletion rule);
     // accounts created by this transaction (created_accounts); and the
     // self-destructed ones among those, which settlement deletes.
     marks: SwissTable<u256, u8>,
@@ -239,6 +242,14 @@ impl Transaction {
         self.mark(kind: TOUCHED, address)
     }
 
+    /// Touches `address` with a journal entry and no mark, which repeated
+    /// touches of one address would each add: for the transaction's own call.
+    pub fn touch_once(mut self, _ address: u256) -> i32 {
+        self.started = true
+        let change = Change { kind: TOUCHED_ONCE, address: address_word(address), slot: 0, previous: 0, existed: true }
+        if self.journal.append(change) { OK } else { ERR_HOST_ALLOCATION }
+    }
+
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
     pub fn doom(mut self, _ address: u256) -> i32 {
         self.mark(kind: DOOMED, address)
@@ -314,6 +325,7 @@ impl Transaction {
                     let empty: [u8; 0] = []
                     self.state.set_code(address: change.address, code: empty) == OK
                 },
+                TOUCHED_ONCE => true,
                 _ => core::panic(),
             }
             // Reverse replay restores entries the tables held before. A table
@@ -393,7 +405,7 @@ impl Transaction {
     // unchanged value still touches it.
     fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
         if !replaced.written { return ERR_HOST_ALLOCATION }
-        if !replaced.changed { return self.touch(address) }
+        if !replaced.changed { return self.touch_once(address) }
         if !self.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
             // Restoring a value the record holds needs no allocation.
             core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
@@ -497,7 +509,8 @@ impl Transaction {
             let change = self.journal.change(position)
             let kind = change.kind
             if kind == DOOMED { self.state.remove_account(change.address) }
-            let touched = kind == TOUCHED || kind == BALANCE || kind == NONCE || kind == CODE || kind == DELEGATION
+            let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE || kind == CODE
+                || kind == DELEGATION
             if touched { self.state.remove_if_empty(change.address) }
             position += 1
         }
