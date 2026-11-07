@@ -1943,12 +1943,18 @@ impl Vm {
         3 + 3 * ((count + 31) / 32)
     }
 
-    // Copy `len` bytes from `size` bytes at `from`, starting at `source`, into
-    // memory at `dest`, zero past the end; the range is within memory.
-    fn copy_padded(mut self, dest: u256, source: u256, len: u256, from: *u8, size: usize) {
+    // For the copy whose destination, source and length are the three words
+    // below `top`, copy `len` bytes from `size` bytes at `from`, starting at
+    // `source`, into memory at `dest`, zero past the end; the range is within
+    // memory and not empty. Out of line, so the copy handlers keep their
+    // arguments in registers.
+    #[inline(never)]
+    fn copy_padded(mut self, _ top: *u256, from: *u8, size: usize) {
+        let dest = unsafe { *below(top, 1) }
+        let source = unsafe { *below(top, 2) }
+        let len = unsafe { *below(top, 3) }
         let start: usize = dest.downcast_unchecked()
         let count: usize = len.downcast_unchecked()
-        if count == 0 { return }
         let copied: usize = if source >= size as u256 { 0 }
             else if (size as u256) - source < len { size - source.downcast_unchecked() }
             else { count }
@@ -1966,8 +1972,8 @@ impl Vm {
         if cost == 0 || gas < cost {
             return self.op_other(code, pc, gas, depth, top, mut tracer)
         }
-        self.copy_padded(dest: unsafe { *below(top, 1) }, source: unsafe { *below(top, 2) }, len: unsafe { *below(top, 3) },
-                         from: self.calldata, size: self.calldata_len)
+        // An empty copy costs only the base 3.
+        if cost > 3 { self.copy_padded(top, from: self.calldata, size: self.calldata_len) }
         self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
     }
 
@@ -1977,8 +1983,7 @@ impl Vm {
         if cost == 0 || gas < cost {
             return self.op_other(code, pc, gas, depth, top, mut tracer)
         }
-        self.copy_padded(dest: unsafe { *below(top, 1) }, source: unsafe { *below(top, 2) }, len: unsafe { *below(top, 3) },
-                         from: code, size: self.code_len)
+        if cost > 3 { self.copy_padded(top, from: code, size: self.code_len) }
         self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
     }
 
