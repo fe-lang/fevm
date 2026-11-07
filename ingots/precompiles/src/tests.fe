@@ -26,6 +26,29 @@ fn sha256_known_answers() {
 }
 
 #[test]
+fn sha256_matches_hashlib_across_block_boundaries() {
+    // Bytes (7i + 3) mod 256; digests from Python's hashlib. Whole blocks
+    // read eight-byte lanes, and the last one or two pad.
+    var input = MemBuffer::empty()
+    input.resize(1100)
+    for i in 0..1100 { input[i] = ((i * 7 + 3) & 0xff).downcast_truncate() }
+    for (offset, len, digest) in [
+        (0, 55, 0xe7313d333c272e639f790978283f9eb392e843d0f29b7016828bb1daa4aac70b),
+        (0, 63, 0x81c80242132f230c3bd41b3e63bbcff16107339549214a99614ff26664625055),
+        (0, 64, 0x39e3d7b6b5d075d37d053ad89b24b41bef4f3c29760c84447cab3f3be1882241),
+        (0, 65, 0xaacca6ff74fdbb296d165a45cecfa04e5127bc008770fbbdd48006f2d2fae95e),
+        (0, 119, 0x9ce7368e4daf32341631b492e80359dc9f594b48453cd0dd5bf0b19279cc177e),
+        (0, 120, 0x7836b787757e95e58b3ca5aec90b1b004e8deba1e50e9675af9cabf1a13a04b5),
+        (0, 128, 0xd2742f1f4ac6bb7ca2b239ee18402ba8b3f9f8e652d2a72973c2b9ba11c08cf6),
+        (0, 1000, 0x1e9bc38cbf860b9ec31918b065f9b52476c549a782e0e7990bed8ce3868d2371),
+        (5, 100, 0x7d89a5fedee64c211d33bd61eff365aac1710b5e7e9336a9ba540130e455179f),
+        (96, 48, 0x4455589f8ee934578bc3c4dcb6a9679e5e8538d1e886f1b55f5f885b46e37b80),
+    ] {
+        core::assert(sha256(input, offset, len) == digest)
+    }
+}
+
+#[test]
 fn ripemd160_known_answers() {
     let empty: [u8; 0] = []
     core::assert(ripemd160(empty) == 0x9c1185a5c5e9fc54612808977ee8f548b2258d31)

@@ -58,10 +58,9 @@ fn rotate_left(_ value: u32, by: u32) -> u32 {
     (value << by) | (value >> (32 - by))
 }
 
-// Both hashes consume 64-byte blocks followed by 0x80, zero padding and a
-// 64-bit bit count; SHA-256 stores the count big endian, RIPEMD-160 little endian.
-fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_index: usize, blocks: usize,
-                                big_endian: bool) -> [u8; 64] {
+// RIPEMD-160 consumes 64-byte blocks followed by 0x80, zero padding and a
+// little-endian 64-bit bit count, as SHA-256 does with a big-endian count.
+fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_index: usize, blocks: usize) -> [u8; 64] {
     var block: [u8; 64] = [0; 64]
     let start = block_index * 64
     for i in 0..64 {
@@ -76,8 +75,7 @@ fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_inde
         // Inputs are bounded by host memory, so the bit count fits 64 bits.
         let bits: u64 = (len * 8).downcast_unchecked()
         for i in 0..8 {
-            let shift: u64 = (if big_endian { (7 - i) * 8 } else { i * 8 }).downcast_unchecked()
-            block[56 + i] = (bits >> shift).downcast_truncate()
+            block[56 + i] = (bits >> (i * 8).downcast_unchecked()).downcast_truncate()
         }
     }
     block
@@ -86,23 +84,33 @@ fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_inde
 // One length byte (0x80) and eight count bytes follow the message.
 fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
 
-fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
-    var w: [u32; 64] = [0; 64]
-    var t: u64 = 0
-    while t < 16 {
-        let at = (t * 4).downcast_truncate()
-        w[t.downcast_truncate()] = (block[at] as u32) << 24 | (block[at + 1] as u32) << 16
-            | (block[at + 2] as u32) << 8 | block[at + 3] as u32
-        t += 1
+// One round on the words a..h, giving the new d and h; each other word
+// keeps its value under the next round's name for it.
+#[arithmetic(unchecked)]
+#[inline(always)]
+fn sha256_round(_ a: u32, _ b: u32, _ c: u32, _ d: u32, _ e: u32, _ f: u32, _ g: u32, _ h: u32, _ kw: u32) -> (u32, u32) {
+    let first = h + (rotate_right(e, by: 6) ^ rotate_right(e, by: 11) ^ rotate_right(e, by: 25))
+        + ((e & f) ^ (~e & g)) + kw
+    let second = (rotate_right(a, by: 2) ^ rotate_right(a, by: 13) ^ rotate_right(a, by: 22))
+        + ((a & b) ^ (a & c) ^ (b & c))
+    (d + first, first + second)
+}
+
+// The message schedule's next 16 words, in place of the 16 before them.
+#[arithmetic(unchecked)]
+fn sha256_schedule(_ w: mut [u32; 16]) {
+    for i in 0..16 {
+        let x = w[(i + 1) & 15]
+        let y = w[(i + 14) & 15]
+        w[i] += (rotate_right(x, by: 7) ^ rotate_right(x, by: 18) ^ (x >> 3)) + w[(i + 9) & 15]
+            + (rotate_right(y, by: 17) ^ rotate_right(y, by: 19) ^ (y >> 10))
     }
-    while t < 64 {
-        let x = w[(t - 15).downcast_truncate()]
-        let y = w[(t - 2).downcast_truncate()]
-        let s0 = rotate_right(x, by: 7) ^ rotate_right(x, by: 18) ^ (x >> 3)
-        let s1 = rotate_right(y, by: 17) ^ rotate_right(y, by: 19) ^ (y >> 10)
-        w[t.downcast_truncate()] = w[(t - 16).downcast_truncate()].wrapping_add(s0).wrapping_add(w[(t - 7).downcast_truncate()]).wrapping_add(s1)
-        t += 1
-    }
+}
+
+// Sixteen rounds at a time, renaming the words instead of moving them, and
+// the schedule kept to the 16 words the next rounds read.
+#[arithmetic(unchecked)]
+fn sha256_compress(_ state: mut [u32; 8], _ w: mut [u32; 16]) {
     var a = state[0]
     var b = state[1]
     var c = state[2]
@@ -111,32 +119,100 @@ fn sha256_compress(_ state: mut [u32; 8], _ block: [u8; 64]) {
     var f = state[5]
     var g = state[6]
     var h = state[7]
-    t = 0
-    while t < 64 {
-        let s1 = rotate_right(e, by: 6) ^ rotate_right(e, by: 11) ^ rotate_right(e, by: 25)
-        let choice = (e & f) ^ (!e & g)
-        let first = h.wrapping_add(s1).wrapping_add(choice).wrapping_add(SHA256_K[t.downcast_truncate()]).wrapping_add(w[t.downcast_truncate()])
-        let s0 = rotate_right(a, by: 2) ^ rotate_right(a, by: 13) ^ rotate_right(a, by: 22)
-        let majority = (a & b) ^ (a & c) ^ (b & c)
-        let second = s0.wrapping_add(majority)
-        h = g
-        g = f
-        f = e
-        e = d.wrapping_add(first)
-        d = c
-        c = b
-        b = a
-        a = first.wrapping_add(second)
-        t += 1
+    var k: usize = 0
+    while true {
+        var round = sha256_round(a, b, c, d, e, f, g, h, SHA256_K[k] + w[0])
+        d = round.0
+        h = round.1
+        round = sha256_round(h, a, b, c, d, e, f, g, SHA256_K[k + 1] + w[1])
+        c = round.0
+        g = round.1
+        round = sha256_round(g, h, a, b, c, d, e, f, SHA256_K[k + 2] + w[2])
+        b = round.0
+        f = round.1
+        round = sha256_round(f, g, h, a, b, c, d, e, SHA256_K[k + 3] + w[3])
+        a = round.0
+        e = round.1
+        round = sha256_round(e, f, g, h, a, b, c, d, SHA256_K[k + 4] + w[4])
+        h = round.0
+        d = round.1
+        round = sha256_round(d, e, f, g, h, a, b, c, SHA256_K[k + 5] + w[5])
+        g = round.0
+        c = round.1
+        round = sha256_round(c, d, e, f, g, h, a, b, SHA256_K[k + 6] + w[6])
+        f = round.0
+        b = round.1
+        round = sha256_round(b, c, d, e, f, g, h, a, SHA256_K[k + 7] + w[7])
+        e = round.0
+        a = round.1
+        round = sha256_round(a, b, c, d, e, f, g, h, SHA256_K[k + 8] + w[8])
+        d = round.0
+        h = round.1
+        round = sha256_round(h, a, b, c, d, e, f, g, SHA256_K[k + 9] + w[9])
+        c = round.0
+        g = round.1
+        round = sha256_round(g, h, a, b, c, d, e, f, SHA256_K[k + 10] + w[10])
+        b = round.0
+        f = round.1
+        round = sha256_round(f, g, h, a, b, c, d, e, SHA256_K[k + 11] + w[11])
+        a = round.0
+        e = round.1
+        round = sha256_round(e, f, g, h, a, b, c, d, SHA256_K[k + 12] + w[12])
+        h = round.0
+        d = round.1
+        round = sha256_round(d, e, f, g, h, a, b, c, SHA256_K[k + 13] + w[13])
+        g = round.0
+        c = round.1
+        round = sha256_round(c, d, e, f, g, h, a, b, SHA256_K[k + 14] + w[14])
+        f = round.0
+        b = round.1
+        round = sha256_round(b, c, d, e, f, g, h, a, SHA256_K[k + 15] + w[15])
+        e = round.0
+        a = round.1
+        k += 16
+        if k == 64 { break }
+        sha256_schedule(mut w)
     }
-    state[0] = state[0].wrapping_add(a)
-    state[1] = state[1].wrapping_add(b)
-    state[2] = state[2].wrapping_add(c)
-    state[3] = state[3].wrapping_add(d)
-    state[4] = state[4].wrapping_add(e)
-    state[5] = state[5].wrapping_add(f)
-    state[6] = state[6].wrapping_add(g)
-    state[7] = state[7].wrapping_add(h)
+    state[0] += a
+    state[1] += b
+    state[2] += c
+    state[3] += d
+    state[4] += e
+    state[5] += f
+    state[6] += g
+    state[7] += h
+}
+
+// The 16 big-endian words of block `index` of the padded message. A block
+// within the input is eight lanes, byte-swapped; the last one or two hold
+// the input's last bytes, 0x80, zeros and the 64-bit bit count.
+fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usize, blocks: usize) -> [u32; 16] {
+    var w: [u32; 16] = [0; 16]
+    let start = index * 64
+    if start + 64 <= len {
+        for lane in 0..8 {
+            let word = swap_bytes(input.lane_at(offset + start + 8 * lane))
+            w[2 * lane] = (word >> 32).downcast_truncate()
+            w[2 * lane + 1] = word.downcast_truncate()
+        }
+        return w
+    }
+    for i in 0..16 {
+        var word: u32 = 0
+        for position in start + 4 * i..start + 4 * i + 4 {
+            let byte: u32 = if position < len { input.byte_at(offset + position) as u32 }
+                else if position == len { 0x80 } else { 0 }
+            word = (word << 8) | byte
+        }
+        w[i] = word
+    }
+    if index == blocks - 1 {
+        // Inputs are bounded by host memory, so the bit count fits 64 bits.
+        let bits: u64 = (len * 8).downcast_unchecked()
+        w[14] = (bits >> 32).downcast_truncate()
+        w[15] = bits.downcast_truncate()
+    }
+    w
 }
 
 /// The SHA-256 digest of `len` bytes of `input` from `offset`, as a big-endian word.
@@ -144,7 +220,8 @@ pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> u256 {
     var state = SHA256_IV
     let blocks = padded_blocks(len)
     for index in 0..blocks {
-        sha256_compress(mut state, padded_block(input, offset, len, block_index: index, blocks, big_endian: true))
+        var w = sha256_block(input, offset, len, index, blocks)
+        sha256_compress(mut state, mut w)
     }
     var digest: u256 = 0
     for word in state { digest = (digest << 32) | word as u256 }
@@ -214,7 +291,7 @@ pub fn ripemd160<T: ByteSource>(_ input: T) -> u256 {
     var state = RIPEMD_IV
     let blocks = padded_blocks(input.len())
     for index in 0..blocks {
-        ripemd_compress(mut state, padded_block(input, offset: 0, len: input.len(), block_index: index, blocks, big_endian: false))
+        ripemd_compress(mut state, padded_block(input, offset: 0, len: input.len(), block_index: index, blocks))
     }
     // Each state word holds its four digest bytes little-endian.
     var digest: u256 = 0
