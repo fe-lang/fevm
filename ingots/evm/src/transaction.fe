@@ -416,7 +416,9 @@ impl Transaction {
     }
 
     // Adds `amount` to a balance or nonce, or subtracts it, touching the
-    // account, with one account lookup.
+    // account, with one account lookup. A transaction runs it a few times in
+    // different places, so it stays one copy.
+    #[inline(never)]
     fn adjust(mut self, kind: u8, address: u256, amount: u256, add: bool) -> i32 {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
