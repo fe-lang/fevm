@@ -449,13 +449,13 @@ impl Transaction {
     // updates are not journaled.
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
-        for slot in 0..self.marks.capacity() {
-            let entry = self.marks.entry(slot)
-            let doomed = entry.value & MARK_DOOMED != 0
-            let touched = entry.value & MARK_TOUCHED != 0
-            if entry.occupied && (doomed || touched && self.state.exists(entry.key) && self.state.is_empty(entry.key)) {
-                self.state.remove_account(entry.key)
-            }
+        // The journal holds one entry for each mark that survived its frames.
+        var position: u64 = 0
+        while position < self.journal.len() {
+            let change = self.journal.change(position)
+            if change.kind == DOOMED { self.state.remove_account(change.address) }
+            if change.kind == TOUCHED { self.state.remove_if_empty(change.address) }
+            position += 1
         }
     }
 

@@ -162,12 +162,20 @@ impl WorldState {
     pub fn exists(self, _ address: u256) -> bool {
         self.index.contains(address_word(address))
     }
-    // EIP-161 emptiness: zero balance and nonce, and no code. Absent accounts are empty.
+    // EIP-161 emptiness of the record at `position`: zero balance and nonce, and no code.
+    fn empty_at(self, _ position: usize) -> bool {
+        let account = ref self.accounts[position]
+        account.balance == 0 && account.nonce == 0 && account.code_len == 0
+    }
+    // EIP-161 emptiness. Absent accounts are empty.
     pub fn is_empty(self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
-        if !lookup.found { return true }
-        let account = ref self.accounts[lookup.value]
-        account.balance == 0 && account.nonce == 0 && account.code_len == 0
+        !lookup.found || self.empty_at(lookup.value)
+    }
+    /// Deletes the account of `address`, with its storage, if it exists and is empty.
+    pub fn remove_if_empty(mut self, _ address: u256) {
+        let lookup = self.index.get(address_word(address))
+        if lookup.found && self.empty_at(lookup.value) { self.remove_account(address) }
     }
     // Delete an account record with its code and storage.
     pub fn remove_account(mut self, _ address: u256) {
@@ -263,11 +271,7 @@ impl WorldState {
     // balance, nonce and code are empty. Storage is not part of that predicate.
     pub fn code_hash(self, _ address: u256) -> u256 {
         let lookup = self.index.get(address_word(address))
-        if !lookup.found { return 0 }
-        let account = ref self.accounts[lookup.value]
-        if account.balance == 0 && account.nonce == 0 && account.code_len == 0 {
-            0
-        } else { account.code_hash }
+        if !lookup.found || self.empty_at(lookup.value) { 0 } else { self.accounts[lookup.value].code_hash }
     }
     // The arena offset and length of an account's code. One without code has
     // no arena record to address.
