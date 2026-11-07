@@ -130,10 +130,12 @@ def main():
                        '--report', '--report-out', account_archive], timeout=args.build_timeout)
         accounts.joinpath('build.log').write_bytes(log)
         artifacts(accounts / 'fevm_accounts', account_archive, accounts, object_name='fevm_accounts.o')
-        # A record of 65,537 bytes of code takes 64 + 65,537 + 8,193 bytes of arena.
+        # Replacing three bytes of code with 65,537 grows the arena by the new
+        # record, 64 + 65,537 + 8,193 bytes, past the old one's 64 + 3 + 1, which
+        # stays until compaction.
         for failure_at in [0, 1, 2]:
             controlled = accounts / f'allocator-{failure_at}'
-            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=73794',
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=73862',
                      ROOT / 'native/fixtures/vm_allocator.c', accounts / 'fevm_accounts.o',
                      '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
