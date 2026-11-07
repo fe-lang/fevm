@@ -49,12 +49,15 @@ pub struct Transaction {
     journal: Journal,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
-    // Warm accounts (precompiles are warm without marks); touched accounts,
+    // Warm accounts, other than those `always_warm` names; touched accounts,
     // whose balance, nonce or code a frame modified, which settlement removes
     // if left empty (the specification's modify_state deletion rule);
     // accounts created by this transaction (created_accounts); and the
     // self-destructed ones among those, which settlement deletes.
     marks: SwissTable<u256, u8>,
+    // The sender, destination and coinbase, warm from the start (EIP-2929,
+    // EIP-3651).
+    endpoints: [u256; 3],
     warm_storage: SwissTable<StorageKey, bool>,
     originals: SwissTable<StorageKey, u256>,
     refund: i128,
@@ -68,18 +71,14 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
-        // Precompiles are always warm, without marks.
-        var marks = SwissTable<u256, u8>::empty()
-        for address in [sender, destination, coinbase] {
-            marks.insert(address_word(address), MARK_WARM)
-        }
         Self {
             state,
             transient: SwissTable<StorageKey, u256>::empty(),
             journal: Journal::new(),
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
-            marks,
+            marks: SwissTable<u256, u8>::empty(),
+            endpoints: [address_word(sender), address_word(destination), address_word(coinbase)],
             warm_storage: SwissTable<StorageKey, bool>::empty(),
             originals: SwissTable<StorageKey, u256>::empty(),
             refund: 0,
@@ -152,7 +151,14 @@ impl Transaction {
 
     pub fn account_is_warm(self, _ address: u256) -> bool {
         let address = address_word(address)
-        is_precompile(address) || self.marked(address, MARK_WARM)
+        self.always_warm(address) || self.marked(address, MARK_WARM)
+    }
+
+    // Whether `address`, an address word, is warm without a mark: a
+    // precompile, or the sender, destination or coinbase.
+    fn always_warm(self, _ address: u256) -> bool {
+        is_precompile(address) || address == self.endpoints[0] || address == self.endpoints[1]
+            || address == self.endpoints[2]
     }
 
     // Whether `address`, an address word, has `mark`.
@@ -191,7 +197,7 @@ impl Transaction {
     fn mark(mut self, kind: u8, address: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        if kind == WARM_ACCOUNT && is_precompile(address) { return OK }
+        if kind == WARM_ACCOUNT && self.always_warm(address) { return OK }
         let mark = mark_of(kind)
         match self.marks.find(address) {
             Option::Some(slot) => {
