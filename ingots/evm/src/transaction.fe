@@ -21,6 +21,13 @@ const DOOMED: u8 = 8
 // An EIP-7702 delegation: `slot` is 1 when the code was a designator to `previous`.
 const DELEGATION: u8 = 9
 
+// An address's marks, the bits of its `marks` entry. Undo clears the warm,
+// touched and doomed marks a frame set; creation marks survive rollback.
+const MARK_WARM: u8 = 1
+const MARK_TOUCHED: u8 = 2
+const MARK_CREATED: u8 = 4
+const MARK_DOOMED: u8 = 8
+
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
 pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128, logs: u64 }
@@ -41,17 +48,14 @@ pub struct Transaction {
     journal: Journal,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
-    warm_accounts: SwissTable<u256, bool>,
+    // Warm accounts (precompiles are warm without marks); touched accounts,
+    // whose balance, nonce or code a frame modified, which settlement removes
+    // if left empty (the specification's modify_state deletion rule);
+    // accounts created by this transaction (created_accounts); and the
+    // self-destructed ones among those, which settlement deletes.
+    marks: SwissTable<u256, u8>,
     warm_storage: SwissTable<StorageKey, bool>,
     originals: SwissTable<StorageKey, u256>,
-    // Accounts whose balance, nonce or code a frame modified; settlement removes
-    // those left empty (the specification's modify_state deletion rule).
-    touched: SwissTable<u256, bool>,
-    // Accounts created by this transaction. Like the specification's
-    // created_accounts, the marks survive frame rollback.
-    created: SwissTable<u256, bool>,
-    // Self-destructed accounts created by this transaction, deleted at settlement.
-    doomed: SwissTable<u256, bool>,
     refund: i128,
     started: bool,
     depth: usize,
@@ -63,10 +67,10 @@ pub struct Transaction {
 
 impl Transaction {
     pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
-        // Precompiles are always warm, without entries.
-        var warm_accounts = SwissTable<u256, bool>::empty()
+        // Precompiles are always warm, without marks.
+        var marks = SwissTable<u256, u8>::empty()
         for address in [sender, destination, coinbase] {
-            warm_accounts.insert(address_word(address), true)
+            marks.insert(address_word(address), MARK_WARM)
         }
         Self {
             state,
@@ -74,12 +78,9 @@ impl Transaction {
             journal: Journal::new(),
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
-            warm_accounts,
+            marks,
             warm_storage: SwissTable<StorageKey, bool>::empty(),
             originals: SwissTable<StorageKey, u256>::empty(),
-            touched: SwissTable<u256, bool>::empty(),
-            created: SwissTable<u256, bool>::empty(),
-            doomed: SwissTable<u256, bool>::empty(),
             refund: 0,
             started: false,
             depth: 0,
@@ -133,16 +134,17 @@ impl Transaction {
     // Access-list initialization precedes all frames and is never rolled back.
     pub fn access_list_account(mut self, address: u256) -> bool {
         core::assert(!self.started)
-        self.warm_accounts.try_insert(address_word(address), true)
+        let address = address_word(address)
+        self.marks.try_insert(address, self.marks.get(address).value | MARK_WARM)
     }
 
     pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
         core::assert(!self.started)
         let address = address_word(address)
-        let was_warm = self.account_is_warm(address)
-        if !self.warm_accounts.try_insert(address, true) { return false }
+        let marks = self.marks.get(address).value
+        if !self.marks.try_insert(address, marks | MARK_WARM) { return false }
         if !self.warm_storage.try_insert(StorageKey { address, slot }, true) {
-            if !was_warm { let _ = self.warm_accounts.remove(address) }
+            core::assert(self.restore_marks(address, marks))
             return false
         }
         true
@@ -150,73 +152,71 @@ impl Transaction {
 
     pub fn account_is_warm(self, _ address: u256) -> bool {
         let address = address_word(address)
-        is_precompile(address) || self.warm_accounts.contains(address)
+        is_precompile(address) || self.marks.get(address).value & MARK_WARM != 0
     }
 
     pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
         self.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
-    // Inserts first, with one lookup, and journals only a new member; a
-    // journal that cannot grow removes it again.
-    fn mark(mut self, kind: u8, address: u256, slot: u256) -> i32 {
+    // Adds the warm, touched or doomed mark of `kind` to `address`, journaled
+    // if new; a journal that cannot grow restores the marks.
+    fn mark(mut self, kind: u8, address: u256) -> i32 {
         self.started = true
         let address = address_word(address)
         if kind == WARM_ACCOUNT && is_precompile(address) { return OK }
-        let before = self.marks(kind)
-        let inserted = match kind {
-            WARM_ACCOUNT => self.warm_accounts.try_insert(address, true),
-            WARM_STORAGE => self.warm_storage.try_insert(StorageKey { address, slot }, true),
-            TOUCHED => self.touched.try_insert(address, true),
-            _ => self.doomed.try_insert(address, true),
-        }
-        if !inserted { return ERR_HOST_ALLOCATION }
-        if self.marks(kind) == before { return OK }
-        if !self.journal.append(Change { kind, address, slot, previous: 0, existed: true }) {
-            let _ = match kind {
-                WARM_ACCOUNT => self.warm_accounts.remove(address),
-                WARM_STORAGE => self.warm_storage.remove(StorageKey { address, slot }),
-                TOUCHED => self.touched.remove(address),
-                _ => self.doomed.remove(address),
-            }
+        let mark = mark_of(kind)
+        let marks = self.marks.get(address).value
+        if marks & mark != 0 { return OK }
+        if !self.marks.try_insert(address, marks | mark) { return ERR_HOST_ALLOCATION }
+        if !self.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
+            core::assert(self.restore_marks(address, marks))
             return ERR_HOST_ALLOCATION
         }
         OK
     }
 
-    // The members of a journaled set.
-    fn marks(self, kind: u8) -> usize {
-        match kind {
-            WARM_ACCOUNT => self.warm_accounts.len(),
-            WARM_STORAGE => self.warm_storage.len(),
-            TOUCHED => self.touched.len(),
-            _ => self.doomed.len(),
-        }
+    // Sets `address`'s marks, which it has an entry for, to `marks`; an
+    // address left without marks loses its entry. Neither grows the table.
+    fn restore_marks(mut self, _ address: u256, _ marks: u8) -> bool {
+        if marks == 0 { self.marks.remove(address) } else { self.marks.try_insert(address, marks) }
     }
 
     pub fn warm_account(mut self, address: u256) -> i32 {
-        self.mark(kind: WARM_ACCOUNT, address, slot: 0)
+        self.mark(kind: WARM_ACCOUNT, address)
     }
 
+    // Inserts first, with one lookup, and journals only a new slot; a journal
+    // that cannot grow removes it again.
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
-        self.mark(kind: WARM_STORAGE, address, slot)
+        self.started = true
+        let key = StorageKey { address: address_word(address), slot }
+        let before = self.warm_storage.len()
+        if !self.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
+        if self.warm_storage.len() == before { return OK }
+        if !self.journal.append(Change { kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true }) {
+            let _ = self.warm_storage.remove(key)
+            return ERR_HOST_ALLOCATION
+        }
+        OK
     }
 
     pub fn touch(mut self, _ address: u256) -> i32 {
-        self.mark(kind: TOUCHED, address, slot: 0)
+        self.mark(kind: TOUCHED, address)
     }
 
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
     pub fn doom(mut self, _ address: u256) -> i32 {
-        self.mark(kind: DOOMED, address, slot: 0)
+        self.mark(kind: DOOMED, address)
     }
 
     pub fn mark_created(mut self, _ address: u256) -> i32 {
-        if self.created.try_insert(address_word(address), true) { OK } else { ERR_HOST_ALLOCATION }
+        let address = address_word(address)
+        if self.marks.try_insert(address, self.marks.get(address).value | MARK_CREATED) { OK } else { ERR_HOST_ALLOCATION }
     }
 
     pub fn was_created(self, _ address: u256) -> bool {
-        self.created.contains(address_word(address))
+        self.marks.get(address_word(address)).value & MARK_CREATED != 0
     }
 
     pub fn original_storage(self, address: u256, slot: u256) -> u256 {
@@ -269,7 +269,9 @@ impl Transaction {
                 NONCE => self.state.set_nonce(change.address, change.previous),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
-                WARM_ACCOUNT => self.warm_accounts.remove(change.address),
+                WARM_ACCOUNT | TOUCHED | DOOMED => self.restore_marks(
+                    change.address, self.marks.get(change.address).value & ~mark_of(change.kind),
+                ),
                 WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
                 CODE => {
                     let empty: [u8; 0] = []
@@ -281,8 +283,6 @@ impl Transaction {
                     let empty: [u8; 0] = []
                     self.state.set_code(address: change.address, code: empty) == OK
                 },
-                TOUCHED => self.touched.remove(change.address),
-                DOOMED => self.doomed.remove(change.address),
                 _ => core::panic(),
             }
             // Reverse replay restores entries the tables held before. A table
@@ -449,19 +449,13 @@ impl Transaction {
     // updates are not journaled.
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
-        var slot: usize = 0
-        while slot < self.doomed.capacity() {
-            let doomed = self.doomed.entry(slot)
-            if doomed.occupied { self.state.remove_account(doomed.key) }
-            slot += 1
-        }
-        slot = 0
-        while slot < self.touched.capacity() {
-            let touched = self.touched.entry(slot)
-            if touched.occupied && self.state.exists(touched.key) && self.state.is_empty(touched.key) {
-                self.state.remove_account(touched.key)
+        for slot in 0..self.marks.capacity() {
+            let entry = self.marks.entry(slot)
+            let doomed = entry.value & MARK_DOOMED != 0
+            let touched = entry.value & MARK_TOUCHED != 0
+            if entry.occupied && (doomed || touched && self.state.exists(entry.key) && self.state.is_empty(entry.key)) {
+                self.state.remove_account(entry.key)
             }
-            slot += 1
         }
     }
 
@@ -475,5 +469,14 @@ impl Transaction {
         }
         let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
         TransactionResult { state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }
+    }
+}
+
+// The mark a journaled kind sets.
+fn mark_of(_ kind: u8) -> u8 {
+    match kind {
+        WARM_ACCOUNT => MARK_WARM,
+        TOUCHED => MARK_TOUCHED,
+        _ => MARK_DOOMED,
     }
 }
