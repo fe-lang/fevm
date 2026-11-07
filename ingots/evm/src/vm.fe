@@ -17,7 +17,6 @@ use ingot::trace::{CallEnd, CallStart, Step, Tracer}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
 use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 use ingot::status::{
-    ERR_BALANCE_OVERFLOW,
     ERR_CODE_PREFIX,
     ERR_HOST_ALLOCATION,
     ERR_INVALID_JUMP,
@@ -847,17 +846,18 @@ fn frame_allocation(_ buffers: mut FrameBuffers) -> Option<Box<Frame>> {
     }
 }
 
-/// Move ether as the specification's move_ether, writing (and touching) both
-/// accounts even for a self-transfer. The sender must hold `value`.
+/// Move ether as the specification's move_ether, touching both accounts. The
+/// sender must hold `value`. On failure the caller reverts its checkpoint.
 pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
-    let available = state.balance(from)
-    core::assert(available >= value)
     // A self-transfer changes no balance, so static frames may perform it.
-    if from == to { return state.touch(from) }
-    if value > MAX_U256 - state.balance(to) { return ERR_BALANCE_OVERFLOW }
-    let status = state.set_balance(address: from, value: available - value)
+    if from == to {
+        core::assert(state.balance(from) >= value)
+        return state.touch(from)
+    }
+    // Crediting first finds an overflow before any balance changes.
+    let status = state.credit(address: to, amount: value)
     if status != OK { return status }
-    state.set_balance(address: to, value: state.balance(to) + value)
+    state.debit(address: from, amount: value)
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation

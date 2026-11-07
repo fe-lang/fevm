@@ -1,6 +1,7 @@
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::default::Default
-use swisstable::{SwissKey, SwissTable, hash_u256}
+use swisstable::{Lookup, SwissKey, SwissTable, hash_u256}
+use ingot::constants::MAX_U256
 use keccak::{ByteSource, keccak256_word}
 use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
@@ -134,7 +135,10 @@ impl WorldState {
     // none; none if allocation fails.
     fn record(mut self, _ address: u256) -> Option<usize> {
         let lookup = self.index.get(address)
-        if lookup.found { return Option::Some(lookup.value) }
+        if lookup.found { Option::Some(lookup.value) } else { self.add_record(address) }
+    }
+    // The position of a new record for `address`, which has none.
+    fn add_record(mut self, _ address: u256) -> Option<usize> {
         let at = self.accounts.len()
         let account = Account {
             address, balance: 0, nonce: 0, code_hash: EMPTY_CODE_HASH, code_offset: 0, code_len: 0, storage_slots: 0,
@@ -242,23 +246,39 @@ impl WorldState {
     pub fn replace(mut self, balance: bool, _ address: u256, _ value: u256) -> Replaced {
         let address = address_word(address)
         let lookup = self.index.get(address)
-        if !lookup.found {
-            if value == 0 { return Replaced { previous: 0, found: false, changed: false, written: true } }
-            let written = match self.record(address) {
-                Option::Some(at) => {
-                    let account = mut self.accounts[at]
-                    if balance { account.balance = value } else { account.nonce = value }
-                    true
-                },
-                Option::None => false,
-            }
-            return Replaced { previous: 0, found: false, changed: true, written }
+        let previous = self.field(balance, lookup)
+        self.store(balance, address, lookup, previous, value)
+    }
+    /// Adds `amount` to the balance (or nonce), or subtracts it, which the
+    /// value must hold, with one lookup. An addition past 2^256 changes
+    /// nothing; an absent account stays absent for zero.
+    pub fn adjust(mut self, balance: bool, _ address: u256, amount: u256, add: bool) -> Replaced {
+        let address = address_word(address)
+        let lookup = self.index.get(address)
+        let previous = self.field(balance, lookup)
+        if add && amount > MAX_U256 - previous {
+            return Replaced { previous, found: lookup.found, changed: false, written: true }
         }
-        let account = mut self.accounts[lookup.value]
-        let previous = if balance { account.balance } else { account.nonce }
-        if previous == value { return Replaced { previous, found: true, changed: false, written: true } }
+        self.store(balance, address, lookup, previous, value: if add { previous + amount } else { previous - amount })
+    }
+    // The balance (or nonce) of a looked-up account.
+    fn field(self, _ balance: bool, _ lookup: Lookup<usize>) -> u256 {
+        if !lookup.found { return 0 }
+        if balance { self.accounts[lookup.value].balance } else { self.accounts[lookup.value].nonce }
+    }
+    // Replaces `previous`, the balance (or nonce) of a looked-up account, with `value`.
+    fn store(mut self, _ balance: bool, _ address: u256, _ lookup: Lookup<usize>, _ previous: u256,
+             _ value: u256) -> Replaced {
+        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true } }
+        let at = if lookup.found { lookup.value } else {
+            match self.add_record(address) {
+                Option::Some(at) => at,
+                Option::None => return Replaced { previous, found: false, changed: true, written: false },
+            }
+        }
+        let account = mut self.accounts[at]
         if balance { account.balance = value } else { account.nonce = value }
-        Replaced { previous, found: true, changed: true, written: true }
+        Replaced { previous, found: lookup.found, changed: true, written: true }
     }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
         self.replace(balance: false, address, value).written

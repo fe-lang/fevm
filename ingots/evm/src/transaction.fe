@@ -1,9 +1,10 @@
 use core::{MemSpan, MemVec, Option}
 use ingot::logs::LogBuffer
 use swisstable::SwissTable
-use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
+use ingot::constants::MAX_U256
+use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, Journal}
-use ingot::state::{StorageKey, WorldState, address_word, designator}
+use ingot::state::{Replaced, StorageKey, WorldState, address_word, designator}
 use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::FrameBuffers
@@ -330,7 +331,9 @@ impl Transaction {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        if kind == BALANCE || kind == NONCE { return self.write_account(kind, address, value) }
+        if kind == BALANCE || kind == NONCE {
+            return self.journal_account(kind, address, self.state.replace(balance: kind == BALANCE, address, value))
+        }
         let previous = match kind {
             BALANCE => self.balance(address),
             NONCE => self.nonce(address),
@@ -359,19 +362,30 @@ impl Transaction {
         OK
     }
 
-    // A balance or nonce write with one account lookup: the store comes first,
-    // and a journal that cannot grow restores the previous value.
-    fn write_account(mut self, kind: u8, address: u256, value: u256) -> i32 {
-        let replaced = self.state.replace(balance: kind == BALANCE, address, value)
+    // Journals a balance or nonce write the world already made; a journal
+    // that cannot grow restores the previous value.
+    fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
         if !replaced.written { return ERR_HOST_ALLOCATION }
         if !replaced.changed { return OK }
         if !self.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
-            // Restoring a value the table holds does not grow it.
+            // Restoring a value the record holds needs no allocation.
             core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
             if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
             return ERR_HOST_ALLOCATION
         }
         OK
+    }
+
+    // Adds `amount` to a balance or nonce, or subtracts it, touching the
+    // account, with one account lookup.
+    fn adjust(mut self, kind: u8, address: u256, amount: u256, add: bool) -> i32 {
+        let status = self.touch(address)
+        if status != OK { return status }
+        if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        let replaced = self.state.adjust(balance: kind == BALANCE, address, amount, add)
+        if add && amount > MAX_U256 - replaced.previous { return ERR_BALANCE_OVERFLOW }
+        self.journal_account(kind, address, replaced)
     }
 
     // Balance, nonce and code writes touch their account even when unchanged.
@@ -386,7 +400,16 @@ impl Transaction {
         self.write(kind: NONCE, address, slot: 0, value)
     }
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
-        self.set_nonce(address, value: self.nonce(address) + 1)
+        self.adjust(kind: NONCE, address, amount: 1, add: true)
+    }
+    /// Adds `amount` to the balance, touching the account; one past 2^256 is
+    /// ERR_BALANCE_OVERFLOW and changes no balance.
+    pub fn credit(mut self, address: u256, amount: u256) -> i32 {
+        self.adjust(kind: BALANCE, address, amount, add: true)
+    }
+    /// Subtracts `amount`, which the balance must hold, touching the account.
+    pub fn debit(mut self, address: u256, amount: u256) -> i32 {
+        self.adjust(kind: BALANCE, address, amount, add: false)
     }
     // Contract deployment writes code to an account that has none (EIP-684).
     pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {

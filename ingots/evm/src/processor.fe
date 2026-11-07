@@ -281,7 +281,7 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
     let fee = request.env.gas_limit as u256 * price + (request.blob_count() * GAS_PER_BLOB) as u256 * blob_price
     let status = tx.increment_nonce(sender)
     if status != OK { return status }
-    tx.set_balance(address: sender, value: tx.balance(sender) - fee)
+    tx.debit(address: sender, amount: fee)
 }
 
 // What an authority signs: keccak256(0x05 || rlp([chain_id, address, nonce])).
@@ -444,11 +444,10 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
     let refunded = gas_spent - tx.capped_refund(gas_spent)
     let floor: u64 = intrinsic.floor.downcast_unchecked()
     let gas_used = if refunded > floor { refunded } else { floor }
-    var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
-    let coinbase = address_word(block.coinbase)
+    var paid = tx.credit(address: sender, amount: (env.gas_limit - gas_used) as u256 * price)
     if paid == OK {
         let tip = if price > block.basefee { price - block.basefee } else { 0 }
-        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * tip)
+        paid = tx.credit(address: address_word(block.coinbase), amount: gas_used as u256 * tip)
     }
     if paid != OK {
         return host_failure(tx, status: paid)

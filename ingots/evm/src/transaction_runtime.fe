@@ -1,8 +1,11 @@
-use ingot::status::{ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK}
+use ingot::constants::MAX_U256
+use ingot::status::{
+    ERR_BALANCE_OVERFLOW, ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK,
+}
 use ingot::state::WorldState
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
-use ingot::vm::{Vm, execute}
+use ingot::vm::{Vm, execute, transfer}
 
 pub fn program<const N: usize>(_ ops: [u8; N]) -> Program {
     Program::copy_from(ops, len: N)
@@ -36,6 +39,30 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(tx.transient_load(address: 7, slot: 8) == 0)
     let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 8) == 11)
+}
+
+#[test]
+fn transfers_credit_and_debit_both_accounts_unless_the_credit_overflows() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(7, 10) && world.set_balance(8, MAX_U256 - 4))
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    // A new account gets a record for its credit.
+    let paid = checkpoint(mut tx, is_static: false)
+    core::assert(transfer(mut tx, from: 7, to: 9, value: 3) == OK)
+    core::assert(tx.balance(7) == 7 && tx.balance(9) == 3 && tx.exists(9))
+    tx.commit(paid)
+    let overflow = checkpoint(mut tx, is_static: false)
+    core::assert(transfer(mut tx, from: 7, to: 8, value: 5) == ERR_BALANCE_OVERFLOW)
+    core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)
+    tx.revert(overflow)
+    let filled = checkpoint(mut tx, is_static: false)
+    core::assert(transfer(mut tx, from: 7, to: 8, value: 4) == OK)
+    core::assert(tx.balance(7) == 3 && tx.balance(8) == MAX_U256)
+    tx.revert(filled)
+    core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)
+    core::assert(tx.increment_nonce(9) == OK && tx.nonce(9) == 1)
+    let world = tx.finish(commit: false, gas_spent: 0).state
+    core::assert(world.balance(7) == 10 && !world.exists(9))
 }
 
 #[test]
