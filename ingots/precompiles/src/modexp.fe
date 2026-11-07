@@ -1,4 +1,5 @@
 use core::{MemArray, MemBuffer, MemSlice, Option}
+use core::num::swap_bytes
 use keccak::ByteSource
 use ingot::{FAILURE, Output, SUCCESS, host_allocation}
 use ingot::bignum::{Modulus, Montgomery}
@@ -56,6 +57,11 @@ fn gas_cost<T: ByteSource>(_ input: T, _ sizes: Lengths) -> u64 {
 
 // One limb of a big-endian number of `len` bytes at `offset`; limb 0 is least significant.
 fn input_limb<T: ByteSource>(_ input: T, offset: u256, len: u256, limb: u256) -> u64 {
+    // A limb of eight bytes within the input is one lane, byte-swapped.
+    let end = offset + len - limb * 8
+    if limb * 8 + 8 <= len && end <= input.len() as u256 {
+        return swap_bytes(input.lane_at((end - 8).downcast_unchecked()))
+    }
     var value: u64 = 0
     var byte: u256 = 8
     while byte > 0 {
@@ -67,10 +73,6 @@ fn input_limb<T: ByteSource>(_ input: T, offset: u256, len: u256, limb: u256) ->
     value
 }
 
-// Bit `index` of the exponent's `len` big-endian bytes at `start`, from the most significant.
-fn exponent_bit<T: ByteSource>(_ input: T, start: u256, index: u256) -> u256 {
-    ((input_byte(input, start + index / 8) >> (7 - (index % 8)).downcast_truncate()) & 1) as u256
-}
 
 // The sliding window width for an exponent of `bits` bits: 2^(w - 1) table
 // products against about bits / (w + 1) window products.
@@ -118,42 +120,56 @@ pub fn run<T: ByteSource>(_ input: T, gas: u64) -> Output {
         return host_allocation(gas_used)
     }
     let Option::Some(var base) = MemArray<u64>::try_new_zeroed(n.downcast_truncate()) else { return host_allocation(gas_used) }
-    // Reduce the base limb by limb, most significant first.
-    var limb = (sizes.base + 7) / 8
-    while limb > 0 {
-        limb -= 1
-        work.as_slice().slice(offset: 1, len: n.downcast_truncate()).copy_from(base.as_slice())
-        work[0] = input_limb(input, offset: 96, len: sizes.base, limb)
-        modulus.reduce(mut work, len: n + 1)
-        base.as_slice().copy_from(work.as_slice().head(n.downcast_truncate()))
+    // The base by one long division; one of fewer limbs than the modulus is below it.
+    let base_limbs: u64 = ((sizes.base + 7) / 8).downcast_unchecked()
+    let Option::Some(var dividend) = MemArray<u64>::try_new_zeroed((base_limbs + 1).downcast_truncate()) else {
+        return host_allocation(gas_used)
     }
-    let total = sizes.exponent * 8
-    var top: u256 = 0
-    while top < total && exponent_bit(input, start: exponent_start, index: top) == 0 { top += 1 }
-    let exponent = Exponent { start: exponent_start, top, total }
+    for i in 0..base_limbs.downcast_truncate() { dividend[i] = input_limb(input, offset: 96, len: sizes.base, limb: i as u256) }
+    if base_limbs >= n { modulus.reduce(mut dividend, len: base_limbs) }
+    for i in 0..n.downcast_truncate() { base[i] = if i < dividend.len() { dividend[i] } else { 0 } }
+    let Option::Some(exponent) = Exponent::try_read(input, start: exponent_start, len: sizes.exponent) else {
+        return host_allocation(gas_used)
+    }
     if value[0] & 1 == 1 {
-        let Option::Some(result) = odd_power(input, exponent, base, modulus, value, n, mut work) else {
+        let Option::Some(result) = odd_power(exponent, base, modulus, value, n, mut work) else {
             return host_allocation(gas_used)
         }
         return encoded(result, n, modulus_len, output, gas_used)
     }
-    let Option::Some(result) = even_power(input, exponent, base, value, n, mut work) else { return host_allocation(gas_used) }
+    let Option::Some(result) = even_power(exponent, base, value, n, mut work) else { return host_allocation(gas_used) }
     encoded(result, n, modulus_len, output, gas_used)
 }
 
-// Where the exponent's bits are: its first set bit `top` (`total` if it is
-// zero) of `total`, from the most significant, at byte `start` of the input.
-struct Exponent { start: u256, top: u256, total: u256 }
+// The exponent's limbs, least significant first, with its first set bit
+// `top` (`total` if it is zero) of its `total` bits, from the most significant.
+struct Exponent { limbs: MemArray<u64>, top: u256, total: u256 }
 
-impl Copy for Exponent {}
+impl Exponent {
+    // The `len` big-endian bytes at `start`; none if allocation fails.
+    fn try_read<T: ByteSource>(_ input: T, start: u256, len: u256) -> Option<Self> {
+        let count: usize = ((len + 7) / 8).downcast_unchecked()
+        var limbs = MemArray<u64>::try_new_zeroed(count)?
+        var top = len * 8
+        for i in 0..count {
+            limbs[i] = input_limb(input, offset: start, len, limb: i as u256)
+            if limbs[i] != 0 { top = len * 8 - 1 - (i as u256 * 64 + 255 - core::num::leading_zeros(limbs[i] as u256)) }
+        }
+        Option::Some(Self { limbs, top, total: len * 8 })
+    }
+    // Bit `index` from the most significant.
+    fn bit(self, _ index: u256) -> u256 {
+        let position = self.total - 1 - index
+        ((self.limbs[(position / 64).downcast_unchecked()] >> (position % 64).downcast_truncate()) & 1) as u256
+    }
+}
 
 // base^e mod an odd m of `n` limbs, for base < m, by Montgomery
 // multiplication over sliding windows; `modulus` is m normalized, and `work`
 // holds at least 2n + 1 limbs.
-fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u64>, _ modulus: Modulus,
+fn odd_power(_ exponent: Exponent, _ base: MemArray<u64>, _ modulus: Modulus,
                             _ value: own MemArray<u64>, _ n: u64, _ work: mut MemArray<u64>) -> Option<MemArray<u64>> {
     let montgomery = Montgomery::new(value, len: n)
-    let start = exponent.start
     let total = exponent.total
     let size: usize = n.downcast_truncate()
     var result = MemArray<u64>::try_new_zeroed(size)?
@@ -166,7 +182,7 @@ fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
         return Option::Some(result)
     }
     // A single squaring does not pay for converting to and from Montgomery form.
-    if total - exponent.top == 2 && exponent_bit(input, start, index: total - 1) == 0 {
+    if total - exponent.top == 2 && exponent.bit(total - 1) == 0 {
         modulus.mul_mod(base, base, mut work)
         result.as_slice().copy_from(work.as_slice().head(size))
         return Option::Some(result)
@@ -194,18 +210,18 @@ fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
     var index = exponent.top
     var started = false
     while index < total {
-        if exponent_bit(input, start: start, index) == 0 {
+        if exponent.bit(index) == 0 {
             montgomery.mul(result.as_slice(), result.as_slice(), mut work)
             result.as_slice().copy_from(work.as_slice().head(size))
             index += 1
             continue
         }
         var end = if total - index < width { total } else { index + width }
-        while exponent_bit(input, start: start, index: end - 1) == 0 { end -= 1 }
+        while exponent.bit(end - 1) == 0 { end -= 1 }
         var digit: u256 = 0
         var bit = index
         while bit < end {
-            digit = (digit << 1) | exponent_bit(input, start: start, index: bit)
+            digit = (digit << 1) | exponent.bit(bit)
             bit += 1
         }
         let entry: usize = ((digit - 1) / 2).downcast_truncate()
@@ -236,7 +252,7 @@ fn odd_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
 // x = base^e mod q and y = base^e mod 2^k combine by the Chinese remainder
 // theorem as x + q ((y - x) q^-1 mod 2^k), which is below m.
 #[arithmetic(unchecked)]
-fn even_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u64>, _ value: MemArray<u64>,
+fn even_power(_ exponent: Exponent, _ base: MemArray<u64>, _ value: MemArray<u64>,
                              _ n: u64, _ work: mut MemArray<u64>) -> Option<MemArray<u64>> {
     let size: usize = n.downcast_truncate()
     var zero_limbs: usize = 0
@@ -246,7 +262,7 @@ fn even_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<
     let bits: u64 = (k % 64).downcast_truncate()
     let mask: u64 = if bits == 0 { 0xffffffffffffffff } else { (1 << bits) - 1 }
     var result = MemArray<u64>::try_new_zeroed(size)?
-    let y = low_power(input, exponent, base, low, mask)?
+    let y = low_power(exponent, base, low, mask)?
     // q = m >> k, of `q_len` significant limbs.
     var q = MemArray<u64>::try_new_zeroed(size)?
     for i in 0..size - k / 64 {
@@ -269,7 +285,7 @@ fn even_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<
         reduced[i] = work[i]
         odd[i] = q[i]
     }
-    let x = odd_power(input, exponent, reduced, q_modulus, odd, q_len.downcast_truncate(), mut work)?
+    let x = odd_power(exponent, reduced, q_modulus, odd, q_len.downcast_truncate(), mut work)?
     // t = (y - x) mod 2^k.
     var t = MemArray<u64>::try_new_zeroed(low)?
     var borrow: u64 = 0
@@ -336,7 +352,7 @@ fn even_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<
 // base^e mod 2^k for 2^k = mask + 1 in its top limb of `low`: products keep
 // only their low `low` limbs. A power that reaches zero stays zero.
 #[arithmetic(unchecked)]
-fn low_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u64>, _ low: usize,
+fn low_power(_ exponent: Exponent, _ base: MemArray<u64>, _ low: usize,
                             _ mask: u64) -> Option<MemArray<u64>> {
     var result = MemArray<u64>::try_new_zeroed(low)?
     var factor = MemArray<u64>::try_new_zeroed(low)?
@@ -347,7 +363,7 @@ fn low_power<T: ByteSource>(_ input: T, _ exponent: Exponent, _ base: MemArray<u
     var index = exponent.top
     while index < exponent.total {
         low_product(result.as_slice(), result.as_slice(), mut work.as_slice())
-        if exponent_bit(input, start: exponent.start, index) == 1 {
+        if exponent.bit(index) == 1 {
             low_product(work.as_slice(), factor.as_slice(), mut result.as_slice())
         } else {
             result.as_slice().copy_from(work.as_slice())
