@@ -1,4 +1,4 @@
-use core::{MemBuffer, MemSpan, Option}
+use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::default::Default
 use swisstable::{SwissKey, SwissTable, hash_u256}
 use keccak::{ByteSource, keccak256_word}
@@ -7,22 +7,19 @@ use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
+// An account's record. Absent accounts read as zero with no code.
 struct Account {
+    address: u256,
     balance: u256,
     nonce: u256,
+    code_hash: u256,
     code_offset: usize,
     code_len: usize,
-    code_hash: u256,
     // Nonzero storage slots, so deployability and deletion need not scan
     // the storage table.
     storage_slots: u64,
 }
 impl Copy for Account {}
-impl Default for Account {
-    fn default() -> Self {
-        Self { balance: 0, nonce: 0, code_offset: 0, code_len: 0, code_hash: EMPTY_CODE_HASH, storage_slots: 0 }
-    }
-}
 
 // EVM account operands use only their low 160 bits.
 pub fn address_word(_ word: u256) -> u256 { word & 0xffffffffffffffffffffffffffffffffffffffff }
@@ -46,9 +43,8 @@ pub fn delegation(_ code: MemSpan) -> Option<u256> {
 
 pub struct StorageKey { pub address: u256, pub slot: u256 }
 
-// Physical table slots for iterating the world; `occupied` is false for free slots.
+// An account, for iterating the world.
 pub struct AccountEntry {
-    pub occupied: bool,
     pub address: u256,
     pub balance: u256,
     pub nonce: u256,
@@ -98,7 +94,11 @@ fn copy_table<K, V>(_ table: SwissTable<K, V>) -> Option<SwissTable<K, V>> where
 }
 
 pub struct WorldState {
-    accounts: SwissTable<u256, Account>,
+    // Each account's position in `accounts`.
+    index: SwissTable<u256, usize>,
+    // The account records, in no order: removing one moves the last into its
+    // place. Fields change in place, with one lookup of the position.
+    accounts: MemVec<Account>,
     // Packed [address:32, length:32, code:length, jumpdests] records, where
     // `jumpdests` is the code's `mark_jumpdests` bitmap. Replacements compact
     // the arena, so retained storage is bounded by the peak live code extent.
@@ -110,7 +110,8 @@ pub struct WorldState {
 impl WorldState {
     pub fn empty() -> Self {
         WorldState {
-            accounts: SwissTable<u256, Account>::empty(),
+            index: SwissTable<u256, usize>::empty(),
+            accounts: MemVec::new(),
             code: MemBuffer::empty(),
             storage: SwissTable<StorageKey, u256>::empty(),
             block_hashes: SwissTable<u256, u256>::empty(),
@@ -119,30 +120,53 @@ impl WorldState {
     /// A copy of the world, which a host can keep to restore later; none if
     /// allocation fails.
     pub fn try_clone(self) -> Option<WorldState> {
-        let accounts = match copy_table(self.accounts) {
-            Option::Some(accounts) => accounts,
-            Option::None => return Option::None,
+        let index = copy_table(self.index)?
+        var accounts = MemVec<Account>::new()
+        if !accounts.try_reserve(self.accounts.len()) { return Option::None }
+        for account in self.accounts { accounts.push(account) }
+        let storage = copy_table(self.storage)?
+        let block_hashes = copy_table(self.block_hashes)?
+        let code = MemBuffer::try_from_span(self.code.span())?
+        Option::Some(WorldState { index, accounts, code, storage, block_hashes })
+    }
+
+    // The position of the record of `address`, an address word, made if it has
+    // none; none if allocation fails.
+    fn record(mut self, _ address: u256) -> Option<usize> {
+        let lookup = self.index.get(address)
+        if lookup.found { return Option::Some(lookup.value) }
+        let at = self.accounts.len()
+        let account = Account {
+            address, balance: 0, nonce: 0, code_hash: EMPTY_CODE_HASH, code_offset: 0, code_len: 0, storage_slots: 0,
         }
-        let storage = match copy_table(self.storage) {
-            Option::Some(storage) => storage,
-            Option::None => return Option::None,
+        if self.accounts.try_push(account).is_err() { return Option::None }
+        if !self.index.try_insert(address, at) {
+            let _ = self.accounts.pop()
+            return Option::None
         }
-        let block_hashes = match copy_table(self.block_hashes) {
-            Option::Some(block_hashes) => block_hashes,
-            Option::None => return Option::None,
+        Option::Some(at)
+    }
+    // Removes the record of `address`, an address word, if it has one.
+    fn remove_record(mut self, _ address: u256) -> bool {
+        let lookup = self.index.get(address)
+        if !lookup.found { return false }
+        let _ = self.index.remove(address)
+        let _ = self.accounts.swap_remove(lookup.value)
+        if lookup.value < self.accounts.len() {
+            // Moving an existing key does not grow the table.
+            core::assert(self.index.try_insert(self.accounts[lookup.value].address, lookup.value))
         }
-        match MemBuffer::try_from_span(self.code.span()) {
-            Option::Some(code) => Option::Some(WorldState { accounts, code, storage, block_hashes }),
-            Option::None => Option::None,
-        }
+        true
     }
 
     pub fn exists(self, _ address: u256) -> bool {
-        self.accounts.contains(address_word(address))
+        self.index.contains(address_word(address))
     }
     // EIP-161 emptiness: zero balance and nonce, and no code. Absent accounts are empty.
     pub fn is_empty(self, _ address: u256) -> bool {
-        let account = self.accounts.get(address_word(address)).value
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return true }
+        let account = ref self.accounts[lookup.value]
         account.balance == 0 && account.nonce == 0 && account.code_len == 0
     }
     // Delete an account record with its code and storage.
@@ -150,8 +174,10 @@ impl WorldState {
         let address = address_word(address)
         let empty: [u8; 0] = []
         core::assert(self.set_code(address, code: empty) == OK)
-        var slots = self.accounts.get(address).value.storage_slots
-        let _ = self.accounts.remove(address)
+        let lookup = self.index.get(address)
+        if !lookup.found { return }
+        var slots = self.accounts[lookup.value].storage_slots
+        let _ = self.remove_record(address)
         var slot: usize = 0
         while slots > 0 && slot < self.storage.capacity() {
             let entry = self.storage.entry(slot)
@@ -163,15 +189,14 @@ impl WorldState {
         }
     }
     pub fn has_storage(self, _ address: u256) -> bool {
-        self.accounts.get(address_word(address)).value.storage_slots != 0
+        let lookup = self.index.get(address_word(address))
+        lookup.found && self.accounts[lookup.value].storage_slots != 0
     }
-    pub fn table_slots(self) -> usize { self.accounts.capacity() }
-    pub fn account_at(self, _ slot: usize) -> AccountEntry {
-        let entry = self.accounts.entry(slot)
-        AccountEntry {
-            occupied: entry.occupied, address: entry.key, balance: entry.value.balance,
-            nonce: entry.value.nonce, code_len: entry.value.code_len,
-        }
+    /// The number of accounts, which `account_at` visits in no particular order.
+    pub fn account_count(self) -> usize { self.accounts.len() }
+    pub fn account_at(self, _ position: usize) -> AccountEntry {
+        let account = ref self.accounts[position]
+        AccountEntry { address: account.address, balance: account.balance, nonce: account.nonce, code_len: account.code_len }
     }
     pub fn storage_slots(self) -> usize { self.storage.capacity() }
     pub fn storage_at(self, _ slot: usize) -> StorageEntry {
@@ -179,78 +204,90 @@ impl WorldState {
         StorageEntry { occupied: entry.occupied, address: entry.key.address, slot: entry.key.slot, value: entry.value }
     }
     pub fn ensure_account(mut self, _ address: u256) -> bool {
-        let address = address_word(address)
-        self.accounts.contains(address) || self.accounts.try_insert(address, Account::default())
+        self.record(address_word(address)).is_some()
     }
     // Used only by undo after restoring every write that created this account.
     pub fn remove_empty_account(mut self, _ address: u256) -> bool {
         let address = address_word(address)
-        let account = self.accounts.get(address).value
-        core::assert(account.balance == 0 && account.nonce == 0 && account.code_len == 0)
-        self.accounts.remove(address)
+        core::assert(self.is_empty(address))
+        self.remove_record(address)
     }
     pub fn balance(self, _ address: u256) -> u256 {
-        self.accounts.get(address_word(address)).value.balance
+        let lookup = self.index.get(address_word(address))
+        if lookup.found { self.accounts[lookup.value].balance } else { 0 }
     }
     pub fn set_balance(mut self, _ address: u256, _ value: u256) -> bool {
-        let address = address_word(address)
-        let previous = self.accounts.get(address)
-        if !previous.found && value == 0 { return true }
-        var account = previous.value
-        account.balance = value
-        self.accounts.try_insert(address, account)
+        self.replace(balance: true, address, value).written
     }
     pub fn nonce(self, _ address: u256) -> u256 {
-        self.accounts.get(address_word(address)).value.nonce
+        let lookup = self.index.get(address_word(address))
+        if lookup.found { self.accounts[lookup.value].nonce } else { 0 }
     }
     pub fn sender(self, _ address: u256) -> Sender {
-        let account = self.accounts.get(address_word(address)).value
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return Sender { nonce: 0, balance: 0, code_len: 0 } }
+        let account = ref self.accounts[lookup.value]
         Sender { nonce: account.nonce, balance: account.balance, code_len: account.code_len }
     }
     /// Sets the balance (or nonce) with one lookup; an absent account stays
     /// absent for zero.
     pub fn replace(mut self, balance: bool, _ address: u256, _ value: u256) -> Replaced {
         let address = address_word(address)
-        let lookup = self.accounts.get(address)
-        var account = lookup.value
+        let lookup = self.index.get(address)
+        if !lookup.found {
+            if value == 0 { return Replaced { previous: 0, found: false, changed: false, written: true } }
+            let written = match self.record(address) {
+                Option::Some(at) => {
+                    let account = mut self.accounts[at]
+                    if balance { account.balance = value } else { account.nonce = value }
+                    true
+                },
+                Option::None => false,
+            }
+            return Replaced { previous: 0, found: false, changed: true, written }
+        }
+        let account = mut self.accounts[lookup.value]
         let previous = if balance { account.balance } else { account.nonce }
-        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true } }
+        if previous == value { return Replaced { previous, found: true, changed: false, written: true } }
         if balance { account.balance = value } else { account.nonce = value }
-        Replaced { previous, found: lookup.found, changed: true, written: self.accounts.try_insert(address, account) }
+        Replaced { previous, found: true, changed: true, written: true }
     }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
-        let address = address_word(address)
-        let previous = self.accounts.get(address)
-        if !previous.found && value == 0 { return true }
-        var account = previous.value
-        account.nonce = value
-        self.accounts.try_insert(address, account)
+        self.replace(balance: false, address, value).written
     }
     pub fn code_size(self, _ address: u256) -> usize {
-        self.accounts.get(address_word(address)).value.code_len
+        let lookup = self.index.get(address_word(address))
+        if lookup.found { self.accounts[lookup.value].code_len } else { 0 }
     }
     // EIP-1052: even an explicitly present account hashes to zero if its
     // balance, nonce and code are empty. Storage is not part of that predicate.
     pub fn code_hash(self, _ address: u256) -> u256 {
-        let account = self.accounts.get(address_word(address)).value
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return 0 }
+        let account = ref self.accounts[lookup.value]
         if account.balance == 0 && account.nonce == 0 && account.code_len == 0 {
             0
         } else { account.code_hash }
     }
-    // An account's code. One without code has no arena record to address.
+    // The arena offset and length of an account's code. One without code has
+    // no arena record to address.
+    fn code_extent(self, _ address: u256) -> (usize, usize) {
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return (0, 0) }
+        let account = ref self.accounts[lookup.value]
+        if account.code_len == 0 { (0, 0) } else { (account.code_offset + 64, account.code_len) }
+    }
+    // An account's code.
     pub fn code(self, _ address: u256) -> ref MemSpan {
-        let account = self.accounts.get(address_word(address)).value
-        let offset = if account.code_len == 0 { 0 } else { account.code_offset + 64 }
-        self.code.slice(offset, len: account.code_len)
+        let (offset, len) = self.code_extent(address)
+        self.code.slice(offset, len)
     }
     /// The account an EIP-7702 delegation designator delegates to, if that is
     /// the account's code.
     pub fn delegate(self, _ address: u256) -> Option<u256> { delegation(self.code(address)) }
     /// The account's code, with the JUMPDEST bitmap computed when the code was set.
     pub fn program(self, _ address: u256) -> Program {
-        let account = self.accounts.get(address_word(address)).value
-        let len = account.code_len
-        let offset = if len == 0 { 0 } else { account.code_offset + 64 }
+        let (offset, len) = self.code_extent(address)
         let jumpdests = self.code.slice(offset: offset + len, len: jumpdest_map_len(len))
         Program::analyzed(self.code.slice(offset, len), jumpdests)
     }
@@ -258,14 +295,14 @@ impl WorldState {
     // set up accounts with it; code deposits and EIP-7702 delegations use it too.
     pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
         let address = address_word(address)
-        let previous = self.accounts.get(address)
+        let lookup = self.index.get(address)
         let len = code.len()
-        if !previous.found && len == 0 { return OK }
-        // With room for the account, the final insertion cannot fail.
-        if !previous.found && !self.accounts.try_reserve(1) { return ERR_HOST_ALLOCATION }
-        var account = previous.value
+        if !lookup.found && len == 0 { return OK }
+        let (code_offset, code_len) = if lookup.found {
+            (self.accounts[lookup.value].code_offset, self.accounts[lookup.value].code_len)
+        } else { (0, 0) }
         let old_size = self.code.len()
-        let removed = if account.code_len == 0 { 0 } else { record_len(account.code_len) }
+        let removed = if code_len == 0 { 0 } else { record_len(code_len) }
         let retained = old_size - removed
         // Bound before addition and before ByteSource traversal/allocation,
         // leaving room for the bitmap, an eighth of the code.
@@ -274,23 +311,27 @@ impl WorldState {
         }
         let new_size = retained + if len == 0 { 0 } else { record_len(len) }
         if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
+        // The arena is unchanged until here, so an account without a record
+        // that cannot get one leaves the world as it was.
+        let at = match self.record(address) {
+            Option::Some(at) => at,
+            Option::None => {
+                self.code.truncate(old_size)
+                return ERR_HOST_ALLOCATION
+            },
+        }
         if removed != 0 {
-            let start = account.code_offset
-            let end = start + removed
-            self.code.span().copy_within(source: end, dest: start, len: old_size - end)
-            var cursor = start
+            let end = code_offset + removed
+            self.code.span().copy_within(source: end, dest: code_offset, len: old_size - end)
+            var cursor = code_offset
             while cursor < retained {
                 let key = self.code.read_word(cursor)
                 let size: usize = self.code.read_word(cursor + 32).downcast_unchecked()
-                var moved = self.accounts.get(key).value
-                moved.code_offset = cursor
-                self.accounts.insert(key, moved)
+                self.accounts[self.index.get(key).value].code_offset = cursor
                 cursor += record_len(size)
             }
         }
-        account.code_offset = retained
-        account.code_len = len
-        account.code_hash = EMPTY_CODE_HASH
+        var hash = EMPTY_CODE_HASH
         if len != 0 {
             self.code.span().write_word(offset: retained, value: address)
             self.code.span().write_word(offset: retained + 32, value: len as u256)
@@ -300,10 +341,13 @@ impl WorldState {
             let map_len = jumpdest_map_len(len)
             self.code.slice(offset: map, len: map_len).zero()
             mark_jumpdests(code, mut self.code.slice(offset: map, len: map_len))
-            account.code_hash = keccak256_word(code)
+            hash = keccak256_word(code)
         }
         self.code.truncate(new_size)
-        self.accounts.insert(address, account)
+        let account = mut self.accounts[at]
+        account.code_offset = retained
+        account.code_len = len
+        account.code_hash = hash
         OK
     }
     pub fn storage_load(self, _ address: u256, _ slot: u256) -> u256 {
@@ -315,26 +359,27 @@ impl WorldState {
         let key = StorageKey { address: address, slot: slot }
         if value == 0 {
             if self.storage.remove(key) {
-                // The slot's account exists, and updating it does not grow the table.
-                var account = self.accounts.get(address).value
-                account.storage_slots -= 1
-                core::assert(self.accounts.try_insert(address, account))
+                // A slot's account has a record.
+                let lookup = self.index.get(address)
+                core::assert(lookup.found)
+                self.accounts[lookup.value].storage_slots -= 1
             }
             return true
         }
-        let previous = self.accounts.get(address)
         let slots = self.storage.len()
         if !self.storage.try_insert(key, value) { return false }
-        let added = self.storage.len() > slots
-        // A slot's account exists, so a slot that existed needs no account change.
-        if !added { return true }
-        var account = previous.value
-        account.storage_slots += 1
-        if !self.accounts.try_insert(address, account) {
-            let _ = self.storage.remove(key)
-            return false
+        // A slot that existed needs no account change.
+        if self.storage.len() == slots { return true }
+        match self.record(address) {
+            Option::Some(at) => {
+                self.accounts[at].storage_slots += 1
+                true
+            },
+            Option::None => {
+                let _ = self.storage.remove(key)
+                false
+            },
         }
-        true
     }
     pub fn block_hash(self, _ number: u256) -> u256 {
         self.block_hashes.get(number).value
@@ -405,4 +450,28 @@ fn world_state_zero_balance_preserves_account() {
 
     core::assert(state.balance(0xaa) == 0 && state.exists(0xaa))
     core::assert(state.storage_load(0xaa, 3) == 0)
+}
+
+#[test]
+fn removing_an_account_keeps_the_others() {
+    var state = WorldState::empty()
+    for address in [0xaa as u256, 0xbb, 0xcc] {
+        let byte: u8 = address.downcast_truncate()
+        core::assert(state.set_balance(address, address) && state.set_code(address, code: [byte, byte]) == OK)
+    }
+    core::assert(state.storage_store(0xcc, 1, 2))
+    // The last record moves into the first one's place.
+    state.remove_account(0xaa)
+    core::assert(!state.exists(0xaa) && state.code_size(0xaa) == 0 && state.account_count() == 2)
+    var seen: u256 = 0
+    for position in 0..state.account_count() {
+        let account = state.account_at(position)
+        let byte: u8 = account.address.downcast_truncate()
+        core::assert(account.balance == account.address && account.code_len == 2)
+        core::assert(state.code(account.address)[0] == byte && state.code(account.address)[1] == byte)
+        seen += account.address
+    }
+    core::assert(seen == 0xbb + 0xcc && state.has_storage(0xcc) && state.storage_load(0xcc, 1) == 2)
+    let copy = state.try_clone().unwrap()
+    core::assert(copy.balance(0xcc) == 0xcc && copy.code_size(0xbb) == 2 && copy.account_count() == 2)
 }
