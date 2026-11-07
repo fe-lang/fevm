@@ -85,8 +85,8 @@ transaction and returns `Applied { state, receipt }`.
   chain ID, nonce, base fee and EIP-3607 sender checks. A test harness may
   raise the limits or skip the checks; a transaction priced below the base fee
   then pays its own price and no priority fee.
-- `FrameBuffers` is a pool of frame memory, stacks and child frames that
-  repeated transactions reuse.
+- `Buffers` holds allocations that repeated transactions reuse: frame memory,
+  stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
 
 An invalid transaction returns the untouched state and a receipt whose

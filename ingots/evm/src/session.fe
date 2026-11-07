@@ -8,7 +8,7 @@ use ingot::state::WorldState
 use ingot::status::OK
 use ingot::trace::{Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
-use ingot::vm::FrameBuffers
+use ingot::vm::Buffers
 
 // Requests.
 const CONFIGURE: u8 = 1
@@ -243,7 +243,7 @@ struct Session {
     world: WorldState,
     block: BlockEnv,
     config: Config,
-    buffers: FrameBuffers,
+    buffers: Buffers,
     snapshots: MemVec<WorldState>,
 }
 
@@ -397,7 +397,7 @@ pub fn serve() -> i32 uses (input: mut Stdin, out: mut Stdout) {
         world: WorldState::empty(),
         block: default_block_env(),
         config: Config::osaka(),
-        buffers: FrameBuffers::new(),
+        buffers: Buffers::new(),
         snapshots: MemVec::new(),
     }
     var header = MemBuffer::new(4)

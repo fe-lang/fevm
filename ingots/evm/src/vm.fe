@@ -12,6 +12,7 @@ use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{I256_MIN, MAX_U256, STACK_LIMIT}
 use ingot::address::{create_address, create2_address}
+use ingot::journal::Journal
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::trace::{CallEnd, CallStart, Step, Tracer}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
@@ -177,20 +178,23 @@ fn sar(shift: u256, value: u256) -> u256 {
     }
 }
 
-/// Memory and stacks of finished frames, which later frames take over with
-/// the capacity they grew, and the allocations of finished child frames,
-/// which later calls fill in place. Frames nest, so each call depth tends to
-/// get back its last frame's buffers, and a caller that keeps the pool across
-/// transactions allocates them once.
-pub struct FrameBuffers {
+/// Allocations a host lends each transaction and gets back, so that a host
+/// that keeps them across transactions allocates them once: memory and
+/// stacks of finished frames, which later frames take over with the capacity
+/// they grew; the allocations of finished child frames, which later calls fill
+/// in place; and the journal. Frames nest, so each call depth tends to get
+/// back its last frame's buffers.
+pub struct Buffers {
     memories: MemVec<MemBuffer>,
     stacks: MemVec<MemVec<u256>>,
     frames: MemVec<Box<Frame>>,
+    // Empty between transactions.
+    pub(ingot) journal: Journal,
 }
 
-impl FrameBuffers {
+impl Buffers {
     pub fn new() -> Self {
-        FrameBuffers { memories: MemVec::new(), stacks: MemVec::new(), frames: MemVec::new() }
+        Buffers { memories: MemVec::new(), stacks: MemVec::new(), frames: MemVec::new(), journal: Journal::new() }
     }
 }
 
@@ -249,7 +253,7 @@ impl Vm {
 
     // A frame that has allocated nothing takes over a finished frame's
     // memory and stack, which hold no bytes or words.
-    fn adopt(mut self, _ buffers: mut FrameBuffers) {
+    fn adopt(mut self, _ buffers: mut Buffers) {
         if self.memory.capacity() == 0 {
             match buffers.memories.pop() {
                 Option::Some(memory) => self.memory = memory,
@@ -826,7 +830,7 @@ impl Frame {
         let checkpoint = self.checkpoint.take().unwrap()
         if self.vm.status == OK { state.commit(checkpoint) }
         else { state.revert(checkpoint) }
-        ChildResult { result: self.vm.take_result(mut state.frame_buffers()), offset: self.output_offset, len: self.output_len, creates, address }
+        ChildResult { result: self.vm.take_result(mut state.buffers()), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
     fn abort(mut self, _ state: mut Transaction) {
@@ -836,7 +840,7 @@ impl Frame {
 
 /// An allocation for a child frame: a finished frame's, or a new one. Calls
 /// fill it in place, and it never moves.
-fn frame_allocation(_ buffers: mut FrameBuffers) -> Option<Box<Frame>> {
+fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
     match buffers.frames.pop() {
         Option::Some(frame) => Option::Some(frame),
         Option::None => match Box::try_new(Frame::idle()) {
@@ -1060,7 +1064,7 @@ impl Vm {
             callvalue: if op == 0xf4 { call.callvalue } else { value },
             origin: call.origin, gasprice: call.gasprice, gas_limit: child_gas, is_static,
         }
-        var frame = match frame_allocation(mut state.frame_buffers()) {
+        var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -1144,7 +1148,7 @@ impl Vm {
             address, caller: sender, callvalue: value, origin: call.origin,
             gasprice: call.gasprice, gas_limit: create_gas, is_static: false,
         }
-        var frame = match frame_allocation(mut state.frame_buffers()) {
+        var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -2345,7 +2349,7 @@ impl Vm {
             match next {
                 Option::Some(frame) => {
                     var frame = frame
-                    frame.get().vm.adopt(mut state.frame_buffers())
+                    frame.get().vm.adopt(mut state.buffers())
                     match frames.try_push(frame) {
                         Result::Ok(()) => {},
                         // Like other host failures while starting a child, this fails the parent.
@@ -2366,7 +2370,7 @@ impl Vm {
                     tracer.leave(CallEnd { depth, status: result.result.status, gas: result.result.gas_remaining },
                                  output: result.result.output.span())
                     // A pool that cannot grow frees it.
-                    let _ = state.frame_buffers().frames.try_push(frame)
+                    let _ = state.buffers().frames.try_push(frame)
                     if depth == 1 { self.accept_child(result) }
                     else { frames[depth - 2].get().vm.accept_child(result) }
                 },
@@ -2395,7 +2399,7 @@ impl Vm {
 
     fn run_root<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ call: CallEnv,
                            _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T, creates: bool) {
-        self.adopt(mut state.frame_buffers())
+        self.adopt(mut state.buffers())
         self.reset(gas: call.gas_limit)
         if program.status != OK || calldata.status != OK {
             self.fault(if program.status != OK { program.status } else { calldata.status })
@@ -2416,12 +2420,12 @@ impl Vm {
         }
     }
     /// The frame's result. Its memory and stack, emptied, go to `buffers`.
-    pub fn into_result(var own self, _ buffers: mut FrameBuffers) -> ExecutionResult {
+    pub fn into_result(var own self, _ buffers: mut Buffers) -> ExecutionResult {
         self.take_result(mut buffers)
     }
 
     /// As `into_result`, leaving the VM without output, memory or stack.
-    fn take_result(mut self, _ buffers: mut FrameBuffers) -> ExecutionResult {
+    fn take_result(mut self, _ buffers: mut Buffers) -> ExecutionResult {
         let stack_len = self.stack.len()
         let stack_top: u256 = if stack_len == 0 {
             0
@@ -2469,5 +2473,5 @@ pub fn execute(
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> ExecutionResult {
-    execute_vm(program, calldata, call, block, mut state).into_result(mut state.frame_buffers())
+    execute_vm(program, calldata, call, block, mut state).into_result(mut state.buffers())
 }

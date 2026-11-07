@@ -16,7 +16,7 @@ use ingot::status::{
 }
 use ingot::trace::{Step, Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
-use ingot::vm::FrameBuffers
+use ingot::vm::Buffers
 
 const SENDER: u256 = 0x1000
 
@@ -41,7 +41,7 @@ fn call(to: u256) -> TxEnv {
 }
 
 fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     transact(world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
 }
@@ -170,7 +170,7 @@ fn simulate_gives_the_receipt_and_keeps_the_state() {
     var world = funded()
     // SSTORE(0, 1); LOG0(0, 0).
     core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
                              Config::osaka(), mut buffers, mut tracer)
@@ -202,7 +202,7 @@ fn calling_world() -> WorldState {
 fn traced<T: Tracer>(_ world: own WorldState, nonce: u256, _ tracer: mut T) -> Applied {
     var env = call(to: 0xaa)
     env.nonce = nonce
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
 }
 
@@ -251,7 +251,7 @@ fn trace_records_no_steps_for_a_message_without_code() {
         var env = call(to)
         env.nonce = nonce
         env.value = 7
-        var buffers = FrameBuffers::new()
+        var buffers = Buffers::new()
         let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers,
                                mut trace)
         core::assert(applied.receipt.status == OK && applied.receipt.gas_used == 21_000)

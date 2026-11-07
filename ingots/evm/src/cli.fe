@@ -13,8 +13,8 @@ use ingot::hex::{
 }
 use ingot::state::WorldState
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_REVERT, OK, status_name}
-use ingot::types::{default_block_env, default_call_env, empty_bytes}
-use ingot::vm::{Vm, execute_vm}
+use ingot::types::{Config, default_block_env, default_call_env, empty_bytes}
+use ingot::vm::{Buffers, Vm, execute_vm}
 
 const ERR_USAGE: i32 = 2
 
@@ -85,7 +85,8 @@ fn execute() -> i32 uses (args: Args, text: mut MemBuffer) {
         return calldata.status
     }
 
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     let vm = execute_vm(
         program,
         calldata,

@@ -1,7 +1,7 @@
 use core::{MemBuffer, Option}
 use std::env::Args
 use std::io::{Display, Stdout}
-use fevm::{Transaction, WorldState, default_block_env, default_call_env}
+use fevm::{Buffers, Config, Transaction, WorldState, default_block_env, default_call_env}
 use fevm::hex::{parse_decimal, parse_hex_bytes, parse_hex_program, write_hex_bytes, write_hex_word}
 use fevm::status::{ERR_REVERT, OK, is_evm_outcome, status_name}
 use fevm::vm::{Vm, execute_vm}
@@ -68,7 +68,8 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
             return 2
         },
     }
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
     state.finish(commit: vm.status == OK, gas_spent: call.gas_limit - vm.gas_remaining)
     if !is_evm_outcome(vm.status) {

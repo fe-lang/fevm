@@ -3,11 +3,11 @@ use ingot::logs::LogBuffer
 use swisstable::SwissTable
 use ingot::constants::MAX_U256
 use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
-use ingot::journal::{Change, Journal}
+use ingot::journal::Change
 use ingot::state::{Replaced, StorageKey, WorldState, address_word, designator}
 use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
-use ingot::vm::FrameBuffers
+use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
 
 const BALANCE: u8 = 0
@@ -43,6 +43,8 @@ pub struct TransactionResult {
     // Gas charged after the transaction refund cap; refunds never refill a frame.
     pub gas_used: u64,
     pub gas_refunded: u64,
+    // The buffers the transaction was lent, for the next.
+    pub buffers: Buffers,
 }
 
 // The persistent database is unavailable to callers until finish consumes the
@@ -50,7 +52,6 @@ pub struct TransactionResult {
 pub struct Transaction {
     state: WorldState,
     transient: SwissTable<StorageKey, u256>,
-    journal: Journal,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
     // Warm accounts, other than those `always_warm` names; accounts that
@@ -70,16 +71,20 @@ pub struct Transaction {
     depth: usize,
     is_static: bool,
     config: Config,
-    // Lent by the caller for the transaction's frames.
-    frame_buffers: FrameBuffers,
+    // Lent by the caller for the journal and the transaction's frames.
+    buffers: Buffers,
 }
 
 impl Transaction {
-    pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256) -> Self {
+    /// A transaction on `state` from `sender` to `destination` (the created
+    /// address for a creation), with `buffers` lent until `finish` returns
+    /// them.
+    pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256, config: Config,
+               buffers: own Buffers) -> Self {
+        core::assert(buffers.journal.len() == 0)
         Self {
             state,
             transient: SwissTable<StorageKey, u256>::empty(),
-            journal: Journal::new(),
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
             marks: SwissTable<u256, u8>::empty(),
@@ -90,22 +95,14 @@ impl Transaction {
             started: false,
             depth: 0,
             is_static: false,
-            config: Config::osaka(),
-            frame_buffers: FrameBuffers::new(),
+            config,
+            buffers,
         }
     }
 
     pub fn config(self) -> Config { self.config }
-    pub fn configure(mut self, _ config: Config) { self.config = config }
 
-    pub fn frame_buffers(mut self) -> mut FrameBuffers { mut self.frame_buffers }
-
-    /// Exchanges the frame buffers with `buffers`: lends the caller's pool to
-    /// the transaction's frames, and a second exchange returns it.
-    pub fn swap_frame_buffers(mut self, _ buffers: mut FrameBuffers) {
-        let lent = core::mem::replace(mut buffers, FrameBuffers::new())
-        buffers = core::mem::replace(mut self.frame_buffers, lent)
-    }
+    pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
 
     pub fn logs(self) -> ref LogBuffer { ref self.logs }
     pub fn take_logs(mut self) -> LogBuffer { core::mem::replace(mut self.logs, LogBuffer::new()) }
@@ -212,7 +209,7 @@ impl Transaction {
             },
             Option::None => if !self.marks.try_insert(address, mark) { return ERR_HOST_ALLOCATION },
         }
-        if !self.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
+        if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
             core::assert(self.unmark(address, mark))
             return ERR_HOST_ALLOCATION
         }
@@ -231,7 +228,7 @@ impl Transaction {
         let before = self.warm_storage.len()
         if !self.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
         if self.warm_storage.len() == before { return OK }
-        if !self.journal.append(Change { kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true }) {
+        if !self.buffers.journal.append(Change { kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true }) {
             let _ = self.warm_storage.remove(key)
             return ERR_HOST_ALLOCATION
         }
@@ -247,7 +244,7 @@ impl Transaction {
     pub fn touch_once(mut self, _ address: u256) -> i32 {
         self.started = true
         let change = Change { kind: TOUCHED_ONCE, address: address_word(address), slot: 0, previous: 0, existed: true }
-        if self.journal.append(change) { OK } else { ERR_HOST_ALLOCATION }
+        if self.buffers.journal.append(change) { OK } else { ERR_HOST_ALLOCATION }
     }
 
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
@@ -284,7 +281,7 @@ impl Transaction {
         self.started = true
         self.depth += 1
         let checkpoint = Checkpoint {
-            position: self.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
+            position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -306,8 +303,8 @@ impl Transaction {
     }
 
     fn undo_to(mut self, _ position: u64) {
-        while self.journal.len() > position {
-            let change = self.journal.pop()
+        while self.buffers.journal.len() > position {
+            let change = self.buffers.journal.pop()
             let restored = match change.kind {
                 BALANCE => self.state.set_balance(change.address, change.previous),
                 NONCE => self.state.set_nonce(change.address, change.previous),
@@ -385,7 +382,7 @@ impl Transaction {
         // Undo deletes an account its write created; transient storage
         // creates no account.
         let existed = kind == TRANSIENT || self.state.exists(address)
-        if !self.journal.append(Change { kind, address, slot, previous, existed }) {
+        if !self.buffers.journal.append(Change { kind, address, slot, previous, existed }) {
             return ERR_HOST_ALLOCATION
         }
         let written = match kind {
@@ -394,7 +391,7 @@ impl Transaction {
             _ => core::panic(),
         }
         if !written {
-            let _ = self.journal.pop()
+            let _ = self.buffers.journal.pop()
             return ERR_HOST_ALLOCATION
         }
         OK
@@ -406,7 +403,7 @@ impl Transaction {
     fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
         if !replaced.written { return ERR_HOST_ALLOCATION }
         if !replaced.changed { return self.touch_once(address) }
-        if !self.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
+        if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
             // Restoring a value the record holds needs no allocation.
             core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
             if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
@@ -453,11 +450,11 @@ impl Transaction {
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
         core::assert(self.state.code_size(address) == 0)
-        if !self.journal.append(Change { kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address) }) {
+        if !self.buffers.journal.append(Change { kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address) }) {
             return ERR_HOST_ALLOCATION
         }
         let written = self.state.set_code(address, code)
-        if written != OK { let _ = self.journal.pop() }
+        if written != OK { let _ = self.buffers.journal.pop() }
         written
     }
     // EIP-7702: point an authority's code at `delegate`, or clear it for zero.
@@ -472,11 +469,11 @@ impl Transaction {
             Option::None => (0, 0),
         }
         let change = Change { kind: DELEGATION, address, slot: was_delegated, previous: previous_delegate, existed: self.state.exists(address) }
-        if !self.journal.append(change) { return ERR_HOST_ALLOCATION }
+        if !self.buffers.journal.append(change) { return ERR_HOST_ALLOCATION }
         let empty: [u8; 0] = []
         let written = if delegate == 0 { self.state.set_code(address, code: empty) }
             else { self.state.set_code(address, code: designator(delegate)) }
-        if written != OK { let _ = self.journal.pop() }
+        if written != OK { let _ = self.buffers.journal.pop() }
         written
     }
     pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
@@ -507,8 +504,8 @@ impl Transaction {
         // The journal holds the changes and marks that survived their frames:
         // each touch, as a mark or as a balance, nonce or code change.
         var position: u64 = 0
-        while position < self.journal.len() {
-            let change = self.journal.change(position)
+        while position < self.buffers.journal.len() {
+            let change = self.buffers.journal.change(position)
             let kind = change.kind
             if kind == DOOMED { self.state.remove_account(change.address) }
             let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE || kind == CODE
@@ -526,8 +523,11 @@ impl Transaction {
             self.undo_to(0)
             self.logs.truncate(0)
         }
+        self.buffers.journal.clear()
         let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
-        TransactionResult { state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }
+        TransactionResult {
+            state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded, buffers: self.buffers,
+        }
     }
 }
 

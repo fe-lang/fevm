@@ -1,4 +1,6 @@
 use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+use ingot::types::Config
+use ingot::vm::Buffers
 
 #[test]
 fn blockhash_limits_history_without_truncating_the_stack_operand() {
@@ -14,7 +16,8 @@ fn blockhash_limits_history_without_truncating_the_stack_operand() {
         // Invalid history entries must remain invisible even when supplied by
         // the host. The VM checks the window before consulting the database.
         core::assert(world.set_block_hash(requested, 0x1234))
-        var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+        var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                                           config: Config::osaka(), buffers: Buffers::new())
         var bytes: [u8; 4096] = [0; 4096]
         bytes[0] = 0x7f
         var index: usize = 0

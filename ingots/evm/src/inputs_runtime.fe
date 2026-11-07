@@ -1,7 +1,8 @@
 use core::MemBuffer
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_INVALID_JUMP, OK}
 use ingot::{InputData, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
-use ingot::vm::Vm
+use ingot::vm::{Buffers, Vm}
+use ingot::types::Config
 
 #[test]
 pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
@@ -12,7 +13,8 @@ pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
     let program = Program::copy_from([0x61 as u8, 0x23, 0x28, 0x35, 0x36], len: 5)
     var vm = Vm::new()
     var tracer = ()
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     for _ in 0..2 {
         vm.run(program, input, default_call_env(), default_block_env(), mut tx, mut tracer)
         core::assert(vm.status == OK && vm.stack.len() == 2)
@@ -23,7 +25,8 @@ pub fn vm_reuses_owned_inputs_beyond_the_old_frame_bound() {
 
 #[test]
 pub fn vm_input_failure_preserves_the_transaction_setup_phase() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     for failed_code in [true, false] {
@@ -43,7 +46,8 @@ pub fn vm_input_failure_preserves_the_transaction_setup_phase() {
 
 #[test]
 pub fn vm_owned_inputs_execute_large_code_and_jump_boundaries() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     var code = MemBuffer::new(8193)

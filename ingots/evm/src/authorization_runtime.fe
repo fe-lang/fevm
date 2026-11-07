@@ -4,7 +4,7 @@ use ingot::processor::{Applied, Authorization, TX_FEE_MARKET, TX_SET_CODE, TxEnv
 use ingot::status::{INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, VALID}
 use ingot::state::{WorldState, designator}
 use ingot::types::{BlockEnv, Config, default_block_env, empty_bytes}
-use ingot::vm::FrameBuffers
+use ingot::vm::Buffers
 
 // Execution-specs fixture authorizations for any chain, with their signers.
 const SIGNER: u256 = 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b
@@ -50,7 +50,7 @@ fn set_code(_ world: own WorldState, to: u256, nonce: u256, authorizations: [Aut
     }
     var request = TxRequest::new(env, data: empty_bytes())
     for index in 0..count { core::assert(request.add_authorization(authorizations[index])) }
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     transact(world, request, block(), Config::osaka(), mut buffers, mut tracer)
 }
@@ -111,7 +111,7 @@ fn set_code_transactions_need_authorizations_and_a_recipient() {
     }
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_authorization(signed(nonce: 0)))
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     core::assert(transact(empty.state, request, block(), Config::osaka(), mut buffers,
                           mut tracer).receipt.invalid == INVALID_CREATE)
@@ -136,7 +136,7 @@ fn delegated_accounts_send_and_calls_run_their_delegates() {
         kind: TX_FEE_MARKET, chain_id: Option::Some(1), sender: 0x1000, to: 0xaa, creates: false, nonce: 0,
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(),
                            Config::osaka(), mut buffers, mut tracer)

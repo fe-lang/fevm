@@ -2,7 +2,7 @@ use core::{MemBuffer, Option}
 use std::env::Args
 use std::io::{Display, Stdin, Stdout, read_to_end}
 use keccak::Keccak256
-use fevm::{Authorization, BlockEnv, Config, FrameBuffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{Authorization, BlockEnv, Config, Buffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
 use fevm::hex::{parse_decimal, write_hex_bytes, write_hex_word}
 use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
@@ -171,7 +171,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     var repeated_gas: u64 = 0
     var repeated = false
     // Repeated applications reuse the frames' memory and stacks.
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     while true {
         reader.position = 0
