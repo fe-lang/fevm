@@ -17,7 +17,7 @@ const DE_BRUIJN_INDEX: [u8; 64] = [
 
 // The number of trailing zeros of a nonzero `x`.
 #[arithmetic(unchecked)]
-fn trailing_zeros(_ x: u64) -> u64 {
+pub fn trailing_zeros(_ x: u64) -> u64 {
     DE_BRUIJN_INDEX[(((x & (0 - x)) * DE_BRUIJN) >> 58).downcast_truncate()] as u64
 }
 
