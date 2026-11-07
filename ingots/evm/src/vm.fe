@@ -1230,9 +1230,34 @@ impl Vm {
             0x61 => self.op_push2(code, pc, gas, depth, top, mut tracer),
             0x63 => self.op_push4(code, pc, gas, depth, top, mut tracer),
             0x7f => self.op_push32(code, pc, gas, depth, top, mut tracer),
-            0x62 | 0x64 | 0x65 | 0x66 | 0x67 => self.op_push_upto8(code, pc, gas, depth, top, mut tracer),
-            0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f => self.op_push_upto16(code, pc, gas, depth, top, mut tracer),
-            0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e => self.op_push_wide(code, pc, gas, depth, top, mut tracer),
+            0x62 => self.op_push_n<3, T>(code, pc, gas, depth, top, mut tracer),
+            0x64 => self.op_push_n<5, T>(code, pc, gas, depth, top, mut tracer),
+            0x65 => self.op_push_n<6, T>(code, pc, gas, depth, top, mut tracer),
+            0x66 => self.op_push_n<7, T>(code, pc, gas, depth, top, mut tracer),
+            0x67 => self.op_push_n<8, T>(code, pc, gas, depth, top, mut tracer),
+            0x68 => self.op_push_n<9, T>(code, pc, gas, depth, top, mut tracer),
+            0x69 => self.op_push_n<10, T>(code, pc, gas, depth, top, mut tracer),
+            0x6a => self.op_push_n<11, T>(code, pc, gas, depth, top, mut tracer),
+            0x6b => self.op_push_n<12, T>(code, pc, gas, depth, top, mut tracer),
+            0x6c => self.op_push_n<13, T>(code, pc, gas, depth, top, mut tracer),
+            0x6d => self.op_push_n<14, T>(code, pc, gas, depth, top, mut tracer),
+            0x6e => self.op_push_n<15, T>(code, pc, gas, depth, top, mut tracer),
+            0x6f => self.op_push_n<16, T>(code, pc, gas, depth, top, mut tracer),
+            0x70 => self.op_push_n<17, T>(code, pc, gas, depth, top, mut tracer),
+            0x71 => self.op_push_n<18, T>(code, pc, gas, depth, top, mut tracer),
+            0x72 => self.op_push_n<19, T>(code, pc, gas, depth, top, mut tracer),
+            0x73 => self.op_push_n<20, T>(code, pc, gas, depth, top, mut tracer),
+            0x74 => self.op_push_n<21, T>(code, pc, gas, depth, top, mut tracer),
+            0x75 => self.op_push_n<22, T>(code, pc, gas, depth, top, mut tracer),
+            0x76 => self.op_push_n<23, T>(code, pc, gas, depth, top, mut tracer),
+            0x77 => self.op_push_n<24, T>(code, pc, gas, depth, top, mut tracer),
+            0x78 => self.op_push_n<25, T>(code, pc, gas, depth, top, mut tracer),
+            0x79 => self.op_push_n<26, T>(code, pc, gas, depth, top, mut tracer),
+            0x7a => self.op_push_n<27, T>(code, pc, gas, depth, top, mut tracer),
+            0x7b => self.op_push_n<28, T>(code, pc, gas, depth, top, mut tracer),
+            0x7c => self.op_push_n<29, T>(code, pc, gas, depth, top, mut tracer),
+            0x7d => self.op_push_n<30, T>(code, pc, gas, depth, top, mut tracer),
+            0x7e => self.op_push_n<31, T>(code, pc, gas, depth, top, mut tracer),
             0x50 => self.op_pop(code, pc, gas, depth, top, mut tracer),
             0x80 => self.op_dup1(code, pc, gas, depth, top, mut tracer),
             0x81 => self.op_dup2(code, pc, gas, depth, top, mut tracer),
@@ -1537,39 +1562,25 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(33), gas - 3, depth, top, mut tracer, value)
     }
 
-    // PUSH3 and PUSH5 through PUSH8: the immediate is the top n bytes of an
-    // eight-byte read.
-    fn op_push_upto8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+    // The other widths, each its own handler: the immediate is the top N
+    // bytes of an eight-, sixteen- or 32-byte read, shifted by a constant.
+    #[arithmetic(unchecked)]
+    fn op_push_n<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                           _ tracer: mut T) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
-        let op = unsafe { read_code<u8>(code, pc) }
-        let n: u64 = (op.wrapping_sub(0x5f) & 0x1f) as u64
-        let word = unsafe { read_code<u64>(code, pc.wrapping_add(1)) }
-        let value = word >> ((8 - n) * 8) as u64
-        self.push_next(code, pc.wrapping_add(1 + n.downcast_truncate()), gas - 3, depth, top, mut tracer, value as u256)
-    }
-
-    // PUSH9 through PUSH16, from a sixteen-byte read.
-    fn op_push_upto16<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        let at = pc.wrapping_add(1)
+        let value: u256 = if N <= 8 {
+            let shift: u64 = ((8 - N) * 8).downcast_truncate()
+            (unsafe { read_code<u64>(code, at) } >> shift) as u256
+        } else if N <= 16 {
+            let shift: u128 = ((16 - N) * 8).downcast_truncate()
+            (unsafe { read_code<u128>(code, at) } >> shift) as u256
+        } else {
+            unsafe { read_code<u256>(code, at) } >> ((32 - N) * 8) as u256
         }
-        let op = unsafe { read_code<u8>(code, pc) }
-        let n: u64 = (op.wrapping_sub(0x5f) & 0x1f) as u64
-        let word = unsafe { read_code<u128>(code, pc.wrapping_add(1)) }
-        let value = word >> ((16 - n) * 8) as u128
-        self.push_next(code, pc.wrapping_add(1 + n.downcast_truncate()), gas - 3, depth, top, mut tracer, value as u256)
-    }
-
-    fn op_push_wide<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
-        }
-        let op = unsafe { read_code<u8>(code, pc) }
-        let n: usize = (op.wrapping_sub(0x5f) & 0x1f) as usize
-        let word = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(1 + n), gas - 3, depth, top, mut tracer, word >> ((32 - n) * 8) as u256)
+        self.push_next(code, pc.wrapping_add(1 + N), gas - 3, depth, top, mut tracer, value)
     }
 
     fn op_pop<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
