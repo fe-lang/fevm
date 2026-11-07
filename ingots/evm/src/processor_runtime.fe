@@ -2,7 +2,7 @@ use core::Option
 use ingot::address::create_address
 use ingot::constants::MAX_U256
 use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
-use ingot::state::WorldState
+use ingot::state::{WorldState, designator}
 use ingot::status::{
     ERR_OUT_OF_GAS,
     INVALID_BALANCE,
@@ -237,6 +237,29 @@ fn trace_records_steps_and_calls_in_order() {
     var calls = Trace::new(steps: false, calls: true)
     let _ = traced(applied.state, nonce: 2, mut calls)
     core::assert(calls.step_count() == 0 && calls.call_count() == 8 && calls.call(7).steps == 0)
+}
+
+#[test]
+fn trace_records_no_steps_for_a_message_without_code() {
+    // Like calls from code, the transaction's own call runs nothing at an
+    // account without code or delegated to a precompile, and keeps its gas.
+    var world = funded()
+    core::assert(world.set_code(address: 0xdd, code: designator(0x04)) == OK)
+    var nonce: u256 = 0
+    for to in [0xcc, 0xdd] {
+        var trace = Trace::new(steps: true, calls: true)
+        var env = call(to)
+        env.nonce = nonce
+        env.value = 7
+        var buffers = FrameBuffers::new()
+        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers,
+                               mut trace)
+        core::assert(applied.receipt.status == OK && applied.receipt.gas_used == 21_000)
+        core::assert(trace.step_count() == 0 && trace.call_count() == 2 && trace.call(1).gas == 100_000 - 21_000)
+        core::assert(applied.state.balance(to) == 7)
+        world = applied.state
+        nonce += 1
+    }
 }
 
 // Counts the opcodes run at each call depth, and keeps the other hooks' defaults.

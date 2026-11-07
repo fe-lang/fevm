@@ -6,7 +6,7 @@ use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
 use ingot::trace::{CallEnd, CallStart, Tracer}
-use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
+use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program}
 use ingot::vm::{FrameBuffers, Vm, begin_create, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
@@ -359,17 +359,29 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }
-    var program = tx.program(target)
-    if let Option::Some(address) = delegation(program.bytes()) {
+    let code = tx.code(target)
+    let delegate = delegation(code)
+    // A precompile delegate runs nothing.
+    let runs_code = match delegate {
+        Option::Some(address) => !is_precompile(address) && tx.code_size(address) != 0,
+        Option::None => code.len() != 0,
+    }
+    if let Option::Some(address) = delegate {
         let warmed = tx.warm_account(address)
         if warmed != OK {
             tx.revert(checkpoint)
             return status_result(warmed)
         }
-        program = if is_precompile(address) { Program::new(empty_bytes()) } else { tx.program(address) }
+    }
+    // Without code the message stops at once with its gas, as a call from code does.
+    if !runs_code {
+        tx.commit(checkpoint)
+        var result = status_result(OK)
+        result.gas_remaining = call.gas_limit
+        return result
     }
     var vm = Vm::new()
-    vm.run(program, request.data(), call, block, mut tx, mut tracer)
+    vm.run(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     vm.into_result(mut tx.frame_buffers())
 }
