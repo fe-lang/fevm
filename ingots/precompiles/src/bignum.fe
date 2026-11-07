@@ -2,6 +2,7 @@
 // are arrays of as many limbs as the modulus; a product takes twice as many,
 // and one more.
 use core::{MemArray, MemSlice, Option}
+use core::ptr::offset_bytes
 
 const LIMB_BASE: u128 = 0x10000000000000000
 
@@ -152,6 +153,13 @@ impl Modulus {
     }
 }
 
+// Limb `index` of `limbs`, an index the caller has checked.
+#[inline(always)]
+#[arithmetic(unchecked)]
+fn limb(_ limbs: *u64, _ index: usize) -> *u64 {
+    offset_bytes(limbs, index * 8)
+}
+
 /// An odd modulus for Montgomery multiplication with R = 2^(64 len).
 pub struct Montgomery { pub limbs: MemArray<u64>, pub len: u64, inverse: u64 }
 
@@ -168,34 +176,40 @@ impl Montgomery {
     }
 
     /// a b / R mod m for a, b < m, left in limbs `0..len` of `t`, which holds
-    /// `len + 2` limbs (CIOS).
+    /// `len + 2` limbs (CIOS, with each row's product and reduction in one pass).
     #[arithmetic(unchecked)]
     pub fn mul(self, _ a: MemSlice<u64>, _ b: MemSlice<u64>, _ t: mut MemArray<u64>) {
         let n: usize = self.len.downcast_truncate()
-        for j in 0..n + 2 { t[j] = 0 }
+        // With every length checked here, the loops read and write unchecked.
+        core::assert(a.len() >= n && b.len() >= n && self.limbs.len() >= n && t.len() >= n + 2)
+        let ap = a.ptr()
+        let bp = b.ptr()
+        let mp = self.limbs.ptr()
+        let tp = t.ptr()
+        for j in 0..n + 1 { unsafe { *limb(tp, j) = 0 } }
         for i in 0..n {
-            let factor = b[i] as u128
-            var carry: u64 = 0
-            for j in 0..n {
-                let sum = t[j] as u128 + a[j] as u128 * factor + carry as u128
-                t[j] = sum.downcast_truncate()
-                carry = (sum >> 64).downcast_truncate()
-            }
-            let top = t[n] as u128 + carry as u128
-            t[n] = top.downcast_truncate()
-            t[n + 1] = (top >> 64).downcast_truncate()
-            // Add the multiple of m that clears the low limb, and shift down a limb.
-            let m = (t[0] * self.inverse) as u128
-            var sum = t[0] as u128 + m * self.limbs[0] as u128
-            carry = (sum >> 64).downcast_truncate()
+            let factor = unsafe { *limb(bp, i) } as u128
+            // Row i adds a b_i and the multiple m of the modulus that clears
+            // its low limb, then shifts down a limb: two carries, one pass.
+            var sum = unsafe { *tp } as u128 + unsafe { *ap } as u128 * factor
+            var carry: u64 = (sum >> 64).downcast_truncate()
+            let low: u64 = sum.downcast_truncate()
+            let m = (low * self.inverse) as u128
+            var reduced = low as u128 + m * unsafe { *mp } as u128
+            var reduced_carry: u64 = (reduced >> 64).downcast_truncate()
             for j in 1..n {
-                sum = t[j] as u128 + m * self.limbs[j] as u128 + carry as u128
-                t[j - 1] = sum.downcast_truncate()
+                sum = unsafe { *limb(tp, j) } as u128 + unsafe { *limb(ap, j) } as u128 * factor + carry as u128
                 carry = (sum >> 64).downcast_truncate()
+                let low: u64 = sum.downcast_truncate()
+                reduced = low as u128 + m * unsafe { *limb(mp, j) } as u128 + reduced_carry as u128
+                reduced_carry = (reduced >> 64).downcast_truncate()
+                unsafe { *limb(tp, j - 1) = reduced.downcast_truncate() }
             }
-            sum = t[n] as u128 + carry as u128
-            t[n - 1] = sum.downcast_truncate()
-            t[n] = t[n + 1] + (sum >> 64).downcast_truncate()
+            let top = unsafe { *limb(tp, n) } as u128 + carry as u128 + reduced_carry as u128
+            unsafe {
+                *limb(tp, n - 1) = top.downcast_truncate()
+                *limb(tp, n) = (top >> 64).downcast_truncate()
+            }
         }
         // t < 2m: subtract m once if t is at least m.
         var at_least = t[n] != 0
