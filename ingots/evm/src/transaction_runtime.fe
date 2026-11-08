@@ -220,3 +220,21 @@ fn vm_static_storage_writes_fault_but_reads_are_allowed() {
     core::assert(result.status == OK && result.stack_top == 0)
     tx.finish(commit: true, gas_spent: 0)
 }
+
+#[test]
+fn transient_storage_reverts_to_empty_whole_and_to_earlier_values_entry_by_entry() {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
+    let outer = checkpoint(mut tx, is_static: false)
+    for slot in 0..40 { core::assert(tx.transient_store(address: 1, slot: slot as u256, value: slot as u256 + 1) == OK) }
+    tx.revert(outer)
+    for slot in 0..40 { core::assert(tx.transient_load(address: 1, slot: slot as u256) == 0) }
+    let first = checkpoint(mut tx, is_static: false)
+    core::assert(tx.transient_store(address: 1, slot: 5, value: 9) == OK)
+    let inner = checkpoint(mut tx, is_static: false)
+    core::assert(tx.transient_store(address: 1, slot: 5, value: 10) == OK)
+    core::assert(tx.transient_store(address: 1, slot: 6, value: 11) == OK)
+    tx.revert(inner)
+    core::assert(tx.transient_load(address: 1, slot: 5) == 9 && tx.transient_load(address: 1, slot: 6) == 0)
+    tx.commit(first)
+}
