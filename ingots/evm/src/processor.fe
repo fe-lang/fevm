@@ -203,6 +203,19 @@ fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
 
 /// The Osaka includability checks, in specification order.
 pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> i32 {
+    checked(world, request, block, config).invalid
+}
+
+// Validation's verdict and the intrinsic gas it computed.
+struct Checked { invalid: i32, intrinsic: IntrinsicGas }
+
+fn checked(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> Checked {
+    let intrinsic = intrinsic_gas(request)
+    Checked { invalid: verdict(world, request, block, config, intrinsic), intrinsic }
+}
+
+fn verdict(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+           _ intrinsic: IntrinsicGas) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_SET_CODE { return INVALID_TX_TYPE }
@@ -210,7 +223,6 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
     // envelope authorizations.
     if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
     if env.kind != TX_SET_CODE && request.authorization_count() != 0 { return INVALID_TX_TYPE }
-    let intrinsic = intrinsic_gas(request)
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > config.max_initcode_size.downcast_truncate() { return INVALID_INITCODE_SIZE }
@@ -409,12 +421,14 @@ pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ bloc
 fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
     let env = request.env
-    let invalid = validate(world, request, block, config)
-    if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
+    let checked = checked(world, request, block, config)
+    if checked.invalid != VALID {
+        return Applied { state: world, receipt: empty_receipt(invalid: checked.invalid, status: OK) }
+    }
+    let intrinsic = checked.intrinsic
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
     let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
-    let intrinsic = intrinsic_gas(request)
     var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase, config,
                               buffers: core::mem::replace(mut buffers, Buffers::new()))
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
