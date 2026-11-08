@@ -2043,15 +2043,17 @@ impl Vm {
         if cost == 0 || gas < cost || self.copy_within_cost(dest: source, len) == 0 {
             return self.op_other(code, pc, gas, depth, top, mut tracer)
         }
-        if len != 0 { self.move_within(source, dest, len) }
+        if len != 0 {
+            self.move_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
+        }
         self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
     }
 
     // Out of line: the memory view it borrows would keep `op_mcopy` from
     // tail-calling the next handler.
     #[inline(never)]
-    fn move_within(mut self, _ source: u256, _ dest: u256, _ len: u256) {
-        self.memory.span().copy_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
+    fn move_within(mut self, source: usize, dest: usize, len: usize) {
+        self.memory.span().copy_within(source, dest, len)
     }
 
     fn op_jump<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
