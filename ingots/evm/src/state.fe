@@ -381,7 +381,17 @@ impl WorldState {
         if len != 0 {
             self.code.span().write_word(offset: old_size, value: address)
             self.code.span().write_word(offset: old_size + 32, value: len as u256)
-            for i in 0..len { self.code[old_size + 64 + i] = code.byte_at(i) }
+            // Eight bytes at a time, then the tail.
+            let start = old_size + 64
+            var i: usize = 0
+            while i + 8 <= len {
+                self.code.write_le<u64>(offset: start + i, value: code.lane_at(i))
+                i += 8
+            }
+            while i < len {
+                self.code[start + i] = code.byte_at(i)
+                i += 1
+            }
             // Growth can expose old bytes where the bitmap goes.
             let map = old_size + 64 + len
             let map_len = jumpdest_map_len(len)
