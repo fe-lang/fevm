@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  EEST_RELEASE: tests@v21.0.1
+
+jobs:
+  check:
+    name: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            host: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            host: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Install Rust
+        run: |
+          rust=$(python3 -c "import json; print(json.load(open('native/toolchain.json'))['rust_version'])")
+          rustup toolchain install "$rust" --profile minimal
+          echo "RUST_VERSION=$rust" >> "$GITHUB_ENV"
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ matrix.host }}-${{ hashFiles('native/toolchain.json', 'native/**/Cargo.lock') }}
+          restore-keys: cargo-${{ matrix.host }}-
+
+      # The compiler depends only on the pinned toolchain, so a cached build
+      # skips bootstrap until toolchain.json changes.
+      - name: Restore the Fe compiler
+        id: compiler
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            native/out/toolchain/bin
+            native/out/toolchain/build.json
+          key: fe-${{ matrix.host }}-${{ hashFiles('native/toolchain.json') }}
+
+      - name: Build the Fe compiler
+        if: steps.compiler.outputs.cache-hit != 'true'
+        run: |
+          python3 native/bootstrap.py --out native/out/toolchain --toolchain "$RUST_VERSION" \
+            --target-dir "$RUNNER_TEMP/fe-target"
+
+      - name: Save the Fe compiler
+        if: steps.compiler.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            native/out/toolchain/bin
+            native/out/toolchain/build.json
+          key: ${{ steps.compiler.outputs.cache-primary-key }}
+
+      - name: Build fevm_tools
+        id: tools
+        run: |
+          native/out/toolchain/bin/fe build . --ingot fevm_tools --backend native -O 2 \
+            --emit executable --out-dir native/out/tools
+
+      - name: Acceptance
+        run: |
+          native/out/tools/fevm_tools accept --build native/out/toolchain/build.json \
+            --out native/out/acceptance --check-only
+
+      - name: Restore the state tests
+        id: fixtures
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/eest/fixtures/state_tests
+          key: eest-${{ env.EEST_RELEASE }}
+
+      - name: Download the state tests
+        id: download
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' && steps.fixtures.outputs.cache-hit != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$EEST_RELEASE" -R ethereum/execution-specs -p fixtures.tar.gz \
+            -D "$RUNNER_TEMP"
+          mkdir -p ~/eest
+          tar -xzf "$RUNNER_TEMP/fixtures.tar.gz" -C ~/eest fixtures/state_tests
+
+      - name: Save the state tests
+        if: ${{ !cancelled() && steps.download.outcome == 'success' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/eest/fixtures/state_tests
+          key: ${{ steps.fixtures.outputs.cache-primary-key }}
+
+      - name: State tests
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
+            --fixtures ~/eest/fixtures/state_tests --out native/out/conformance
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: logs-${{ matrix.host }}
+          path: |
+            native/out/acceptance/*.log
+            native/out/acceptance/acceptance.json
+            native/out/conformance/results.json
+            native/out/conformance/cases.jsonl
+          if-no-files-found: ignore

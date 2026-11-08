@@ -67,6 +67,9 @@ interpreter tests use substantial memory); `--build-timeout` and
 machines, which skips timing measurements. Run it on each host: an unexecuted
 platform is not a passing result.
 
+[CI](../.github/workflows/ci.yml) runs acceptance and the state tests on both
+hosts for every pull request and push to `main`.
+
 ## State tests
 
 The [state-test runner](conformance/README.md) runs execution-spec-tests
