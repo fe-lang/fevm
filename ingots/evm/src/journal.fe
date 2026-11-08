@@ -20,13 +20,20 @@ impl Journal {
     pub fn len(self) -> u64 { self.changes.len().downcast_unchecked() }
 
     pub fn append(mut self, _ change: Change) -> bool {
-        // With room, the change is written in place: `try_push` returns it
-        // back on failure, a copy through a result the fast path never needs.
+        self.record(kind: change.kind, address: change.address, slot: change.slot, previous: change.previous,
+                    existed: change.existed)
+    }
+
+    /// Appends the change of these fields. Each path builds it where it goes:
+    /// with room, in the journal's next slot; `try_push` returns it back on
+    /// failure, a copy through a result the fast path never needs.
+    #[inline(always)]
+    pub fn record(mut self, kind: u8, address: u256, slot: u256, previous: u256, existed: bool) -> bool {
         if self.changes.len() < self.changes.capacity() {
-            unsafe { self.changes.push_unchecked(change) }
+            unsafe { self.changes.push_unchecked(Change { kind, address, slot, previous, existed }) }
             return true
         }
-        self.changes.try_push(change).is_ok()
+        self.changes.try_push(Change { kind, address, slot, previous, existed }).is_ok()
     }
 
     pub fn change(self, _ index: u64) -> Change { self.changes[index.downcast_truncate()] }

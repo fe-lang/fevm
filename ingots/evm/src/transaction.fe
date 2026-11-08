@@ -196,7 +196,7 @@ impl Transaction {
         let marks = mut self.buffers.marks.value_at(slot)
         if marks & mark != 0 { return OK }
         marks |= mark
-        if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
+        if !self.buffers.journal.record(kind, address, slot: 0, previous: 0, existed: true) {
             core::assert(self.unmark(address, mark))
             return ERR_HOST_ALLOCATION
         }
@@ -215,7 +215,7 @@ impl Transaction {
         let before = self.buffers.warm_storage.len()
         if !self.buffers.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
         if self.buffers.warm_storage.len() == before { return OK }
-        if !self.buffers.journal.append(Change { kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true }) {
+        if !self.buffers.journal.record(kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true) {
             let _ = self.buffers.warm_storage.remove(key)
             return ERR_HOST_ALLOCATION
         }
@@ -373,7 +373,7 @@ impl Transaction {
         if previous == value { return OK }
         // Undo deletes an account its write created.
         let existed = self.state.exists(address)
-        if !self.buffers.journal.append(Change { kind, address, slot, previous, existed }) {
+        if !self.buffers.journal.record(kind, address, slot, previous, existed) {
             return ERR_HOST_ALLOCATION
         }
         if !self.state.storage_store(address, slot, value) {
@@ -389,7 +389,7 @@ impl Transaction {
     fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
         if !replaced.written { return ERR_HOST_ALLOCATION }
         if !replaced.changed { return self.touch_once(address) }
-        if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: replaced.previous, existed: replaced.found }) {
+        if !self.buffers.journal.record(kind, address, slot: 0, previous: replaced.previous, existed: replaced.found) {
             // Restoring a value the record holds needs no allocation.
             core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
             if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
@@ -457,7 +457,7 @@ impl Transaction {
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
         core::assert(self.state.code_size(address) == 0)
-        if !self.buffers.journal.append(Change { kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address) }) {
+        if !self.buffers.journal.record(kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address)) {
             return ERR_HOST_ALLOCATION
         }
         let written = self.state.set_code(address, code)
@@ -508,7 +508,7 @@ impl Transaction {
         if value == 0 {
             let Option::Some(at) = self.buffers.transient.find(key) else { return OK }
             let previous = self.buffers.transient.value_at(at)
-            if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
+            if !self.buffers.journal.record(kind: TRANSIENT, address: key.address, slot, previous, existed: true) {
                 return ERR_HOST_ALLOCATION
             }
             let _ = self.buffers.transient.remove(key)
@@ -517,7 +517,7 @@ impl Transaction {
         let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
         let previous = self.buffers.transient.value_at(at)
         if previous == value { return OK }
-        if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
+        if !self.buffers.journal.record(kind: TRANSIENT, address: key.address, slot, previous, existed: true) {
             if previous == 0 { let _ = self.buffers.transient.remove(key) }
             return ERR_HOST_ALLOCATION
         }
