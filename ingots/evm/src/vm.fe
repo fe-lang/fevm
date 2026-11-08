@@ -382,7 +382,14 @@ impl Vm {
 
     // Grows memory to a planned size, at least its current one. A buffer
     // too small doubles, or takes just the size if doubling fails.
+    // Expansion plans never shrink memory, so a plan of the current size
+    // changes nothing.
+    #[inline(always)]
     fn expand_memory(mut self, _ size: u64) -> bool {
+        size == self.memory_size || self.resize_memory(size)
+    }
+
+    fn resize_memory(mut self, _ size: u64) -> bool {
         let len: u64 = self.memory.len().downcast_unchecked()
         if size > len {
             let doubled = 2 * len
