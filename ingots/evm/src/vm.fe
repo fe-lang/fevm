@@ -6,7 +6,8 @@ use ingot::memory::{
     MemoryExpansion, SMALL_EXTENT, memory_expansion, copy_expansion, copy_gas, small_growth_cost,
 }
 use ingot::gas::base_cost
-use ingot::state::{address_word, delegation}
+use ingot::state::{StorageKey, address_word, delegation}
+use swisstable::SwissTable
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
@@ -188,11 +189,33 @@ pub struct Buffers {
     frames: MemVec<Box<Frame>>,
     // Empty between transactions.
     pub(ingot) journal: Journal,
+    // A transaction's tables, empty between transactions, which keep their
+    // slots for the next one. `transient` is EIP-1153 transient storage.
+    // `marks` holds warm accounts, other than those `always_warm` names;
+    // accounts that calls from code touched, which settlement removes if
+    // left empty with the journal's other touches, its balance, nonce and
+    // code changes and TOUCHED_ONCE entries (the specification's
+    // modify_state deletion rule); accounts created by this transaction
+    // (created_accounts); and the self-destructed ones among those, which
+    // settlement deletes.
+    pub(ingot) transient: SwissTable<StorageKey, u256>,
+    pub(ingot) marks: SwissTable<u256, u8>,
+    pub(ingot) warm_storage: SwissTable<StorageKey, bool>,
+    pub(ingot) originals: SwissTable<StorageKey, u256>,
 }
 
 impl Buffers {
     pub fn new() -> Self {
-        Buffers { memories: MemVec::new(), stacks: MemVec::new(), frames: MemVec::new(), journal: Journal::new() }
+        Buffers {
+            memories: MemVec::new(),
+            stacks: MemVec::new(),
+            frames: MemVec::new(),
+            journal: Journal::new(),
+            transient: SwissTable<StorageKey, u256>::empty(),
+            marks: SwissTable<u256, u8>::empty(),
+            warm_storage: SwissTable<StorageKey, bool>::empty(),
+            originals: SwissTable<StorageKey, u256>::empty(),
+        }
     }
 }
 

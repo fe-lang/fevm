@@ -1,6 +1,5 @@
 use core::{MemSpan, MemVec, Option}
 use ingot::logs::LogBuffer
-use swisstable::SwissTable
 use ingot::constants::MAX_U256
 use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::Change
@@ -56,27 +55,18 @@ pub struct TransactionResult {
 // transaction. Every write during execution must therefore pass the journal.
 pub struct Transaction {
     state: WorldState,
-    transient: SwissTable<StorageKey, u256>,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
-    // Warm accounts, other than those `always_warm` names; accounts that
-    // calls from code touched, which settlement removes if left empty with
-    // the journal's other touches, its balance, nonce and code changes and
-    // TOUCHED_ONCE entries (the specification's modify_state deletion rule);
-    // accounts created by this transaction (created_accounts); and the
-    // self-destructed ones among those, which settlement deletes.
-    marks: SwissTable<u256, u8>,
     // The sender, destination and coinbase, warm from the start (EIP-2929,
     // EIP-3651).
     endpoints: [u256; 3],
-    warm_storage: SwissTable<StorageKey, bool>,
-    originals: SwissTable<StorageKey, u256>,
     refund: i128,
     started: bool,
     depth: usize,
     is_static: bool,
     config: Config,
-    // Lent by the caller for the journal and the transaction's frames.
+    // Lent by the caller for the journal, the transaction's frames and its
+    // tables (see `Buffers`).
     buffers: Buffers,
 }
 
@@ -89,13 +79,9 @@ impl Transaction {
         core::assert(buffers.journal.len() == 0)
         Self {
             state,
-            transient: SwissTable<StorageKey, u256>::empty(),
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
-            marks: SwissTable<u256, u8>::empty(),
             endpoints: [address_word(sender), address_word(destination), address_word(coinbase)],
-            warm_storage: SwissTable<StorageKey, bool>::empty(),
-            originals: SwissTable<StorageKey, u256>::empty(),
             refund: 0,
             started: false,
             depth: 0,
@@ -152,7 +138,7 @@ impl Transaction {
         let address = address_word(address)
         let was_warm = self.marked(address, MARK_WARM)
         if !self.add_mark(address, MARK_WARM) { return false }
-        if !self.warm_storage.try_insert(StorageKey { address, slot }, true) {
+        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) {
             if !was_warm { core::assert(self.unmark(address, MARK_WARM)) }
             return false
         }
@@ -173,14 +159,14 @@ impl Transaction {
 
     // Whether `address`, an address word, has `mark`.
     fn marked(self, _ address: u256, _ mark: u8) -> bool {
-        self.marks.get(address).value & mark != 0
+        self.buffers.marks.get(address).value & mark != 0
     }
 
     // Adds `mark` to `address`'s marks, unjournaled; false, changing nothing,
     // if the table cannot grow.
     fn add_mark(mut self, _ address: u256, _ mark: u8) -> bool {
-        let Option::Some(slot) = self.marks.try_find_or_insert(address) else { return false }
-        let marks = mut self.marks.value_at(slot)
+        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return false }
+        let marks = mut self.buffers.marks.value_at(slot)
         marks |= mark
         true
     }
@@ -188,14 +174,14 @@ impl Transaction {
     // Clears `mark` from `address`'s marks, which it has an entry for; an
     // address left without marks loses its entry. Neither grows the table.
     fn unmark(mut self, _ address: u256, _ mark: u8) -> bool {
-        let Option::Some(slot) = self.marks.find(address) else { return false }
-        let marks = mut self.marks.value_at(slot)
+        let Option::Some(slot) = self.buffers.marks.find(address) else { return false }
+        let marks = mut self.buffers.marks.value_at(slot)
         marks &= ~mark
-        marks != 0 || self.marks.remove(address)
+        marks != 0 || self.buffers.marks.remove(address)
     }
 
     pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
-        self.warm_storage.contains(StorageKey { address: address_word(address), slot })
+        self.buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
     // Adds the warm, touched or doomed mark of `kind` to `address`, journaled
@@ -206,8 +192,8 @@ impl Transaction {
         if kind == WARM_ACCOUNT && self.always_warm(address) { return OK }
         let mark = mark_of(kind)
         // A new address gets an entry without marks first.
-        let Option::Some(slot) = self.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
-        let marks = mut self.marks.value_at(slot)
+        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
+        let marks = mut self.buffers.marks.value_at(slot)
         if marks & mark != 0 { return OK }
         marks |= mark
         if !self.buffers.journal.append(Change { kind, address, slot: 0, previous: 0, existed: true }) {
@@ -226,11 +212,11 @@ impl Transaction {
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
         self.started = true
         let key = StorageKey { address: address_word(address), slot }
-        let before = self.warm_storage.len()
-        if !self.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
-        if self.warm_storage.len() == before { return OK }
+        let before = self.buffers.warm_storage.len()
+        if !self.buffers.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
+        if self.buffers.warm_storage.len() == before { return OK }
         if !self.buffers.journal.append(Change { kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true }) {
-            let _ = self.warm_storage.remove(key)
+            let _ = self.buffers.warm_storage.remove(key)
             return ERR_HOST_ALLOCATION
         }
         OK
@@ -262,7 +248,7 @@ impl Transaction {
     }
 
     pub fn original_storage(self, address: u256, slot: u256) -> u256 {
-        let original = self.originals.get(StorageKey { address: address_word(address), slot })
+        let original = self.buffers.originals.get(StorageKey { address: address_word(address), slot })
         if original.found { original.value } else { self.storage_load(address, slot) }
     }
 
@@ -283,7 +269,7 @@ impl Transaction {
         self.depth += 1
         let checkpoint = Checkpoint {
             position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
-            transient_empty: self.transient.is_empty(),
+            transient_empty: self.buffers.transient.is_empty(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -299,7 +285,7 @@ impl Transaction {
         core::assert(self.depth == checkpoint.depth)
         self.undo_to(checkpoint.position, transient: !checkpoint.transient_empty)
         if checkpoint.transient_empty {
-            let _ = core::mem::replace(mut self.transient, SwissTable<StorageKey, u256>::empty())
+            self.buffers.transient.clear()
         }
         self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
@@ -320,7 +306,7 @@ impl Transaction {
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => !transient || self.write_transient(change.address, change.slot, change.previous),
                 WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
-                WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
+                WARM_STORAGE => self.buffers.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
                 CODE => {
                     let empty: [u8; 0] = []
                     self.state.set_code(address: change.address, code: empty) == OK
@@ -362,17 +348,17 @@ impl Transaction {
         self.state.storage_load(address, slot)
     }
     pub fn transient_load(self, address: u256, slot: u256) -> u256 {
-        self.transient.get(StorageKey { address: address_word(address), slot }).value
+        self.buffers.transient.get(StorageKey { address: address_word(address), slot }).value
     }
     pub fn block_hash(self, _ number: u256) -> u256 { self.state.block_hash(number) }
 
     fn write_transient(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
         let key = StorageKey { address, slot }
         if value == 0 {
-            let _ = self.transient.remove(key)
+            let _ = self.buffers.transient.remove(key)
             return true
         }
-        self.transient.try_insert(key, value)
+        self.buffers.transient.try_insert(key, value)
     }
 
     fn write(mut self, kind: u8, address: u256, slot: u256, value: u256) -> i32 {
@@ -504,8 +490,8 @@ impl Transaction {
         let charge = self.storage_charge(address, slot, value)
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
-        if !self.originals.contains(key)
-            && !self.originals.try_insert(key, self.storage_load(address, slot)) {
+        if !self.buffers.originals.contains(key)
+            && !self.buffers.originals.try_insert(key, self.storage_load(address, slot)) {
             return ERR_HOST_ALLOCATION
         }
         let status = self.write(kind: STORAGE, address, slot, value)
@@ -520,22 +506,22 @@ impl Transaction {
         if self.is_static { return ERR_STATIC_WRITE }
         let key = StorageKey { address: address_word(address), slot }
         if value == 0 {
-            let Option::Some(at) = self.transient.find(key) else { return OK }
-            let previous = self.transient.value_at(at)
+            let Option::Some(at) = self.buffers.transient.find(key) else { return OK }
+            let previous = self.buffers.transient.value_at(at)
             if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
                 return ERR_HOST_ALLOCATION
             }
-            let _ = self.transient.remove(key)
+            let _ = self.buffers.transient.remove(key)
             return OK
         }
-        let Option::Some(at) = self.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
-        let previous = self.transient.value_at(at)
+        let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
+        let previous = self.buffers.transient.value_at(at)
         if previous == value { return OK }
         if !self.buffers.journal.append(Change { kind: TRANSIENT, address: key.address, slot, previous, existed: true }) {
-            if previous == 0 { let _ = self.transient.remove(key) }
+            if previous == 0 { let _ = self.buffers.transient.remove(key) }
             return ERR_HOST_ALLOCATION
         }
-        let stored = mut self.transient.value_at(at)
+        let stored = mut self.buffers.transient.value_at(at)
         stored = value
         OK
     }
@@ -580,6 +566,10 @@ impl Transaction {
             self.logs.truncate(0)
         }
         self.buffers.journal.clear()
+        self.buffers.transient.clear()
+        self.buffers.marks.clear()
+        self.buffers.warm_storage.clear()
+        self.buffers.originals.clear()
         let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
         TransactionResult {
             state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded, buffers: self.buffers,
