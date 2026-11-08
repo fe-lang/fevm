@@ -135,13 +135,22 @@ impl Fp {
         at_least(value, HALF_MODULUS) && !at_least(HALF_MODULUS, value)
     }
 
+    // Four exponent bits at a time, from the top nonzero four: four
+    // squarings, then one multiplication by self^(the four bits) if nonzero.
     pub fn pow(self, _ exponent: [u64; 6]) -> Fp {
+        var powers: [Fp; 16] = [Fp { limbs: R1 }; 16]
+        for i in 1..16 { powers[i] = powers[i - 1].mul(self) }
         var result = Fp { limbs: R1 }
-        var i: u64 = 384
-        while i > 0 {
-            i -= 1
-            result = result.square()
-            if (exponent[(i / 64).downcast_truncate()] >> (i % 64)) & 1 == 1 { result = result.mul(self) }
+        var started = false
+        var window: u64 = 96
+        while window > 0 {
+            window -= 1
+            if started { result = result.square().square().square().square() }
+            let bits: usize = ((exponent[(window / 16).downcast_truncate()] >> ((window % 16) * 4)) & 0xf).downcast_truncate()
+            if bits != 0 {
+                result = if started { result.mul(powers[bits]) } else { powers[bits] }
+                started = true
+            }
         }
         result
     }
@@ -151,9 +160,12 @@ impl Fp {
 
     /// A square root, if one exists.
     pub fn sqrt(self) -> Option<Fp> {
-        let root = self.pow(SQRT_EXPONENT)
+        let root = self.sqrt_candidate()
         if root.square().equals(self) { Option::Some(root) } else { Option::None }
     }
+
+    /// self^((p+1)/4): a square root of a square, and of -self otherwise.
+    pub fn sqrt_candidate(self) -> Fp { self.pow(SQRT_EXPONENT) }
 }
 
 impl Field for Fp {
