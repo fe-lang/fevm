@@ -2077,10 +2077,11 @@ impl Vm {
         if depth < 2 {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 10, depth)
         }
-        let dest = unsafe { *below(top, 1) }
         if unsafe { *below(top, 2) } == 0 {
             return self.next(code, pc.wrapping_add(1), gas - 10, depth - 2, below(top, 2), mut tracer)
         }
+        // Only a taken jump reads its destination.
+        let dest = unsafe { *below(top, 1) }
         if !self.jump_ok(dest) {
             return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), gas - 10, depth - 2)
         }
