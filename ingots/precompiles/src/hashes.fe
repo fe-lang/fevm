@@ -17,6 +17,7 @@ fn rotate_left(_ value: u32, by: u32) -> u32 {
 
 // RIPEMD-160 consumes 64-byte blocks followed by 0x80, zero padding and a
 // little-endian 64-bit bit count, as SHA-256 does with a big-endian count.
+#[arithmetic(unchecked)]
 fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_index: usize, blocks: usize) -> [u8; 64] {
     var block: [u8; 64] = [0; 64]
     let start = block_index * 64
@@ -43,7 +44,9 @@ fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
 
 // The 16 big-endian words of block `index` of the padded message. A block
 // within the input is eight lanes, byte-swapped; the last one or two hold
-// the input's last bytes, 0x80, zeros and the 64-bit bit count.
+// the input's last bytes, 0x80, zeros and the 64-bit bit count. Offsets
+// within an input bounded by host memory cannot overflow.
+#[arithmetic(unchecked)]
 fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usize, blocks: usize) -> [u32; 16] {
     var w: [u32; 16] = [0; 16]
     let start = index * 64
