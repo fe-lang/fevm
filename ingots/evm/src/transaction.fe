@@ -3,7 +3,7 @@ use ingot::logs::LogBuffer
 use ingot::constants::MAX_U256
 use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::Change
-use ingot::state::{Charged, Replaced, StorageKey, WorldState, address_word, designator}
+use ingot::state::{Charged, Replaced, Sender, StorageKey, WorldState, address_word, designator}
 use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
@@ -298,11 +298,16 @@ impl Transaction {
     fn undo_to(mut self, _ position: u64, transient: bool) {
         while self.buffers.journal.len() > position {
             let change = self.buffers.journal.pop()
+            // A balance or nonce change that created its account also
+            // removes it.
             let restored = match change.kind {
-                BALANCE => self.state.set_balance(change.address, change.previous),
-                NONCE => self.state.set_nonce(change.address, change.previous),
+                BALANCE => self.state.restore(balance: true, change.address, value: change.previous,
+                                              existed: change.existed),
+                NONCE => self.state.restore(balance: false, change.address, value: change.previous,
+                                            existed: change.existed),
                 SENDER => self.state.set_nonce(change.address, change.slot)
-                    && self.state.set_balance(change.address, change.previous),
+                    && self.state.restore(balance: true, change.address, value: change.previous,
+                                          existed: change.existed),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => !transient || self.write_transient(change.address, change.slot, change.previous),
                 WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
@@ -323,8 +328,7 @@ impl Transaction {
             // Reverse replay restores entries the tables held before. A table
             // that cannot allocate to hold one again is a fatal host failure.
             core::assert(restored)
-            let account_write = change.kind == BALANCE || change.kind == NONCE || change.kind == SENDER
-                || change.kind == STORAGE || change.kind == CODE || change.kind == DELEGATION
+            let account_write = change.kind == STORAGE || change.kind == CODE || change.kind == DELEGATION
             if !change.existed && account_write {
                 core::assert(self.state.remove_empty_account(change.address))
             }
@@ -334,9 +338,8 @@ impl Transaction {
     pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
     pub fn is_empty(self, _ address: u256) -> bool { self.state.is_empty(address) }
     // EIP-684/EIP-7610: creation needs an address without nonce, code or storage.
-    pub fn deployable(self, _ address: u256) -> bool {
-        self.state.nonce(address) == 0 && self.state.code_size(address) == 0 && !self.state.has_storage(address)
-    }
+    pub fn deployable(self, _ address: u256) -> bool { self.state.deployable(address) }
+    pub fn sender(self, _ address: u256) -> Sender { self.state.sender(address) }
     pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
     pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
     pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
@@ -456,8 +459,9 @@ impl Transaction {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        core::assert(self.state.code_size(address) == 0)
-        if !self.buffers.journal.record(kind: CODE, address, slot: 0, previous: 0, existed: self.state.exists(address)) {
+        let existing = self.state.existing_code_len(address)
+        core::assert(existing.unwrap_or(default: 0) == 0)
+        if !self.buffers.journal.record(kind: CODE, address, slot: 0, previous: 0, existed: existing.is_some()) {
             return ERR_HOST_ALLOCATION
         }
         let written = self.state.set_code(address, code)
