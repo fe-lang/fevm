@@ -20,6 +20,12 @@ impl Journal {
     pub fn len(self) -> u64 { self.changes.len().downcast_unchecked() }
 
     pub fn append(mut self, _ change: Change) -> bool {
+        // With room, the change is written in place: `try_push` returns it
+        // back on failure, a copy through a result the fast path never needs.
+        if self.changes.len() < self.changes.capacity() {
+            unsafe { self.changes.push_unchecked(change) }
+            return true
+        }
         self.changes.try_push(change).is_ok()
     }
 
