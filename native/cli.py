@@ -12,7 +12,7 @@ from arith.run import artifacts, command
 
 ROOT = Path(__file__).resolve().parent.parent
 # The bytes of a boxed child `Frame` (with the stack on the heap).
-FRAME_BOX_SIZE = 576
+FRAME_BOX_SIZE = 864
 CASES = [
     ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n'),
     ('empty', [''], 0, 'empty\n'),
@@ -130,10 +130,12 @@ def main():
                        '--report', '--report-out', account_archive], timeout=args.build_timeout)
         accounts.joinpath('build.log').write_bytes(log)
         artifacts(accounts / 'fevm_accounts', account_archive, accounts, object_name='fevm_accounts.o')
-        # A record of 65,537 bytes of code takes 64 + 65,537 + 8,193 bytes of arena.
+        # Replacing three bytes of code with 65,537 grows the arena by the new
+        # record, 64 + 65,537 + 8,193 bytes, past the old one's 64 + 3 + 1, which
+        # stays until compaction.
         for failure_at in [0, 1, 2]:
             controlled = accounts / f'allocator-{failure_at}'
-            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=73794',
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=73862',
                      ROOT / 'native/fixtures/vm_allocator.c', accounts / 'fevm_accounts.o',
                      '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
@@ -192,7 +194,7 @@ def main():
                        '--report', '--report-out', log_archive], timeout=args.build_timeout)
         logs.joinpath('build.log').write_bytes(log)
         artifacts(logs / 'fevm_logs', log_archive, logs, object_name='fevm_logs.o')
-        for mode, size in [('h', 98304), ('b', 128), ('b', 256)]:
+        for mode, size in [('h', 32768), ('b', 128), ('b', 256)]:
             for failure_at in [0, 1]:
                 name = f'log-headers-{failure_at}' if mode == 'h' else f'blob-hashes-{size}-{failure_at}'
                 controlled = logs / name

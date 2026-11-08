@@ -1,6 +1,6 @@
 use core::Option
 use keccak::ByteSource
-use ingot::bls_curve::{Affine, ORDER, Point, decompress_g1, g1_generator, g2_generator}
+use ingot::bls_curve::{Affine, ORDER, Point, decompress_g1, g1_generator, g2_generator, multiply_two}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_pairing::pairing_product_is_one
 use ingot::bls_tower::Fp2
@@ -48,8 +48,10 @@ fn tau_g2() -> Point<Fp2> {
 }
 
 /// Verify the proof that the committed polynomial evaluates to y at z:
-/// e(C - [y]G1, -G2) * e(proof, [tau]G2 - [z]G2) == 1. `input` is the 192-byte
-/// precompile input; the versioned hash must match the commitment.
+/// e(C - [y]G1, -G2) * e(proof, [tau]G2 - [z]G2) == 1, computed as
+/// e(C - [y]G1 + [z]proof, -G2) * e(proof, [tau]G2) == 1, since
+/// e(proof, [-z]G2) = e([z]proof, -G2), which leaves G2 constant. `input` is
+/// the 192-byte precompile input; the versioned hash must match the commitment.
 pub fn verify<T: ByteSource>(_ input: T) -> bool {
     core::assert(input.len() == INPUT_LEN)
     // The versioned hash is 0x01 followed by the commitment digest's last 31 bytes.
@@ -66,9 +68,9 @@ pub fn verify<T: ByteSource>(_ input: T) -> bool {
         Option::Some(point) => point,
         Option::None => return false,
     }
-    let p_minus_y = Point::from_affine(commitment).add(g1_generator().multiply(y).neg()).to_affine()
-    let x_minus_z = tau_g2().add(g2_generator().multiply(z).neg()).to_affine()
+    let generator = Affine { x: g1_generator().x, y: g1_generator().y, infinity: false }
+    let combined = multiply_two(generator.neg(), y, proof, z).add_affine(commitment).to_affine()
     let neg_g2 = g2_generator().neg().to_affine()
-    pairing_product_is_one(p_minus_y, neg_g2, proof, x_minus_z)
+    pairing_product_is_one(combined, neg_g2, proof, tau_g2().to_affine())
 }
 

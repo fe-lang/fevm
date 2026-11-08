@@ -2,7 +2,7 @@ use core::{MemBuffer, Option}
 use std::env::Args
 use std::io::{Display, Stdin, Stdout, read_to_end}
 use keccak::Keccak256
-use fevm::{Authorization, BlockEnv, Config, FrameBuffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{Authorization, BlockEnv, Config, Buffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
 use fevm::hex::{parse_decimal, write_hex_bytes, write_hex_word}
 use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
@@ -98,27 +98,23 @@ fn logs_hash(_ logs: LogBuffer) -> u256 {
 fn write_world(_ world: WorldState) uses (text: mut MemBuffer) {
     ",\"accounts\":[".fmt(mut text)
     var first = true
-    var slot: usize = 0
-    while slot < world.table_slots() {
-        let account = world.account_at(slot)
-        if account.occupied {
-            if !first { ",".fmt(mut text) }
-            first = false
-            "[\"".fmt(mut text)
-            write_hex_word(account.address)
-            "\",\"".fmt(mut text)
-            write_hex_word(account.balance)
-            "\",\"".fmt(mut text)
-            write_hex_word(account.nonce)
-            "\",\"".fmt(mut text)
-            write_hex_bytes(world.code(account.address))
-            "\"]".fmt(mut text)
-        }
-        slot += 1
+    for position in 0..world.account_count() {
+        let account = world.account_at(position)
+        if !first { ",".fmt(mut text) }
+        first = false
+        "[\"".fmt(mut text)
+        write_hex_word(account.address)
+        "\",\"".fmt(mut text)
+        write_hex_word(account.balance)
+        "\",\"".fmt(mut text)
+        write_hex_word(account.nonce)
+        "\",\"".fmt(mut text)
+        write_hex_bytes(world.code(account.address))
+        "\"]".fmt(mut text)
     }
     "],\"storage\":[".fmt(mut text)
     first = true
-    slot = 0
+    var slot: usize = 0
     while slot < world.storage_slots() {
         let entry = world.storage_at(slot)
         if entry.occupied {
@@ -175,7 +171,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     var repeated_gas: u64 = 0
     var repeated = false
     // Repeated applications reuse the frames' memory and stacks.
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     while true {
         reader.position = 0

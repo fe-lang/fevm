@@ -30,8 +30,8 @@ Keccak-256; `ingots/evm/fe.toml` pins both to Git revisions.
 
 ## Building
 
-fevm needs Fe master `58c897d0f`
-([argotorg/fe#1942](https://github.com/argotorg/fe/pull/1942)) with its pinned
+fevm needs Fe master `22b156fff`
+([argotorg/fe#1966](https://github.com/argotorg/fe/pull/1966)) with its pinned
 Sonatina and Rust 1.99.0.
 [`native/toolchain.json`](native/toolchain.json) records the revisions and lock
 hash, and bootstrap builds that compiler. Native hosts are x86_64 Linux and
@@ -85,8 +85,8 @@ transaction and returns `Applied { state, receipt }`.
   chain ID, nonce, base fee and EIP-3607 sender checks. A test harness may
   raise the limits or skip the checks; a transaction priced below the base fee
   then pays its own price and no priority fee.
-- `FrameBuffers` is a pool of frame memory, stacks and child frames that
-  repeated transactions reuse.
+- `Buffers` holds allocations that repeated transactions reuse: frame memory,
+  stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
 
 An invalid transaction returns the untouched state and a receipt whose

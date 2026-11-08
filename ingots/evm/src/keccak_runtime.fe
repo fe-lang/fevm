@@ -1,6 +1,7 @@
 use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
 use ingot::status::{ERR_OUT_OF_GAS, ERR_STACK_UNDERFLOW}
-use ingot::vm::Vm
+use ingot::vm::{Buffers, Vm}
+use ingot::types::Config
 
 #[test]
 fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
@@ -15,7 +16,8 @@ fn sha3_empty_ignores_full_width_offset_and_obeys_exact_gas() {
             index += 1
         }
         bytes[35] = 0x20
-        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                     config: Config::osaka(), buffers: Buffers::new())
         var vm = Vm::new()
         var tracer = ()
         var call = default_call_env()
@@ -41,7 +43,8 @@ fn sha3_hashes_a_borrowed_memory_subrange_without_changing_it() {
         bytes[index] = byte
         index += 1
     }
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     var call = default_call_env()
@@ -88,7 +91,8 @@ fn sha3_checks_stack_and_charges_before_allocation() {
             }
         }
         bytes[size] = 0x20
-        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                     config: Config::osaka(), buffers: Buffers::new())
         var vm = Vm::new()
         var tracer = ()
         var call = default_call_env()

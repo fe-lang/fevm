@@ -26,4 +26,6 @@ impl Journal {
     pub fn change(self, _ index: u64) -> Change { self.changes[index.downcast_truncate()] }
 
     pub fn pop(mut self) -> Change { self.changes.pop().unwrap() }
+
+    pub fn clear(mut self) { self.changes.clear() }
 }

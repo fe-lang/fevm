@@ -1,4 +1,4 @@
-use core::Option
+use core::{MemArray, Option}
 use keccak::ByteSource
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_tower::Fp2
@@ -13,6 +13,16 @@ const G2_X0: [u64; 6] = [0xf5f28fa202940a10, 0xb3f5fb2687b4961a, 0xa1a893b53e2ae
 const G2_X1: [u64; 6] = [0xa5a9c0759e23f606, 0xaaa0c59dbccd60c3, 0x3bb17e18e2867806, 0x1b1ab6cc8541b367, 0xc2b6ed0ef2158547, 0x11922a097360edf3]
 const G2_Y0: [u64; 6] = [0x4c730af860494c4a, 0x597cfa1f5e369c5a, 0xe7e6856caa0a635a, 0xbbefb5e96e0d495f, 0x07d3a975f0ef25a2, 0x0083fd8e7e80dae5]
 const G2_Y1: [u64; 6] = [0xadc0fc92df64b05d, 0x18aa270a2b1461dc, 0x86adac6a3be4eba0, 0x79495c4ec93da33a, 0xe7175850a43ccaed, 0x0b2bc2a163de1bf2]
+
+// |x| for the BLS parameter x = -0xd201000000010000.
+const X_ABS: u64 = 0xd201000000010000
+// The cube root of unity beta (Montgomery form) for which (beta x, y) = -[x^2] (x, y) on G1.
+const BETA: [u64; 6] = [0x30f1361b798a64e8, 0xf3b8ddab7ece5a2a, 0x16a8ca3ac61577f7, 0xc26a2ff874fd029b, 0x3636b76660701c6e, 0x051ba4ab241b6160]
+// psi(x, y) = (conj(x) / (1 + u)^((p - 1) / 3), conj(y) / (1 + u)^((p - 1) / 2)), [x] on G2; the
+// first coefficient is c1 u alone.
+const PSI_X1: [u64; 6] = [0x890dc9e4867545c3, 0x2af322533285a5d5, 0x50880866309b7e2c, 0xa20d1b8c7e881024, 0x14e4f04fe2db9068, 0x14e56d3f1564853a]
+const PSI_Y0: [u64; 6] = [0x3e2f585da55c9ad1, 0x4294213d86c18183, 0x382844c88b623732, 0x92ad2afd19103e18, 0x1d794e4fac7cf0b9, 0x0bd592fc7d825ec8]
+const PSI_Y1: [u64; 6] = [0x7bcfa7a25aa30fda, 0xdc17dec12a927e7c, 0x2f088dd86b4ebef1, 0xd1ca2087da74d4a7, 0x2da2596696cebc1d, 0x0e2b7eedbbfd87d2]
 
 /// A point in Jacobian coordinates (x/z^2, y/z^3) on y^2 = x^3 + b; z = 0 is infinity.
 pub struct Point<F> { pub x: F, pub y: F, pub z: F }
@@ -70,16 +80,25 @@ impl<F> Point<F> where F: Field + Copy {
         Point { x, y, z }
     }
 
-    /// The product with a scalar of little-endian 64-bit limbs.
-    pub fn multiply_limbs<const N: usize>(self, _ limbs: [u64; N]) -> Point<F> {
-        var result = Point::identity()
-        var bit: u64 = (N * 64).downcast_unchecked()
-        while bit > 0 {
-            bit -= 1
-            result = result.double()
-            if (limbs[(bit / 64).downcast_truncate()] >> (bit % 64)) & 1 == 1 { result = result.add(self) }
+    // madd-2007-bl: the sum with an affine point.
+    pub fn add_affine(self, _ other: Affine<F>) -> Point<F> {
+        if other.infinity { return self }
+        if self.is_identity() { return Point::from_affine(other) }
+        let z1z1 = self.z.square()
+        let u2 = other.x.mul(z1z1)
+        let s2 = other.y.mul(self.z).mul(z1z1)
+        let h = u2.sub(self.x)
+        let r = s2.sub(self.y).double()
+        if h.is_zero() {
+            return if r.is_zero() { self.double() } else { Point::identity() }
         }
-        result
+        let hh = h.square()
+        let i = hh.double().double()
+        let j = h.mul(i)
+        let v = self.x.mul(i)
+        let x = r.square().sub(j).sub(v.double())
+        let y = r.mul(v.sub(x)).sub(self.y.mul(j).double())
+        Point { x, y, z: self.z.add(h).square().sub(z1z1).sub(hh) }
     }
 
     pub fn multiply(self, _ scalar: u256) -> Point<F> {
@@ -100,7 +119,160 @@ impl<F> Point<F> where F: Field + Copy {
         Affine { x: self.x.mul(inverse_squared), y: self.y.mul(inverse_squared).mul(inverse), infinity: false }
     }
 
-    pub fn in_subgroup(self) -> bool { self.multiply(ORDER).is_identity() }
+    /// [|x|] self, over |x|'s six set bits.
+    pub fn multiply_by_x_abs(self) -> Point<F> {
+        var result = self
+        var bit: u64 = 63
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (X_ABS >> bit) & 1 == 1 { result = result.add(self) }
+        }
+        result
+    }
+
+    /// Whether two points are equal: x1 z2^2 = x2 z1^2 and y1 z2^3 = y2 z1^3.
+    pub fn equals(self, _ other: Point<F>) -> bool {
+        if self.is_identity() || other.is_identity() { return self.is_identity() && other.is_identity() }
+        let z1z1 = self.z.square()
+        let z2z2 = other.z.square()
+        self.x.mul(z2z2).equals(other.x.mul(z1z1)) && self.y.mul(z2z2.mul(other.z)).equals(other.y.mul(z1z1.mul(self.z)))
+    }
+}
+
+impl<F> Affine<F> where F: Field + Copy {
+    pub fn identity() -> Affine<F> { Affine { x: F::zero(), y: F::zero(), infinity: true } }
+    pub fn neg(self) -> Affine<F> { Affine { x: self.x, y: self.y.neg(), infinity: self.infinity } }
+
+    /// The product with a scalar, by double-and-add with mixed additions.
+    pub fn multiply(self, _ scalar: u256) -> Point<F> {
+        var result = Point::identity()
+        var bit: u64 = 256
+        while bit > 0 {
+            bit -= 1
+            result = result.double()
+            if (scalar >> bit as u256) & 1 == 1 { result = result.add_affine(self) }
+        }
+        result
+    }
+}
+
+/// [s] a + [t] b by one double-and-add over both scalars (Shamir's trick).
+pub fn multiply_two<F: Field + Copy>(_ a: Affine<F>, _ s: u256, _ b: Affine<F>, _ t: u256) -> Point<F> {
+    let sum = Point::from_affine(a).add_affine(b).to_affine()
+    var result = Point::identity()
+    var bit: u64 = 256
+    while bit > 0 {
+        bit -= 1
+        result = result.double()
+        let in_s = (s >> bit as u256) & 1 == 1
+        let in_t = (t >> bit as u256) & 1 == 1
+        if in_s && in_t { result = result.add_affine(sum) }
+        else if in_s { result = result.add_affine(a) }
+        else if in_t { result = result.add_affine(b) }
+    }
+    result
+}
+
+// The window width for Pippenger's method over k points, or 0 when separate
+// double-and-add multiplications cost less. Costs count field
+// multiplications: about 11 for a mixed addition, 16 for an addition and 7
+// for a doubling.
+fn msm_window(_ k: usize) -> usize {
+    var best: usize = 0
+    var best_cost = k * (255 * 7 + 128 * 11)
+    var c: usize = 2
+    while c <= 12 {
+        let cost = (255 / c + 1) * (k * 11 + (1 << (c - 1)) * 32) + 255 * 7
+        if cost < best_cost {
+            best = c
+            best_cost = cost
+        }
+        c += 1
+    }
+    best
+}
+
+/// The sum of [scalars[i]] points[i] for scalars below 2^255, by Pippenger's
+/// bucket method over Booth-recoded c-bit digits in [-2^(c-1), 2^(c-1)];
+/// None when the buckets cannot be allocated.
+pub fn msm<F: Field + Copy>(_ points: MemArray<Affine<F>>, _ scalars: MemArray<u256>) -> Option<Point<F>> {
+    let k = points.len()
+    let c = msm_window(k)
+    if c == 0 {
+        var sum = Point::identity()
+        for i in 0..k { sum = sum.add(points[i].multiply(scalars[i])) }
+        return Option::Some(sum)
+    }
+    let count: usize = 1 << (c - 1)
+    var buckets = MemArray::try_from_fn(count, |_| Point<F>::identity())?
+    let mask: u256 = (1 << (c + 1) as u256) - 1
+    var result = Point::identity()
+    var window = 255 / c + 1
+    while window > 0 {
+        window -= 1
+        for _ in 0..c { result = result.double() }
+        for b in 0..count { buckets[b] = Point::identity() }
+        for i in 0..k {
+            // Bits c window - 1 through c window + c - 1 of the scalar give the
+            // digit (w & 1) + (w >> 1) - 2^c (w >> c).
+            let w: usize = (((scalars[i] << 1) >> (c * window) as u256) & mask).downcast_truncate()
+            let magnitude = (w & 1) + (w >> 1)
+            if w >> c == 0 {
+                if magnitude != 0 { buckets[magnitude - 1] = buckets[magnitude - 1].add_affine(points[i]) }
+            } else if magnitude != 1 << c {
+                let negated = (1 << c) - magnitude
+                buckets[negated - 1] = buckets[negated - 1].add_affine(points[i].neg())
+            }
+        }
+        // The sum of (b + 1) buckets[b], by running sums from the top.
+        var running = Point::identity()
+        var total = Point::identity()
+        var b = count
+        while b > 0 {
+            b -= 1
+            running = running.add(buckets[b])
+            total = total.add(running)
+        }
+        result = result.add(total)
+    }
+    Option::Some(result)
+}
+
+impl Point<Fp> {
+    /// Whether a point of the curve is in G1: (beta x, y) = -[x^2] (x, y), the
+    /// test of https://eprint.iacr.org/2021/1130 section 6. For each prime l of
+    /// the cofactor x = 1 mod l, so -x^2 = -1, which is not an eigenvalue of
+    /// the endomorphism on the l-torsion, and no other point passes.
+    pub fn in_subgroup(self) -> bool {
+        let endomorphism = Point { x: self.x.mul(Fp::from_montgomery(BETA)), y: self.y, z: self.z }
+        endomorphism.equals(self.multiply_by_x_abs().multiply_by_x_abs().neg())
+    }
+}
+
+impl Point<Fp2> {
+    /// The untwist-Frobenius-twist endomorphism psi.
+    pub fn psi(self) -> Point<Fp2> {
+        let psi_x = Fp2::new(c0: Fp::zero(), c1: Fp::from_montgomery(PSI_X1))
+        let psi_y = Fp2::new(c0: Fp::from_montgomery(PSI_Y0), c1: Fp::from_montgomery(PSI_Y1))
+        Point { x: self.x.conjugate().mul(psi_x), y: self.y.conjugate().mul(psi_y), z: self.z.conjugate() }
+    }
+
+    /// [x] self; x is negative.
+    fn multiply_by_x(self) -> Point<Fp2> { self.multiply_by_x_abs().neg() }
+
+    /// Whether a point of the twist is in G2: psi(Q) = [x] Q, the test of
+    /// https://eprint.iacr.org/2021/1130 section 4.
+    pub fn in_subgroup(self) -> bool { self.psi().equals(self.multiply_by_x()) }
+
+    /// [h_eff] self, as RFC 9380's clear_cofactor_bls12381_g2 (appendix G.3):
+    /// [x^2 - x - 1] P + [x - 1] psi(P) + psi^2([2] P).
+    pub fn clear_cofactor(self) -> Point<Fp2> {
+        let t1 = self.multiply_by_x()
+        let t2 = self.psi()
+        let t3 = self.double().psi().psi().add(t2.neg())
+        t3.add(t1.add(t2).multiply_by_x()).add(t1.neg()).add(self.neg())
+    }
 }
 
 /// Whether affine (x, y) is on G1's curve y^2 = x^3 + 4.

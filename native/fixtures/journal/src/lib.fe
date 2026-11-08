@@ -1,4 +1,4 @@
-use fevm::{Checkpoint, Transaction, WorldState, OK}
+use fevm::{Buffers, Checkpoint, Config, Transaction, WorldState, OK}
 use fevm::status::ERR_HOST_ALLOCATION
 
 fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
@@ -11,7 +11,8 @@ fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
 pub fn main() -> i32 {
     var world = WorldState::empty()
     core::assert(world.storage_store(7, 3, 9000))
-    var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                                       config: Config::osaka(), buffers: Buffers::new())
     let parent = checkpoint(mut transaction)
     var value: u256 = 1
     var status = OK

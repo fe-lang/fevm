@@ -1,8 +1,8 @@
 use ingot::transaction::Transaction
 use ingot::status::{ERR_OUT_OF_GAS, OK}
 use ingot::state::WorldState
-use ingot::types::{Program, default_block_env, default_call_env, empty_bytes}
-use ingot::vm::{Vm, execute, execute_vm}
+use ingot::types::{Config, Program, default_block_env, default_call_env, empty_bytes}
+use ingot::vm::{Buffers, Vm, execute, execute_vm}
 
 #[test]
 fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
@@ -14,7 +14,8 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
         i += 1
     }
     let large = Program::copy_from(bytes, len: i)
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     vm.run(
@@ -66,7 +67,7 @@ fn vm_reuses_zeroed_memory_and_transfers_owned_output() {
     core::assert(
         vm.memory_size == 9024 && vm.memory.capacity() == memory_capacity,
     )
-    let result = vm.into_result(mut state.frame_buffers())
+    let result = vm.into_result(mut state.buffers())
     core::assert(result.output_valid && result.output.len() == 9000)
     for byte in result.output.span() {
         core::assert(byte == 0)
@@ -84,7 +85,8 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
     bytes[3] = 0x80
     bytes[35] = 0x53
     let huge = Program::copy_from(bytes, len: 36)
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     vm.run(
@@ -110,7 +112,8 @@ fn vm_exhausts_gas_before_allocating_and_can_reset_after_fault() {
 
 #[test]
 fn frames_take_over_finished_frames_memory_zeroed() {
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     // PUSH1 0x2a PUSH0 MSTORE: leaves a nonzero word in memory.
     let store = Program::copy_from([0x60 as u8, 0x2a, 0x5f, 0x52], len: 4)
     let stored = execute(store, empty_bytes(), default_call_env(), default_block_env(), mut state)
@@ -119,7 +122,7 @@ fn frames_take_over_finished_frames_memory_zeroed() {
     let stop = Program::copy_from([0 as u8], len: 1)
     let vm = execute_vm(stop, empty_bytes(), default_call_env(), default_block_env(), mut state)
     core::assert(vm.memory_size == 0 && vm.memory.capacity() != 0 && vm.stack.capacity() != 0)
-    vm.into_result(mut state.frame_buffers())
+    vm.into_result(mut state.buffers())
     // PUSH0 MLOAD: the reused memory reads zero.
     let load = Program::copy_from([0x5f as u8, 0x51], len: 2)
     let loaded = execute(load, empty_bytes(), default_call_env(), default_block_env(), mut state)

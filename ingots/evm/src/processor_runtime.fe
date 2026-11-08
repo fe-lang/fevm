@@ -1,9 +1,11 @@
 use core::Option
 use ingot::address::create_address
+use ingot::constants::MAX_U256
 use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
-use ingot::state::WorldState
+use ingot::state::{WorldState, designator}
 use ingot::status::{
     ERR_OUT_OF_GAS,
+    INVALID_BALANCE,
     INVALID_CHAIN_ID,
     INVALID_FEE_CAP,
     INVALID_INITCODE_SIZE,
@@ -14,7 +16,7 @@ use ingot::status::{
 }
 use ingot::trace::{Step, Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
-use ingot::vm::FrameBuffers
+use ingot::vm::Buffers
 
 const SENDER: u256 = 0x1000
 
@@ -39,7 +41,7 @@ fn call(to: u256) -> TxEnv {
 }
 
 fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     transact(world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
 }
@@ -130,6 +132,26 @@ fn config_sets_code_size_limits() {
 }
 
 #[test]
+fn fees_past_256_bits_are_unaffordable() {
+    let limit: u256 = 100_000
+    let price = MAX_U256 / limit
+    // The gas, then the gas and the value, fill 256 bits exactly; one more wei
+    // of either overflows the sum, and of the price the low product.
+    for (gas_price, value, valid) in [
+        (price, MAX_U256 - price * limit, true), (price, MAX_U256 - price * limit + 1, false),
+        (price + 1, 0, false), (MAX_U256, 0, false),
+    ] {
+        var world = WorldState::empty()
+        core::assert(world.set_balance(SENDER, MAX_U256))
+        var env = call(to: 0xbb)
+        env.gas_price = gas_price
+        env.value = value
+        let receipt = send(world, env, empty_bytes(), block(), Config::osaka()).receipt
+        core::assert(receipt.invalid == if valid { VALID } else { INVALID_BALANCE })
+    }
+}
+
+#[test]
 fn receipt_reports_the_refund() {
     var world = funded()
     // SSTORE(0, 0) on a slot holding 1: a cold reset that refunds 4,800.
@@ -148,7 +170,7 @@ fn simulate_gives_the_receipt_and_keeps_the_state() {
     var world = funded()
     // SSTORE(0, 1); LOG0(0, 0).
     core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
                              Config::osaka(), mut buffers, mut tracer)
@@ -180,7 +202,7 @@ fn calling_world() -> WorldState {
 fn traced<T: Tracer>(_ world: own WorldState, nonce: u256, _ tracer: mut T) -> Applied {
     var env = call(to: 0xaa)
     env.nonce = nonce
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
 }
 
@@ -215,6 +237,29 @@ fn trace_records_steps_and_calls_in_order() {
     var calls = Trace::new(steps: false, calls: true)
     let _ = traced(applied.state, nonce: 2, mut calls)
     core::assert(calls.step_count() == 0 && calls.call_count() == 8 && calls.call(7).steps == 0)
+}
+
+#[test]
+fn trace_records_no_steps_for_a_message_without_code() {
+    // Like calls from code, the transaction's own call runs nothing at an
+    // account without code or delegated to a precompile, and keeps its gas.
+    var world = funded()
+    core::assert(world.set_code(address: 0xdd, code: designator(0x04)) == OK)
+    var nonce: u256 = 0
+    for to in [0xcc, 0xdd] {
+        var trace = Trace::new(steps: true, calls: true)
+        var env = call(to)
+        env.nonce = nonce
+        env.value = 7
+        var buffers = Buffers::new()
+        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers,
+                               mut trace)
+        core::assert(applied.receipt.status == OK && applied.receipt.gas_used == 21_000)
+        core::assert(trace.step_count() == 0 && trace.call_count() == 2 && trace.call(1).gas == 100_000 - 21_000)
+        core::assert(applied.state.balance(to) == 7)
+        world = applied.state
+        nonce += 1
+    }
 }
 
 // Counts the opcodes run at each call depth, and keeps the other hooks' defaults.

@@ -1,6 +1,6 @@
 use core::{MemArray, MemBuffer}
 use ingot::{FAILURE, SUCCESS, run}
-use ingot::bls_curve::{Point, g1_generator, g2_generator}
+use ingot::bls_curve::{ORDER, Point, g1_generator, g2_generator, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_tower::Fp2
 
@@ -132,4 +132,70 @@ fn bls_rejects_malformed_input() {
     p_input[63] = 0xaa
     core::assert(run(address: 0x10, input: p_input, gas).status == SUCCESS)
     core::assert(run(address: 0x10, input: p_input, gas: 5499).status == FAILURE)
+}
+
+#[test]
+fn bls_subgroup_checks_match_multiplication_by_the_order() {
+    let g1 = g1_generator()
+    let g2 = g2_generator()
+    for p in [g1, g1.double(), g1.multiply(0x1234567890abcdef).neg(), Point<Fp>::identity()] {
+        core::assert(p.in_subgroup() && p.multiply(ORDER).is_identity())
+    }
+    for q in [g2, g2.double(), g2.multiply(0x1234567890abcdef).neg(), Point<Fp2>::identity()] {
+        core::assert(q.in_subgroup() && q.multiply(ORDER).is_identity())
+    }
+    // Points of the curves outside the subgroups, at x = 4 and x = 1 + u.
+    let x1 = Fp::from_canonical([4, 0, 0, 0, 0, 0])
+    let y1 = x1.square().mul(x1).add(Fp::from_canonical([4, 0, 0, 0, 0, 0])).sqrt().unwrap()
+    core::assert(on_g1(x: x1, y: y1))
+    let p = Point { x: x1, y: y1, z: Fp::one() }
+    core::assert(!p.in_subgroup() && !p.multiply(ORDER).is_identity())
+    core::assert(!p.add(g1).in_subgroup() && !p.multiply(5).in_subgroup())
+    let one = Fp::one()
+    let x2 = Fp2::new(c0: one, c1: one)
+    let four = Fp::from_canonical([4, 0, 0, 0, 0, 0])
+    let y2 = x2.square().mul(x2).add(Fp2::new(c0: four, c1: four)).sqrt().unwrap()
+    core::assert(on_g2(x: x2, y: y2))
+    let q = Point { x: x2, y: y2, z: Fp2::one() }
+    core::assert(!q.in_subgroup() && !q.multiply(ORDER).is_identity())
+    core::assert(!q.add(g2).in_subgroup() && !q.multiply(5).in_subgroup())
+}
+
+#[test]
+fn bls_msm_matches_separate_multiplications() {
+    let scalars: [u256; 8] = [
+        0, 1, ORDER - 1, ORDER + 5, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef, 1 << 254, 0xd201000000010000,
+    ]
+    // Below and above the size where Pippenger's method takes over.
+    for k in [3 as usize, 9, 40] {
+        var input = MemBuffer::empty()
+        var expected = Point<Fp>::identity()
+        for i in 0..k {
+            let point = if i == 4 { Point<Fp>::identity() } else { g1_generator().multiply(i as u256 * 7 + 3) }
+            let scalar = scalars[i % 8] ^ (i / 8) as u256
+            append_g1(mut input, point)
+            append_scalar(mut input, scalar)
+            expected = expected.add(point.multiply(scalar % ORDER))
+        }
+        var want = MemBuffer::empty()
+        append_g1(mut want, expected)
+        let output = run(address: 0x0c, input, gas: 1000000000)
+        core::assert(output.status == SUCCESS && same(output.output, want))
+    }
+    for k in [3 as usize, 12] {
+        var input = MemBuffer::empty()
+        var expected = Point<Fp2>::identity()
+        for i in 0..k {
+            let point = if i == 4 { Point<Fp2>::identity() } else { g2_generator().multiply(i as u256 * 7 + 3) }
+            let scalar = scalars[i % 8] ^ (i / 8) as u256
+            append_g2(mut input, point)
+            append_scalar(mut input, scalar)
+            expected = expected.add(point.multiply(scalar % ORDER))
+        }
+        var want = MemBuffer::empty()
+        append_g2(mut want, expected)
+        let output = run(address: 0x0e, input, gas: 1000000000)
+        core::assert(output.status == SUCCESS && same(output.output, want))
+    }
 }

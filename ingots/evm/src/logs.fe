@@ -16,44 +16,66 @@ impl LogEntry {
     pub fn len(self) -> u64 { self.len }
 }
 
-// Entries, and their payloads back to back: indexed reads and checkpoint
-// truncation take constant time.
-pub struct LogBuffer { entries: MemVec<LogEntry>, data: MemBuffer }
+// Stored entries: topics live in their own buffer, so a log keeps only those
+// it has.
+struct Stored {
+    address: u256,
+    topic_start: u64,
+    topic_count: u64,
+    start: u64,
+    len: u64,
+}
+
+impl Copy for Stored {}
+
+// Entries, their topics and their payloads back to back: indexed reads and
+// checkpoint truncation take constant time.
+pub struct LogBuffer { entries: MemVec<Stored>, topics: MemVec<u256>, data: MemBuffer }
 
 impl LogBuffer {
     pub fn new() -> Self {
-        Self { entries: MemVec::new(), data: MemBuffer::empty() }
+        Self { entries: MemVec::new(), topics: MemVec::new(), data: MemBuffer::empty() }
     }
     pub fn len(self) -> u64 { self.entries.len().downcast_unchecked() }
-    pub fn entry(self, _ index: u64) -> LogEntry { self.entries[index.downcast_truncate()] }
+    pub fn entry(self, _ index: u64) -> LogEntry {
+        let stored = self.entries[index.downcast_truncate()]
+        var topics: [u256; 4] = [0; 4]
+        let first: usize = stored.topic_start.downcast_truncate()
+        for topic in 0..stored.topic_count.downcast_truncate() {
+            topics[topic] = self.topics[first + topic]
+        }
+        LogEntry { address: stored.address, topics, topic_count: stored.topic_count, start: stored.start, len: stored.len }
+    }
     pub fn payload(self, _ entry: u64) -> ref MemSpan {
-        let entry = self.entries[entry.downcast_truncate()]
-        self.data.slice(offset: entry.start.downcast_truncate(), len: entry.len.downcast_truncate())
+        let stored = self.entries[entry.downcast_truncate()]
+        self.data.slice(offset: stored.start.downcast_truncate(), len: stored.len.downcast_truncate())
     }
     pub fn byte_at(self, entry: u64, index: u64) -> u8 {
         self.payload(entry)[index.downcast_truncate()]
     }
     pub fn append(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> bool {
         core::assert(topic_count <= 4)
-        if !self.entries.try_reserve(1) || !self.data.try_reserve(data.len()) { return false }
+        if !self.entries.try_reserve(1) || !self.topics.try_reserve(topic_count.downcast_truncate())
+            || !self.data.try_reserve(data.len()) {
+            return false
+        }
         let start: u64 = self.data.len().downcast_unchecked()
         self.data.extend_from(data)
-        var kept: [u256; 4] = [0; 4]
-        for topic in 0..topic_count.downcast_truncate() {
-            kept[topic] = topics[topic]
-        }
-        self.entries.push(LogEntry {
-            address: address_word(address), topics: kept, topic_count, start, len: data.len().downcast_unchecked(),
+        let topic_start: u64 = self.topics.len().downcast_unchecked()
+        for topic in 0..topic_count.downcast_truncate() { self.topics.push(topics[topic]) }
+        self.entries.push(Stored {
+            address: address_word(address), topic_start, topic_count, start, len: data.len().downcast_unchecked(),
         })
         true
     }
     pub fn truncate(mut self, _ count: u64) {
         core::assert(count <= self.len())
-        let end = if count == 0 { 0 } else {
+        let (end, topic_end) = if count == 0 { (0, 0) } else {
             let last = self.entries[(count - 1).downcast_truncate()]
-            last.start + last.len
+            (last.start + last.len, last.topic_start + last.topic_count)
         }
         self.data.truncate(end.downcast_truncate())
+        self.topics.truncate(topic_end.downcast_truncate())
         self.entries.truncate(count.downcast_truncate())
     }
 }

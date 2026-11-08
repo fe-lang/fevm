@@ -1,7 +1,7 @@
-use core::{MemBuffer, Option}
+use core::{MemArray, MemBuffer, Option}
 use keccak::ByteSource
 use ingot::{Output, SUCCESS, failure, host_allocation}
-use ingot::bls_curve::{Affine, Point, on_g1, on_g2}
+use ingot::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_map::{map_to_g1, map_to_g2}
 use ingot::bls_pairing::{final_exponentiation, miller_loop}
@@ -113,26 +113,36 @@ fn g1_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let len = input.len()
     let k = len / 160
     if len == 0 || len % 160 != 0 || msm_gas(k, per: 12000, G1_DISCOUNT) > gas as u128 { return failure(gas) }
-    var sum = Point<Fp>::identity()
+    let used: u64 = msm_gas(k, per: 12000, G1_DISCOUNT).downcast_unchecked()
+    let Option::Some(var points) = MemArray::try_from_fn(k, |_| Affine<Fp>::identity()) else { return host_allocation(used) }
+    let Option::Some(var scalars) = MemArray<u256>::try_new_zeroed(k) else { return host_allocation(used) }
     for i in 0..k {
         let point = g1_at(input, offset: 160 * i, subgroup: true)
         if point.is_none() { return failure(gas) }
-        sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 160 * i + 128)))
+        points[i] = point.unwrap()
+        // The points have order r.
+        scalars[i] = word_at(input, offset: 160 * i + 128) % ORDER
     }
-    g1_output(sum, gas_used: msm_gas(k, per: 12000, G1_DISCOUNT).downcast_unchecked())
+    let Option::Some(sum) = msm(points, scalars) else { return host_allocation(used) }
+    g1_output(sum, gas_used: used)
 }
 
 fn g2_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
     let len = input.len()
     let k = len / 288
     if len == 0 || len % 288 != 0 || msm_gas(k, per: 22500, G2_DISCOUNT) > gas as u128 { return failure(gas) }
-    var sum = Point<Fp2>::identity()
+    let used: u64 = msm_gas(k, per: 22500, G2_DISCOUNT).downcast_unchecked()
+    let Option::Some(var points) = MemArray::try_from_fn(k, |_| Affine<Fp2>::identity()) else { return host_allocation(used) }
+    let Option::Some(var scalars) = MemArray<u256>::try_new_zeroed(k) else { return host_allocation(used) }
     for i in 0..k {
         let point = g2_at(input, offset: 288 * i, subgroup: true)
         if point.is_none() { return failure(gas) }
-        sum = sum.add(Point::from_affine(point.unwrap()).multiply(word_at(input, offset: 288 * i + 256)))
+        points[i] = point.unwrap()
+        // The points have order r.
+        scalars[i] = word_at(input, offset: 288 * i + 256) % ORDER
     }
-    g2_output(sum, gas_used: msm_gas(k, per: 22500, G2_DISCOUNT).downcast_unchecked())
+    let Option::Some(sum) = msm(points, scalars) else { return host_allocation(used) }
+    g2_output(sum, gas_used: used)
 }
 
 // The word 1 if the product of the pairings of k (G1, G2) pairs is one, else 0.

@@ -1,4 +1,5 @@
 use core::ops::{WrappingMul, WrappingSub}
+use ingot::inversion::invert_256
 
 // Values and operations used generically by the curve arithmetic.
 pub trait Field {
@@ -25,6 +26,10 @@ pub trait Modulus {
     const P3: u64
     const INV: u64
     const R2: u256
+    /// p as signed 62-bit limbs, p^-1 mod 2^62, and R^3 mod p, for inversion.
+    const SIGNED_62: [i64; 5]
+    const INV62: u64
+    const R3: u256
 }
 
 /// An element of Z/pZ in Montgomery form (x * 2^256 mod p), little-endian limbs.
@@ -33,18 +38,22 @@ pub struct Mont<M> { l0: u64, l1: u64, l2: u64, l3: u64 }
 impl<M> Copy for Mont<M> {}
 
 // a * b + c + carry, as (low, high) words.
-fn mac(_ a: u64, _ b: u64, _ c: u64, _ carry: u64) -> (u64, u64) {
+#[inline(always)]
+pub fn mac(_ a: u64, _ b: u64, _ c: u64, _ carry: u64) -> (u64, u64) {
     let t = (a as u128) * (b as u128) + (c as u128) + (carry as u128)
     (t.downcast_truncate(), (t >> 64).downcast_truncate())
 }
 
-fn adc(_ a: u64, _ b: u64, _ carry: u64) -> (u64, u64) {
+// a + b + carry, as (sum, carry out).
+#[inline(always)]
+pub fn adc(_ a: u64, _ b: u64, _ carry: u64) -> (u64, u64) {
     let t = (a as u128) + (b as u128) + (carry as u128)
     (t.downcast_truncate(), (t >> 64).downcast_truncate())
 }
 
 // a - b - borrow, as (difference, borrow out).
-fn sbb(_ a: u64, _ b: u64, _ borrow: u64) -> (u64, u64) {
+#[inline(always)]
+pub fn sbb(_ a: u64, _ b: u64, _ borrow: u64) -> (u64, u64) {
     let t = (a as u128).wrapping_sub(b as u128).wrapping_sub(borrow as u128)
     (t.downcast_truncate(), (t >> 127).downcast_truncate())
 }
@@ -73,6 +82,7 @@ impl<M: Modulus> Mont<M> {
 
     // One CIOS row: accumulate self * b into t, then add a multiple of p that
     // clears the low word and shift down one word.
+    #[inline(always)]
     fn row(self, _ b: u64, _ t: Self, _ top: u64) -> (Self, u64) {
         let (t0, c) = mac(self.l0, b, t.l0, 0)
         let (t1, c) = mac(self.l1, b, t.l1, c)
@@ -89,6 +99,7 @@ impl<M: Modulus> Mont<M> {
     }
 
     // Subtract p when the value, with `top` above the four limbs, is at least p.
+    #[inline(always)]
     fn reduce(self, _ top: u64) -> Self {
         let (d0, b) = sbb(self.l0, M::P0, 0)
         let (d1, b) = sbb(self.l1, M::P1, b)
@@ -144,8 +155,12 @@ impl<M: Modulus> Field for Mont<M> {
     fn square(self) -> Self { self.mul(self) }
     fn double(self) -> Self { self.add(self) }
     fn neg(self) -> Self { Self::zero().sub(self) }
-    // Fermat inversion; zero maps to zero.
-    fn inverse(self) -> Self { self.pow(M::VALUE - 2) }
+    // The inverse of x R is x^-1 R^-1; multiplying by R^3 makes it x^-1 R.
+    // Zero maps to zero.
+    fn inverse(self) -> Self {
+        let limbs = invert_256([self.l0, self.l1, self.l2, self.l3], M::SIGNED_62, M::INV62)
+        Mont { l0: limbs[0], l1: limbs[1], l2: limbs[2], l3: limbs[3] }.mul(raw<M>(M::R3))
+    }
     fn is_zero(self) -> bool { self.l0 == 0 && self.l1 == 0 && self.l2 == 0 && self.l3 == 0 }
     fn equals(self, _ other: Self) -> bool {
         self.l0 == other.l0 && self.l1 == other.l1 && self.l2 == other.l2 && self.l3 == other.l3

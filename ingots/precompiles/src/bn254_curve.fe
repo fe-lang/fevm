@@ -47,10 +47,36 @@ impl<F> Point<F> where F: Field + Copy {
 
     pub fn neg(self) -> Self { Point { x: self.x, y: self.y.neg(), z: self.z } }
 
+    // madd-2007-bl: the sum with an affine point (x2, y2).
+    pub fn add_affine(self, x2: F, y2: F) -> Self {
+        if self.is_infinity() { return Point::affine(x: x2, y: y2) }
+        let z1z1 = self.z.square()
+        let u2 = x2.mul(z1z1)
+        let s2 = y2.mul(self.z).mul(z1z1)
+        let h = u2.sub(self.x)
+        let r = s2.sub(self.y).double()
+        if h.is_zero() { return if r.is_zero() { self.double() } else { Self::infinity() } }
+        let hh = h.square()
+        let i = hh.double().double()
+        let j = h.mul(i)
+        let v = self.x.mul(i)
+        let x = r.square().sub(j).sub(v.double())
+        let y = r.mul(v.sub(x)).sub(self.y.mul(j).double())
+        Point { x, y, z: self.z.add(h).square().sub(z1z1).sub(hh) }
+    }
+
+    /// Whether two points are equal: x1 z2^2 = x2 z1^2 and y1 z2^3 = y2 z1^3.
+    pub fn equals(self, _ other: Self) -> bool {
+        if self.is_infinity() || other.is_infinity() { return self.is_infinity() && other.is_infinity() }
+        let z1z1 = self.z.square()
+        let z2z2 = other.z.square()
+        self.x.mul(z2z2).equals(other.x.mul(z1z1)) && self.y.mul(z2z2.mul(other.z)).equals(other.y.mul(z1z1.mul(self.z)))
+    }
+
     // Double-and-add over the scalar's bits, most significant first.
     pub fn multiply(self, _ scalar: u256) -> Self {
         var result = Self::infinity()
-        var bit: u64 = 256
+        var bit: u64 = (256 - core::num::leading_zeros(scalar)).downcast_truncate()
         while bit > 0 {
             bit -= 1
             result = result.double()
@@ -59,10 +85,12 @@ impl<F> Point<F> where F: Field + Copy {
         result
     }
 
-    /// The affine x coordinate of a finite point.
-    pub fn affine_x(self) -> F { self.x.mul(self.z.square().inverse()) }
-    /// The affine y coordinate of a finite point.
-    pub fn affine_y(self) -> F { self.y.mul(self.z.square().mul(self.z).inverse()) }
+    /// The affine coordinates of a finite point, with one inversion.
+    pub fn to_affine(self) -> (F, F) {
+        let z_inv = self.z.inverse()
+        let z_inv2 = z_inv.square()
+        (self.x.mul(z_inv2), self.y.mul(z_inv2.mul(z_inv)))
+    }
 }
 
 /// Whether affine (x, y) satisfies y^2 = x^3 + b.

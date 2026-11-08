@@ -28,10 +28,19 @@ pub(ingot) fn host_allocation(_ gas_used: u64) -> Output {
     Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
 }
 
-// An output of `source`'s bytes.
+// An output of `source`'s bytes, eight at a time.
 fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
-    let Option::Some(var output) = MemBuffer::try_new(source.len()) else { return host_allocation(gas_used) }
-    for i in 0..source.len() { output[i] = source.byte_at(i) }
+    let len = source.len()
+    let Option::Some(var output) = MemBuffer::try_new(len) else { return host_allocation(gas_used) }
+    var i: usize = 0
+    while i + 8 <= len {
+        output.write_le<u64>(offset: i, value: source.lane_at(i))
+        i += 8
+    }
+    while i < len {
+        output[i] = source.byte_at(i)
+        i += 1
+    }
     Output { status: SUCCESS, gas_used, output }
 }
 

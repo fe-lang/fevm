@@ -6,8 +6,8 @@ use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
 use ingot::trace::{CallEnd, CallStart, Tracer}
-use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
-use ingot::vm::{FrameBuffers, Vm, begin_create, run_precompile, status_result, transfer}
+use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program}
+use ingot::vm::{Buffers, Vm, begin_create, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
 use ingot::status::{
@@ -44,7 +44,7 @@ pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
 pub const TX_SET_CODE: u8 = 4
 
-const GAS_PER_BLOB: u256 = 131072
+const GAS_PER_BLOB: u64 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
 const MAX_BLOBS_PER_TX: u64 = 6
@@ -132,8 +132,12 @@ pub struct Receipt {
 
 pub struct Applied { pub state: WorldState, pub receipt: Receipt }
 
-fn checked_mul(_ a: u256, _ b: u256) -> Option<u256> {
-    if a != 0 && b > MAX_U256 / a { Option::None } else { Option::Some(a * b) }
+// `a * b`, or none past 256 bits. With `b` split at bit 64, `a` times the
+// high part fits in 256 bits and times the low part in 128.
+fn checked_mul(_ a: u64, _ b: u256) -> Option<u256> {
+    let high = (b >> 64) * a as u256
+    let low = (b & 0xffffffffffffffff) * a as u256
+    if high >> 192 != 0 || low > MAX_U256 - (high << 64) { Option::None } else { Option::Some((high << 64) + low) }
 }
 
 fn checked_add(_ a: u256, _ b: u256) -> Option<u256> {
@@ -194,7 +198,7 @@ fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
 }
 
 fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
-    checked_mul(request.blob_count() as u256 * GAS_PER_BLOB, price)
+    checked_mul(request.blob_count() * GAS_PER_BLOB, price)
 }
 
 /// The Osaka includability checks, in specification order.
@@ -218,7 +222,7 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
         return INVALID_CHAIN_ID
     }
     if config.check_base_fee && env.gas_price < block.basefee { return INVALID_FEE_CAP }
-    var max_fee = checked_mul(env.gas_limit as u256, env.gas_price)
+    var max_fee = checked_mul(env.gas_limit, env.gas_price)
     if env.kind == TX_BLOB {
         if request.blob_count() == 0 { return INVALID_NO_BLOBS }
         if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
@@ -233,18 +237,18 @@ pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ 
     }
     if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
     if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
-    let nonce = world.nonce(sender)
-    if config.check_nonce && nonce != env.nonce { return INVALID_NONCE }
+    let account = world.sender(sender)
+    if config.check_nonce && account.nonce != env.nonce { return INVALID_NONCE }
     let required = match max_fee {
         Option::Some(fee) => checked_add(fee, env.value),
         Option::None => Option::None,
     }
     match required {
-        Option::Some(required) => if world.balance(sender) < required { return INVALID_BALANCE },
+        Option::Some(required) => if account.balance < required { return INVALID_BALANCE },
         Option::None => return INVALID_BALANCE,
     }
     // EIP-3607, except that an EIP-7702 delegated account may send.
-    if config.check_sender_code && world.code_size(sender) != 0 && world.delegate(sender).is_none() {
+    if config.check_sender_code && account.code_len != 0 && world.delegate(sender).is_none() {
         return INVALID_SENDER_CODE
     }
     VALID
@@ -258,8 +262,10 @@ fn empty_receipt(invalid: i32, status: i32) -> Receipt {
 }
 
 // A host failure during a valid transaction returns the pre-state.
-fn host_failure(_ tx: own Transaction, status: i32) -> Applied {
-    Applied { state: tx.finish(commit: false, gas_spent: 0).state, receipt: empty_receipt(invalid: VALID, status) }
+fn host_failure(_ tx: own Transaction, status: i32, _ buffers: mut Buffers) -> Applied {
+    let finished = tx.finish(commit: false, gas_spent: 0)
+    buffers = finished.buffers
+    Applied { state: finished.state, receipt: empty_receipt(invalid: VALID, status) }
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
@@ -274,10 +280,10 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
         if !tx.add_blob_hash(hash) { return ERR_HOST_ALLOCATION }
     }
     let sender = address_word(request.env.sender)
-    let fee = request.env.gas_limit as u256 * price + request.blob_count() as u256 * GAS_PER_BLOB * blob_price
+    let fee = request.env.gas_limit as u256 * price + (request.blob_count() * GAS_PER_BLOB) as u256 * blob_price
     let status = tx.increment_nonce(sender)
     if status != OK { return status }
-    tx.set_balance(address: sender, value: tx.balance(sender) - fee)
+    tx.debit(address: sender, amount: fee)
 }
 
 // What an authority signs: keccak256(0x05 || rlp([chain_id, address, nonce])).
@@ -340,11 +346,11 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         var vm = Vm::new()
         vm.create(program, call, block, mut tx, mut tracer)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-        return vm.into_result(mut tx.frame_buffers())
+        return vm.into_result(mut tx.buffers())
     }
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
-    let moved = if value == 0 { tx.touch(target) } else { transfer(mut tx, from: sender, to: target, value) }
+    let moved = if value == 0 { tx.touch_once(target) } else { transfer(mut tx, from: sender, to: target, value) }
     if moved != OK {
         tx.revert(checkpoint)
         return status_result(moved)
@@ -355,41 +361,53 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }
-    var program = tx.program(target)
-    if let Option::Some(address) = delegation(program.bytes()) {
+    let code = tx.code(target)
+    let delegate = delegation(code)
+    // A precompile delegate runs nothing.
+    let runs_code = match delegate {
+        Option::Some(address) => !is_precompile(address) && tx.code_size(address) != 0,
+        Option::None => code.len() != 0,
+    }
+    if let Option::Some(address) = delegate {
         let warmed = tx.warm_account(address)
         if warmed != OK {
             tx.revert(checkpoint)
             return status_result(warmed)
         }
-        program = if is_precompile(address) { Program::new(empty_bytes()) } else { tx.program(address) }
+    }
+    // Without code the message stops at once with its gas, as a call from code does.
+    if !runs_code {
+        tx.commit(checkpoint)
+        var result = status_result(OK)
+        result.gas_remaining = call.gas_limit
+        return result
     }
     var vm = Vm::new()
-    vm.run(program, request.data(), call, block, mut tx, mut tracer)
+    vm.run(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-    vm.into_result(mut tx.frame_buffers())
+    vm.into_result(mut tx.buffers())
 }
 
 /// Validate and execute one Osaka transaction against `world`. Valid
 /// transactions pay for gas, run their message, refund unused and refunded gas
 /// to the sender, pay the priority fee to the coinbase, and settle deletions.
-/// Frames reuse the memory and stacks in `buffers`, and leave theirs there.
+/// The journal and frames reuse the allocations in `buffers`, and leave theirs there.
 /// `tracer` sees each opcode and each call and creation, the transaction's own
 /// message among them; pass `()` to trace nothing.
 pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut FrameBuffers, _ tracer: mut T) -> Applied {
+                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
     apply(world, request, block, config, mut buffers, mut tracer, commit: true)
 }
 
 /// Runs a transaction as `transact` does but keeps none of its changes: the
 /// returned state is the pre-state. The receipt is the one `transact` would give.
 pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut FrameBuffers, _ tracer: mut T) -> Applied {
+                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
     apply(world, request, block, config, mut buffers, mut tracer, commit: false)
 }
 
 fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                    _ buffers: mut FrameBuffers, _ tracer: mut T, commit: bool) -> Applied {
+                    _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
     let env = request.env
     let invalid = validate(world, request, block, config)
     if invalid != VALID { return Applied { state: world, receipt: empty_receipt(invalid, status: OK) } }
@@ -397,9 +415,8 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
     let price = effective_gas_price(env, base_fee: block.basefee)
     let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
     let intrinsic = intrinsic_gas(request)
-    var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase)
-    tx.configure(config)
-    tx.swap_frame_buffers(mut buffers)
+    var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase, config,
+                              buffers: core::mem::replace(mut buffers, Buffers::new()))
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
     let call = CallEnv {
@@ -417,9 +434,8 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
     } else {
         status_result(prepared)
     }
-    tx.swap_frame_buffers(mut buffers)
     if !is_evm_outcome(result.status) {
-        return host_failure(tx, status: result.status)
+        return host_failure(tx, status: result.status, mut buffers)
     }
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
@@ -428,25 +444,27 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
     let refunded = gas_spent - tx.capped_refund(gas_spent)
     let floor: u64 = intrinsic.floor.downcast_unchecked()
     let gas_used = if refunded > floor { refunded } else { floor }
-    var paid = tx.set_balance(address: sender, value: tx.balance(sender) + (env.gas_limit - gas_used) as u256 * price)
-    let coinbase = address_word(block.coinbase)
+    var paid = tx.credit(address: sender, amount: (env.gas_limit - gas_used) as u256 * price)
     if paid == OK {
         let tip = if price > block.basefee { price - block.basefee } else { 0 }
-        paid = tx.set_balance(address: coinbase, value: tx.balance(coinbase) + gas_used as u256 * tip)
+        paid = tx.credit(address: address_word(block.coinbase), amount: gas_used as u256 * tip)
     }
     if paid != OK {
-        return host_failure(tx, status: paid)
+        return host_failure(tx, status: paid, mut buffers)
     }
-    let logs = tx.take_logs()
+    // Aborting discards the logs, which a simulation still reports.
+    let simulated = if commit { Option::None } else { Option::Some(tx.take_logs()) }
     // Settlement's deletions bypass the journal, which undoes the rest.
     if commit { tx.settle() }
+    let finished = tx.finish(commit, gas_spent)
+    buffers = finished.buffers
     Applied {
-        state: tx.finish(commit, gas_spent).state,
+        state: finished.state,
         receipt: Receipt {
             invalid: VALID, status: result.status, gas_used,
             gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
             created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
-            output: result.output, logs,
+            output: result.output, logs: simulated.unwrap_or(default: finished.logs),
         },
     }
 }

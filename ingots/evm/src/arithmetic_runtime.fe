@@ -1,5 +1,7 @@
 use ingot::status::{ERR_OUT_OF_GAS, OK}
 use ingot::{Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+use ingot::types::Config
+use ingot::vm::Buffers
 
 // PUSH32 `value`, CLZ: 3 + 5 gas.
 fn clz(_ value: u256, gas_limit: u64) -> (i32, u256, u64) {
@@ -13,7 +15,8 @@ fn clz(_ value: u256, gas_limit: u64) -> (i32, u256, u64) {
     bytes[33] = 0x1e
     var call = default_call_env()
     call.gas_limit = gas_limit
-    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                       config: Config::osaka(), buffers: Buffers::new())
     let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, default_block_env(), mut transaction)
     transaction.finish(commit: result.status == OK, gas_spent: gas_limit - result.gas_remaining)
     (result.status, result.stack_top, result.gas_remaining)

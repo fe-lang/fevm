@@ -2,12 +2,13 @@ use ingot::status::{ERR_OUT_OF_GAS, ERR_REVERT, OK}
 use ingot::state::WorldState
 use ingot::transaction::Transaction
 use ingot::transaction_runtime::{checkpoint, program}
-use ingot::types::{default_block_env, default_call_env, empty_bytes}
-use ingot::vm::execute
+use ingot::types::{Config, default_block_env, default_call_env, empty_bytes}
+use ingot::vm::{Buffers, execute}
 
 #[test]
 fn upfront_warming_and_access_lists_survive_revert() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0x21, destination: 0x22, coinbase: 0x23)
+    var tx = Transaction::new(WorldState::empty(), sender: 0x21, destination: 0x22, coinbase: 0x23,
+                              config: Config::osaka(), buffers: Buffers::new())
     // The precompiles, the sender, the destination and the coinbase.
     var address: u256 = 1
     while address <= 0x11 {
@@ -32,7 +33,8 @@ fn upfront_warming_and_access_lists_survive_revert() {
 fn balance_masks_high_address_bits_and_charges_one_cold_access() {
     var world = WorldState::empty()
     core::assert(world.set_balance(0x44, 99))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let result = execute(
         program([0x60, 0x44, 0x31, 0x50, 0x60, 1, 0x60, 160, 0x1b, 0x60, 0x44, 0x17, 0x31]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx,
@@ -44,7 +46,8 @@ fn balance_masks_high_address_bits_and_charges_one_cold_access() {
 
 #[test]
 fn storage_reads_warm_once_and_reverted_reads_become_cold() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let result = execute(program([0x5f, 0x54, 0x5f, 0x54, 0x5f, 0x5f, 0xfd]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx)
     core::assert(result.status == ERR_REVERT && result.gas_remaining == 997792)
@@ -60,7 +63,8 @@ fn storage_reads_warm_once_and_reverted_reads_become_cold() {
 fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
     var world = WorldState::empty()
     core::assert(world.storage_store(0, 0, 1))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let parent = checkpoint(mut tx, is_static: false)
     let result = execute(program([0x5f, 0x5f, 0x55]),
         empty_bytes(), default_call_env(), default_block_env(), mut tx)
@@ -84,7 +88,8 @@ fn storage_refunds_are_signed_and_follow_nested_checkpoints() {
 
 #[test]
 fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
     core::assert(tx.original_storage(address: 0, slot: 0) == 0)
@@ -102,7 +107,8 @@ fn original_zero_survives_revert_and_refunds_are_capped_at_transaction_end() {
 fn sstore_sentry_and_exact_cold_cost_boundaries() {
     for warm in [false, true] {
         for gas in [2304, 2305] {
-            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                      config: Config::osaka(), buffers: Buffers::new())
             if warm { core::assert(tx.access_list_slot(address: 0, slot: 0)) }
             var call = default_call_env()
             call.gas_limit = gas
@@ -118,7 +124,8 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
         }
     }
     for gas in [22104, 22105] {
-        var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+        var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                  config: Config::osaka(), buffers: Buffers::new())
         var call = default_call_env()
         call.gas_limit = gas
         let result = execute(program([0x60, 1, 0x5f, 0x55]), empty_bytes(), call, default_block_env(), mut tx)
@@ -137,7 +144,8 @@ fn sstore_sentry_and_exact_cold_cost_boundaries() {
 fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
     var world = WorldState::empty()
     core::assert(world.storage_store(0, 0, 1))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     var call = default_call_env()
     call.gas_limit = 5005
     let result = execute(program([0x5f, 0x5f, 0x55, 0x5f]), empty_bytes(), call, default_block_env(), mut tx)
@@ -150,11 +158,13 @@ fn refunds_never_pay_for_execution_and_failed_frames_discard_them() {
 
 #[test]
 fn transaction_boundaries_reset_original_storage_and_access_state() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     core::assert(tx.storage_store(address: 0, slot: 0, value: 7) == OK)
     core::assert(tx.warm_slot(address: 0, slot: 0) == OK)
     let settled = tx.finish(commit: true, gas_spent: 22100)
-    var tx = Transaction::new(settled.state, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(settled.state, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     core::assert(!tx.storage_is_warm(address: 0, slot: 0))
     core::assert(tx.original_storage(address: 0, slot: 0) == 7)
     let result = execute(program([0x5f, 0x5f, 0x55]),
@@ -167,7 +177,8 @@ fn transaction_boundaries_reset_original_storage_and_access_state() {
 
 #[test]
 fn access_cache_grows_and_rolls_back() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let point = checkpoint(mut tx, is_static: false)
     // Above the precompiles at 0x01 through 0x11.
     var address: u256 = 0x12
@@ -184,7 +195,8 @@ fn access_cache_grows_and_rolls_back() {
 
 #[test]
 fn original_cache_grows_and_survives_rollback() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let point = checkpoint(mut tx, is_static: false)
     var slot: u256 = 0
     while slot < 1000 {

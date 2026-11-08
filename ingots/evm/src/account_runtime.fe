@@ -3,6 +3,8 @@ use ingot::status::{ERR_HOST_ALLOCATION, OK}
 use ingot::state::{EMPTY_CODE_HASH, WorldState}
 use ingot::transaction::Transaction
 use ingot::transaction_runtime::checkpoint
+use ingot::types::Config
+use ingot::vm::Buffers
 
 struct OversizedCode {}
 impl ByteSource for OversizedCode {
@@ -86,7 +88,8 @@ fn account_creation_undo_distinguishes_empty_existing_and_absent_accounts() {
     var world = WorldState::empty()
     core::assert(world.ensure_account(1))
     core::assert(world.set_code(address: 4, code: [97 as u8, 98, 99]) == OK)
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let parent = checkpoint(mut tx, is_static: false)
     core::assert(tx.set_balance(address: 1, value: 1) == OK)
     core::assert(tx.set_nonce(address: 2, value: 1) == OK)
@@ -114,7 +117,8 @@ fn accounts_grow_and_undo_removes_the_accounts_a_frame_created() {
         core::assert(world.ensure_account(address))
         address += 1
     }
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     let point = checkpoint(mut tx, is_static: false)
     core::assert(tx.set_balance(address: 1000, value: 1) == OK)
     core::assert(tx.set_nonce(address: 1001, value: 1) == OK)

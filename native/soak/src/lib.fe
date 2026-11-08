@@ -1,7 +1,7 @@
 use core::Option
 use std::env::Args
 use std::text
-use fevm::{Config, FrameBuffers, OK, WorldState, default_block_env, empty_bytes}
+use fevm::{Config, Buffers, OK, WorldState, default_block_env, empty_bytes}
 use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, transact}
 use fevm::status::VALID
 
@@ -25,7 +25,7 @@ pub fn main() -> i32 uses (args: Args) {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     var nonce: u256 = 0
-    var buffers = FrameBuffers::new()
+    var buffers = Buffers::new()
     var tracer = ()
     while nonce < count {
         let env = TxEnv {

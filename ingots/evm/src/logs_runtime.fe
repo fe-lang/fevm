@@ -2,7 +2,8 @@ use core::MemBuffer
 use ingot::{LogBuffer, OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes}
 use ingot::status::{ERR_OUT_OF_GAS, ERR_STATIC_WRITE}
 use ingot::transaction_runtime::{checkpoint, program}
-use ingot::vm::Vm
+use ingot::vm::{Buffers, Vm}
+use ingot::types::Config
 
 #[test]
 fn logs_copy_data_grow_and_reuse_truncated_storage() {
@@ -36,7 +37,8 @@ fn logs_copy_data_grow_and_reuse_truncated_storage() {
 fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
     var source = MemBuffer::new(1)
     source[0] = 17
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     core::assert(tx.emit_log(address: 1, topics: [1; 4], topic_count: 1, data: source.slice(offset: 0, len: 1)) == OK)
     let parent = checkpoint(mut tx, is_static: false)
     let child = checkpoint(mut tx, is_static: false)
@@ -50,7 +52,8 @@ fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
     tx.commit(child)
     tx.revert(parent)
     let receipt = tx.finish(commit: true, gas_spent: 0)
-    var next = Transaction::new(receipt.state, sender: 0, destination: 0, coinbase: 0)
+    var next = Transaction::new(receipt.state, sender: 0, destination: 0, coinbase: 0,
+                                config: Config::osaka(), buffers: Buffers::new())
     source[0] = 34
     core::assert(next.emit_log(address: 4, topics: [0; 4], topic_count: 0, data: source.slice(offset: 0, len: 1)) == OK)
     let aborted = next.finish(commit: false, gas_spent: 0)
@@ -77,7 +80,8 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
                 size += 1
             }
             code[size] = (0xa0 + count).downcast_unchecked()
-            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                      config: Config::osaka(), buffers: Buffers::new())
             var vm = Vm::new()
             var tracer = ()
             var call = default_call_env()
@@ -97,7 +101,8 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
 
 #[test]
 fn log_copies_frame_memory_and_preserves_topic_stack_order() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     var vm = Vm::new()
     var tracer = ()
     // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
@@ -114,7 +119,8 @@ fn log_copies_frame_memory_and_preserves_topic_stack_order() {
 fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     let first = (1 << 248) | 0x1234
     let second = (1 << 248) | 0x5678
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     core::assert(tx.add_blob_hash(first) && tx.add_blob_hash(second))
     let point = checkpoint(mut tx, is_static: true)
     core::assert(tx.blob_hash(0) == first && tx.blob_hash(1) == second)
@@ -128,7 +134,8 @@ fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     call.gas_limit = 5
     vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
     core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack[0] == first)
-    let next = Transaction::new(tx.finish(commit: true, gas_spent: 5).state, sender: 0, destination: 0, coinbase: 0)
+    let next = Transaction::new(tx.finish(commit: true, gas_spent: 5).state, sender: 0, destination: 0, coinbase: 0,
+                                config: Config::osaka(), buffers: Buffers::new())
     core::assert(next.blob_hash(0) == 0)
     next.finish(commit: true, gas_spent: 0)
 }

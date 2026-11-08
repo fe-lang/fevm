@@ -1,4 +1,4 @@
-use fevm::{Program, Transaction, WorldState, OK, default_block_env, default_call_env, empty_bytes}
+use fevm::{Buffers, Config, Program, Transaction, WorldState, OK, default_block_env, default_call_env, empty_bytes}
 use fevm::status::ERR_HOST_ALLOCATION
 use fevm::vm::Vm
 
@@ -13,7 +13,8 @@ pub fn main() -> i32 {
     let relay = [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xcc, 0x5a, 0xf1]
     core::assert(world.set_code(address: 0xbb, code: relay) == OK)
     core::assert(world.set_code(address: 0xcc, code: [0x60 as u8, 1, 0x5f, 0x55]) == OK)
-    var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0)
+    var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
     var call = default_call_env()
     call.address = 0xaa
     let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1]

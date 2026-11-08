@@ -17,7 +17,7 @@ pub use types::{
     default_call_env,
     empty_bytes,
 }
-pub use vm::{self, FrameBuffers, execute}
+pub use vm::{self, Buffers, execute}
 pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
@@ -46,7 +46,8 @@ fn evm_sload_sstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     let result = execute(
         program,
         empty_bytes(),
@@ -86,7 +87,8 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     }
     var world = WorldState::empty()
     core::assert(world.set_block_hash(7, 5))
-    var state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
     core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
     var block = default_block_env()
@@ -126,7 +128,8 @@ fn evm_tload_tstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     let result = execute(
         program,
         empty_bytes(),
@@ -178,7 +181,8 @@ fn evm_interleaves_state_and_owned_memory() {
         len += 1
     }
     let program = Program::copy_from(bytes, len)
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0)
+    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                 config: Config::osaka(), buffers: Buffers::new())
     let result = execute(
         program,
         empty_bytes(),

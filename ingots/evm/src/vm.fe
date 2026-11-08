@@ -12,12 +12,12 @@ use core::num::leading_zeros
 use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{I256_MIN, MAX_U256, STACK_LIMIT}
 use ingot::address::{create_address, create2_address}
+use ingot::journal::Journal
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::trace::{CallEnd, CallStart, Step, Tracer}
 use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env, empty_bytes}
 use fevm_precompiles::{FAILURE, SUCCESS, is_precompile}
 use ingot::status::{
-    ERR_BALANCE_OVERFLOW,
     ERR_CODE_PREFIX,
     ERR_HOST_ALLOCATION,
     ERR_INVALID_JUMP,
@@ -178,20 +178,23 @@ fn sar(shift: u256, value: u256) -> u256 {
     }
 }
 
-/// Memory and stacks of finished frames, which later frames take over with
-/// the capacity they grew, and the allocations of finished child frames,
-/// which later calls fill in place. Frames nest, so each call depth tends to
-/// get back its last frame's buffers, and a caller that keeps the pool across
-/// transactions allocates them once.
-pub struct FrameBuffers {
+/// Allocations a host lends each transaction and gets back, so that a host
+/// that keeps them across transactions allocates them once: memory and
+/// stacks of finished frames, which later frames take over with the capacity
+/// they grew; the allocations of finished child frames, which later calls fill
+/// in place; and the journal. Frames nest, so each call depth tends to get
+/// back its last frame's buffers.
+pub struct Buffers {
     memories: MemVec<MemBuffer>,
     stacks: MemVec<MemVec<u256>>,
     frames: MemVec<Box<Frame>>,
+    // Empty between transactions.
+    pub(ingot) journal: Journal,
 }
 
-impl FrameBuffers {
+impl Buffers {
     pub fn new() -> Self {
-        FrameBuffers { memories: MemVec::new(), stacks: MemVec::new(), frames: MemVec::new() }
+        Buffers { memories: MemVec::new(), stacks: MemVec::new(), frames: MemVec::new(), journal: Journal::new() }
     }
 }
 
@@ -215,6 +218,16 @@ pub struct Vm {
     jumpdests: *u8,
     jump_limit: usize,
     call_depth: usize,
+    // The running code's length and the frame's calldata, for the copy handlers.
+    code_len: usize,
+    calldata: *u8,
+    calldata_len: usize,
+    // The frame's call and the block, which the environment handlers push.
+    call: CallEnv,
+    block: BlockEnv,
+    // The transaction's blob hashes, for BLOBHASH.
+    blob_hashes: *u256,
+    blob_count: usize,
 }
 
 impl Vm {
@@ -234,6 +247,15 @@ impl Vm {
             jumpdests: (0 as usize) as *u8,
             jump_limit: 0,
             call_depth: 0,
+            code_len: 0,
+            calldata: (0 as usize) as *u8,
+            calldata_len: 0,
+            call: default_call_env(),
+            block: BlockEnv {
+                coinbase: 0, timestamp: 0, number: 0, prevrandao: 0, gaslimit: 0, chainid: 0, basefee: 0, blobbasefee: 0,
+            },
+            blob_hashes: (0 as usize) as *u256,
+            blob_count: 0,
         }
     }
 
@@ -243,7 +265,7 @@ impl Vm {
 
     // A frame that has allocated nothing takes over a finished frame's
     // memory and stack, which hold no bytes or words.
-    fn adopt(mut self, _ buffers: mut FrameBuffers) {
+    fn adopt(mut self, _ buffers: mut Buffers) {
         if self.memory.capacity() == 0 {
             match buffers.memories.pop() {
                 Option::Some(memory) => self.memory = memory,
@@ -526,25 +548,6 @@ impl Vm {
         }
     }
 
-    fn calldataload(mut self, _ calldata: InputData) {
-        let offset = self.pop()
-        if !self.ok() { return }
-        let len = calldata.len()
-        // Most loads read one whole word within the calldata.
-        if offset <= len as u256 && len as u256 - offset >= 32 {
-            self.push(calldata.bytes().read_word(offset.downcast_unchecked()))
-            return
-        }
-        // Bytes past the end read as zero.
-        var value: u256 = 0
-        if offset < len as u256 {
-            let start: usize = offset.downcast_unchecked()
-            for index in start..len { value = (value << 8) | calldata.byte_at(index) as u256 }
-            value <<= ((32 - (len - start)) * 8) as u256
-        }
-        self.push(value)
-    }
-
     fn calldatacopy(mut self, _ calldata: InputData) {
         let offset = self.pop()
         let source = self.pop()
@@ -776,7 +779,6 @@ struct Frame {
     vm: Vm,
     program: Program,
     calldata: InputData,
-    call: CallEnv,
     // None once the frame is closed and its allocation waits in the pool.
     checkpoint: Option<Checkpoint>,
     output_offset: u64,
@@ -792,35 +794,35 @@ impl Frame {
     fn idle() -> Self {
         Frame {
             vm: Vm::new(), program: Program::new(empty_bytes()), calldata: empty_bytes(),
-            call: default_call_env(), checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false,
+            checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false,
         }
     }
 
     fn start(mut self, gas: u64, _ program: own Program, _ calldata: own InputData, _ call: CallEnv,
-             _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64, creates: bool) {
+             _ block: BlockEnv, _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64, creates: bool) {
         self.vm.reset(gas)
         self.program = program
         self.calldata = calldata
-        self.call = call
+        self.vm.call = call
+        self.vm.block = block
         self.checkpoint = Option::Some(checkpoint)
         self.output_offset = output_offset
         self.output_len = output_len
         self.creates = creates
     }
 
-    fn resume<T: Tracer>(mut self, _ block: BlockEnv, _ state: mut Transaction, depth: usize,
-                         _ tracer: mut T) -> Option<Box<Frame>> {
-        self.vm.run_until_child(self.program, self.calldata, self.call, block, mut state, depth, mut tracer)
+    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        self.vm.run_until_child(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
     fn finish(mut self, _ state: mut Transaction) -> ChildResult {
         let creates = self.creates
-        let address = self.call.address
+        let address = self.vm.call.address
         if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         let checkpoint = self.checkpoint.take().unwrap()
         if self.vm.status == OK { state.commit(checkpoint) }
         else { state.revert(checkpoint) }
-        ChildResult { result: self.vm.take_result(mut state.frame_buffers()), offset: self.output_offset, len: self.output_len, creates, address }
+        ChildResult { result: self.vm.take_result(mut state.buffers()), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
     fn abort(mut self, _ state: mut Transaction) {
@@ -830,7 +832,7 @@ impl Frame {
 
 /// An allocation for a child frame: a finished frame's, or a new one. Calls
 /// fill it in place, and it never moves.
-fn frame_allocation(_ buffers: mut FrameBuffers) -> Option<Box<Frame>> {
+fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
     match buffers.frames.pop() {
         Option::Some(frame) => Option::Some(frame),
         Option::None => match Box::try_new(Frame::idle()) {
@@ -840,17 +842,18 @@ fn frame_allocation(_ buffers: mut FrameBuffers) -> Option<Box<Frame>> {
     }
 }
 
-/// Move ether as the specification's move_ether, writing (and touching) both
-/// accounts even for a self-transfer. The sender must hold `value`.
+/// Move ether as the specification's move_ether, touching both accounts. The
+/// sender must hold `value`. On failure the caller reverts its checkpoint.
 pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
-    let available = state.balance(from)
-    core::assert(available >= value)
     // A self-transfer changes no balance, so static frames may perform it.
-    if from == to { return state.touch(from) }
-    if value > MAX_U256 - state.balance(to) { return ERR_BALANCE_OVERFLOW }
-    let status = state.set_balance(address: from, value: available - value)
+    if from == to {
+        core::assert(state.balance(from) >= value)
+        return state.touch(from)
+    }
+    // Crediting first finds an overflow before any balance changes.
+    let status = state.credit(address: to, amount: value)
     if status != OK { return status }
-    state.set_balance(address: to, value: state.balance(to) + value)
+    state.debit(address: from, amount: value)
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation
@@ -1053,7 +1056,7 @@ impl Vm {
             callvalue: if op == 0xf4 { call.callvalue } else { value },
             origin: call.origin, gasprice: call.gasprice, gas_limit: child_gas, is_static,
         }
-        var frame = match frame_allocation(mut state.frame_buffers()) {
+        var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -1061,7 +1064,7 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: child_gas, program, calldata, child_call, checkpoint,
+        frame.get().start(gas: child_gas, program, calldata, child_call, block: self.block, checkpoint,
                           output_offset: out_offset, output_len: out_len, creates: false)
         Option::Some(frame)
     }
@@ -1137,7 +1140,7 @@ impl Vm {
             address, caller: sender, callvalue: value, origin: call.origin,
             gasprice: call.gasprice, gas_limit: create_gas, is_static: false,
         }
-        var frame = match frame_allocation(mut state.frame_buffers()) {
+        var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -1145,7 +1148,7 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: create_gas, program, empty_bytes(), child_call, checkpoint,
+        frame.get().start(gas: create_gas, program, empty_bytes(), child_call, block: self.block, checkpoint,
                           output_offset: 0, output_len: 0, creates: true)
         Option::Some(frame)
     }
@@ -1213,7 +1216,34 @@ impl Vm {
             0x61 => self.op_push2(code, pc, gas, depth, top, mut tracer),
             0x63 => self.op_push4(code, pc, gas, depth, top, mut tracer),
             0x7f => self.op_push32(code, pc, gas, depth, top, mut tracer),
-            0x62 | 0x64 | 0x65 | 0x66 | 0x67 | 0x68 | 0x69 | 0x6a | 0x6b | 0x6c | 0x6d | 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e => self.op_push_wide(code, pc, gas, depth, top, mut tracer),
+            0x62 => self.op_push_n<3, T>(code, pc, gas, depth, top, mut tracer),
+            0x64 => self.op_push_n<5, T>(code, pc, gas, depth, top, mut tracer),
+            0x65 => self.op_push_n<6, T>(code, pc, gas, depth, top, mut tracer),
+            0x66 => self.op_push_n<7, T>(code, pc, gas, depth, top, mut tracer),
+            0x67 => self.op_push_n<8, T>(code, pc, gas, depth, top, mut tracer),
+            0x68 => self.op_push_n<9, T>(code, pc, gas, depth, top, mut tracer),
+            0x69 => self.op_push_n<10, T>(code, pc, gas, depth, top, mut tracer),
+            0x6a => self.op_push_n<11, T>(code, pc, gas, depth, top, mut tracer),
+            0x6b => self.op_push_n<12, T>(code, pc, gas, depth, top, mut tracer),
+            0x6c => self.op_push_n<13, T>(code, pc, gas, depth, top, mut tracer),
+            0x6d => self.op_push_n<14, T>(code, pc, gas, depth, top, mut tracer),
+            0x6e => self.op_push_n<15, T>(code, pc, gas, depth, top, mut tracer),
+            0x6f => self.op_push_n<16, T>(code, pc, gas, depth, top, mut tracer),
+            0x70 => self.op_push_n<17, T>(code, pc, gas, depth, top, mut tracer),
+            0x71 => self.op_push_n<18, T>(code, pc, gas, depth, top, mut tracer),
+            0x72 => self.op_push_n<19, T>(code, pc, gas, depth, top, mut tracer),
+            0x73 => self.op_push_n<20, T>(code, pc, gas, depth, top, mut tracer),
+            0x74 => self.op_push_n<21, T>(code, pc, gas, depth, top, mut tracer),
+            0x75 => self.op_push_n<22, T>(code, pc, gas, depth, top, mut tracer),
+            0x76 => self.op_push_n<23, T>(code, pc, gas, depth, top, mut tracer),
+            0x77 => self.op_push_n<24, T>(code, pc, gas, depth, top, mut tracer),
+            0x78 => self.op_push_n<25, T>(code, pc, gas, depth, top, mut tracer),
+            0x79 => self.op_push_n<26, T>(code, pc, gas, depth, top, mut tracer),
+            0x7a => self.op_push_n<27, T>(code, pc, gas, depth, top, mut tracer),
+            0x7b => self.op_push_n<28, T>(code, pc, gas, depth, top, mut tracer),
+            0x7c => self.op_push_n<29, T>(code, pc, gas, depth, top, mut tracer),
+            0x7d => self.op_push_n<30, T>(code, pc, gas, depth, top, mut tracer),
+            0x7e => self.op_push_n<31, T>(code, pc, gas, depth, top, mut tracer),
             0x50 => self.op_pop(code, pc, gas, depth, top, mut tracer),
             0x80 => self.op_dup1(code, pc, gas, depth, top, mut tracer),
             0x81 => self.op_dup2(code, pc, gas, depth, top, mut tracer),
@@ -1268,12 +1298,34 @@ impl Vm {
             0x1d => self.op_sar(code, pc, gas, depth, top, mut tracer),
             0x51 => self.op_mload(code, pc, gas, depth, top, mut tracer),
             0x52 => self.op_mstore(code, pc, gas, depth, top, mut tracer),
+            0x53 => self.op_mstore8(code, pc, gas, depth, top, mut tracer),
+            0x37 => self.op_calldatacopy(code, pc, gas, depth, top, mut tracer),
+            0x39 => self.op_codecopy(code, pc, gas, depth, top, mut tracer),
+            0x5e => self.op_mcopy(code, pc, gas, depth, top, mut tracer),
             0x56 => self.op_jump(code, pc, gas, depth, top, mut tracer),
             0x57 => self.op_jumpi(code, pc, gas, depth, top, mut tracer),
             0x58 => self.op_pc(code, pc, gas, depth, top, mut tracer),
             0x59 => self.op_msize(code, pc, gas, depth, top, mut tracer),
             0x5a => self.op_gas(code, pc, gas, depth, top, mut tracer),
             0x5b => self.op_jumpdest(code, pc, gas, depth, top, mut tracer),
+            0x35 => self.op_calldataload(code, pc, gas, depth, top, mut tracer),
+            0x49 => self.op_blobhash(code, pc, gas, depth, top, mut tracer),
+            0x30 => self.op_address(code, pc, gas, depth, top, mut tracer),
+            0x32 => self.op_origin(code, pc, gas, depth, top, mut tracer),
+            0x33 => self.op_caller(code, pc, gas, depth, top, mut tracer),
+            0x34 => self.op_callvalue(code, pc, gas, depth, top, mut tracer),
+            0x36 => self.op_calldatasize(code, pc, gas, depth, top, mut tracer),
+            0x38 => self.op_codesize(code, pc, gas, depth, top, mut tracer),
+            0x3a => self.op_gasprice(code, pc, gas, depth, top, mut tracer),
+            0x3d => self.op_returndatasize(code, pc, gas, depth, top, mut tracer),
+            0x41 => self.op_coinbase(code, pc, gas, depth, top, mut tracer),
+            0x42 => self.op_timestamp(code, pc, gas, depth, top, mut tracer),
+            0x43 => self.op_number(code, pc, gas, depth, top, mut tracer),
+            0x44 => self.op_prevrandao(code, pc, gas, depth, top, mut tracer),
+            0x45 => self.op_gaslimit(code, pc, gas, depth, top, mut tracer),
+            0x46 => self.op_chainid(code, pc, gas, depth, top, mut tracer),
+            0x48 => self.op_basefee(code, pc, gas, depth, top, mut tracer),
+            0x4a => self.op_blobbasefee(code, pc, gas, depth, top, mut tracer),
             _ => self.op_other(code, pc, gas, depth, top, mut tracer),
         }
     }
@@ -1498,14 +1550,25 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(33), gas - 3, depth, top, mut tracer, value)
     }
 
-    fn op_push_wide<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+    // The other widths, each its own handler: the immediate is the top N
+    // bytes of an eight-, sixteen- or 32-byte read, shifted by a constant.
+    #[arithmetic(unchecked)]
+    fn op_push_n<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                           _ tracer: mut T) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
         }
-        let op = unsafe { read_code<u8>(code, pc) }
-        let n: usize = (op.wrapping_sub(0x5f) & 0x1f) as usize
-        let word = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(1 + n), gas - 3, depth, top, mut tracer, word >> ((32 - n) * 8) as u256)
+        let at = pc.wrapping_add(1)
+        let value: u256 = if N <= 8 {
+            let shift: u64 = ((8 - N) * 8).downcast_truncate()
+            (unsafe { read_code<u64>(code, at) } >> shift) as u256
+        } else if N <= 16 {
+            let shift: u128 = ((16 - N) * 8).downcast_truncate()
+            (unsafe { read_code<u128>(code, at) } >> shift) as u256
+        } else {
+            unsafe { read_code<u256>(code, at) } >> ((32 - N) * 8) as u256
+        }
+        self.push_next(code, pc.wrapping_add(1 + N), gas - 3, depth, top, mut tracer, value)
     }
 
     fn op_pop<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
@@ -1811,6 +1874,180 @@ impl Vm {
         self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
     }
 
+    fn op_mstore8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let offset = unsafe { *below(top, 1) }
+        if !self.in_memory(offset, len: 1) {
+            return self.op_mstore8_grow(code, pc, gas - 3, depth, top, mut tracer)
+        }
+        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2, below(top, 2), mut tracer)
+    }
+
+    // As `op_mstore_grow`, for one byte.
+    fn op_mstore8_grow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let offset = unsafe { *below(top, 1) }
+        let size = self.buffered_growth(offset, len: 1)
+        if size == 0 {
+            return self.op_mstore8_slow(code, pc, gas, depth, mut tracer)
+        }
+        var gas = gas
+        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.memory_size = size
+        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
+        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2), below(top, 2), mut tracer)
+    }
+
+    // As `op_mstore_slow`, for one byte.
+    fn op_mstore8_slow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ tracer: mut T) {
+        self.gas_remaining = gas
+        unsafe { self.stack.set_len(depth) }
+        self.mstore8()
+        let gas = self.gas_remaining
+        if !self.ok() {
+            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
+        }
+        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+    }
+
+    // The gas of a copy of `len` bytes into memory that holds them, which
+    // grows nothing: 3 and 3 per word. An empty copy grows nothing at any
+    // offset. Zero when the range is not within memory, which the
+    // interpreter loop then handles.
+    fn copy_within_cost(self, dest: u256, len: u256) -> u64 {
+        if len == 0 { return 3 }
+        if len > self.memory_size as u256 { return 0 }
+        let count: u64 = len.downcast_unchecked()
+        if !self.in_memory(dest, len: count) { return 0 }
+        3 + 3 * ((count + 31) / 32)
+    }
+
+    // For the copy whose destination, source and length are the three words
+    // below `top`, copy `len` bytes from `size` bytes at `from`, starting at
+    // `source`, into memory at `dest`, zero past the end; the range is within
+    // memory and not empty. Out of line, so the copy handlers keep their
+    // arguments in registers.
+    #[inline(never)]
+    fn copy_padded(mut self, _ top: *u256, from: *u8, size: usize) {
+        let dest = unsafe { *below(top, 1) }
+        let source = unsafe { *below(top, 2) }
+        let len = unsafe { *below(top, 3) }
+        let start: usize = dest.downcast_unchecked()
+        let count: usize = len.downcast_unchecked()
+        let copied: usize = if source >= size as u256 { 0 }
+            else if (size as u256) - source < len { size - source.downcast_unchecked() }
+            else { count }
+        if copied != 0 {
+            unsafe {
+                core::ptr::copy_raw(offset_bytes(self.memory.span().ptr(), start), offset_bytes(from, source.downcast_unchecked()), copied)
+            }
+        }
+        if copied < count { self.memory.slice(offset: start + copied, len: count - copied).zero() }
+    }
+
+    // CALLDATALOAD: the calldata word at the offset on top, bytes past the end
+    // reading as zero.
+    fn op_calldataload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let slot = below(top, 1)
+        let offset = unsafe { *slot }
+        let len = self.calldata_len
+        // Most loads read one whole word within the calldata.
+        unsafe {
+            *slot = if offset <= len as u256 && len as u256 - offset >= 32 {
+                read_code<u256>(self.calldata, offset.downcast_unchecked())
+            } else { self.calldata_tail(offset) }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+    }
+
+    // The calldata word at `offset`, which runs past the end: its bytes
+    // within the calldata, then zeros.
+    #[inline(never)]
+    fn calldata_tail(self, _ offset: u256) -> u256 {
+        let len = self.calldata_len
+        if offset >= len as u256 { return 0 }
+        let start: usize = offset.downcast_unchecked()
+        var value: u256 = 0
+        for index in start..len { value = (value << 8) | unsafe { read_code<u8>(self.calldata, index) } as u256 }
+        value << ((32 - (len - start)) * 8) as u256
+    }
+
+    // BLOBHASH: the transaction's blob hash at the index on top, or zero.
+    fn op_blobhash<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        if depth < 1 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+        }
+        let slot = below(top, 1)
+        let index = unsafe { *slot }
+        unsafe {
+            *slot = if index < self.blob_count as u256 {
+                let at: usize = index.downcast_unchecked()
+                *offset_bytes(self.blob_hashes, at * 32)
+            } else { 0 }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+    }
+
+    // CALLDATACOPY within memory; the interpreter loop handles everything else.
+    fn op_calldatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
+        if cost == 0 || gas < cost {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        // An empty copy costs only the base 3.
+        if cost > 3 { self.copy_padded(top, from: self.calldata, size: self.calldata_len) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // CODECOPY within memory; the interpreter loop handles everything else.
+    fn op_codecopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
+        if cost == 0 || gas < cost {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        if cost > 3 { self.copy_padded(top, from: code, size: self.code_len) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // MCOPY with both ranges within memory; the interpreter loop handles
+    // everything else.
+    fn op_mcopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let dest = if depth < 3 { 0 } else { unsafe { *below(top, 1) } }
+        let source = if depth < 3 { 0 } else { unsafe { *below(top, 2) } }
+        let len = if depth < 3 { 0 } else { unsafe { *below(top, 3) } }
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest, len) }
+        if cost == 0 || gas < cost || self.copy_within_cost(dest: source, len) == 0 {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        if len != 0 { self.move_within(source, dest, len) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // Out of line: the memory view it borrows would keep `op_mcopy` from
+    // tail-calling the next handler.
+    #[inline(never)]
+    fn move_within(mut self, _ source: u256, _ dest: u256, _ len: u256) {
+        self.memory.span().copy_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
+    }
+
     fn op_jump<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 8 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
@@ -1863,6 +2100,80 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, (gas - 2) as u256)
     }
 
+    // The environment opcodes push a word of the call, the block or the frame for two gas.
+    #[inline(always)]
+    fn push_environment<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                   _ tracer: mut T, _ value: u256) {
+        if gas < 2 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+        }
+        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, value)
+    }
+
+    fn op_address<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.address)
+    }
+
+    fn op_origin<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.origin)
+    }
+
+    fn op_caller<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.caller)
+    }
+
+    fn op_callvalue<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.callvalue)
+    }
+
+    fn op_calldatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.calldata_len as u256)
+    }
+
+    fn op_codesize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.code_len as u256)
+    }
+
+    fn op_gasprice<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.gasprice)
+    }
+
+    fn op_returndatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.return_data.len() as u256)
+    }
+
+    fn op_coinbase<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.coinbase)
+    }
+
+    fn op_timestamp<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.timestamp)
+    }
+
+    fn op_number<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.number)
+    }
+
+    fn op_prevrandao<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.prevrandao)
+    }
+
+    fn op_gaslimit<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.gaslimit)
+    }
+
+    fn op_chainid<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.chainid)
+    }
+
+    fn op_basefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.basefee)
+    }
+
+    fn op_blobbasefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.blobbasefee)
+    }
+
     fn op_jumpdest<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 1 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
@@ -1882,9 +2193,9 @@ impl Vm {
         byte & (1 << bit) != 0
     }
 
-    fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData,
-                                  _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction,
+    fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ state: mut Transaction,
                                   depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        let call = self.call
         // Pushes skip the capacity check, so the stack holds its limit first.
         if !self.stack.try_reserve(STACK_LIMIT - self.stack.len()) {
             self.fault(ERR_HOST_ALLOCATION)
@@ -1899,6 +2210,11 @@ impl Vm {
         self.jumpdests = program.jumpdest_map()
         self.jump_limit = program.jump_limit()
         self.call_depth = depth
+        self.code_len = program.len()
+        self.calldata = calldata.bytes().ptr()
+        self.calldata_len = calldata.len()
+        self.blob_hashes = state.blob_hash_ptr()
+        self.blob_count = state.blob_count()
         var pc = self.pc
         var gas = self.gas_remaining
         if self.ok() {
@@ -1916,118 +2232,6 @@ impl Vm {
                 // `pc` stays within the code and its padding, far from overflow.
                 pc = pc.wrapping_add(1)
                 match op {
-                    0x30 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.address) { break }
-                    },
-                    0x32 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.origin) { break }
-                    },
-                    0x33 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.caller) { break }
-                    },
-                    0x34 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.callvalue) { break }
-                    },
-                    0x36 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(calldata.len() as u256) { break }
-                    },
-                    0x38 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(program.len() as u256) { break }
-                    },
-                    0x3a => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(call.gasprice) { break }
-                    },
-                    0x3d => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(self.return_data.len() as u256) { break }
-                    },
-                    0x41 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.coinbase) { break }
-                    },
-                    0x42 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.timestamp) { break }
-                    },
-                    0x43 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.number) { break }
-                    },
-                    0x44 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.prevrandao) { break }
-                    },
-                    0x45 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.gaslimit) { break }
-                    },
-                    0x46 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.chainid) { break }
-                    },
-                    0x48 => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.basefee) { break }
-                    },
-                    0x4a => {
-                        if !spend(mut gas, 2) {
-                            self.fault(ERR_OUT_OF_GAS)
-                            break
-                        }
-                        if !self.pushed(block.blobbasefee) { break }
-                    },
                     // The rest charge their base cost from the table and dispatch
                     // again; those that call out charge more through `self`.
                     _ => {
@@ -2046,10 +2250,6 @@ impl Vm {
                             self.gas_remaining = gas
                             self.account_field(op, mut state)
                             gas = self.gas_remaining
-                            if !self.ok() { break }
-                        },
-                        0x35 => {
-                            self.calldataload(calldata)
                             if !self.ok() { break }
                         },
                         0x37 => {
@@ -2079,16 +2279,12 @@ impl Vm {
                         0x40 => {
                             let number = self.pop()
                             if !self.ok() { break }
-                            let hash = if number < block.number && block.number - number <= 256 {
+                            let hash = if number < self.block.number && self.block.number - number <= 256 {
                                 state.block_hash(number)
                             } else { 0 }
                             if !self.pushed(hash) { break }
                         },
                         0x47 => if !self.pushed(state.balance(call.address)) { break },
-                        0x49 => {
-                            let index = self.pop()
-                            if !self.ok() || !self.pushed(state.blob_hash(index)) { break }
-                        },
                         0x53 => {
                             self.gas_remaining = gas
                             self.mstore8()
@@ -2178,7 +2374,7 @@ impl Vm {
     }
 
     fn run_children<T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
-                               _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
+                               _ state: mut Transaction, _ tracer: mut T) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
         var frames: MemVec<Box<Frame>> = MemVec::new()
@@ -2187,7 +2383,7 @@ impl Vm {
             match next {
                 Option::Some(frame) => {
                     var frame = frame
-                    frame.get().vm.adopt(mut state.frame_buffers())
+                    frame.get().vm.adopt(mut state.buffers())
                     match frames.try_push(frame) {
                         Result::Ok(()) => {},
                         // Like other host failures while starting a child, this fails the parent.
@@ -2208,16 +2404,16 @@ impl Vm {
                     tracer.leave(CallEnd { depth, status: result.result.status, gas: result.result.gas_remaining },
                                  output: result.result.output.span())
                     // A pool that cannot grow frees it.
-                    let _ = state.frame_buffers().frames.try_push(frame)
+                    let _ = state.buffers().frames.try_push(frame)
                     if depth == 1 { self.accept_child(result) }
                     else { frames[depth - 2].get().vm.accept_child(result) }
                 },
             }
             let depth = frames.len()
             next = if depth == 0 {
-                self.run_until_child(program, calldata, call, block, mut state, depth: 0, mut tracer)
+                self.run_until_child(program, calldata, mut state, depth: 0, mut tracer)
             } else {
-                frames[depth - 1].get().resume(block, mut state, depth, mut tracer)
+                frames[depth - 1].get().resume(mut state, depth, mut tracer)
             }
         }
     }
@@ -2237,7 +2433,7 @@ impl Vm {
 
     fn run_root<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ call: CallEnv,
                            _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T, creates: bool) {
-        self.adopt(mut state.frame_buffers())
+        self.adopt(mut state.buffers())
         self.reset(gas: call.gas_limit)
         if program.status != OK || calldata.status != OK {
             self.fault(if program.status != OK { program.status } else { calldata.status })
@@ -2245,8 +2441,10 @@ impl Vm {
         }
         let refund_before = state.refund()
         let checkpoint = state.checkpoint(is_static: call.is_static)
-        match self.run_until_child(program, calldata, call, block, mut state, depth: 0, mut tracer) {
-            Option::Some(first) => self.run_children(first, program, calldata, call, block, mut state, mut tracer),
+        self.call = call
+        self.block = block
+        match self.run_until_child(program, calldata, mut state, depth: 0, mut tracer) {
+            Option::Some(first) => self.run_children(first, program, calldata, mut state, mut tracer),
             Option::None => {},
         }
         if creates && self.status == OK { self.deposit_code(address: call.address, mut state) }
@@ -2258,12 +2456,12 @@ impl Vm {
         }
     }
     /// The frame's result. Its memory and stack, emptied, go to `buffers`.
-    pub fn into_result(var own self, _ buffers: mut FrameBuffers) -> ExecutionResult {
+    pub fn into_result(var own self, _ buffers: mut Buffers) -> ExecutionResult {
         self.take_result(mut buffers)
     }
 
     /// As `into_result`, leaving the VM without output, memory or stack.
-    fn take_result(mut self, _ buffers: mut FrameBuffers) -> ExecutionResult {
+    fn take_result(mut self, _ buffers: mut Buffers) -> ExecutionResult {
         let stack_len = self.stack.len()
         let stack_top: u256 = if stack_len == 0 {
             0
@@ -2311,5 +2509,5 @@ pub fn execute(
     _ block: BlockEnv,
     _ state: mut Transaction,
 ) -> ExecutionResult {
-    execute_vm(program, calldata, call, block, mut state).into_result(mut state.frame_buffers())
+    execute_vm(program, calldata, call, block, mut state).into_result(mut state.buffers())
 }
