@@ -297,7 +297,11 @@ impl Transaction {
     // unless `transient`.
     fn undo_to(mut self, _ position: u64, transient: bool) {
         while self.buffers.journal.len() > position {
-            let change = self.buffers.journal.pop()
+            // The last change, read where it is: `pop` would copy it out
+            // whole, twice, through an `Option`.
+            let last = self.buffers.journal.len() - 1
+            let change = self.buffers.journal.change(last)
+            self.buffers.journal.truncate(last)
             // A balance or nonce change that created its account also
             // removes it.
             let restored = match change.kind {
