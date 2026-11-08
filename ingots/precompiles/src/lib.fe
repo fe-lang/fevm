@@ -1,4 +1,4 @@
-use core::{MemBuffer, Option}
+use core::{MemBuffer, MemSpan, Option}
 use keccak::{ByteSource, Keccak256}
 pub use hashes::{ripemd160, sha256}
 
@@ -26,6 +26,17 @@ pub(ingot) fn failure(_ gas: u64) -> Output {
 
 pub(ingot) fn host_allocation(_ gas_used: u64) -> Output {
     Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
+}
+
+/// The identity precompile (0x04) on input in memory: one bulk copy.
+pub fn identity(_ input: MemSpan, gas: u64) -> Output {
+    let cost = 15 + 3 * word_count(input.len())
+    if cost > gas as u128 { return failure(gas) }
+    let gas_used: u64 = cost.downcast_unchecked()
+    match MemBuffer::try_from_span(input) {
+        Option::Some(output) => Output { status: SUCCESS, gas_used, output },
+        Option::None => host_allocation(gas_used),
+    }
 }
 
 // An output of `source`'s bytes, eight at a time.

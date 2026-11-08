@@ -873,7 +873,8 @@ pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value
 /// insufficient gas are exceptional halts that consume all `gas`; allocation
 /// failure is a host error.
 pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionResult {
-    let outcome = fevm_precompiles::run(address, input, gas)
+    let outcome = if address == 4 { fevm_precompiles::identity(input.bytes(), gas) }
+        else { fevm_precompiles::run(address, input, gas) }
     let status = if outcome.status == SUCCESS { OK }
         else if outcome.status == FAILURE { ERR_PRECOMPILE }
         else { ERR_HOST_ALLOCATION }
