@@ -41,3 +41,35 @@ fn clz_costs_five_gas() {
     let (status, _, remaining) = clz(1, gas_limit: 7)
     core::assert(status == ERR_OUT_OF_GAS && remaining == 0)
 }
+
+// PUSH32 `value`, PUSH32 `shift`, SAR.
+fn sar(_ value: u256, shift: u256) -> u256 {
+    var bytes: [u8; 67] = [0; 67]
+    bytes[0] = 0x7f
+    bytes[33] = 0x7f
+    var index: usize = 0
+    while index < 32 {
+        bytes[index + 1] = (value >> ((31 - index) * 8) as u256).downcast_truncate()
+        bytes[index + 34] = (shift >> ((31 - index) * 8) as u256).downcast_truncate()
+        index += 1
+    }
+    bytes[66] = 0x1d
+    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
+                                       config: Config::osaka(), buffers: Buffers::new())
+    let result = execute(Program::copy_from(bytes, len: 67), empty_bytes(), default_call_env(), default_block_env(), mut transaction)
+    core::assert(result.status == OK)
+    result.stack_top
+}
+
+#[test]
+fn sar_fills_with_the_sign_bit() {
+    let max = !(0 as u256)
+    let min = 1 << 255
+    for (value, shift, shifted) in [
+        (min, 0, min), (min, 1, (1 << 255) | (1 << 254)), (min, 255, max), (min, 256, max), (min, max, max),
+        (max, 7, max), (min >> 1, 1, min >> 2), (min >> 1, 255, 0), (min >> 1, 256, 0), (0xff00, 8, 0xff),
+        (max - 0xff, 4, max - 0xf),
+    ] {
+        core::assert(sar(value, shift) == shifted)
+    }
+}
