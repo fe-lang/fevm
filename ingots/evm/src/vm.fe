@@ -1121,8 +1121,9 @@ impl Vm {
         let count: usize = len.downcast_unchecked()
         let start: usize = if count == 0 { 0 } else { offset.downcast_unchecked() }
         let sender = address_word(call.address)
+        let account = state.sender(sender)
         let address = if op == 0xf0 {
-            create_address(sender, nonce: state.nonce(sender))
+            create_address(sender, nonce: account.nonce)
         } else {
             var hash = Keccak256::new()
             hash.update(self.memory, offset: start, len: count)
@@ -1135,7 +1136,7 @@ impl Vm {
             return Option::None
         }
         self.return_data.clear()
-        if state.balance(sender) < value || state.nonce(sender) == 0xffffffffffffffff || depth == CALL_DEPTH_LIMIT {
+        if account.balance < value || account.nonce == 0xffffffffffffffff || depth == CALL_DEPTH_LIMIT {
             self.gas_remaining += create_gas
             self.push(0)
             return Option::None

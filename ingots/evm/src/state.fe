@@ -166,14 +166,17 @@ impl WorldState {
     // Removes the record of `address`, an address word, if it has one.
     fn remove_record(mut self, _ address: u256) -> bool {
         let lookup = self.index.get(address)
-        if !lookup.found { return false }
+        if lookup.found { self.remove_at(address, lookup.value) }
+        lookup.found
+    }
+    // Removes the record of `address`, an address word, at `position`.
+    fn remove_at(mut self, _ address: u256, _ position: usize) {
         let _ = self.index.remove(address)
-        let _ = self.accounts.swap_remove(lookup.value)
-        if lookup.value < self.accounts.len() {
+        let _ = self.accounts.swap_remove(position)
+        if position < self.accounts.len() {
             // Moving an existing key does not grow the table.
-            core::assert(self.index.try_insert(self.accounts[lookup.value].address, lookup.value))
+            core::assert(self.index.try_insert(self.accounts[position].address, position))
         }
-        true
     }
 
     pub fn exists(self, _ address: u256) -> bool {
@@ -212,6 +215,19 @@ impl WorldState {
             }
             slot += 1
         }
+    }
+    /// EIP-684/EIP-7610: whether creation can use `address`, which needs no
+    /// nonce, code or storage.
+    pub fn deployable(self, _ address: u256) -> bool {
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return true }
+        let account = ref self.accounts[lookup.value]
+        account.nonce == 0 && account.code_len == 0 && account.storage_slots == 0
+    }
+    /// The length of the code of `address`, if it has a record.
+    pub fn existing_code_len(self, _ address: u256) -> Option<usize> {
+        let lookup = self.index.get(address_word(address))
+        if lookup.found { Option::Some(self.accounts[lookup.value].code_len) } else { Option::None }
     }
     pub fn has_storage(self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
@@ -313,6 +329,20 @@ impl WorldState {
         if balance { account.balance = value } else { account.nonce = value }
         Replaced { previous, found: lookup.found, changed: true, written: true, overflowed: false }
     }
+    /// Sets the balance (or nonce) of `address` back to `value` with one
+    /// lookup. Undoing the change that created the account leaves it empty,
+    /// and removes its record. `false` if the table cannot hold the value.
+    pub fn restore(mut self, balance: bool, _ address: u256, _ value: u256, existed: bool) -> bool {
+        let address = address_word(address)
+        let lookup = self.index.get(address)
+        let previous = self.field(balance, lookup)
+        if !self.store(balance, address, lookup, previous, value).written { return false }
+        if !existed {
+            core::assert(lookup.found && self.empty_at(lookup.value))
+            self.remove_at(address, lookup.value)
+        }
+        true
+    }
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
         self.replace(balance: false, address, value).written
     }
@@ -368,7 +398,8 @@ impl WorldState {
         if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
         // The arena is unchanged until here, so an account without a record
         // that cannot get one leaves the world as it was.
-        let at = match self.record(address) {
+        let added = if lookup.found { Option::Some(lookup.value) } else { self.add_record(address) }
+        let at = match added {
             Option::Some(at) => at,
             Option::None => {
                 self.code.truncate(old_size)
