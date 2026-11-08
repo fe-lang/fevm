@@ -55,14 +55,24 @@ fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usi
         }
         return w
     }
-    for i in 0..16 {
-        var word: u32 = 0
-        for position in start + 4 * i..start + 4 * i + 4 {
-            let byte: u32 = if position < len { input.byte_at(offset + position) as u32 }
-                else if position == len { 0x80 } else { 0 }
-            word = (word << 8) | byte
+    for lane in 0..8 {
+        let position = start + 8 * lane
+        let word: u64 = if position + 8 <= len {
+            swap_bytes(input.lane_at(offset + position))
+        } else if position > len {
+            0
+        } else {
+            // The lane holding the input's last bytes and the 0x80 marker.
+            var word: u64 = 0
+            for at in position..position + 8 {
+                let byte: u64 = if at < len { input.byte_at(offset + at) as u64 }
+                    else if at == len { 0x80 } else { 0 }
+                word = (word << 8) | byte
+            }
+            word
         }
-        w[i] = word
+        w[2 * lane] = (word >> 32).downcast_truncate()
+        w[2 * lane + 1] = word.downcast_truncate()
     }
     if index == blocks - 1 {
         // Inputs are bounded by host memory, so the bit count fits 64 bits.
