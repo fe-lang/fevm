@@ -29,29 +29,27 @@ impl Fp2 {
     /// x0^2 = (c0 +- a) / 2 and x1 = c1 / (2 x0).
     pub fn sqrt(self) -> Option<Fp2> {
         if self.c1.is_zero() {
-            // An element of Fp is c0 or -c0 = (c1 u)^2 for a root of -c0.
-            return match self.c0.sqrt() {
-                Option::Some(root) => Option::Some(Fp2 { c0: root, c1: Fp::zero() }),
-                Option::None => match self.c0.neg().sqrt() {
-                    Option::Some(root) => Option::Some(Fp2 { c0: Fp::zero(), c1: root }),
-                    Option::None => Option::None,
-                },
-            }
+            // Every element of Fp is a square here: y = c0^((p+1)/4) is a
+            // root of c0, or has y^2 = -c0 and then (y u)^2 = c0.
+            let y = self.c0.sqrt_candidate()
+            if y.square().equals(self.c0) { return Option::Some(Fp2 { c0: y, c1: Fp::zero() }) }
+            return Option::Some(Fp2 { c0: Fp::zero(), c1: y })
         }
         let alpha = match self.c0.square().add(self.c1.square()).sqrt() {
             Option::Some(alpha) => alpha,
             Option::None => return Option::None,
         }
         let half = Fp::from_montgomery(HALF)
-        // With c1 nonzero, c0 +- alpha is nonzero, so x0 is too.
-        let x0 = match self.c0.add(alpha).mul(half).sqrt() {
-            Option::Some(x0) => x0,
-            Option::None => match self.c0.sub(alpha).mul(half).sqrt() {
-                Option::Some(x0) => x0,
-                Option::None => return Option::None,
-            },
+        // With c1 nonzero, c0 +- alpha is nonzero, and their halves multiply
+        // to -(c1 / 2)^2: as -1 is not a square, exactly one is a square.
+        // When g = (c0 + alpha) / 2 is not, y = g^((p+1)/4) has y^2 = -g,
+        // so x0 = c1 / (2 y) is a root of the other, and x1 = y.
+        let g = self.c0.add(alpha).mul(half)
+        let y = g.sqrt_candidate()
+        if y.square().equals(g) {
+            return Option::Some(Fp2 { c0: y, c1: self.c1.mul(y.double().invert()) })
         }
-        Option::Some(Fp2 { c0: x0, c1: self.c1.mul(x0.double().invert()) })
+        Option::Some(Fp2 { c0: self.c1.mul(y.double().invert()), c1: y })
     }
 }
 
