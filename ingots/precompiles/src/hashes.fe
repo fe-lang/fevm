@@ -1,18 +1,9 @@
 use core::num::swap_bytes
 use core::ops::WrappingAdd
 use keccak::ByteSource
+use std::native::sha256_compress
 
-// FIPS 180-4 SHA-256 round constants and initial state.
-const SHA256_K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-]
+// FIPS 180-4 SHA-256 initial state.
 const SHA256_IV: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ]
@@ -50,10 +41,6 @@ const RIPEMD_LEFT_K: [u32; 5] = [0x00000000, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc,
 const RIPEMD_RIGHT_K: [u32; 5] = [0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0x00000000]
 const RIPEMD_IV: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0]
 
-fn rotate_right(_ value: u32, by: u32) -> u32 {
-    (value >> by) | (value << (32 - by))
-}
-
 fn rotate_left(_ value: u32, by: u32) -> u32 {
     (value << by) | (value >> (32 - by))
 }
@@ -83,105 +70,6 @@ fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_inde
 
 // One length byte (0x80) and eight count bytes follow the message.
 fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
-
-// One round on the words a..h, giving the new d and h; each other word
-// keeps its value under the next round's name for it.
-#[arithmetic(unchecked)]
-#[inline(always)]
-fn sha256_round(_ a: u32, _ b: u32, _ c: u32, _ d: u32, _ e: u32, _ f: u32, _ g: u32, _ h: u32, _ kw: u32) -> (u32, u32) {
-    let first = h + (rotate_right(e, by: 6) ^ rotate_right(e, by: 11) ^ rotate_right(e, by: 25))
-        + ((e & f) ^ (~e & g)) + kw
-    let second = (rotate_right(a, by: 2) ^ rotate_right(a, by: 13) ^ rotate_right(a, by: 22))
-        + ((a & b) ^ (a & c) ^ (b & c))
-    (d + first, first + second)
-}
-
-// The message schedule's next 16 words, in place of the 16 before them.
-#[arithmetic(unchecked)]
-fn sha256_schedule(_ w: mut [u32; 16]) {
-    for i in 0..16 {
-        let x = w[(i + 1) & 15]
-        let y = w[(i + 14) & 15]
-        w[i] += (rotate_right(x, by: 7) ^ rotate_right(x, by: 18) ^ (x >> 3)) + w[(i + 9) & 15]
-            + (rotate_right(y, by: 17) ^ rotate_right(y, by: 19) ^ (y >> 10))
-    }
-}
-
-// Sixteen rounds at a time, renaming the words instead of moving them, and
-// the schedule kept to the 16 words the next rounds read.
-#[arithmetic(unchecked)]
-fn sha256_compress(_ state: mut [u32; 8], _ w: mut [u32; 16]) {
-    var a = state[0]
-    var b = state[1]
-    var c = state[2]
-    var d = state[3]
-    var e = state[4]
-    var f = state[5]
-    var g = state[6]
-    var h = state[7]
-    var k: usize = 0
-    while true {
-        var round = sha256_round(a, b, c, d, e, f, g, h, SHA256_K[k] + w[0])
-        d = round.0
-        h = round.1
-        round = sha256_round(h, a, b, c, d, e, f, g, SHA256_K[k + 1] + w[1])
-        c = round.0
-        g = round.1
-        round = sha256_round(g, h, a, b, c, d, e, f, SHA256_K[k + 2] + w[2])
-        b = round.0
-        f = round.1
-        round = sha256_round(f, g, h, a, b, c, d, e, SHA256_K[k + 3] + w[3])
-        a = round.0
-        e = round.1
-        round = sha256_round(e, f, g, h, a, b, c, d, SHA256_K[k + 4] + w[4])
-        h = round.0
-        d = round.1
-        round = sha256_round(d, e, f, g, h, a, b, c, SHA256_K[k + 5] + w[5])
-        g = round.0
-        c = round.1
-        round = sha256_round(c, d, e, f, g, h, a, b, SHA256_K[k + 6] + w[6])
-        f = round.0
-        b = round.1
-        round = sha256_round(b, c, d, e, f, g, h, a, SHA256_K[k + 7] + w[7])
-        e = round.0
-        a = round.1
-        round = sha256_round(a, b, c, d, e, f, g, h, SHA256_K[k + 8] + w[8])
-        d = round.0
-        h = round.1
-        round = sha256_round(h, a, b, c, d, e, f, g, SHA256_K[k + 9] + w[9])
-        c = round.0
-        g = round.1
-        round = sha256_round(g, h, a, b, c, d, e, f, SHA256_K[k + 10] + w[10])
-        b = round.0
-        f = round.1
-        round = sha256_round(f, g, h, a, b, c, d, e, SHA256_K[k + 11] + w[11])
-        a = round.0
-        e = round.1
-        round = sha256_round(e, f, g, h, a, b, c, d, SHA256_K[k + 12] + w[12])
-        h = round.0
-        d = round.1
-        round = sha256_round(d, e, f, g, h, a, b, c, SHA256_K[k + 13] + w[13])
-        g = round.0
-        c = round.1
-        round = sha256_round(c, d, e, f, g, h, a, b, SHA256_K[k + 14] + w[14])
-        f = round.0
-        b = round.1
-        round = sha256_round(b, c, d, e, f, g, h, a, SHA256_K[k + 15] + w[15])
-        e = round.0
-        a = round.1
-        k += 16
-        if k == 64 { break }
-        sha256_schedule(mut w)
-    }
-    state[0] += a
-    state[1] += b
-    state[2] += c
-    state[3] += d
-    state[4] += e
-    state[5] += f
-    state[6] += g
-    state[7] += h
-}
 
 // The 16 big-endian words of block `index` of the padded message. A block
 // within the input is eight lanes, byte-swapped; the last one or two hold
@@ -220,8 +108,7 @@ pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> u256 {
     var state = SHA256_IV
     let blocks = padded_blocks(len)
     for index in 0..blocks {
-        var w = sha256_block(input, offset, len, index, blocks)
-        sha256_compress(mut state, mut w)
+        state = sha256_compress(state, sha256_block(input, offset, len, index, blocks))
     }
     var digest: u256 = 0
     for word in state { digest = (digest << 32) | word as u256 }
