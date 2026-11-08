@@ -38,7 +38,9 @@ const MARK_DOOMED: u8 = 8
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
-pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128, logs: u64 }
+// `transient_empty`: no transient storage was set, so undoing to the
+// checkpoint empties it whole instead of entry by entry.
+pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128, logs: u64, transient_empty: bool }
 
 pub struct TransactionResult {
     pub state: WorldState,
@@ -281,6 +283,7 @@ impl Transaction {
         self.depth += 1
         let checkpoint = Checkpoint {
             position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
+            transient_empty: self.transient.is_empty(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -294,14 +297,19 @@ impl Transaction {
 
     pub fn revert(mut self, _ checkpoint: own Checkpoint) {
         core::assert(self.depth == checkpoint.depth)
-        self.undo_to(checkpoint.position)
+        self.undo_to(checkpoint.position, transient: !checkpoint.transient_empty)
+        if checkpoint.transient_empty {
+            let _ = core::mem::replace(mut self.transient, SwissTable<StorageKey, u256>::empty())
+        }
         self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
         self.depth -= 1
         self.is_static = checkpoint.was_static
     }
 
-    fn undo_to(mut self, _ position: u64) {
+    // Undoes journal entries past `position`, but for transient storage's
+    // unless `transient`.
+    fn undo_to(mut self, _ position: u64, transient: bool) {
         while self.buffers.journal.len() > position {
             let change = self.buffers.journal.pop()
             let restored = match change.kind {
@@ -310,7 +318,7 @@ impl Transaction {
                 SENDER => self.state.set_nonce(change.address, change.slot)
                     && self.state.set_balance(change.address, change.previous),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
-                TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
+                TRANSIENT => !transient || self.write_transient(change.address, change.slot, change.previous),
                 WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
                 WARM_STORAGE => self.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
                 CODE => {
@@ -568,7 +576,7 @@ impl Transaction {
     pub fn finish(var own self, commit: bool, gas_spent: u64) -> TransactionResult {
         core::assert(self.depth == 0)
         if !commit {
-            self.undo_to(0)
+            self.undo_to(0, transient: false)
             self.logs.truncate(0)
         }
         self.buffers.journal.clear()
