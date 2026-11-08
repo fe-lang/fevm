@@ -40,5 +40,8 @@ impl Journal {
 
     pub fn pop(mut self) -> Change { self.changes.pop().unwrap() }
 
+    /// Drops the changes from `len` on.
+    pub fn truncate(mut self, _ len: u64) { self.changes.truncate(len.downcast_truncate()) }
+
     pub fn clear(mut self) { self.changes.clear() }
 }
