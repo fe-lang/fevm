@@ -42,13 +42,15 @@ fn padded_block<T: ByteSource>(_ input: T, offset: usize, len: usize, block_inde
 // One length byte (0x80) and eight count bytes follow the message.
 fn padded_blocks(_ len: usize) -> usize { (len + 9 + 63) / 64 }
 
-// The 16 big-endian words of block `index` of the padded message. A block
-// within the input is eight lanes, byte-swapped; the last one or two hold
-// the input's last bytes, 0x80, zeros and the 64-bit bit count. Offsets
-// within an input bounded by host memory cannot overflow.
+// Writes to `w` the 16 big-endian words of block `index` of the padded
+// message. A block within the input is eight lanes, byte-swapped; the last
+// one or two hold the input's last bytes, 0x80, zeros and the 64-bit bit
+// count. Offsets within an input bounded by host memory cannot overflow.
+// The caller's array takes the words, so that `sha256_compress` reads them
+// where they are.
 #[arithmetic(unchecked)]
-fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usize, blocks: usize) -> [u32; 16] {
-    var w: [u32; 16] = [0; 16]
+fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usize, blocks: usize,
+                               _ w: mut [u32; 16]) {
     let start = index * 64
     if start + 64 <= len {
         for lane in 0..8 {
@@ -56,7 +58,7 @@ fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usi
             w[2 * lane] = (word >> 32).downcast_truncate()
             w[2 * lane + 1] = word.downcast_truncate()
         }
-        return w
+        return
     }
     for lane in 0..8 {
         let position = start + 8 * lane
@@ -83,15 +85,16 @@ fn sha256_block<T: ByteSource>(_ input: T, offset: usize, len: usize, index: usi
         w[14] = (bits >> 32).downcast_truncate()
         w[15] = bits.downcast_truncate()
     }
-    w
 }
 
 /// The SHA-256 digest of `len` bytes of `input` from `offset`, as a big-endian word.
 pub fn sha256<T: ByteSource>(_ input: T, offset: usize, len: usize) -> u256 {
     var state = SHA256_IV
+    var block: [u32; 16] = [0; 16]
     let blocks = padded_blocks(len)
     for index in 0..blocks {
-        state = sha256_compress(state, sha256_block(input, offset, len, index, blocks))
+        sha256_block(input, offset, len, index, blocks, mut block)
+        state = sha256_compress(state, block)
     }
     var digest: u256 = 0
     for word in state { digest = (digest << 32) | word as u256 }
