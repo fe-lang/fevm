@@ -421,7 +421,7 @@ impl Transaction {
         if self.is_static { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let replaced = self.state.adjust(balance: kind == BALANCE, address, amount, add)
-        if add && amount > MAX_U256 - replaced.previous { return ERR_BALANCE_OVERFLOW }
+        if replaced.overflowed { return ERR_BALANCE_OVERFLOW }
         self.journal_account(kind, address, replaced)
     }
 
