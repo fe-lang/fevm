@@ -4,7 +4,7 @@ use swisstable::SwissTable
 use ingot::constants::MAX_U256
 use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::Change
-use ingot::state::{Replaced, StorageKey, WorldState, address_word, designator}
+use ingot::state::{Charged, Replaced, StorageKey, WorldState, address_word, designator}
 use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
@@ -25,6 +25,9 @@ const DELEGATION: u8 = 9
 // writes that leave their value, and the transaction's own call. Undo has
 // nothing to restore.
 const TOUCHED_ONCE: u8 = 10
+// The transaction's nonce increment and gas purchase: `slot` is the
+// sender's previous nonce and `previous` its previous balance.
+const SENDER: u8 = 11
 
 // An address's marks, the bits of its `marks` entry. Undo clears the warm,
 // touched and doomed marks a frame set; creation marks survive rollback.
@@ -304,6 +307,8 @@ impl Transaction {
             let restored = match change.kind {
                 BALANCE => self.state.set_balance(change.address, change.previous),
                 NONCE => self.state.set_nonce(change.address, change.previous),
+                SENDER => self.state.set_nonce(change.address, change.slot)
+                    && self.state.set_balance(change.address, change.previous),
                 STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
                 TRANSIENT => self.write_transient(change.address, change.slot, change.previous),
                 WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
@@ -324,8 +329,8 @@ impl Transaction {
             // Reverse replay restores entries the tables held before. A table
             // that cannot allocate to hold one again is a fatal host failure.
             core::assert(restored)
-            let account_write = change.kind == BALANCE || change.kind == NONCE || change.kind == STORAGE
-                || change.kind == CODE || change.kind == DELEGATION
+            let account_write = change.kind == BALANCE || change.kind == NONCE || change.kind == SENDER
+                || change.kind == STORAGE || change.kind == CODE || change.kind == DELEGATION
             if !change.existed && account_write {
                 core::assert(self.state.remove_empty_account(change.address))
             }
@@ -422,6 +427,27 @@ impl Transaction {
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
         self.adjust(kind: NONCE, address, amount: 1, add: true)
     }
+    /// Increments the sender's nonce and subtracts `fee`, which its balance
+    /// must hold, with one lookup and one journal entry: the transaction's
+    /// nonce increment and gas purchase. A nonce of 2^256 - 1 is
+    /// ERR_BALANCE_OVERFLOW and changes nothing.
+    pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 {
+        self.started = true
+        if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(sender)
+        let charged: Charged = self.state.charge(address, fee)
+        if !charged.written { return ERR_HOST_ALLOCATION }
+        if charged.nonce == MAX_U256 { return ERR_BALANCE_OVERFLOW }
+        let change = Change { kind: SENDER, address, slot: charged.nonce, previous: charged.balance, existed: charged.found }
+        if !self.buffers.journal.append(change) {
+            // Restoring values the record holds needs no allocation.
+            core::assert(self.state.set_nonce(address, charged.nonce))
+            core::assert(self.state.set_balance(address, charged.balance))
+            if !charged.found { core::assert(self.state.remove_empty_account(address)) }
+            return ERR_HOST_ALLOCATION
+        }
+        OK
+    }
     /// Adds `amount` to the balance, touching the account; one past 2^256 is
     /// ERR_BALANCE_OVERFLOW and changes no balance.
     pub fn credit(mut self, address: u256, amount: u256) -> i32 {
@@ -513,15 +539,26 @@ impl Transaction {
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
         // The journal holds the changes and marks that survived their frames:
-        // each touch, as a mark or as a balance, nonce or code change.
+        // each touch, as a mark or as a balance, nonce or code change. It
+        // mostly touches the sender, destination and coinbase, repeatedly, and
+        // settling changes no balance, so an address checked recently is
+        // skipped. No address word is 2^256 - 1.
+        var recent: [u256; 4] = [MAX_U256; 4]
+        var next: usize = 0
         var position: u64 = 0
         while position < self.buffers.journal.len() {
             let change = self.buffers.journal.change(position)
             let kind = change.kind
-            if kind == DOOMED { self.state.remove_account(change.address) }
-            let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE || kind == CODE
-                || kind == DELEGATION
-            if touched { self.state.remove_if_empty(change.address) }
+            let address = change.address
+            if kind == DOOMED { self.state.remove_account(address) }
+            let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE
+                || kind == SENDER || kind == CODE || kind == DELEGATION
+            if touched && address != recent[0] && address != recent[1] && address != recent[2]
+                && address != recent[3] {
+                self.state.remove_if_empty(address)
+                recent[next] = address
+                next = (next + 1) % 4
+            }
             position += 1
         }
     }

@@ -293,9 +293,7 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
     }
     let sender = address_word(request.env.sender)
     let fee = request.env.gas_limit as u256 * price + (request.blob_count() * GAS_PER_BLOB) as u256 * blob_price
-    let status = tx.increment_nonce(sender)
-    if status != OK { return status }
-    tx.debit(address: sender, amount: fee)
+    tx.charge(sender, fee)
 }
 
 // What an authority signs: keccak256(0x05 || rlp([chain_id, address, nonce])).

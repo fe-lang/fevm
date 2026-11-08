@@ -60,6 +60,10 @@ pub struct Replaced { pub previous: u256, pub found: bool, pub changed: bool, pu
 /// What validating a sender reads from its account.
 pub struct Sender { pub nonce: u256, pub balance: u256, pub code_len: usize }
 
+/// A sender's nonce and balance before `charge`, whether its account existed,
+/// and whether the table could hold a new one.
+pub struct Charged { pub nonce: u256, pub balance: u256, pub found: bool, pub written: bool }
+
 impl Copy for StorageKey {}
 
 impl Default for StorageKey {
@@ -268,6 +272,25 @@ impl WorldState {
             return Replaced { previous, found: lookup.found, changed: false, written: true }
         }
         self.store(balance, address, lookup, previous, value: if add { previous + amount } else { previous - amount })
+    }
+    /// Increments the nonce of `address`, an address word, and subtracts
+    /// `fee`, which its balance must hold, with one lookup. A nonce of
+    /// 2^256 - 1 is left as it is, and so is the balance.
+    pub fn charge(mut self, _ address: u256, fee: u256) -> Charged {
+        let lookup = self.index.get(address)
+        let at = if lookup.found { lookup.value } else {
+            match self.add_record(address) {
+                Option::Some(at) => at,
+                Option::None => return Charged { nonce: 0, balance: 0, found: false, written: false },
+            }
+        }
+        let account = mut self.accounts[at]
+        let charged = Charged { nonce: account.nonce, balance: account.balance, found: lookup.found, written: true }
+        if account.nonce != MAX_U256 {
+            account.nonce += 1
+            account.balance -= fee
+        }
+        charged
     }
     // The balance (or nonce) of a looked-up account.
     fn field(self, _ balance: bool, _ lookup: Lookup<usize>) -> u256 {
