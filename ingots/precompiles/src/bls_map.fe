@@ -193,12 +193,16 @@ fn fp2_poly<const N: usize>(_ coefficients: [[[u64; 6]; 2]; N], x: Fp2, monic: b
 
 fn fp2(_ limbs: [[u64; 6]; 2]) -> Fp2 { Fp2::new(c0: Fp::from_montgomery(limbs[0]), c1: Fp::from_montgomery(limbs[1])) }
 
-// (x, y) -> (x_num / x_den, y * y_num / y_den); a zero denominator gives the identity.
+// (x, y) -> (x_num / x_den, y * y_num / y_den) in Jacobian coordinates, with no
+// inversion: z = x_den y_den, x = x_num x_den y_den^2, y = y y_num x_den^3 y_den^2.
+// A zero denominator makes z zero, the identity.
 fn isogeny<F: Field + Copy>(_ point: Affine<F>, x_num: F, x_den: F, y_num: F, y_den: F) -> Point<F> {
-    if x_den.is_zero() || y_den.is_zero() { return Point::identity() }
-    Point::from_affine(Affine {
-        x: x_num.mul(x_den.invert()), y: point.y.mul(y_num).mul(y_den.invert()), infinity: false,
-    })
+    let x_den_y_den2 = x_den.mul(y_den.square())
+    Point {
+        x: x_num.mul(x_den_y_den2),
+        y: point.y.mul(y_num).mul(x_den.square()).mul(x_den_y_den2),
+        z: x_den.mul(y_den),
+    }
 }
 
 /// MAP_FP_TO_G1: the G1 point of a field element.
