@@ -484,6 +484,8 @@ impl Transaction {
     pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
+        // Empty code leaves the account as it is, with nothing to undo.
+        if code.len() == 0 { return OK }
         let address = address_word(address)
         let existing = self.state.existing_code_len(address)
         core::assert(existing.unwrap_or(default: 0) == 0)

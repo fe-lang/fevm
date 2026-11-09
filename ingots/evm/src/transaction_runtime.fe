@@ -1,3 +1,4 @@
+use core::MemBuffer
 use ingot::constants::MAX_U256
 use ingot::status::{
     ERR_BALANCE_OVERFLOW, ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK,
@@ -40,6 +41,24 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(tx.transient_load(address: 7, slot: 8) == 0)
     let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(7, 8) == 11)
+}
+
+#[test]
+fn empty_code_deployment_changes_nothing() {
+    var world = WorldState::empty()
+    core::assert(world.set_nonce(7, 1))
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
+    let empty = MemBuffer::empty()
+    let frozen = checkpoint(mut tx, is_static: true)
+    core::assert(tx.deploy_code(address: 7, code: empty.span()) == ERR_STATIC_WRITE)
+    tx.revert(frozen)
+    let parent = checkpoint(mut tx, is_static: false)
+    core::assert(tx.deploy_code(address: 7, code: empty.span()) == OK)
+    core::assert(tx.deploy_code(address: 8, code: empty.span()) == OK)
+    core::assert(tx.code_size(7) == 0 && tx.nonce(7) == 1 && !tx.exists(8))
+    tx.revert(parent)
+    core::assert(tx.code_size(7) == 0 && tx.nonce(7) == 1 && !tx.exists(8))
 }
 
 #[test]
