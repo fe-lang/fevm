@@ -123,8 +123,6 @@ const G2_Y_DEN: [[[u64; 6]; 2]; 3] = [
     [[0x66b10000003affc5, 0xcb1400e764ec0030, 0xa73e5eb56fa5d106, 0x8984c913a0fe09a9, 0x11e10afb78ad7f13, 0x05429d0e3e918f52], [0x534dffffffc4aae6, 0x5397ff174c67ffcf, 0xbff273eb870b251d, 0xdaf2827152870915, 0x393a9cbaca9e2dc3, 0x14be74dbfaee5748]],
 ]
 
-// G1's h_eff, 1 - x.
-const G1_COFACTOR: u256 = 0xd201000000010001
 
 /// Square roots and RFC 9380's sgn0 in Fp and Fp2.
 pub trait Root {
@@ -222,7 +220,8 @@ pub fn map_to_g1(_ u: Fp) -> Point<Fp> {
                  minus_b_over_a: Fp::from_montgomery(G1_MINUS_B_OVER_A), b_over_za: Fp::from_montgomery(G1_B_OVER_ZA))
     let mapped = isogeny(p, x_num: fp_poly(G1_X_NUM, x: p.x, monic: false), x_den: fp_poly(G1_X_DEN, x: p.x, monic: true),
                          y_num: fp_poly(G1_Y_NUM, x: p.x, monic: false), y_den: fp_poly(G1_Y_DEN, x: p.x, monic: true))
-    mapped.multiply(G1_COFACTOR)
+    // h_eff = |x| + 1.
+    mapped.multiply_by_x_abs().add(mapped)
 }
 
 /// MAP_FP2_TO_G2: the G2 point of an Fp2 element.
