@@ -1496,9 +1496,13 @@ impl Vm {
         }
         let third = below(top, 3)
         unsafe {
-            let lhs = *offset_bytes(third, 64)
-            let rhs = *offset_bytes(third, 32)
-            *third = if op == 0x08 { addmod(lhs, rhs, *third) } else { mulmod(lhs, rhs, *third) }
+            // A zero modulus gives zero, which the third word already holds.
+            let modulus = *third
+            if modulus != 0 {
+                let lhs = *offset_bytes(third, 64)
+                let rhs = *offset_bytes(third, 32)
+                *third = if op == 0x08 { addmod(lhs, rhs, modulus) } else { mulmod(lhs, rhs, modulus) }
+            }
         }
         self.next(code, pc.wrapping_add(1), gas - 8, depth - 2, below(top, 2), mut tracer)
     }
