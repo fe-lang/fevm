@@ -1568,7 +1568,9 @@ impl Vm {
     #[inline(always)]
     fn push_next<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
                             _ value: u256) {
-        if depth >= STACK_LIMIT {
+        // As the overflow it is, so that the fault is the branch taken out
+        // of line and the push runs straight through to its dispatch.
+        if depth > STACK_LIMIT - 1 {
             return self.faulted_at(ERR_STACK_OVERFLOW, pc, 0, depth)
         }
         unsafe { *top = value }
