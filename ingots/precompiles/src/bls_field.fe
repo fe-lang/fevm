@@ -1,4 +1,5 @@
 use core::Option
+use core::num::swap_bytes
 use core::ops::WrappingMul
 use ingot::inversion::invert_384
 use ingot::montgomery::{adc, mul_wide, sbb}
@@ -407,12 +408,10 @@ impl Fp {
     /// A 48-byte big-endian integer from `source` at `offset`, ignoring the top
     /// three bits when `masked` (compressed-point flags); None if not below p.
     pub fn from_be_bytes<T: ByteSource>(_ source: T, offset: usize, masked: bool) -> Option<Fp> {
+        // Six big-endian words, most significant first.
         var limbs: [u64; 6] = [0; 6]
-        for i in 0..48 {
-            var byte = source.byte_at(offset + i)
-            if i == 0 && masked { byte &= 0x1f }
-            limbs[(47 - i) / 8] |= (byte as u64) << (((47 - i) % 8) * 8).downcast_unchecked()
-        }
+        for i in 0..6 { limbs[5 - i] = swap_bytes(source.lane_at(offset + 8 * i)) }
+        if masked { limbs[5] &= 0x1fffffffffffffff }
         if at_least(limbs, MODULUS) { return Option::None }
         Option::Some(Fp::from_canonical(limbs))
     }
