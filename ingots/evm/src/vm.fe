@@ -449,11 +449,19 @@ impl Vm {
                 },
             }
         }
+        self.push(self.hash_memory(offset, len))
+    }
+
+    // The Keccak-256 hash of `len` bytes of memory at `offset`, a range
+    // within memory. Out of line, so the hashing handler keeps its arguments
+    // in registers.
+    #[inline(never)]
+    fn hash_memory(self, _ offset: u256, _ len: u256) -> u256 {
         var hash = Keccak256::new()
         if len != 0 {
             hash.update(self.memory, offset: offset.downcast_unchecked(), len: len.downcast_unchecked())
         }
-        self.push(hash.finish_word())
+        hash.finish_word()
     }
 
     // An access within active memory needs no charge or growth.
@@ -1332,6 +1340,8 @@ impl Vm {
             0x37 => self.op_calldatacopy(code, pc, gas, depth, top, mut tracer),
             0x39 => self.op_codecopy(code, pc, gas, depth, top, mut tracer),
             0x5e => self.op_mcopy(code, pc, gas, depth, top, mut tracer),
+            0x3e => self.op_returndatacopy(code, pc, gas, depth, top, mut tracer),
+            0x20 => self.op_keccak256(code, pc, gas, depth, top, mut tracer),
             0x56 => self.op_jump(code, pc, gas, depth, top, mut tracer),
             0x57 => self.op_jumpi(code, pc, gas, depth, top, mut tracer),
             0x58 => self.op_pc(code, pc, gas, depth, top, mut tracer),
@@ -2055,6 +2065,43 @@ impl Vm {
         }
         if cost > 3 { self.copy_padded(top, from: code, size: self.code_len) }
         self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // RETURNDATACOPY within memory and the return data; the interpreter
+    // loop handles everything else.
+    fn op_returndatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let source = if depth < 3 { 0 } else { unsafe { *below(top, 2) } }
+        let len = if depth < 3 { 0 } else { unsafe { *below(top, 3) } }
+        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len) }
+        let available = self.return_data.len() as u256
+        if cost == 0 || gas < cost || source > available || len > available - source {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        if cost > 3 { self.copy_padded(top, from: self.return_data.span().ptr(), size: self.return_data.len()) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    }
+
+    // KECCAK256 of a range within memory; the interpreter loop handles
+    // everything else.
+    fn op_keccak256<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+        let offset = if depth < 2 { 0 } else { unsafe { *below(top, 1) } }
+        let len = if depth < 2 { 0 } else { unsafe { *below(top, 2) } }
+        let cost = if depth < 2 { 0 } else { self.hash_within_cost(offset, len) }
+        if cost == 0 || gas < cost {
+            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        }
+        unsafe { *below(top, 2) = self.hash_memory(offset, len) }
+        self.next(code, pc.wrapping_add(1), gas - cost, depth - 1, below(top, 1), mut tracer)
+    }
+
+    // The gas of KECCAK256 over a range that needs no memory growth: 30 and 6
+    // per word, or zero for a range outside memory.
+    fn hash_within_cost(self, _ offset: u256, _ len: u256) -> u64 {
+        if len == 0 { return 30 }
+        if len > self.memory_size as u256 { return 0 }
+        let count: u64 = len.downcast_unchecked()
+        if !self.in_memory(offset, len: count) { return 0 }
+        30 + 6 * ((count + 31) / 32)
     }
 
     // MCOPY with both ranges within memory; the interpreter loop handles
