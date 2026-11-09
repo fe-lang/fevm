@@ -27,6 +27,9 @@ const TOUCHED_ONCE: u8 = 10
 // The transaction's nonce increment and gas purchase: `slot` is the
 // sender's previous nonce and `previous` its previous balance.
 const SENDER: u8 = 11
+// A new contract's first nonce and endowment: `slot` is its account's
+// position and `previous` its previous balance. Its nonce was zero.
+const CONTRACT: u8 = 12
 
 // An address's marks, the bits of its `marks` entry. Undo clears the warm,
 // touched and doomed marks a frame set; creation marks survive rollback.
@@ -326,6 +329,10 @@ impl Transaction {
                                                  value: change.previous, existed: change.existed),
                 NONCE => self.state.restore_at(balance: false, change.address, position: change.slot.downcast_truncate(),
                                                value: change.previous, existed: change.existed),
+                CONTRACT => self.state.restore_at(balance: false, change.address,
+                                                  position: change.slot.downcast_truncate(), value: 0, existed: true)
+                    && self.state.restore_at(balance: true, change.address, position: change.slot.downcast_truncate(),
+                                             value: change.previous, existed: change.existed),
                 SENDER => self.state.set_nonce(change.address, change.slot)
                     && self.state.restore(balance: true, change.address, value: change.previous,
                                           existed: change.existed),
@@ -417,7 +424,8 @@ impl Transaction {
         if !self.buffers.journal.record(kind, address, slot: replaced.position as u256, previous: replaced.previous,
                                         existed: replaced.found) {
             // Restoring a value the record holds needs no allocation.
-            core::assert(self.state.replace(balance: kind == BALANCE, address, value: replaced.previous).written)
+            core::assert(self.state.replace(balance: kind != NONCE, address, value: replaced.previous).written)
+            if kind == CONTRACT { core::assert(self.state.replace(balance: false, address, value: 0).written) }
             if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
             return ERR_HOST_ALLOCATION
         }
@@ -446,6 +454,17 @@ impl Transaction {
     }
     pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
         self.write(kind: NONCE, address, slot: 0, value)
+    }
+    /// Sets a new contract's nonce to one and credits it `value`, with one
+    /// lookup and one journal entry; one past 2^256 is ERR_BALANCE_OVERFLOW
+    /// and changes nothing.
+    pub fn endow(mut self, address: u256, value: u256) -> i32 {
+        self.started = true
+        if self.is_static { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        let replaced = self.state.endow(address, amount: value)
+        if replaced.overflowed { return ERR_BALANCE_OVERFLOW }
+        self.journal_account(kind: CONTRACT, address, replaced)
     }
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
         self.adjust(kind: NONCE, address, amount: 1, add: true)
@@ -578,7 +597,7 @@ impl Transaction {
             let address = change.address
             if kind == DOOMED { self.state.remove_account(address) }
             let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE
-                || kind == SENDER || kind == CODE || kind == DELEGATION
+                || kind == SENDER || kind == CONTRACT || kind == CODE || kind == DELEGATION
             if touched && address != recent[0] && address != recent[1] && address != recent[2]
                 && address != recent[3] {
                 self.state.remove_if_empty(address)

@@ -295,6 +295,28 @@ impl WorldState {
         }
         self.store(balance, address, lookup, previous, value: if add { previous + amount } else { previous - amount })
     }
+    /// Opens the account of a new contract at `address`, an address word,
+    /// whose nonce is zero (EIP-684): sets the nonce to one and adds `amount`
+    /// to the balance, with one lookup. `previous` is the balance before. An
+    /// addition past 2^256 changes nothing and reports `overflowed`.
+    pub fn endow(mut self, _ address: u256, amount: u256) -> Replaced {
+        let lookup = self.index.get(address)
+        let previous = self.field(balance: true, lookup)
+        if amount > MAX_U256 - previous {
+            return Replaced { previous, found: lookup.found, changed: false, written: true, overflowed: true, position: 0 }
+        }
+        let at = if lookup.found { lookup.value } else {
+            match self.add_record(address) {
+                Option::Some(at) => at,
+                Option::None => return Replaced { previous, found: false, changed: true, written: false, overflowed: false, position: 0 },
+            }
+        }
+        let account = mut self.accounts[at]
+        core::assert(account.nonce == 0)
+        account.nonce = 1
+        account.balance = previous + amount
+        Replaced { previous, found: lookup.found, changed: true, written: true, overflowed: false, position: at }
+    }
     /// Increments the nonce of `address`, an address word, and subtracts
     /// `fee`, which its balance must hold, with one lookup. A nonce of
     /// 2^256 - 1 is left as it is, and so is the balance.
