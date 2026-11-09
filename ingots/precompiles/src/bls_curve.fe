@@ -157,21 +157,66 @@ impl<F> Affine<F> where F: Field + Copy {
     }
 }
 
-/// [s] a + [t] b by one double-and-add over both scalars (Shamir's trick).
-pub fn multiply_two<F: Field + Copy>(_ a: Affine<F>, _ s: u256, _ b: Affine<F>, _ t: u256) -> Point<F> {
-    let sum = Point::from_affine(a).add_affine(b).to_affine()
+// x^2 for the BLS parameter x; [x^2] (x, y) = (beta x, -y) on G1.
+const X_SQUARED: u256 = 0xac45a4010001a4020000000100000000
+
+/// [s] a + [t] b for points of G1 and scalars below r. Each scalar splits as
+/// k0 + k1 x^2 with both parts below 2^128, and [x^2] P = (beta x, -y) (see
+/// `in_subgroup`), so one double-and-add over 128 bits sums the four
+/// products, adding the precomputed sum of the points whose bit is set.
+pub fn multiply_two(_ a: Affine<Fp>, _ s: u256, _ b: Affine<Fp>, _ t: u256) -> Point<Fp> {
+    let scalars = [s % X_SQUARED, s / X_SQUARED, t % X_SQUARED, t / X_SQUARED]
+    let beta = Fp::from_montgomery(BETA)
+    let points = [
+        a, Affine { x: a.x.mul(beta), y: a.y.neg(), infinity: a.infinity },
+        b, Affine { x: b.x.mul(beta), y: b.y.neg(), infinity: b.infinity },
+    ]
+    // The sum of each subset of the points, indexed by its bits.
+    var sums: [Point<Fp>; 16] = [Point::identity(); 16]
+    for i in 0..4 {
+        let size: usize = 1 << i
+        for m in 0..size { sums[m + size] = sums[m].add_affine(points[i]) }
+    }
+    let table = to_affine_all(sums)
     var result = Point::identity()
-    var bit: u64 = 256
+    var bit: u64 = (256 - core::num::leading_zeros(scalars[0] | scalars[1] | scalars[2] | scalars[3])).downcast_truncate()
     while bit > 0 {
         bit -= 1
         result = result.double()
-        let in_s = (s >> bit as u256) & 1 == 1
-        let in_t = (t >> bit as u256) & 1 == 1
-        if in_s && in_t { result = result.add_affine(sum) }
-        else if in_s { result = result.add_affine(a) }
-        else if in_t { result = result.add_affine(b) }
+        let index: usize = ((scalars[0] >> bit as u256) & 1 | ((scalars[1] >> bit as u256) & 1) << 1
+            | ((scalars[2] >> bit as u256) & 1) << 2 | ((scalars[3] >> bit as u256) & 1) << 3).downcast_truncate()
+        if index != 0 { result = result.add_affine(table[index]) }
     }
     result
+}
+
+// The affine forms of 16 points, with one inversion (Montgomery's trick):
+// the product of the nonzero z, inverted, gives each one's inverse by
+// multiplying out the others.
+fn to_affine_all(_ points: [Point<Fp>; 16]) -> [Affine<Fp>; 16] {
+    var prefix: [Fp; 16] = [Fp::one(); 16]
+    var product = Fp::one()
+    for i in 0..16 {
+        if !points[i].is_identity() { product = product.mul(points[i].z) }
+        prefix[i] = product
+    }
+    var inverse = product.invert()
+    var affine: [Affine<Fp>; 16] = [Affine::identity(); 16]
+    var i: usize = 16
+    while i > 0 {
+        i -= 1
+        let point = points[i]
+        if !point.is_identity() {
+            // `inverse` is the inverse of prefix[i]; times prefix[i - 1], of z.
+            let z_inverse = if i == 0 { inverse } else { inverse.mul(prefix[i - 1]) }
+            inverse = inverse.mul(point.z)
+            let z_inverse_squared = z_inverse.square()
+            affine[i] = Affine {
+                x: point.x.mul(z_inverse_squared), y: point.y.mul(z_inverse_squared).mul(z_inverse), infinity: false,
+            }
+        }
+    }
+    affine
 }
 
 // The window width for Pippenger's method over k points, or 0 when separate

@@ -1,6 +1,6 @@
 use core::{MemArray, MemBuffer}
 use ingot::{FAILURE, SUCCESS, run}
-use ingot::bls_curve::{ORDER, Point, g1_generator, g2_generator, on_g1, on_g2}
+use ingot::bls_curve::{Affine, ORDER, Point, g1_generator, g2_generator, multiply_two, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_tower::Fp2
 
@@ -197,5 +197,18 @@ fn bls_msm_matches_separate_multiplications() {
         append_g2(mut want, expected)
         let output = run(address: 0x0e, input, gas: 1000000000)
         core::assert(output.status == SUCCESS && same(output.output, want))
+    }
+}
+
+#[test]
+fn bls_multiply_two_matches_separate_multiplications() {
+    let g = g1_generator()
+    let a = g.multiply(0x1234567890abcdef).to_affine()
+    let b = g.double().add(g).to_affine()
+    let large = ORDER - 1
+    for (p, q) in [(a, b), (a, Affine<Fp>::identity()), (b, b.neg()), (a, a)] {
+        for (s, t) in [(0, 0), (1, 0), (0, 1), (large, large), (large - 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a, 0xd201000000010000 * 0xd201000000010000 + 7)] {
+            core::assert(multiply_two(p, s, q, t).equals(p.multiply(s).add(q.multiply(t))))
+        }
     }
 }
