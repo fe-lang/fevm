@@ -682,20 +682,20 @@ impl Vm {
         self.push(result)
     }
 
-    fn sload(mut self, _ call: CallEnv, _ state: mut Transaction) {
+    fn sload(mut self, _ state: mut Transaction) {
         let slot = self.pop()
         if !self.ok() { return }
         // A warm slot needs no journal entry.
-        let warm = state.storage_is_warm(address: call.address, slot)
+        let warm = state.storage_is_warm(address: self.call.address, slot)
         if !self.charge(if warm { 100 } else { 2100 }) { return }
         if !warm {
-            self.fault(state.warm_slot(address: call.address, slot))
+            self.fault(state.warm_slot(address: self.call.address, slot))
             if !self.ok() { return }
         }
-        self.push(state.storage_load(address: call.address, slot))
+        self.push(state.storage_load(address: self.call.address, slot))
     }
 
-    fn sstore(mut self, _ call: CallEnv, _ state: mut Transaction) {
+    fn sstore(mut self, _ state: mut Transaction) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -707,22 +707,22 @@ impl Vm {
                 self.fault(ERR_OUT_OF_GAS)
                 return
             }
-            let charge = state.storage_charge(address: call.address, slot, value)
+            let charge = state.storage_charge(address: self.call.address, slot, value)
             if self.charge(charge.gas as u128) {
-                self.fault(state.warm_slot(address: call.address, slot))
-                if self.ok() { self.fault(state.storage_store(address: call.address, slot, value)) }
+                self.fault(state.warm_slot(address: self.call.address, slot))
+                if self.ok() { self.fault(state.storage_store(address: self.call.address, slot, value)) }
             }
         }
     }
 
-    fn tload(mut self, _ call: CallEnv, _ state: Transaction) {
+    fn tload(mut self, _ state: Transaction) {
         let slot = self.pop()
         if self.ok() {
-            self.push(state.transient_load(address: call.address, slot))
+            self.push(state.transient_load(address: self.call.address, slot))
         }
     }
 
-    fn tstore(mut self, _ call: CallEnv, _ state: mut Transaction) {
+    fn tstore(mut self, _ state: mut Transaction) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -730,7 +730,7 @@ impl Vm {
         let slot = self.pop()
         let value = self.pop()
         if self.ok() {
-            self.fault(state.transient_store(address: call.address, slot, value))
+            self.fault(state.transient_store(address: self.call.address, slot, value))
         }
     }
 
@@ -760,7 +760,7 @@ impl Vm {
         self.zero_memory(from: dest + copied, to: dest + len.downcast_unchecked())
     }
 
-    fn log(mut self, _ topics_count: u64, _ call: CallEnv, _ state: mut Transaction) {
+    fn log(mut self, _ topics_count: u64, _ state: mut Transaction) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -785,7 +785,7 @@ impl Vm {
         }
         if !self.ok() || !self.expand_memory(plan.size) { return }
         let start: usize = if length == 0 { 0 } else { offset.downcast_unchecked() }
-        self.fault(state.emit_log(address: call.address, topics, topic_count: topics_count,
+        self.fault(state.emit_log(address: self.call.address, topics, topic_count: topics_count,
                                   data: self.memory.slice(offset: start, len: length.downcast_truncate())))
     }
 
@@ -978,11 +978,11 @@ impl Vm {
         }
     }
 
-    fn start_call<T: Tracer>(mut self, op: i32, _ call: CallEnv, _ state: mut Transaction, depth: usize,
+    fn start_call<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                              _ tracer: mut T) -> Option<Box<Frame>> {
         let requested = self.pop()
         let code_address = address_word(self.pop())
-        let sender = address_word(call.address)
+        let sender = address_word(self.call.address)
         let transfers = op == 0xf1 || op == 0xf2
         let value = if transfers { self.pop() } else { 0 }
         if !self.ok() { return Option::None }
@@ -1089,9 +1089,9 @@ impl Vm {
             return Option::None
         }
         let child_call = CallEnv {
-            address, caller: if op == 0xf4 { address_word(call.caller) } else { sender },
-            callvalue: if op == 0xf4 { call.callvalue } else { value },
-            origin: call.origin, gasprice: call.gasprice, gas_limit: child_gas, is_static,
+            address, caller: if op == 0xf4 { address_word(self.call.caller) } else { sender },
+            callvalue: if op == 0xf4 { self.call.callvalue } else { value },
+            origin: self.call.origin, gasprice: self.call.gasprice, gas_limit: child_gas, is_static,
         }
         var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
@@ -1106,7 +1106,7 @@ impl Vm {
         Option::Some(frame)
     }
 
-    fn start_create<T: Tracer>(mut self, op: i32, _ call: CallEnv, _ state: mut Transaction, depth: usize,
+    fn start_create<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                                _ tracer: mut T) -> Option<Box<Frame>> {
         let value = self.pop()
         let offset = self.pop()
@@ -1128,7 +1128,7 @@ impl Vm {
         }
         let count: usize = len.downcast_unchecked()
         let start: usize = if count == 0 { 0 } else { offset.downcast_unchecked() }
-        let sender = address_word(call.address)
+        let sender = address_word(self.call.address)
         let account = state.sender(sender)
         let address = if op == 0xf0 {
             create_address(sender, nonce: account.nonce)
@@ -1175,8 +1175,8 @@ impl Vm {
         tracer.enter(CallStart { kind: op.downcast_unchecked(), depth: depth + 1, from: sender, to: address, value,
                                  gas: create_gas }, input: program.bytes())
         let child_call = CallEnv {
-            address, caller: sender, callvalue: value, origin: call.origin,
-            gasprice: call.gasprice, gas_limit: create_gas, is_static: false,
+            address, caller: sender, callvalue: value, origin: self.call.origin,
+            gasprice: self.call.gasprice, gas_limit: create_gas, is_static: false,
         }
         var frame = match frame_allocation(mut state.buffers()) {
             Option::Some(frame) => frame,
@@ -1193,10 +1193,10 @@ impl Vm {
 
     // EIP-6780: the balance moves to the beneficiary; only an account created by
     // this transaction is deleted, at settlement, and loses ether sent to itself.
-    fn selfdestruct(mut self, _ call: CallEnv, _ state: mut Transaction) {
+    fn selfdestruct(mut self, _ state: mut Transaction) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
-        let me = address_word(call.address)
+        let me = address_word(self.call.address)
         let balance = state.balance(me)
         var gas: u128 = 5000
         if !state.account_is_warm(beneficiary) { gas += 2600 }
@@ -2281,7 +2281,6 @@ impl Vm {
 
     fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ state: mut Transaction,
                                   depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
-        let call = self.call
         // Pushes skip the capacity check, so the stack holds its limit first.
         if !self.stack.try_reserve(STACK_LIMIT - self.stack.len()) {
             self.fault(ERR_HOST_ALLOCATION)
@@ -2370,7 +2369,7 @@ impl Vm {
                             } else { 0 }
                             if !self.pushed(hash) { break }
                         },
-                        0x47 => if !self.pushed(state.balance(call.address)) { break },
+                        0x47 => if !self.pushed(state.balance(self.call.address)) { break },
                         0x53 => {
                             self.gas_remaining = gas
                             self.mstore8()
@@ -2379,22 +2378,22 @@ impl Vm {
                         },
                         0x54 => {
                             self.gas_remaining = gas
-                            self.sload(call, mut state)
+                            self.sload(mut state)
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         },
                         0x55 => {
                             self.gas_remaining = gas
-                            self.sstore(call, mut state)
+                            self.sstore(mut state)
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         },
                         0x5c => {
-                            self.tload(call, state)
+                            self.tload(state)
                             if !self.ok() { break }
                         },
                         0x5d => {
-                            self.tstore(call, mut state)
+                            self.tstore(mut state)
                             if !self.ok() { break }
                         },
                         0x5e => {
@@ -2405,7 +2404,7 @@ impl Vm {
                         },
                         0xa0 | 0xa1 | 0xa2 | 0xa3 | 0xa4 => {
                             self.gas_remaining = gas
-                            self.log((op - 0xa0).downcast_unchecked(), call, mut state)
+                            self.log((op - 0xa0).downcast_unchecked(), mut state)
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         },
@@ -2423,7 +2422,7 @@ impl Vm {
                         },
                         0xff => {
                             self.gas_remaining = gas
-                            self.selfdestruct(call, mut state)
+                            self.selfdestruct(mut state)
                             gas = self.gas_remaining
                             break
                         },
@@ -2431,9 +2430,9 @@ impl Vm {
                             self.pc = pc
                             self.gas_remaining = gas
                             let child = if op == 0xf0 || op == 0xf5 {
-                                self.start_create(op, call, mut state, depth, mut tracer)
+                                self.start_create(op, mut state, depth, mut tracer)
                             } else {
-                                self.start_call(op, call, mut state, depth, mut tracer)
+                                self.start_call(op, mut state, depth, mut tracer)
                             }
                             match child {
                                 Option::Some(frame) => return Option::Some(frame),
