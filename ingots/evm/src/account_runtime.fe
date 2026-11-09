@@ -13,6 +13,21 @@ impl ByteSource for OversizedCode {
 }
 
 #[test]
+fn unhashed_code_hashes_on_first_read() {
+    var world = WorldState::empty()
+    core::assert(world.set_code_unhashed(address: 11, code: [97 as u8, 98, 99]) == OK)
+    // Compaction moves the record before its first read.
+    core::assert(world.set_code(address: 22, code: [1 as u8; 300]) == OK)
+    core::assert(world.set_code(address: 22, code: [2 as u8]) == OK)
+    let abc = 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45
+    core::assert(world.code_hash(11) == abc && world.code_hash(11) == abc)
+    core::assert(world.set_code_unhashed(address: 33, code: [0 as u8; 0]) == OK)
+    core::assert(world.set_nonce(33, 1) && world.code_hash(33) == EMPTY_CODE_HASH)
+    core::assert(world.set_code_unhashed(address: 11, code: OversizedCode {}) == ERR_HOST_ALLOCATION)
+    core::assert(world.code_hash(11) == abc)
+}
+
+#[test]
 fn account_code_replacement_compacts_and_preserves_other_accounts() {
     var world = WorldState::empty()
     core::assert(world.set_balance(11, 9))
@@ -139,7 +154,7 @@ fn world_clone_is_independent_of_the_original() {
     core::assert(world.set_balance(0xaa, 7) && world.set_nonce(0xaa, 2))
     core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5b]) == OK)
     core::assert(world.storage_store(0xbb, 3, 9) && world.set_block_hash(5, 0x55))
-    let snapshot = world.try_clone().unwrap()
+    var snapshot = world.try_clone().unwrap()
     core::assert(world.set_balance(0xaa, 8) && world.storage_store(0xbb, 3, 10))
     core::assert(world.set_code(address: 0xbb, code: [0x00 as u8]) == OK)
     world.remove_account(0xaa)

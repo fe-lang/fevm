@@ -13,6 +13,7 @@ struct Account {
     address: u256,
     balance: u256,
     nonce: u256,
+    // Zero for code set by `set_code_unhashed` until the first `code_hash`.
     code_hash: u256,
     code_offset: usize,
     code_len: usize,
@@ -371,9 +372,14 @@ impl WorldState {
     }
     // EIP-1052: even an explicitly present account hashes to zero if its
     // balance, nonce and code are empty. Storage is not part of that predicate.
-    pub fn code_hash(self, _ address: u256) -> u256 {
+    pub fn code_hash(mut self, _ address: u256) -> u256 {
         let lookup = self.index.get(address_word(address))
-        if !lookup.found || self.empty_at(lookup.value) { 0 } else { self.accounts[lookup.value].code_hash }
+        if !lookup.found || self.empty_at(lookup.value) { return 0 }
+        let account = self.accounts[lookup.value]
+        if account.code_hash != 0 { return account.code_hash }
+        let hash = keccak256_word(self.code.slice(offset: account.code_offset + 64, len: account.code_len))
+        self.accounts[lookup.value].code_hash = hash
+        hash
     }
     // The arena offset and length of an account's code. One without code has
     // no arena record to address.
@@ -397,9 +403,18 @@ impl WorldState {
         let jumpdests = self.code.slice(offset: offset + len, len: jumpdest_map_len(len))
         Program::analyzed(self.code.slice(offset, len), jumpdests)
     }
-    // Copies `code` into the arena with its jump-destination map and hash. Hosts
-    // set up accounts with it; code deposits and EIP-7702 delegations use it too.
+    // Copies `code` into the arena with its jump-destination map and hash.
+    // Hosts set up accounts with it.
     pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
+        self.store_code(address, code, hashed: true)
+    }
+    // `set_code` for code deposits and EIP-7702 delegations, leaving the hash
+    // to the first `code_hash`: most such code is never hashed, and code that
+    // a SELFDESTRUCT removes in its creating transaction never can be.
+    pub fn set_code_unhashed<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
+        self.store_code(address, code, hashed: false)
+    }
+    fn store_code<T: ByteSource>(mut self, address: u256, code: T, hashed: bool) -> i32 {
         let address = address_word(address)
         let lookup = self.index.get(address)
         let len = code.len()
@@ -429,7 +444,6 @@ impl WorldState {
             self.code.span().write_word(offset: code_offset, value: DEAD_CODE)
             self.dead_code += record_len(code_len)
         }
-        var hash = EMPTY_CODE_HASH
         if len != 0 {
             self.code.span().write_word(offset: old_size, value: address)
             self.code.span().write_word(offset: old_size + 32, value: len as u256)
@@ -449,12 +463,11 @@ impl WorldState {
             let map_len = jumpdest_map_len(len)
             self.code.slice(offset: map, len: map_len).zero()
             mark_jumpdests(code, mut self.code.slice(offset: map, len: map_len))
-            hash = keccak256_word(code)
         }
         let account = mut self.accounts[at]
         account.code_offset = old_size
         account.code_len = len
-        account.code_hash = hash
+        account.code_hash = if len == 0 { EMPTY_CODE_HASH } else if hashed { keccak256_word(code) } else { 0 }
         if self.dead_code > self.code.len() - self.dead_code { self.compact_code() }
         OK
     }
