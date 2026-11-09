@@ -36,9 +36,7 @@ const G2_DISCOUNT: [u16; 128] = [
 ]
 
 fn fp_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp> {
-    for i in 0..16 {
-        if input.byte_at(offset + i) != 0 { return Option::None }
-    }
+    if (input.lane_at(offset) | input.lane_at(offset + 8)) != 0 { return Option::None }
     Fp::from_be_bytes(input, offset: offset + 16, masked: false)
 }
 
@@ -73,11 +71,7 @@ fn g2_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Aff
 // Write `value` as 64 big-endian bytes at `offset`.
 fn write_fp(_ out: mut MemBuffer, offset: usize, _ value: Fp) {
     let limbs = value.to_canonical()
-    var i: u64 = 0
-    while i < 48 {
-        out[offset + 16 + i.downcast_truncate()] = (limbs[((47 - i) / 8).downcast_truncate()] >> (((47 - i) % 8) * 8)).downcast_truncate()
-        i += 1
-    }
+    for i in 0..6 { out.write_be<u64>(offset: offset + 16 + 8 * i, value: limbs[5 - i]) }
 }
 
 fn g1_output(_ point: Point<Fp>, gas_used: u64) -> Output {
