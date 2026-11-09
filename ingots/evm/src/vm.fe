@@ -72,7 +72,6 @@ fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
         0x1c => if lhs >= 256 { 0 } else { rhs >> lhs },
         0x12 => if signed_less(lhs, rhs) { 1 } else { 0 },
         0x13 => if signed_less(rhs, lhs) { 1 } else { 0 },
-        0x1a => if lhs >= 32 { 0 } else { (rhs >> ((31 - lhs) * 8)) & 255 },
         0x0b => signextend(byte_index: lhs, value: rhs),
         0x1d => sar(shift: lhs, value: rhs),
         _ => return Option::None,
@@ -1432,8 +1431,26 @@ impl Vm {
         self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x18)
     }
 
+    // The top word indexes a byte of the second from its most significant
+    // end. A native word holds its bytes least significant first, so the
+    // byte is read from the second word's place.
     fn op_byte<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x1a)
+        if gas < 3 {
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+        }
+        if depth < 2 {
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
+        }
+        let second = below(top, 2)
+        unsafe {
+            let index = *offset_bytes(second, 32)
+            *second = if index >= 32 { 0 } else {
+                let at: usize = (31 - index).downcast_unchecked()
+                let byte = *offset_bytes(cast<u256, u8>(second), at)
+                byte as u256
+            }
+        }
+        self.next(code, pc.wrapping_add(1), gas - 3, depth - 1, below(top, 1), mut tracer)
     }
 
     fn op_shl<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
