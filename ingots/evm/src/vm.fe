@@ -126,12 +126,55 @@ unsafe fn swap_piece(_ a: *u64, _ b: *u64, _ index: usize) {
     *b = value
 }
 
-/// The handlers' stack word `count` words below `top`, the slot just past
-/// the top word. The offset wraps, so this subtracts.
-#[inline(always)]
-fn below(_ top: *u256, _ count: usize) -> *u256 {
-    let zero: usize = 0
-    offset_bytes(top, zero.wrapping_sub(count.wrapping_mul(32)))
+/// Where a running frame is, as the handlers pass it from one to the next:
+/// its code, the position of the opcode to run, the gas left, and the stack,
+/// as the slot just past its top word and the number of words below it.
+struct Cursor { code: *u8, pc: usize, gas: u64, top: *u256, depth: usize }
+impl Copy for Cursor {}
+
+impl Cursor {
+    /// Charges `cost`, or leaves the gas as it is when it does not cover it.
+    fn charge(mut self, _ cost: u64) -> bool {
+        if cost > self.gas { return false }
+        self.gas -= cost
+        true
+    }
+    /// Whether the stack holds `count` words.
+    fn holds(self, _ count: usize) -> bool { self.depth >= count }
+    /// Whether the stack has room for another word (`STACK_LIMIT`).
+    fn has_room(self) -> bool { self.depth < STACK_LIMIT }
+    /// The slot of the word `index` from the top, 1 for the top word, which
+    /// the stack must hold. The offset wraps, so this subtracts.
+    fn slot(self, _ index: usize) -> *u256 {
+        let zero: usize = 0
+        offset_bytes(self.top, zero.wrapping_sub(index.wrapping_mul(32)))
+    }
+    fn peek(self, _ index: usize) -> u256 { unsafe { *self.slot(index) } }
+    fn set(self, _ index: usize, _ value: u256) { unsafe { *self.slot(index) = value } }
+    /// Removes the top word, which the stack must hold, and returns it.
+    fn pop(mut self) -> u256 {
+        let value = self.peek(1)
+        self.discard(1)
+        value
+    }
+    /// Removes `count` words, which the stack must hold.
+    fn discard(mut self, _ count: usize) {
+        self.top = self.slot(count)
+        self.depth -= count
+    }
+    /// Pushes `value`, for which the stack must have room: `run_until_child`
+    /// reserves `STACK_LIMIT` words.
+    fn push(mut self, _ value: u256) {
+        unsafe { *self.top = value }
+        self.top = offset_bytes(self.top, 32)
+        self.depth += 1
+    }
+    /// Moves on `count` bytes. `pc` stays within the code and its padding,
+    /// far from overflow.
+    fn advance(mut self, _ count: usize) { self.pc = self.pc.wrapping_add(count) }
+    /// The big-endian `T` at `offset` bytes from the opcode, within the code
+    /// or its padding, which follows every immediate with a whole word.
+    fn read<T: IntWord>(self, _ offset: usize) -> T { unsafe { read_code<T>(self.code, self.pc.wrapping_add(offset)) } }
 }
 
 fn signed_less(_ lhs: u256, _ rhs: u256) -> bool {
@@ -1239,618 +1282,493 @@ impl Vm {
     }
 
     // Opcodes that need nothing but the stack, memory and the code run as
-    // handlers, each of which ends by dispatching the next opcode itself, so
-    // dispatch is one indirect tail call and `pc`, gas and the stack depth
-    // stay in argument registers instead of a loop body Cranelift spills
-    // them across. Each handler gets the opcode's own `pc`. `self.stack`'s
-    // length is stale while they run: they keep `depth` words initialized
-    // from `self.stack.ptr()` up, and store it with `pc` and gas when the
-    // frame stops, reaches an opcode `run_until_child` runs, or calls code
-    // that uses the stack. They also get `top`, the slot `depth` words up,
-    // so each operand is a constant offset from a register. `pc` stays
-    // within the code and its padding, far from overflow.
+    // handlers, which take a `Cursor` and end by running the next opcode
+    // themselves: dispatch is one indirect tail call, and the cursor stays
+    // in registers from one handler to the next. `self.pc`, its gas and its
+    // stack's length are stale while they run, until a handler saves the
+    // cursor (`save`) to stop or to call code that uses them. Out of line,
+    // so that `run_until_child`'s loop does not hold the cursor.
     #[inline(never)]
     fn dispatch<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ tracer: mut T) {
         let depth = self.stack.len()
-        self.next(code, pc, gas, depth, offset_bytes(self.stack.ptr(), depth.wrapping_mul(32)), mut tracer)
+        self.next(Cursor { code, pc, gas, top: offset_bytes(self.stack.ptr(), depth * 32), depth }, mut tracer)
     }
 
-    // Every arm tail-calls a handler with the same arguments, which Sonatina
-    // turns into a table of handlers.
+    // Runs the opcode at the cursor. Every arm tail-calls its handler, which
+    // Sonatina turns into a jump through a table. Every handler ends in its
+    // own copy, so that the processor predicts each opcode's successor from
+    // the opcode before it.
     #[inline(always)]
-    fn next<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let op = unsafe { read_code<u8>(code, pc) }
-        tracer.step(Step { pc, op, gas, stack_len: depth, memory_size: self.memory_size, depth: self.call_depth })
+    fn next<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) {
+        let op = c.read<u8>(0)
+        tracer.step(Step { pc: c.pc, op, gas: c.gas, stack_len: c.depth, memory_size: self.memory_size, depth: self.call_depth })
         match op as i32 {
-            0x00 => self.op_stop(code, pc, gas, depth, top, mut tracer),
-            0x04 => self.op_div(code, pc, gas, depth, top, mut tracer),
-            0x05 => self.op_sdiv(code, pc, gas, depth, top, mut tracer),
-            0x06 => self.op_mod(code, pc, gas, depth, top, mut tracer),
-            0x07 => self.op_smod(code, pc, gas, depth, top, mut tracer),
-            0x08 => self.op_addmod(code, pc, gas, depth, top, mut tracer),
-            0x09 => self.op_mulmod(code, pc, gas, depth, top, mut tracer),
-            0x0a => self.op_exp(code, pc, gas, depth, top, mut tracer),
-            0x5f => self.op_push0(code, pc, gas, depth, top, mut tracer),
-            0x60 => self.op_push<1, T>(code, pc, gas, depth, top, mut tracer),
-            0x61 => self.op_push<2, T>(code, pc, gas, depth, top, mut tracer),
-            0x62 => self.op_push<3, T>(code, pc, gas, depth, top, mut tracer),
-            0x63 => self.op_push<4, T>(code, pc, gas, depth, top, mut tracer),
-            0x64 => self.op_push<5, T>(code, pc, gas, depth, top, mut tracer),
-            0x65 => self.op_push<6, T>(code, pc, gas, depth, top, mut tracer),
-            0x66 => self.op_push<7, T>(code, pc, gas, depth, top, mut tracer),
-            0x67 => self.op_push<8, T>(code, pc, gas, depth, top, mut tracer),
-            0x68 => self.op_push<9, T>(code, pc, gas, depth, top, mut tracer),
-            0x69 => self.op_push<10, T>(code, pc, gas, depth, top, mut tracer),
-            0x6a => self.op_push<11, T>(code, pc, gas, depth, top, mut tracer),
-            0x6b => self.op_push<12, T>(code, pc, gas, depth, top, mut tracer),
-            0x6c => self.op_push<13, T>(code, pc, gas, depth, top, mut tracer),
-            0x6d => self.op_push<14, T>(code, pc, gas, depth, top, mut tracer),
-            0x6e => self.op_push<15, T>(code, pc, gas, depth, top, mut tracer),
-            0x6f => self.op_push<16, T>(code, pc, gas, depth, top, mut tracer),
-            0x70 => self.op_push<17, T>(code, pc, gas, depth, top, mut tracer),
-            0x71 => self.op_push<18, T>(code, pc, gas, depth, top, mut tracer),
-            0x72 => self.op_push<19, T>(code, pc, gas, depth, top, mut tracer),
-            0x73 => self.op_push<20, T>(code, pc, gas, depth, top, mut tracer),
-            0x74 => self.op_push<21, T>(code, pc, gas, depth, top, mut tracer),
-            0x75 => self.op_push<22, T>(code, pc, gas, depth, top, mut tracer),
-            0x76 => self.op_push<23, T>(code, pc, gas, depth, top, mut tracer),
-            0x77 => self.op_push<24, T>(code, pc, gas, depth, top, mut tracer),
-            0x78 => self.op_push<25, T>(code, pc, gas, depth, top, mut tracer),
-            0x79 => self.op_push<26, T>(code, pc, gas, depth, top, mut tracer),
-            0x7a => self.op_push<27, T>(code, pc, gas, depth, top, mut tracer),
-            0x7b => self.op_push<28, T>(code, pc, gas, depth, top, mut tracer),
-            0x7c => self.op_push<29, T>(code, pc, gas, depth, top, mut tracer),
-            0x7d => self.op_push<30, T>(code, pc, gas, depth, top, mut tracer),
-            0x7e => self.op_push<31, T>(code, pc, gas, depth, top, mut tracer),
-            0x7f => self.op_push<32, T>(code, pc, gas, depth, top, mut tracer),
-            0x50 => self.op_pop(code, pc, gas, depth, top, mut tracer),
-            0x80 => self.op_dup<1, T>(code, pc, gas, depth, top, mut tracer),
-            0x81 => self.op_dup<2, T>(code, pc, gas, depth, top, mut tracer),
-            0x82 => self.op_dup<3, T>(code, pc, gas, depth, top, mut tracer),
-            0x83 => self.op_dup<4, T>(code, pc, gas, depth, top, mut tracer),
-            0x84 => self.op_dup<5, T>(code, pc, gas, depth, top, mut tracer),
-            0x85 => self.op_dup<6, T>(code, pc, gas, depth, top, mut tracer),
-            0x86 => self.op_dup<7, T>(code, pc, gas, depth, top, mut tracer),
-            0x87 => self.op_dup<8, T>(code, pc, gas, depth, top, mut tracer),
-            0x88 => self.op_dup<9, T>(code, pc, gas, depth, top, mut tracer),
-            0x89 => self.op_dup<10, T>(code, pc, gas, depth, top, mut tracer),
-            0x8a => self.op_dup<11, T>(code, pc, gas, depth, top, mut tracer),
-            0x8b => self.op_dup<12, T>(code, pc, gas, depth, top, mut tracer),
-            0x8c => self.op_dup<13, T>(code, pc, gas, depth, top, mut tracer),
-            0x8d => self.op_dup<14, T>(code, pc, gas, depth, top, mut tracer),
-            0x8e => self.op_dup<15, T>(code, pc, gas, depth, top, mut tracer),
-            0x8f => self.op_dup<16, T>(code, pc, gas, depth, top, mut tracer),
-            0x90 => self.op_swap<1, T>(code, pc, gas, depth, top, mut tracer),
-            0x91 => self.op_swap<2, T>(code, pc, gas, depth, top, mut tracer),
-            0x92 => self.op_swap<3, T>(code, pc, gas, depth, top, mut tracer),
-            0x93 => self.op_swap<4, T>(code, pc, gas, depth, top, mut tracer),
-            0x94 => self.op_swap<5, T>(code, pc, gas, depth, top, mut tracer),
-            0x95 => self.op_swap<6, T>(code, pc, gas, depth, top, mut tracer),
-            0x96 => self.op_swap<7, T>(code, pc, gas, depth, top, mut tracer),
-            0x97 => self.op_swap<8, T>(code, pc, gas, depth, top, mut tracer),
-            0x98 => self.op_swap<9, T>(code, pc, gas, depth, top, mut tracer),
-            0x99 => self.op_swap<10, T>(code, pc, gas, depth, top, mut tracer),
-            0x9a => self.op_swap<11, T>(code, pc, gas, depth, top, mut tracer),
-            0x9b => self.op_swap<12, T>(code, pc, gas, depth, top, mut tracer),
-            0x9c => self.op_swap<13, T>(code, pc, gas, depth, top, mut tracer),
-            0x9d => self.op_swap<14, T>(code, pc, gas, depth, top, mut tracer),
-            0x9e => self.op_swap<15, T>(code, pc, gas, depth, top, mut tracer),
-            0x9f => self.op_swap<16, T>(code, pc, gas, depth, top, mut tracer),
-            0x01 => self.op_add(code, pc, gas, depth, top, mut tracer),
-            0x02 => self.op_mul(code, pc, gas, depth, top, mut tracer),
-            0x03 => self.op_sub(code, pc, gas, depth, top, mut tracer),
-            0x0b => self.op_signextend(code, pc, gas, depth, top, mut tracer),
-            0x10 => self.op_lt(code, pc, gas, depth, top, mut tracer),
-            0x11 => self.op_gt(code, pc, gas, depth, top, mut tracer),
-            0x12 => self.op_slt(code, pc, gas, depth, top, mut tracer),
-            0x13 => self.op_sgt(code, pc, gas, depth, top, mut tracer),
-            0x14 => self.op_eq(code, pc, gas, depth, top, mut tracer),
-            0x15 => self.op_iszero(code, pc, gas, depth, top, mut tracer),
-            0x16 => self.op_and(code, pc, gas, depth, top, mut tracer),
-            0x17 => self.op_or(code, pc, gas, depth, top, mut tracer),
-            0x18 => self.op_xor(code, pc, gas, depth, top, mut tracer),
-            0x19 => self.op_not(code, pc, gas, depth, top, mut tracer),
-            0x1e => self.op_clz(code, pc, gas, depth, top, mut tracer),
-            0x1a => self.op_byte(code, pc, gas, depth, top, mut tracer),
-            0x1b => self.op_shl(code, pc, gas, depth, top, mut tracer),
-            0x1c => self.op_shr(code, pc, gas, depth, top, mut tracer),
-            0x1d => self.op_sar(code, pc, gas, depth, top, mut tracer),
-            0x51 => self.op_mload(code, pc, gas, depth, top, mut tracer),
-            0x52 => self.op_mstore(code, pc, gas, depth, top, mut tracer),
-            0x53 => self.op_mstore8(code, pc, gas, depth, top, mut tracer),
-            0x37 => self.op_calldatacopy(code, pc, gas, depth, top, mut tracer),
-            0x39 => self.op_codecopy(code, pc, gas, depth, top, mut tracer),
-            0x5e => self.op_mcopy(code, pc, gas, depth, top, mut tracer),
-            0x3e => self.op_returndatacopy(code, pc, gas, depth, top, mut tracer),
-            0x20 => self.op_keccak256(code, pc, gas, depth, top, mut tracer),
-            0x56 => self.op_jump(code, pc, gas, depth, top, mut tracer),
-            0x57 => self.op_jumpi(code, pc, gas, depth, top, mut tracer),
-            0x58 => self.op_pc(code, pc, gas, depth, top, mut tracer),
-            0x59 => self.op_msize(code, pc, gas, depth, top, mut tracer),
-            0x5a => self.op_gas(code, pc, gas, depth, top, mut tracer),
-            0x5b => self.op_jumpdest(code, pc, gas, depth, top, mut tracer),
-            0x35 => self.op_calldataload(code, pc, gas, depth, top, mut tracer),
-            0x49 => self.op_blobhash(code, pc, gas, depth, top, mut tracer),
-            0x30 => self.op_address(code, pc, gas, depth, top, mut tracer),
-            0x32 => self.op_origin(code, pc, gas, depth, top, mut tracer),
-            0x33 => self.op_caller(code, pc, gas, depth, top, mut tracer),
-            0x34 => self.op_callvalue(code, pc, gas, depth, top, mut tracer),
-            0x36 => self.op_calldatasize(code, pc, gas, depth, top, mut tracer),
-            0x38 => self.op_codesize(code, pc, gas, depth, top, mut tracer),
-            0x3a => self.op_gasprice(code, pc, gas, depth, top, mut tracer),
-            0x3d => self.op_returndatasize(code, pc, gas, depth, top, mut tracer),
-            0x41 => self.op_coinbase(code, pc, gas, depth, top, mut tracer),
-            0x42 => self.op_timestamp(code, pc, gas, depth, top, mut tracer),
-            0x43 => self.op_number(code, pc, gas, depth, top, mut tracer),
-            0x44 => self.op_prevrandao(code, pc, gas, depth, top, mut tracer),
-            0x45 => self.op_gaslimit(code, pc, gas, depth, top, mut tracer),
-            0x46 => self.op_chainid(code, pc, gas, depth, top, mut tracer),
-            0x48 => self.op_basefee(code, pc, gas, depth, top, mut tracer),
-            0x4a => self.op_blobbasefee(code, pc, gas, depth, top, mut tracer),
-            _ => self.op_other(code, pc, gas, depth, top, mut tracer),
+            0x00 => self.op_stop(c, mut tracer),
+            0x04 => self.op_div(c, mut tracer),
+            0x05 => self.op_sdiv(c, mut tracer),
+            0x06 => self.op_mod(c, mut tracer),
+            0x07 => self.op_smod(c, mut tracer),
+            0x08 => self.op_addmod(c, mut tracer),
+            0x09 => self.op_mulmod(c, mut tracer),
+            0x0a => self.op_exp(c, mut tracer),
+            0x5f => self.op_push0(c, mut tracer),
+            0x60 => self.op_push<1, T>(c, mut tracer),
+            0x61 => self.op_push<2, T>(c, mut tracer),
+            0x62 => self.op_push<3, T>(c, mut tracer),
+            0x63 => self.op_push<4, T>(c, mut tracer),
+            0x64 => self.op_push<5, T>(c, mut tracer),
+            0x65 => self.op_push<6, T>(c, mut tracer),
+            0x66 => self.op_push<7, T>(c, mut tracer),
+            0x67 => self.op_push<8, T>(c, mut tracer),
+            0x68 => self.op_push<9, T>(c, mut tracer),
+            0x69 => self.op_push<10, T>(c, mut tracer),
+            0x6a => self.op_push<11, T>(c, mut tracer),
+            0x6b => self.op_push<12, T>(c, mut tracer),
+            0x6c => self.op_push<13, T>(c, mut tracer),
+            0x6d => self.op_push<14, T>(c, mut tracer),
+            0x6e => self.op_push<15, T>(c, mut tracer),
+            0x6f => self.op_push<16, T>(c, mut tracer),
+            0x70 => self.op_push<17, T>(c, mut tracer),
+            0x71 => self.op_push<18, T>(c, mut tracer),
+            0x72 => self.op_push<19, T>(c, mut tracer),
+            0x73 => self.op_push<20, T>(c, mut tracer),
+            0x74 => self.op_push<21, T>(c, mut tracer),
+            0x75 => self.op_push<22, T>(c, mut tracer),
+            0x76 => self.op_push<23, T>(c, mut tracer),
+            0x77 => self.op_push<24, T>(c, mut tracer),
+            0x78 => self.op_push<25, T>(c, mut tracer),
+            0x79 => self.op_push<26, T>(c, mut tracer),
+            0x7a => self.op_push<27, T>(c, mut tracer),
+            0x7b => self.op_push<28, T>(c, mut tracer),
+            0x7c => self.op_push<29, T>(c, mut tracer),
+            0x7d => self.op_push<30, T>(c, mut tracer),
+            0x7e => self.op_push<31, T>(c, mut tracer),
+            0x7f => self.op_push<32, T>(c, mut tracer),
+            0x50 => self.op_pop(c, mut tracer),
+            0x80 => self.op_dup<1, T>(c, mut tracer),
+            0x81 => self.op_dup<2, T>(c, mut tracer),
+            0x82 => self.op_dup<3, T>(c, mut tracer),
+            0x83 => self.op_dup<4, T>(c, mut tracer),
+            0x84 => self.op_dup<5, T>(c, mut tracer),
+            0x85 => self.op_dup<6, T>(c, mut tracer),
+            0x86 => self.op_dup<7, T>(c, mut tracer),
+            0x87 => self.op_dup<8, T>(c, mut tracer),
+            0x88 => self.op_dup<9, T>(c, mut tracer),
+            0x89 => self.op_dup<10, T>(c, mut tracer),
+            0x8a => self.op_dup<11, T>(c, mut tracer),
+            0x8b => self.op_dup<12, T>(c, mut tracer),
+            0x8c => self.op_dup<13, T>(c, mut tracer),
+            0x8d => self.op_dup<14, T>(c, mut tracer),
+            0x8e => self.op_dup<15, T>(c, mut tracer),
+            0x8f => self.op_dup<16, T>(c, mut tracer),
+            0x90 => self.op_swap<1, T>(c, mut tracer),
+            0x91 => self.op_swap<2, T>(c, mut tracer),
+            0x92 => self.op_swap<3, T>(c, mut tracer),
+            0x93 => self.op_swap<4, T>(c, mut tracer),
+            0x94 => self.op_swap<5, T>(c, mut tracer),
+            0x95 => self.op_swap<6, T>(c, mut tracer),
+            0x96 => self.op_swap<7, T>(c, mut tracer),
+            0x97 => self.op_swap<8, T>(c, mut tracer),
+            0x98 => self.op_swap<9, T>(c, mut tracer),
+            0x99 => self.op_swap<10, T>(c, mut tracer),
+            0x9a => self.op_swap<11, T>(c, mut tracer),
+            0x9b => self.op_swap<12, T>(c, mut tracer),
+            0x9c => self.op_swap<13, T>(c, mut tracer),
+            0x9d => self.op_swap<14, T>(c, mut tracer),
+            0x9e => self.op_swap<15, T>(c, mut tracer),
+            0x9f => self.op_swap<16, T>(c, mut tracer),
+            0x01 => self.op_add(c, mut tracer),
+            0x02 => self.op_mul(c, mut tracer),
+            0x03 => self.op_sub(c, mut tracer),
+            0x0b => self.op_signextend(c, mut tracer),
+            0x10 => self.op_lt(c, mut tracer),
+            0x11 => self.op_gt(c, mut tracer),
+            0x12 => self.op_slt(c, mut tracer),
+            0x13 => self.op_sgt(c, mut tracer),
+            0x14 => self.op_eq(c, mut tracer),
+            0x15 => self.op_iszero(c, mut tracer),
+            0x16 => self.op_and(c, mut tracer),
+            0x17 => self.op_or(c, mut tracer),
+            0x18 => self.op_xor(c, mut tracer),
+            0x19 => self.op_not(c, mut tracer),
+            0x1e => self.op_clz(c, mut tracer),
+            0x1a => self.op_byte(c, mut tracer),
+            0x1b => self.op_shl(c, mut tracer),
+            0x1c => self.op_shr(c, mut tracer),
+            0x1d => self.op_sar(c, mut tracer),
+            0x51 => self.op_mload(c, mut tracer),
+            0x52 => self.op_mstore(c, mut tracer),
+            0x53 => self.op_mstore8(c, mut tracer),
+            0x37 => self.op_calldatacopy(c, mut tracer),
+            0x39 => self.op_codecopy(c, mut tracer),
+            0x5e => self.op_mcopy(c, mut tracer),
+            0x3e => self.op_returndatacopy(c, mut tracer),
+            0x20 => self.op_keccak256(c, mut tracer),
+            0x56 => self.op_jump(c, mut tracer),
+            0x57 => self.op_jumpi(c, mut tracer),
+            0x58 => self.op_pc(c, mut tracer),
+            0x59 => self.op_msize(c, mut tracer),
+            0x5a => self.op_gas(c, mut tracer),
+            0x5b => self.op_jumpdest(c, mut tracer),
+            0x35 => self.op_calldataload(c, mut tracer),
+            0x49 => self.op_blobhash(c, mut tracer),
+            0x30 => self.op_address(c, mut tracer),
+            0x32 => self.op_origin(c, mut tracer),
+            0x33 => self.op_caller(c, mut tracer),
+            0x34 => self.op_callvalue(c, mut tracer),
+            0x36 => self.op_calldatasize(c, mut tracer),
+            0x38 => self.op_codesize(c, mut tracer),
+            0x3a => self.op_gasprice(c, mut tracer),
+            0x3d => self.op_returndatasize(c, mut tracer),
+            0x41 => self.op_coinbase(c, mut tracer),
+            0x42 => self.op_timestamp(c, mut tracer),
+            0x43 => self.op_number(c, mut tracer),
+            0x44 => self.op_prevrandao(c, mut tracer),
+            0x45 => self.op_gaslimit(c, mut tracer),
+            0x46 => self.op_chainid(c, mut tracer),
+            0x48 => self.op_basefee(c, mut tracer),
+            0x4a => self.op_blobbasefee(c, mut tracer),
+            _ => self.op_other(c, mut tracer),
         }
+    }
+
+    // Saves the cursor in `self`, for the interpreter loop, which runs the
+    // opcode at its `pc` next unless the frame has stopped, or for code that
+    // uses `self`'s pc, gas and stack.
+    fn save(mut self, _ c: Cursor) {
+        self.pc = c.pc
+        self.gas_remaining = c.gas
+        // The handlers kept `depth` words initialized, within the reserved
+        // `STACK_LIMIT`.
+        unsafe { self.stack.set_len(c.depth) }
+    }
+
+    // Runs the handlers again after code that used `self`'s pc, gas and
+    // stack, unless it failed.
+    fn resume<T: Tracer>(mut self, _ code: *u8, _ tracer: mut T) {
+        if self.ok() { self.dispatch(code, self.pc, self.gas_remaining, mut tracer) }
+    }
+
+    // A handler's faults, exceptional halts, which leave the frame no gas.
+    // Every handler can fault, most twice, so each stays out of line. One
+    // per status keeps `self` and the cursor's five words within the six
+    // registers a tail call passes arguments in.
+    #[inline(never)]
+    fn out_of_gas(mut self, _ c: Cursor) { self.halt(ERR_OUT_OF_GAS, c) }
+    #[inline(never)]
+    fn underflow(mut self, _ c: Cursor) { self.halt(ERR_STACK_UNDERFLOW, c) }
+    #[inline(never)]
+    fn overflow(mut self, _ c: Cursor) { self.halt(ERR_STACK_OVERFLOW, c) }
+    #[inline(never)]
+    fn invalid_jump(mut self, _ c: Cursor) { self.halt(ERR_INVALID_JUMP, c) }
+
+    fn halt(mut self, _ status: i32, _ c: Cursor) {
+        self.save(c)
+        self.fault(status)
     }
 
     // The handlers that leave stay out of line, so every arm of `next` is a
     // tail call.
     #[inline(never)]
-    fn op_stop<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
+    fn op_stop<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
         self.halted = true
-        self.stopped_at(pc.wrapping_add(1), gas, depth)
+        c.advance(1)
+        self.save(c)
     }
 
     // Leaves the opcode to `run_until_child`.
     #[inline(never)]
-    fn op_other<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.stopped_at(pc, gas, depth)
-    }
+    fn op_other<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.save(c) }
 
-    fn op_add<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x01)
-    }
-
-    fn op_mul<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x02)
-    }
-
-    fn op_sub<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x03)
-    }
-
-    fn op_signextend<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x0b)
-    }
-
-    fn op_lt<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x10)
-    }
-
-    fn op_gt<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x11)
-    }
-
-    fn op_slt<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x12)
-    }
-
-    fn op_sgt<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x13)
-    }
-
-    fn op_eq<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x14)
-    }
-
-    fn op_and<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x16)
-    }
-
-    fn op_or<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x17)
-    }
-
-    fn op_xor<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x18)
-    }
+    fn op_add<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x01) }
+    fn op_mul<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x02) }
+    fn op_sub<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x03) }
+    fn op_signextend<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x0b) }
+    fn op_lt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x10) }
+    fn op_gt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x11) }
+    fn op_slt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x12) }
+    fn op_sgt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x13) }
+    fn op_eq<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x14) }
+    fn op_and<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x16) }
+    fn op_or<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x17) }
+    fn op_xor<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x18) }
 
     // The top word indexes a byte of the second from its most significant
     // end. A native word holds its bytes least significant first, so the
     // byte is read from the second word's place.
-    fn op_byte<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let second = below(top, 2)
-        unsafe {
-            let index = *offset_bytes(second, 32)
-            *second = if index >= 32 { 0 } else {
-                let at: usize = (31 - index).downcast_unchecked()
-                let byte = *offset_bytes(cast<u256, u8>(second), at)
-                byte as u256
-            }
-        }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth - 1, below(top, 1), mut tracer)
+    fn op_byte<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(2) { return self.underflow(c) }
+        let index = c.pop()
+        c.set(1, if index >= 32 { 0 } else {
+            let at: usize = (31 - index).downcast_unchecked()
+            unsafe { *offset_bytes(cast<u256, u8>(c.slot(1)), at) } as u256
+        })
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
-    fn op_shl<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x1b)
-    }
-
-    fn op_shr<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x1c)
-    }
-
-    fn op_sar<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x1d)
-    }
-
-    fn op_iszero<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_unary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x15)
-    }
-
-    fn op_not<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_unary(code, pc, gas, depth, top, mut tracer, cost: 3, op: 0x19)
-    }
-
-    fn op_clz<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_unary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x1e)
-    }
-
-    fn op_div<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x04)
-    }
-
-    fn op_sdiv<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x05)
-    }
-
-    fn op_mod<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x06)
-    }
-
-    fn op_smod<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_binary(code, pc, gas, depth, top, mut tracer, cost: 5, op: 0x07)
-    }
-
-    fn op_addmod<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_modular(code, pc, gas, depth, top, mut tracer, op: 0x08)
-    }
-
-    fn op_mulmod<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_modular(code, pc, gas, depth, top, mut tracer, op: 0x09)
-    }
+    fn op_shl<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1b) }
+    fn op_shr<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1c) }
+    fn op_sar<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1d) }
+    fn op_iszero<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 3, op: 0x15) }
+    fn op_not<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 3, op: 0x19) }
+    fn op_clz<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 5, op: 0x1e) }
+    fn op_div<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x04) }
+    fn op_sdiv<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x05) }
+    fn op_mod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x06) }
+    fn op_smod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x07) }
+    fn op_addmod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_modular(c, mut tracer, op: 0x08) }
+    fn op_mulmod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_modular(c, mut tracer, op: 0x09) }
 
     // ADDMOD and MULMOD: the top two words' sum or product modulo the third
     // replaces the third.
     #[inline(always)]
-    fn op_modular<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, op: i32) {
-        if gas < 8 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+    fn op_modular<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, op: i32) {
+        if !c.charge(8) { return self.out_of_gas(c) }
+        if !c.holds(3) { return self.underflow(c) }
+        let lhs = c.pop()
+        let rhs = c.pop()
+        // A zero modulus gives zero, which the third word already holds.
+        let modulus = c.peek(1)
+        if modulus != 0 {
+            c.set(1, if op == 0x08 { addmod(lhs, rhs, modulus) } else { mulmod(lhs, rhs, modulus) })
         }
-        if depth < 3 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let third = below(top, 3)
-        unsafe {
-            // A zero modulus gives zero, which the third word already holds.
-            let modulus = *third
-            if modulus != 0 {
-                let lhs = *offset_bytes(third, 64)
-                let rhs = *offset_bytes(third, 32)
-                *third = if op == 0x08 { addmod(lhs, rhs, modulus) } else { mulmod(lhs, rhs, modulus) }
-            }
-        }
-        self.next(code, pc.wrapping_add(1), gas - 8, depth - 2, below(top, 2), mut tracer)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // EXP calls out, but stays in the handlers rather than returning to
     // `run_until_child`.
-    fn op_exp<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let cost = base_cost(0x0a)
-        if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.gas_remaining = gas - cost
-        unsafe { self.stack.set_len(depth) }
+    fn op_exp<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(base_cost(0x0a)) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.save(c)
         let base = self.pop()
         let exponent = self.pop()
         if self.ok() { self.exp(base, exponent) }
-        let gas = self.gas_remaining
-        if !self.ok() {
-            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
-        }
-        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+        self.resume(c.code, mut tracer)
     }
 
-    fn stopped_at(mut self, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.pc = pc
-        self.gas_remaining = gas
-        // The handlers kept `depth` words initialized, within the reserved
-        // `STACK_LIMIT`.
-        unsafe { self.stack.set_len(depth) }
-    }
-
-    // Every handler can fault, usually twice; one copy out of line keeps
-    // the handlers small. A handler's fault is an exceptional halt, which
-    // leaves the frame no gas: callers pass a `gas` of zero, in the place a
-    // handler keeps its gas, so that the arguments stay in the handler's
-    // registers and the handler's gas is dead on the way to the fault.
-    #[inline(never)]
-    fn faulted_at(mut self, _ status: i32, _ pc: usize, _ gas: u64, _ depth: usize) {
-        self.fault(status)
-        self.stopped_at(pc, gas, depth)
-    }
-
-    // Pushes `value` and runs the opcode at `pc`, the one after the push.
+    // Pushes `value` and runs the opcode at the cursor, the one after the
+    // push. Each handler that pushes has its own copy, with its own dispatch.
     #[inline(always)]
-    fn push_next<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
-                            _ value: u256) {
-        // As the overflow it is, so that the fault is the branch taken out
-        // of line and the push runs straight through to its dispatch.
-        if depth > STACK_LIMIT - 1 {
-            return self.faulted_at(ERR_STACK_OVERFLOW, pc, 0, depth)
-        }
-        unsafe { *top = value }
-        self.next(code, pc, gas, depth + 1, offset_bytes(top, 32), mut tracer)
+    fn push_next<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, _ value: u256) {
+        if !c.has_room() { return self.overflow(c) }
+        c.push(value)
+        self.next(c, mut tracer)
     }
 
-    fn op_push0<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, 0)
+    fn op_push0<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.push_next(c, mut tracer, 0)
     }
 
     // PUSH1 to PUSH32: the immediate is the top N bytes of the smallest
     // whole word that holds it, which padding puts after every immediate.
     #[arithmetic(unchecked)]
-    fn op_push<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
-                                         _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        let at = pc.wrapping_add(1)
+    fn op_push<const N: usize, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
         let value: u256 = if N == 1 {
-            unsafe { read_code<u8>(code, at) } as u256
+            c.read<u8>(1) as u256
         } else if N == 2 {
-            unsafe { read_code<u16>(code, at) } as u256
+            c.read<u16>(1) as u256
         } else if N <= 4 {
             let shift: u32 = ((4 - N) * 8).downcast_truncate()
-            (unsafe { read_code<u32>(code, at) } >> shift) as u256
+            (c.read<u32>(1) >> shift) as u256
         } else if N <= 8 {
             let shift: u64 = ((8 - N) * 8).downcast_truncate()
-            (unsafe { read_code<u64>(code, at) } >> shift) as u256
+            (c.read<u64>(1) >> shift) as u256
         } else if N <= 16 {
             let shift: u128 = ((16 - N) * 8).downcast_truncate()
-            (unsafe { read_code<u128>(code, at) } >> shift) as u256
+            (c.read<u128>(1) >> shift) as u256
         } else {
-            unsafe { read_code<u256>(code, at) } >> ((32 - N) * 8) as u256
+            c.read<u256>(1) >> ((32 - N) * 8) as u256
         }
-        self.push_next(code, pc.wrapping_add(1 + N), gas - 3, depth, top, mut tracer, value)
+        c.advance(1 + N)
+        self.push_next(c, mut tracer, value)
     }
 
-    fn op_pop<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        self.next(code, pc.wrapping_add(1), gas - 2, depth - 1, below(top, 1), mut tracer)
+    fn op_pop<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        c.discard(1)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // DUP1 to DUP16, each its own handler, with its depth a constant.
-    fn op_dup<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
-                                        _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < N {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let value = unsafe { *below(top, N) }
-        self.push_next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer, value)
+    fn op_dup<const N: usize, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(N) { return self.underflow(c) }
+        let value = c.peek(N)
+        c.advance(1)
+        self.push_next(c, mut tracer, value)
     }
 
     // SWAP1 to SWAP16, as DUP.
-    fn op_swap<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
-                                         _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth <= N {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
+    fn op_swap<const N: usize, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(N + 1) { return self.underflow(c) }
         // Swapping a 64-bit piece at a time keeps two of them live, not
         // eight.
-        let first = cast<u256, u64>(below(top, 1))
-        let other = cast<u256, u64>(below(top, N + 1))
+        let first = cast<u256, u64>(c.slot(1))
+        let other = cast<u256, u64>(c.slot(N + 1))
         unsafe {
             swap_piece(first, other, 0)
             swap_piece(first, other, 1)
             swap_piece(first, other, 2)
             swap_piece(first, other, 3)
         }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     #[inline(always)]
-    fn op_unary<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
-                           cost: u64, op: i32) {
-        if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let word = below(top, 1)
-        match unary_result(op, unsafe { *word }) {
-            Option::Some(result) => unsafe { *word = result },
+    fn op_unary<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, cost: u64, op: i32) {
+        if !c.charge(cost) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        match unary_result(op, c.peek(1)) {
+            Option::Some(result) => c.set(1, result),
             Option::None => {},
         }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth, top, mut tracer)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Each binary and unary opcode has a handler of its own, which inlines
-    // its one operation.
+    // its one operation. The top word is the first operand; the result
+    // replaces the second.
     #[inline(always)]
-    fn op_binary<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
-                            cost: u64, op: i32) {
-        if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+    fn op_binary<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, cost: u64, op: i32) {
+        if !c.charge(cost) { return self.out_of_gas(c) }
+        if !c.holds(2) { return self.underflow(c) }
+        let lhs = c.pop()
+        match binary_result(op, lhs, c.peek(1)) {
+            Option::Some(result) => c.set(1, result),
+            Option::None => {},
         }
-        if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        // The top word is the first operand; the result replaces the second.
-        let second = below(top, 2)
-        unsafe {
-            match binary_result(op, *offset_bytes(second, 32), *second) {
-                Option::Some(result) => *second = result,
-                Option::None => {},
-            }
-        }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 1, below(top, 1), mut tracer)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
-    fn op_mload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let word = below(top, 1)
-        let offset = unsafe { *word }
+    fn op_mload<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        let offset = c.peek(1)
         if !self.in_memory(offset, len: 32) {
-            return self.op_mload_grow(code, pc, gas - 3, depth, top, mut tracer)
+            return self.op_mload_grow(c, mut tracer)
         }
-        unsafe { *word = self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+        c.set(1, unsafe { self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) })
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Growth within the buffer, out of line so the common path keeps fewer
-    // values live. `op_mload` checked the stack.
-    fn op_mload_grow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let word = below(top, 1)
-        let offset = unsafe { *word }
+    // values live. `op_mload` charged its 3 and checked the stack.
+    fn op_mload_grow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        let offset = c.peek(1)
         let size = self.buffered_growth(offset, len: 32)
         if size == 0 {
-            return self.op_mload_slow(code, pc, gas, depth, mut tracer)
+            return self.op_mload_slow(c, mut tracer)
         }
-        var gas = gas
-        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+        if !c.charge(small_growth_cost(current: self.memory_size, size)) {
+            return self.out_of_gas(c)
         }
         self.memory_size = size
-        unsafe { *word = self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) }
-        self.next(code, pc.wrapping_add(1), gas, depth, top, mut tracer)
+        c.set(1, unsafe { self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) })
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Growth past the buffer and offsets past memory, out of line so the
     // common path keeps no frame.
-    fn op_mload_slow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ tracer: mut T) {
-        self.gas_remaining = gas
-        unsafe { self.stack.set_len(depth) }
+    fn op_mload_slow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        c.advance(1)
+        self.save(c)
         self.mload()
-        let gas = self.gas_remaining
-        if !self.ok() {
-            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
-        }
-        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+        self.resume(c.code, mut tracer)
     }
 
-    fn op_mstore<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let offset = unsafe { *below(top, 1) }
+    fn op_mstore<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(2) { return self.underflow(c) }
+        let offset = c.peek(1)
         if !self.in_memory(offset, len: 32) {
-            return self.op_mstore_grow(code, pc, gas - 3, depth, top, mut tracer)
+            return self.op_mstore_grow(c, mut tracer)
         }
-        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *below(top, 2)) }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2, below(top, 2), mut tracer)
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: c.peek(2)) }
+        c.discard(2)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Growth within the buffer, out of line so the common path keeps fewer
-    // values live. `op_mstore` checked the stack.
-    fn op_mstore_grow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let offset = unsafe { *below(top, 1) }
+    // values live. `op_mstore` charged its 3 and checked the stack.
+    fn op_mstore_grow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        let offset = c.peek(1)
         let size = self.buffered_growth(offset, len: 32)
         if size == 0 {
-            return self.op_mstore_slow(code, pc, gas, depth, mut tracer)
+            return self.op_mstore_slow(c, mut tracer)
         }
-        var gas = gas
-        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+        if !c.charge(small_growth_cost(current: self.memory_size, size)) {
+            return self.out_of_gas(c)
         }
         self.memory_size = size
-        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *below(top, 2)) }
-        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2), below(top, 2), mut tracer)
+        unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: c.peek(2)) }
+        c.discard(2)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Growth past the buffer and offsets past memory, out of line so the
     // common path keeps no frame.
-    fn op_mstore_slow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ tracer: mut T) {
-        self.gas_remaining = gas
-        unsafe { self.stack.set_len(depth) }
+    fn op_mstore_slow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        c.advance(1)
+        self.save(c)
         self.mstore()
-        let gas = self.gas_remaining
-        if !self.ok() {
-            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
-        }
-        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+        self.resume(c.code, mut tracer)
     }
 
-    fn op_mstore8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let offset = unsafe { *below(top, 1) }
+    fn op_mstore8<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(2) { return self.underflow(c) }
+        let offset = c.peek(1)
         if !self.in_memory(offset, len: 1) {
-            return self.op_mstore8_grow(code, pc, gas - 3, depth, top, mut tracer)
+            return self.op_mstore8_grow(c, mut tracer)
         }
-        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        let byte: u8 = c.peek(2).downcast_truncate()
         unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth - 2, below(top, 2), mut tracer)
+        c.discard(2)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // As `op_mstore_grow`, for one byte.
-    fn op_mstore8_grow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let offset = unsafe { *below(top, 1) }
+    fn op_mstore8_grow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        let offset = c.peek(1)
         let size = self.buffered_growth(offset, len: 1)
         if size == 0 {
-            return self.op_mstore8_slow(code, pc, gas, depth, mut tracer)
+            return self.op_mstore8_slow(c, mut tracer)
         }
-        var gas = gas
-        if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+        if !c.charge(small_growth_cost(current: self.memory_size, size)) {
+            return self.out_of_gas(c)
         }
         self.memory_size = size
-        let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
+        let byte: u8 = c.peek(2).downcast_truncate()
         unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: byte) }
-        self.next(code, pc.wrapping_add(1), gas, depth.wrapping_sub(2), below(top, 2), mut tracer)
+        c.discard(2)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // As `op_mstore_slow`, for one byte.
-    fn op_mstore8_slow<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ tracer: mut T) {
-        self.gas_remaining = gas
-        unsafe { self.stack.set_len(depth) }
+    fn op_mstore8_slow<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        c.advance(1)
+        self.save(c)
         self.mstore8()
-        let gas = self.gas_remaining
-        if !self.ok() {
-            return self.stopped_at(pc.wrapping_add(1), gas, self.stack.len())
-        }
-        self.dispatch(code, pc.wrapping_add(1), gas, mut tracer)
+        self.resume(c.code, mut tracer)
     }
 
     // The gas of a copy of `len` bytes into memory that holds them, which
@@ -1865,16 +1783,16 @@ impl Vm {
         3 + 3 * ((count + 31) / 32)
     }
 
-    // For the copy whose destination, source and length are the three words
-    // below `top`, copy `len` bytes from `size` bytes at `from`, starting at
-    // `source`, into memory at `dest`, zero past the end; the range is within
-    // memory and not empty. Out of line, so the copy handlers keep their
-    // arguments in registers.
+    // For the copy whose destination, source and length are the cursor's
+    // top three words, copy `len` bytes from `size` bytes at `from`,
+    // starting at `source`, into memory at `dest`, zero past the end; the
+    // range is within memory and not empty. Out of line, so the copy
+    // handlers keep their arguments in registers.
     #[inline(never)]
-    fn copy_padded(mut self, _ top: *u256, from: *u8, size: usize) {
-        let dest = unsafe { *below(top, 1) }
-        let source = unsafe { *below(top, 2) }
-        let len = unsafe { *below(top, 3) }
+    fn copy_padded(mut self, _ c: Cursor, from: *u8, size: usize) {
+        let dest = c.peek(1)
+        let source = c.peek(2)
+        let len = c.peek(3)
         let start: usize = dest.downcast_unchecked()
         let count: usize = len.downcast_unchecked()
         let copied: usize = if source >= size as u256 { 0 }
@@ -1896,23 +1814,17 @@ impl Vm {
 
     // CALLDATALOAD: the calldata word at the offset on top, bytes past the end
     // reading as zero.
-    fn op_calldataload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let slot = below(top, 1)
-        let offset = unsafe { *slot }
+    fn op_calldataload<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        let offset = c.peek(1)
         let len = self.calldata_len
         // Most loads read one whole word within the calldata.
-        unsafe {
-            *slot = if offset <= len as u256 && len as u256 - offset >= 32 {
-                read_code<u256>(self.calldata, offset.downcast_unchecked())
-            } else { self.calldata_tail(offset) }
-        }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+        c.set(1, if offset <= len as u256 && len as u256 - offset >= 32 {
+            unsafe { read_code<u256>(self.calldata, offset.downcast_unchecked()) }
+        } else { self.calldata_tail(offset) })
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // The calldata word at `offset`, which runs past the end: its bytes
@@ -1928,70 +1840,71 @@ impl Vm {
     }
 
     // BLOBHASH: the transaction's blob hash at the index on top, or zero.
-    fn op_blobhash<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let slot = below(top, 1)
-        let index = unsafe { *slot }
-        unsafe {
-            *slot = if index < self.blob_count as u256 {
-                let at: usize = index.downcast_unchecked()
-                *offset_bytes(self.blob_hashes, at * 32)
-            } else { 0 }
-        }
-        self.next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer)
+    fn op_blobhash<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        let index = c.peek(1)
+        c.set(1, if index < self.blob_count as u256 {
+            let at: usize = index.downcast_unchecked()
+            unsafe { *offset_bytes(self.blob_hashes, at * 32) }
+        } else { 0 })
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // CALLDATACOPY within memory; the interpreter loop handles everything else.
-    fn op_calldatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
-        if cost == 0 || gas < cost {
-            return self.op_other(code, pc, gas, depth, top, mut tracer)
-        }
+    fn op_calldatacopy<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.holds(3) { return self.op_other(c, mut tracer) }
+        let cost = self.copy_within_cost(dest: c.peek(1), len: c.peek(3))
+        if cost == 0 || !c.charge(cost) { return self.op_other(c, mut tracer) }
         // An empty copy costs only the base 3.
-        if cost > 3 { self.copy_padded(top, from: self.calldata, size: self.calldata_len) }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+        if cost > 3 { self.copy_padded(c, from: self.calldata, size: self.calldata_len) }
+        c.discard(3)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // CODECOPY within memory; the interpreter loop handles everything else.
-    fn op_codecopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len: unsafe { *below(top, 3) }) }
-        if cost == 0 || gas < cost {
-            return self.op_other(code, pc, gas, depth, top, mut tracer)
-        }
-        if cost > 3 { self.copy_padded(top, from: code, size: self.code_len) }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+    fn op_codecopy<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.holds(3) { return self.op_other(c, mut tracer) }
+        let cost = self.copy_within_cost(dest: c.peek(1), len: c.peek(3))
+        if cost == 0 || !c.charge(cost) { return self.op_other(c, mut tracer) }
+        if cost > 3 { self.copy_padded(c, from: c.code, size: self.code_len) }
+        c.discard(3)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // RETURNDATACOPY within memory and the return data; the interpreter
     // loop handles everything else.
-    fn op_returndatacopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let source = if depth < 3 { 0 } else { unsafe { *below(top, 2) } }
-        let len = if depth < 3 { 0 } else { unsafe { *below(top, 3) } }
-        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest: unsafe { *below(top, 1) }, len) }
+    fn op_returndatacopy<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.holds(3) { return self.op_other(c, mut tracer) }
+        let source = c.peek(2)
+        let len = c.peek(3)
+        let cost = self.copy_within_cost(dest: c.peek(1), len)
         let available = self.return_data.len() as u256
-        if cost == 0 || gas < cost || source > available || len > available - source {
-            return self.op_other(code, pc, gas, depth, top, mut tracer)
+        if cost == 0 || source > available || len > available - source || !c.charge(cost) {
+            return self.op_other(c, mut tracer)
         }
-        if cost > 3 { self.copy_padded(top, from: self.return_data.span().ptr(), size: self.return_data.len()) }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+        if cost > 3 { self.copy_padded(c, from: self.return_data.span().ptr(), size: self.return_data.len()) }
+        c.discard(3)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // KECCAK256 of a range within memory; the interpreter loop handles
     // everything else.
-    fn op_keccak256<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let offset = if depth < 2 { 0 } else { unsafe { *below(top, 1) } }
-        let len = if depth < 2 { 0 } else { unsafe { *below(top, 2) } }
-        let cost = if depth < 2 { 0 } else { self.hash_within_cost(offset, len) }
-        if cost == 0 || gas < cost {
-            return self.op_other(code, pc, gas, depth, top, mut tracer)
-        }
-        unsafe { *below(top, 2) = self.hash_memory(offset, len) }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 1, below(top, 1), mut tracer)
+    fn op_keccak256<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.holds(2) { return self.op_other(c, mut tracer) }
+        let offset = c.peek(1)
+        let len = c.peek(2)
+        let cost = self.hash_within_cost(offset, len)
+        if cost == 0 || !c.charge(cost) { return self.op_other(c, mut tracer) }
+        let hash = self.hash_memory(offset, len)
+        c.discard(1)
+        c.set(1, hash)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // The gas of KECCAK256 over a range that needs no memory growth: 30 and 6
@@ -2006,13 +1919,14 @@ impl Vm {
 
     // MCOPY with both ranges within memory; the interpreter loop handles
     // everything else.
-    fn op_mcopy<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        let dest = if depth < 3 { 0 } else { unsafe { *below(top, 1) } }
-        let source = if depth < 3 { 0 } else { unsafe { *below(top, 2) } }
-        let len = if depth < 3 { 0 } else { unsafe { *below(top, 3) } }
-        let cost = if depth < 3 { 0 } else { self.copy_within_cost(dest, len) }
-        if cost == 0 || gas < cost || self.copy_within_cost(dest: source, len) == 0 {
-            return self.op_other(code, pc, gas, depth, top, mut tracer)
+    fn op_mcopy<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.holds(3) { return self.op_other(c, mut tracer) }
+        let dest = c.peek(1)
+        let source = c.peek(2)
+        let len = c.peek(3)
+        let cost = self.copy_within_cost(dest, len)
+        if cost == 0 || self.copy_within_cost(dest: source, len) == 0 || !c.charge(cost) {
+            return self.op_other(c, mut tracer)
         }
         if len == 32 {
             // A word, the usual copy: load it whole, then store it, which
@@ -2025,7 +1939,9 @@ impl Vm {
         } else if len != 0 {
             self.move_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
         }
-        self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
+        c.discard(3)
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // Out of line: the memory view it borrows would keep `op_mcopy` from
@@ -2035,141 +1951,76 @@ impl Vm {
         self.memory.span().copy_within(source, dest, len)
     }
 
-    fn op_jump<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 8 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        let dest = unsafe { *below(top, 1) }
-        // A faulted frame's pc is never read, and the destination sits where
-        // the jump's pc goes, so the handler's own pc is dead once it loads it.
-        if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, dest.downcast_truncate(), 0, depth - 1)
-        }
-        self.next(code, dest.downcast_unchecked(), gas - 8, depth - 1, below(top, 1), mut tracer)
+    fn op_jump<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(8) { return self.out_of_gas(c) }
+        if !c.holds(1) { return self.underflow(c) }
+        let dest = c.pop()
+        if !self.jump_ok(dest) { return self.invalid_jump(c) }
+        c.pc = dest.downcast_unchecked()
+        self.next(c, mut tracer)
     }
 
-    fn op_jumpi<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 10 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
+    fn op_jumpi<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(10) { return self.out_of_gas(c) }
+        if !c.holds(2) { return self.underflow(c) }
+        let dest = c.pop()
+        if c.pop() == 0 {
+            c.advance(1)
+            return self.next(c, mut tracer)
         }
-        if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
-        }
-        if unsafe { *below(top, 2) } == 0 {
-            return self.next(code, pc.wrapping_add(1), gas - 10, depth - 2, below(top, 2), mut tracer)
-        }
-        // Only a taken jump reads its destination.
-        let dest = unsafe { *below(top, 1) }
-        // As in `op_jump`, the fault passes the destination as its pc.
-        if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, dest.downcast_truncate(), 0, depth - 2)
-        }
-        self.next(code, dest.downcast_unchecked(), gas - 10, depth - 2, below(top, 2), mut tracer)
+        if !self.jump_ok(dest) { return self.invalid_jump(c) }
+        c.pc = dest.downcast_unchecked()
+        self.next(c, mut tracer)
     }
 
-    fn op_pc<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, pc as u256)
+    fn op_pc<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        let pc = c.pc
+        c.advance(1)
+        self.push_next(c, mut tracer, pc as u256)
     }
 
-    fn op_msize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, self.memory_size as u256)
+    fn op_msize<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.push_next(c, mut tracer, self.memory_size as u256)
     }
 
-    fn op_gas<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, (gas - 2) as u256)
+    fn op_gas<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.push_next(c, mut tracer, c.gas as u256)
     }
 
     // The environment opcodes push a word of the call, the block or the frame for two gas.
     #[inline(always)]
-    fn push_environment<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
-                                   _ tracer: mut T, _ value: u256) {
-        if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, value)
+    fn push_environment<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, _ value: u256) {
+        if !c.charge(2) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.push_next(c, mut tracer, value)
     }
 
-    fn op_address<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.address)
-    }
+    fn op_address<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.call.address) }
+    fn op_origin<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.call.origin) }
+    fn op_caller<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.call.caller) }
+    fn op_callvalue<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.call.callvalue) }
+    fn op_calldatasize<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.calldata_len as u256) }
+    fn op_codesize<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.code_len as u256) }
+    fn op_gasprice<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.call.gasprice) }
+    fn op_returndatasize<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.return_data.len() as u256) }
+    fn op_coinbase<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.coinbase) }
+    fn op_timestamp<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.timestamp) }
+    fn op_number<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.number) }
+    fn op_prevrandao<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.prevrandao) }
+    fn op_gaslimit<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.gaslimit) }
+    fn op_chainid<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.chainid) }
+    fn op_basefee<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.basefee) }
+    fn op_blobbasefee<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.blobbasefee) }
 
-    fn op_origin<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.origin)
-    }
-
-    fn op_caller<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.caller)
-    }
-
-    fn op_callvalue<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.callvalue)
-    }
-
-    fn op_calldatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.calldata_len as u256)
-    }
-
-    fn op_codesize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.code_len as u256)
-    }
-
-    fn op_gasprice<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.call.gasprice)
-    }
-
-    fn op_returndatasize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.return_data.len() as u256)
-    }
-
-    fn op_coinbase<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.coinbase)
-    }
-
-    fn op_timestamp<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.timestamp)
-    }
-
-    fn op_number<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.number)
-    }
-
-    fn op_prevrandao<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.prevrandao)
-    }
-
-    fn op_gaslimit<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.gaslimit)
-    }
-
-    fn op_chainid<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.chainid)
-    }
-
-    fn op_basefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.basefee)
-    }
-
-    fn op_blobbasefee<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.push_environment(code, pc, gas, depth, top, mut tracer, self.block.blobbasefee)
-    }
-
-    fn op_jumpdest<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 1 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        self.next(code, pc.wrapping_add(1), gas - 1, depth, top, mut tracer)
+    fn op_jumpdest<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(1) { return self.out_of_gas(c) }
+        c.advance(1)
+        self.next(c, mut tracer)
     }
 
     // As `Program::is_jumpdest`, from the bitmap `run_until_child` keeps in
@@ -2183,7 +2034,6 @@ impl Vm {
         let byte = unsafe { *offset_bytes(self.jumpdests, pc / 8) }
         byte & (1 << bit) != 0
     }
-
     fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ state: mut Transaction,
                                   depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
         // Pushes skip the capacity check, so the stack holds its limit first.
