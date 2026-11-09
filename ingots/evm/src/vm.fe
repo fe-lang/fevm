@@ -2010,7 +2010,13 @@ impl Vm {
         let copied: usize = if source >= size as u256 { 0 }
             else if (size as u256) - source < len { size - source.downcast_unchecked() }
             else { count }
-        if copied != 0 {
+        if copied == 32 {
+            // A word, the usual copy, without a call.
+            unsafe {
+                *cast<u8, u256>(offset_bytes(self.memory.span().ptr(), start)) =
+                    *cast<u8, u256>(offset_bytes(from, source.downcast_unchecked()))
+            }
+        } else if copied != 0 {
             unsafe {
                 core::ptr::copy_raw(offset_bytes(self.memory.span().ptr(), start), offset_bytes(from, source.downcast_unchecked()), copied)
             }
