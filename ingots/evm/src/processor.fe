@@ -273,11 +273,10 @@ fn empty_receipt(invalid: i32, status: i32) -> Receipt {
     }
 }
 
-// A host failure during a valid transaction returns the pre-state.
-fn host_failure(_ tx: own Transaction, status: i32, _ buffers: mut Buffers) -> Applied {
-    let finished = tx.finish(commit: false, gas_spent: 0)
-    buffers = finished.buffers
-    Applied { state: finished.state, receipt: empty_receipt(invalid: VALID, status) }
+// A host failure during a valid transaction leaves the pre-state.
+fn host_failure(_ tx: mut Transaction, status: i32) -> Receipt {
+    tx.end(commit: false)
+    empty_receipt(invalid: VALID, status)
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
@@ -416,19 +415,35 @@ pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ bloc
     apply(world, request, block, config, mut buffers, mut tracer, commit: false)
 }
 
+/// `transact` on the state `tx` holds between transactions (see
+/// `Transaction::load`), which keeps it and its buffers in place.
+pub fn transact_in<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                              _ tracer: mut T) -> Receipt {
+    apply_in(mut tx, request, block, config, mut tracer, commit: true)
+}
+
 fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config,
+                              buffers: core::mem::replace(mut buffers, Buffers::new()))
+    let receipt = apply_in(mut tx, request, block, config, mut tracer, commit)
+    let (state, lent) = tx.release()
+    buffers = lent
+    Applied { state, receipt }
+}
+
+fn apply_in<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                       _ tracer: mut T, commit: bool) -> Receipt {
     let env = request.env
-    let checked = checked(world, request, block, config)
+    let checked = checked(tx.world(), request, block, config)
     if checked.invalid != VALID {
-        return Applied { state: world, receipt: empty_receipt(invalid: checked.invalid, status: OK) }
+        return empty_receipt(invalid: checked.invalid, status: OK)
     }
     let intrinsic = checked.intrinsic
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
-    let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
-    var tx = Transaction::new(world, sender, destination: target, coinbase: block.coinbase, config,
-                              buffers: core::mem::replace(mut buffers, Buffers::new()))
+    let target = if env.creates { create_address(sender, nonce: tx.world().nonce(sender)) } else { address_word(env.to) }
+    tx.begin(sender, destination: target, coinbase: block.coinbase, config)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
     let call = CallEnv {
@@ -447,7 +462,7 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
         status_result(prepared)
     }
     if !is_evm_outcome(result.status) {
-        return host_failure(tx, status: result.status, mut buffers)
+        return host_failure(mut tx, status: result.status)
     }
     // Exceptional halts and collisions consume all gas.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
@@ -462,21 +477,17 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
         paid = tx.credit(address: address_word(block.coinbase), amount: gas_used as u256 * tip)
     }
     if paid != OK {
-        return host_failure(tx, status: paid, mut buffers)
+        return host_failure(mut tx, status: paid)
     }
     // Aborting discards the logs, which a simulation still reports.
     let simulated = if commit { Option::None } else { Option::Some(tx.take_logs()) }
     // Settlement's deletions bypass the journal, which undoes the rest.
     if commit { tx.settle() }
-    let finished = tx.finish(commit, gas_spent)
-    buffers = finished.buffers
-    Applied {
-        state: finished.state,
-        receipt: Receipt {
-            invalid: VALID, status: result.status, gas_used,
-            gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
-            created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
-            output: result.output, logs: simulated.unwrap_or(default: finished.logs),
-        },
+    tx.end(commit)
+    Receipt {
+        invalid: VALID, status: result.status, gas_used,
+        gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
+        created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
+        output: result.output, logs: simulated.unwrap_or(default: tx.take_logs()),
     }
 }
