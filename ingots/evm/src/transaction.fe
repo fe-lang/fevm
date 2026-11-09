@@ -429,6 +429,9 @@ impl Transaction {
     fn adjust(mut self, kind: u8, address: u256, amount: u256, add: bool) -> i32 {
         self.started = true
         if self.is_static { return ERR_STATIC_WRITE }
+        // Zero changes nothing and only touches the account: a value-free
+        // transfer's debit and credit need no lookup.
+        if amount == 0 { return self.touch_once(address) }
         let address = address_word(address)
         let replaced = self.state.adjust(balance: kind == BALANCE, address, amount, add)
         if replaced.overflowed { return ERR_BALANCE_OVERFLOW }
