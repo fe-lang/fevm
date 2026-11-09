@@ -83,6 +83,48 @@ pub fn miller_loop(_ p1: Affine<Fp>, _ q1: Affine<Fp2>, _ p2: Affine<Fp>, _ q2: 
     f.conjugate()
 }
 
+// Line `step` of a G2 point's precomputed lines, which hold each line's
+// coefficients c0, c1 and c2 as six Montgomery-form Fp words.
+fn line_at(_ lines: [[u64; 6]; 408], _ step: usize) -> Line {
+    let at = 6 * step
+    Line {
+        c0: Fp2::new(c0: Fp::from_montgomery(lines[at]), c1: Fp::from_montgomery(lines[at + 1])),
+        c1: Fp2::new(c0: Fp::from_montgomery(lines[at + 2]), c1: Fp::from_montgomery(lines[at + 3])),
+        c2: Fp2::new(c0: Fp::from_montgomery(lines[at + 4]), c1: Fp::from_montgomery(lines[at + 5])),
+    }
+}
+
+/// `miller_loop` for two fixed G2 points, from their 68 precomputed lines:
+/// those `doubling_step` and `addition_step` give, in the loop's order. An
+/// identity G1 point contributes one.
+pub fn miller_loop_lines(_ p1: Affine<Fp>, _ lines1: [[u64; 6]; 408], _ p2: Affine<Fp>,
+                         _ lines2: [[u64; 6]; 408]) -> Fp12 {
+    var f = Fp12::one()
+    var step: usize = 0
+    var found_one = false
+    var bit: u64 = 64
+    while bit > 0 {
+        bit -= 1
+        let set = ((BLS_X >> 1) >> bit) & 1 == 1
+        if !found_one {
+            found_one = set
+        } else {
+            if !p1.infinity { f = ell(f, line_at(lines1, step), p1) }
+            if !p2.infinity { f = ell(f, line_at(lines2, step), p2) }
+            step += 1
+            if set {
+                if !p1.infinity { f = ell(f, line_at(lines1, step), p1) }
+                if !p2.infinity { f = ell(f, line_at(lines2, step), p2) }
+                step += 1
+            }
+            f = f.square()
+        }
+    }
+    if !p1.infinity { f = ell(f, line_at(lines1, step), p1) }
+    if !p2.infinity { f = ell(f, line_at(lines2, step), p2) }
+    f.conjugate()
+}
+
 fn fp4_square(_ a: Fp2, _ b: Fp2) -> (Fp2, Fp2) {
     let t0 = a.square()
     let t1 = b.square()
