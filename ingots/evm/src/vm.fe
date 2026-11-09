@@ -2138,7 +2138,15 @@ impl Vm {
         if cost == 0 || gas < cost || self.copy_within_cost(dest: source, len) == 0 {
             return self.op_other(code, pc, gas, depth, top, mut tracer)
         }
-        if len != 0 {
+        if len == 32 {
+            // A word, the usual copy: load it whole, then store it, which
+            // also holds for overlapping ranges.
+            let base = self.memory.span().ptr()
+            unsafe {
+                let word = *cast<u8, u256>(offset_bytes(base, source.downcast_unchecked()))
+                *cast<u8, u256>(offset_bytes(base, dest.downcast_unchecked())) = word
+            }
+        } else if len != 0 {
             self.move_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
         }
         self.next(code, pc.wrapping_add(1), gas - cost, depth - 3, below(top, 3), mut tracer)
