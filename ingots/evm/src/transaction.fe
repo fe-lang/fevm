@@ -338,7 +338,7 @@ impl Transaction {
                     self.state.set_code(address: change.address, code: empty) == OK
                 },
                 DELEGATION => if change.slot == 1 {
-                    self.state.set_code(address: change.address, code: designator(change.previous)) == OK
+                    self.state.set_code_unhashed(address: change.address, code: designator(change.previous)) == OK
                 } else {
                     let empty: [u8; 0] = []
                     self.state.set_code(address: change.address, code: empty) == OK
@@ -362,7 +362,7 @@ impl Transaction {
     pub fn deployable(self, _ address: u256) -> bool { self.state.deployable(address) }
     pub fn sender(self, _ address: u256) -> Sender { self.state.sender(address) }
     pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
-    pub fn code_hash(self, _ address: u256) -> u256 { self.state.code_hash(address) }
+    pub fn code_hash(mut self, _ address: u256) -> u256 { self.state.code_hash(address) }
     pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
     pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
     pub fn program(self, _ address: u256) -> Program { self.state.program(address) }
@@ -490,7 +490,7 @@ impl Transaction {
         if !self.buffers.journal.record(kind: CODE, address, slot: 0, previous: 0, existed: existing.is_some()) {
             return ERR_HOST_ALLOCATION
         }
-        let written = self.state.set_code(address, code)
+        let written = self.state.set_code_unhashed(address, code)
         if written != OK { let _ = self.buffers.journal.pop() }
         written
     }
@@ -509,7 +509,7 @@ impl Transaction {
         if !self.buffers.journal.append(change) { return ERR_HOST_ALLOCATION }
         let empty: [u8; 0] = []
         let written = if delegate == 0 { self.state.set_code(address, code: empty) }
-            else { self.state.set_code(address, code: designator(delegate)) }
+            else { self.state.set_code_unhashed(address, code: designator(delegate)) }
         if written != OK { let _ = self.buffers.journal.pop() }
         written
     }
