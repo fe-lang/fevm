@@ -1,5 +1,7 @@
 // Relinked into the CLI for RETURN of 65,537 bytes. Its memory and output
-// buffers request 65,568 and 65,537 bytes, larger than the frame/state descriptors.
+// buffers of 65,568 and 65,537 bytes, larger than the frame/state descriptors,
+// both request 65,600: Fe allocates blocks of 256 bytes or more with
+// aligned_alloc in whole 64-byte lines. Watched sizes are those requests.
 // FAIL_AT selects memory failure (1), output failure (2), or success (0).
 // The journal fixture uses FAIL_AT=1 and WATCH_SIZE=131072 to check atomic
 // growth failure and undo; the logs fixture watches entry and blob-hash growth.
@@ -30,32 +32,44 @@ static unsigned failures;
 
 typedef union {
     max_align_t alignment;
-    struct { size_t extent; int watched; } info;
+    struct { void *base; size_t extent; int watched; } info;
 } Header;
 
-void *malloc(size_t size) {
+// The header sits just below the block, which starts at `alignment`.
+static void *allocate(size_t alignment, size_t size) {
     int watched = size == WATCH_SIZE || (WATCH_SIZE_EXTRA != 0 && size == WATCH_SIZE_EXTRA);
     if (watched && ++attempts == FAIL_AT) {
         failures++;
         return NULL;
     }
-    if (size > SIZE_MAX - sizeof(Header)) return NULL;
-    size_t extent = sizeof(Header) + size;
-    Header *header = mmap(NULL, extent, PROT_READ | PROT_WRITE,
-                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (header == MAP_FAILED) return NULL;
+    size_t offset = (sizeof(Header) + alignment - 1) / alignment * alignment;
+    if (size > SIZE_MAX - offset) return NULL;
+    size_t extent = offset + size;
+    char *base = mmap(NULL, extent, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) return NULL;
+    Header *header = (Header *)(base + offset) - 1;
+    header->info.base = base;
     header->info.extent = extent;
     header->info.watched = watched;
     allocations += watched;
-    memset(header + 1, 0xa5, size);
-    return header + 1;
+    memset(base + offset, 0xa5, size);
+    return base + offset;
+}
+
+void *malloc(size_t size) {
+    return allocate(_Alignof(max_align_t), size);
+}
+
+void *aligned_alloc(size_t alignment, size_t size) {
+    return allocate(alignment, size);
 }
 
 void free(void *pointer) {
     if (pointer == NULL) return;
     Header *header = (Header *)pointer - 1;
     releases += header->info.watched;
-    munmap(header, header->info.extent);
+    munmap(header->info.base, header->info.extent);
 }
 
 __attribute__((destructor)) static void check_releases(void) {
