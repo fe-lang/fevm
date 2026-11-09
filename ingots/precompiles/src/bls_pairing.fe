@@ -1,5 +1,5 @@
 use ingot::bls_curve::{Affine, Point}
-use ingot::bls_field::{Field, Fp}
+use ingot::bls_field::{self, Field, Fp}
 use ingot::bls_tower::{Fp12, Fp2, Fp6}
 
 // |x| for the BLS parameter x = -0xd201000000010000.
@@ -126,11 +126,8 @@ pub fn miller_loop_lines(_ p1: Affine<Fp>, _ lines1: [[u64; 6]; 408], _ p2: Affi
 }
 
 fn fp4_square(_ a: Fp2, _ b: Fp2) -> (Fp2, Fp2) {
-    let t0 = a.square()
-    let t1 = b.square()
-    let c0 = t1.mul_by_nonresidue().add(t0)
-    let c1 = a.add(b).square().sub(t0).sub(t1)
-    (c0, c1)
+    let (c00, c01, c10, c11) = bls_field::fp4_square(a.c0, a.c1, b.c0, b.c1)
+    (Fp2 { c0: c00, c1: c01 }, Fp2 { c0: c10, c1: c11 })
 }
 
 // Squaring in the cyclotomic subgroup (Granger-Scott, https://eprint.iacr.org/2009/565).

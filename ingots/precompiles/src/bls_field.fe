@@ -244,8 +244,8 @@ fn redc_round(_ t: [u64; 6]) -> [u64; 6] {
 // Montgomery reduction of t below p 2^384: t 2^-384 mod p. Six rounds take
 // the low half to (low + M p) / 2^384, at most p; the high half, below p,
 // adds on, and one subtraction brings the sum below p.
-#[inline(never)]
-fn redc(_ t: [u64; 12]) -> Fp {
+#[inline(always)]
+fn montgomery_reduce(_ t: [u64; 12]) -> Fp {
     let u = redc_round([t[0], t[1], t[2], t[3], t[4], t[5]])
     let u = redc_round(u)
     let u = redc_round(u)
@@ -254,6 +254,11 @@ fn redc(_ t: [u64; 12]) -> Fp {
     let u = redc_round(u)
     let (sum, carry) = add_limbs(u, [t[6], t[7], t[8], t[9], t[10], t[11]])
     Fp { limbs: reduce(sum, carry) }
+}
+
+#[inline(never)]
+fn redc(_ t: [u64; 12]) -> Fp {
+    montgomery_reduce(t)
 }
 
 // a - b over twelve words, with the borrow out.
@@ -302,6 +307,88 @@ pub fn mul_quadratic(_ a0: Fp, _ a1: Fp, _ b0: Fp, _ b1: Fp) -> (Fp, Fp) {
     let (a_sum, _) = add_limbs(a0.limbs, a1.limbs)
     let (b_sum, _) = add_limbs(b0.limbs, b1.limbs)
     combine(product(a0.limbs, b0.limbs), product(a1.limbs, b1.limbs), product(a_sum, b_sum))
+}
+
+// x + y over twelve words, both below p 2^384, less p 2^384 when the sum
+// reaches it.
+#[inline(always)]
+fn add_wide_reduced(_ x: [u64; 12], _ y: [u64; 12]) -> [u64; 12] {
+    let (s0, c) = adc(x[0], y[0], 0)
+    let (s1, c) = adc(x[1], y[1], c)
+    let (s2, c) = adc(x[2], y[2], c)
+    let (s3, c) = adc(x[3], y[3], c)
+    let (s4, c) = adc(x[4], y[4], c)
+    let (s5, c) = adc(x[5], y[5], c)
+    let (s6, c) = adc(x[6], y[6], c)
+    let (s7, c) = adc(x[7], y[7], c)
+    let (s8, c) = adc(x[8], y[8], c)
+    let (s9, c) = adc(x[9], y[9], c)
+    let (s10, c) = adc(x[10], y[10], c)
+    let (s11, c) = adc(x[11], y[11], c)
+    let high = reduce([s6, s7, s8, s9, s10, s11], c)
+    [s0, s1, s2, s3, s4, s5, high[0], high[1], high[2], high[3], high[4], high[5]]
+}
+
+// x - y over twelve words, both below p 2^384, plus p 2^384 when negative.
+#[inline(always)]
+fn sub_wide_reduced(_ x: [u64; 12], _ y: [u64; 12]) -> [u64; 12] {
+    let (d, borrow) = subtract_wide(x, y)
+    let zero: u64 = 0
+    let mask = zero.wrapping_sub(borrow)
+    let (high, _) = add_limbs(
+        [d[6], d[7], d[8], d[9], d[10], d[11]],
+        [MODULUS[0] & mask, MODULUS[1] & mask, MODULUS[2] & mask, MODULUS[3] & mask, MODULUS[4] & mask, MODULUS[5] & mask],
+    )
+    [d[0], d[1], d[2], d[3], d[4], d[5], high[0], high[1], high[2], high[3], high[4], high[5]]
+}
+
+// The unreduced square of a0 + a1 u, u^2 = -1: (a0 + a1)(a0 + p - a1),
+// below 4 p^2, and 2 a0 a1, below 2 p^2. Each factor is below 2 p and fits
+// six limbs.
+#[inline(always)]
+fn square_wide(_ a0: [u64; 6], _ a1: [u64; 6]) -> ([u64; 12], [u64; 12]) {
+    let (sum, _) = add_limbs(a0, a1)
+    let (lifted, _) = add_limbs(a0, MODULUS)
+    let (difference, _) = subtract(lifted, a1)
+    let (twice, _) = add_limbs(a0, a0)
+    (product(sum, difference), product(twice, a1))
+}
+
+/// The square of a + b w in Fp4 = Fp2[w]/(w^2 - (u + 1)), with a = a0 + a1 u
+/// and b = b0 + b1 u, as cyclotomic squaring takes it: c0 = b^2 (u + 1) + a^2
+/// and c1 = (a + b)^2 - a^2 - b^2, from three unreduced Fp2 squares combined
+/// below p 2^384 and reduced once per coefficient. The coefficients come as
+/// c0's two then c1's two.
+#[inline(never)]
+pub fn fp4_square(_ a0: Fp, _ a1: Fp, _ b0: Fp, _ b1: Fp) -> (Fp, Fp, Fp, Fp) {
+    let (aa_re, aa_im) = square_wide(a0.limbs, a1.limbs)
+    let (bb_re, bb_im) = square_wide(b0.limbs, b1.limbs)
+    let (ss_re, ss_im) = square_wide(a0.add(b0).limbs, a1.add(b1).limbs)
+    // b^2 (u + 1) is (bb_re - bb_im) + (bb_re + bb_im) u.
+    (
+        reduce_difference_sum(bb_re, bb_im, aa_re),
+        reduce_sum_sum(bb_re, bb_im, aa_im),
+        reduce_difference_difference(ss_re, aa_re, bb_re),
+        reduce_difference_difference(ss_im, aa_im, bb_im),
+    )
+}
+
+// The Montgomery reductions of x - y + z, x + y + z and x - y - z, each of
+// x, y and z below p 2^384, combined below p 2^384 first. Each runs out of
+// line, so that only its own three products are live.
+#[inline(never)]
+fn reduce_difference_sum(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(add_wide_reduced(sub_wide_reduced(x, y), z))
+}
+
+#[inline(never)]
+fn reduce_sum_sum(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(add_wide_reduced(add_wide_reduced(x, y), z))
+}
+
+#[inline(never)]
+fn reduce_difference_difference(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(sub_wide_reduced(sub_wide_reduced(x, y), z))
 }
 
 impl Fp {
