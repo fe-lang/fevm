@@ -139,10 +139,11 @@ fn row(_ a: [u64; 6], _ b: u64, _ t: [u64; 6], _ top: u64) -> ([u64; 6], u64) {
     let (s5, cb) = adc(t[5], h4, cb)
     let (l5, h5) = mul_wide(b, a[5])
     let (s5, ca) = adc(s5, l5, ca)
+    // A product's high word is at most 2^64 - 2, so it takes `ca` without
+    // carrying, and the chains end one after the other.
+    let (h5, _) = adc(h5, 0, ca)
     let (s6, cb) = adc(top, h5, cb)
-    let (s6, ca) = adc(s6, 0, ca)
-    let (s7, _) = adc(cb, 0, ca)
-    shift_reduced([s0, s1, s2, s3, s4, s5, s6], s7)
+    shift_reduced([s0, s1, s2, s3, s4, s5, s6], cb)
 }
 
 // s plus the multiple of p that clears its low word, shifted down one
@@ -167,9 +168,10 @@ fn shift_reduced(_ s: [u64; 7], _ s7: u64) -> ([u64; 6], u64) {
     let (u5, cb) = adc(s[5], j4, cb)
     let (k5, j5) = mul_wide(m, MODULUS[5])
     let (u5, ca) = adc(u5, k5, ca)
+    // `j5` takes `ca` without carrying, as in `row`.
+    let (j5, _) = adc(j5, 0, ca)
     let (u6, cb) = adc(s[6], j5, cb)
-    let (u6, ca) = adc(u6, 0, ca)
-    let (u7, _) = adc(s7, cb, ca)
+    let (u7, _) = adc(s7, 0, cb)
     ([u1, u2, u3, u4, u5, u6], u7)
 }
 
