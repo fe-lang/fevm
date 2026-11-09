@@ -43,6 +43,10 @@ pub enum ChangeKind {
     Transient { pub slot: u256, pub previous: u256 },
     /// A new mark.
     Mark(Mark),
+    /// A touch without a mark (EIP-161), for the few a transaction makes
+    /// outside code: its own call, and writes that leave a value as it was.
+    /// Code's touches, which can repeat without bound, are marks.
+    Touch,
     WarmSlot { pub slot: u256 },
     /// Code deployed to an account without code.
     Code { pub existed: bool },
@@ -71,7 +75,8 @@ impl Change {
     pub fn touches(self) -> bool {
         match self.kind {
             ChangeKind::Account { .. } | ChangeKind::Sender { .. } | ChangeKind::Contract { .. }
-                | ChangeKind::Code { .. } | ChangeKind::Delegation { .. } | ChangeKind::Mark(Mark::Touched) => true,
+                | ChangeKind::Code { .. } | ChangeKind::Delegation { .. } | ChangeKind::Mark(Mark::Touched)
+                | ChangeKind::Touch => true,
             _ => false,
         }
     }

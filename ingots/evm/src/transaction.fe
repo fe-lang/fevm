@@ -10,7 +10,9 @@ use fevm_precompiles::is_precompile
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
-pub struct Checkpoint { position: usize, depth: usize, was_static: bool, refund: i128, logs: u64 }
+// `transient_empty`: transient storage was empty at the checkpoint, so
+// reverting to it empties the table instead of undoing each write.
+pub struct Checkpoint { position: usize, depth: usize, was_static: bool, refund: i128, logs: u64, transient_empty: bool }
 
 pub struct TransactionResult {
     pub state: WorldState,
@@ -175,12 +177,15 @@ impl Transaction {
         self.buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
-    // Adds `mark` to `address`, journaled if new.
+    // Adds `mark` to `address`, journaled if new. A new address gets an
+    // entry without marks first.
     fn mark(mut self, _ mark: Mark, _ address: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        if self.marked(address, mark) { return OK }
-        if !self.add_mark(address, mark) { return ERR_HOST_ALLOCATION }
+        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
+        let marks = mut self.buffers.marks.value_at(slot)
+        if marks & mark.bit() != 0 { return OK }
+        marks |= mark.bit()
         self.journal(address, ChangeKind::Mark(mark))
     }
 
@@ -200,6 +205,14 @@ impl Transaction {
 
     pub fn touch(mut self, _ address: u256) -> i32 {
         self.mark(Mark::Touched, address)
+    }
+
+    /// Touches `address` with a journal entry and no mark: for the
+    /// transaction's own call, which touches its target once.
+    pub fn touch_unmarked(mut self, _ address: u256) -> i32 {
+        self.started = true
+        if self.buffers.journal.push(Change { address: address_word(address), kind: ChangeKind::Touch }) { OK }
+        else { ERR_HOST_ALLOCATION }
     }
 
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
@@ -237,7 +250,7 @@ impl Transaction {
         self.depth += 1
         let checkpoint = Checkpoint {
             position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
-            logs: self.logs.len(),
+            logs: self.logs.len(), transient_empty: self.buffers.transient.is_empty(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -251,18 +264,24 @@ impl Transaction {
 
     pub fn revert(mut self, _ checkpoint: own Checkpoint) {
         core::assert(self.depth == checkpoint.depth)
-        self.undo_to(checkpoint.position)
+        if checkpoint.transient_empty { self.buffers.transient.clear() }
+        self.undo_to(checkpoint.position, transient: !checkpoint.transient_empty)
         self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
         self.depth -= 1
         self.is_static = checkpoint.was_static
     }
 
-    // Undoes the journal's changes past `position`, latest first.
-    fn undo_to(mut self, _ position: usize) {
+    // Undoes the journal's changes past `position`, latest first, but for
+    // transient storage's unless `transient`.
+    fn undo_to(mut self, _ position: usize, transient: bool) {
         while self.buffers.journal.len() > position {
             let change = self.buffers.journal.pop()
-            self.undo(change)
+            let skip = match change.kind {
+                ChangeKind::Transient { .. } => !transient,
+                _ => false,
+            }
+            if !skip { self.undo(change) }
         }
     }
 
@@ -288,6 +307,7 @@ impl Transaction {
             ChangeKind::Mark(mark) => core::assert(self.unmark(address, mark)),
             ChangeKind::WarmSlot { slot } => core::assert(self.buffers.warm_storage.remove(StorageKey { address, slot })),
             ChangeKind::Code { .. } => core::assert(self.state.set_code(address, code: empty) == OK),
+            ChangeKind::Touch => {},
             ChangeKind::Delegation { previous, .. } => {
                 let restored = match previous {
                     Option::Some(delegate) => self.state.set_code_unhashed(address, code: designator(delegate)),
@@ -351,7 +371,7 @@ impl Transaction {
             Result::Ok(written) => if written.changed {
                 self.journal(address, ChangeKind::Account { field, previous: written.previous, existed: written.existed })
             } else {
-                self.touch(address)
+                self.touch_unmarked(address)
             },
             Result::Err(error) => error.status(),
         }
@@ -465,13 +485,24 @@ impl Transaction {
         self.refund += charge.refund
         OK
     }
-    // TSTORE's write (EIP-1153).
+    // TSTORE's write (EIP-1153). The transient table holds no zeros: a zero
+    // removes the entry, and another value finds or makes one with a single
+    // search.
     pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        let previous = self.transient_load(address, slot)
-        if previous == value { return OK }
-        if !self.write_transient(address, slot, value) { return ERR_HOST_ALLOCATION }
+        let key = StorageKey { address, slot }
+        let previous = if value == 0 {
+            let Option::Some(at) = self.buffers.transient.find(key) else { return OK }
+            let previous = self.buffers.transient.value_at(at)
+            let _ = self.buffers.transient.remove(key)
+            previous
+        } else {
+            let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
+            let stored = mut self.buffers.transient.value_at(at)
+            if stored == value { return OK }
+            core::mem::replace(mut stored, value)
+        }
         self.journal(address, ChangeKind::Transient { slot, previous })
     }
 
@@ -495,7 +526,7 @@ impl Transaction {
     pub fn end(mut self, commit: bool) {
         core::assert(self.depth == 0)
         if !commit {
-            self.undo_to(0)
+            self.undo_to(0, transient: false)
             self.logs.truncate(0)
         }
         self.buffers.journal.clear()
