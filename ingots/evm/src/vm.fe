@@ -2138,8 +2138,10 @@ impl Vm {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let dest = unsafe { *below(top, 1) }
+        // A faulted frame's pc is never read, and the destination sits where
+        // the jump's pc goes, so the handler's own pc is dead once it loads it.
         if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), 0, depth - 1)
+            return self.faulted_at(ERR_INVALID_JUMP, dest.downcast_truncate(), 0, depth - 1)
         }
         self.next(code, dest.downcast_unchecked(), gas - 8, depth - 1, below(top, 1), mut tracer)
     }
@@ -2156,8 +2158,9 @@ impl Vm {
         }
         // Only a taken jump reads its destination.
         let dest = unsafe { *below(top, 1) }
+        // As in `op_jump`, the fault passes the destination as its pc.
         if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), 0, depth - 2)
+            return self.faulted_at(ERR_INVALID_JUMP, dest.downcast_truncate(), 0, depth - 2)
         }
         self.next(code, dest.downcast_unchecked(), gas - 10, depth - 2, below(top, 2), mut tracer)
     }
