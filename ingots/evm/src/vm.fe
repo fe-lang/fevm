@@ -1489,10 +1489,10 @@ impl Vm {
     #[inline(always)]
     fn op_modular<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, op: i32) {
         if gas < 8 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 3 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 8, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let third = below(top, 3)
         unsafe {
@@ -1508,7 +1508,7 @@ impl Vm {
     fn op_exp<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         let cost = base_cost(0x0a)
         if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.gas_remaining = gas - cost
         unsafe { self.stack.set_len(depth) }
@@ -1531,7 +1531,10 @@ impl Vm {
     }
 
     // Every handler can fault, usually twice; one copy out of line keeps
-    // the handlers small.
+    // the handlers small. A handler's fault is an exceptional halt, which
+    // leaves the frame no gas: callers pass a `gas` of zero, in the place a
+    // handler keeps its gas, so that the arguments stay in the handler's
+    // registers and the handler's gas is dead on the way to the fault.
     #[inline(never)]
     fn faulted_at(mut self, _ status: i32, _ pc: usize, _ gas: u64, _ depth: usize) {
         self.fault(status)
@@ -1543,7 +1546,7 @@ impl Vm {
     fn push_next<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
                             _ value: u256) {
         if depth >= STACK_LIMIT {
-            return self.faulted_at(ERR_STACK_OVERFLOW, pc, gas, depth)
+            return self.faulted_at(ERR_STACK_OVERFLOW, pc, 0, depth)
         }
         unsafe { *top = value }
         self.next(code, pc, gas, depth + 1, offset_bytes(top, 32), mut tracer)
@@ -1551,7 +1554,7 @@ impl Vm {
 
     fn op_push0<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, 0)
     }
@@ -1560,7 +1563,7 @@ impl Vm {
     // immediate a whole word of code after it.
     fn op_push1<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let value = unsafe { read_code<u8>(code, pc.wrapping_add(1)) }
         self.push_next(code, pc.wrapping_add(2), gas - 3, depth, top, mut tracer, value as u256)
@@ -1568,7 +1571,7 @@ impl Vm {
 
     fn op_push2<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let value = unsafe { read_code<u16>(code, pc.wrapping_add(1)) }
         self.push_next(code, pc.wrapping_add(3), gas - 3, depth, top, mut tracer, value as u256)
@@ -1576,7 +1579,7 @@ impl Vm {
 
     fn op_push4<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let value = unsafe { read_code<u32>(code, pc.wrapping_add(1)) }
         self.push_next(code, pc.wrapping_add(5), gas - 3, depth, top, mut tracer, value as u256)
@@ -1584,7 +1587,7 @@ impl Vm {
 
     fn op_push32<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let value = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
         self.push_next(code, pc.wrapping_add(33), gas - 3, depth, top, mut tracer, value)
@@ -1596,7 +1599,7 @@ impl Vm {
     fn op_push_n<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
                                            _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let at = pc.wrapping_add(1)
         let value: u256 = if N <= 8 {
@@ -1613,10 +1616,10 @@ impl Vm {
 
     fn op_pop<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 2, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         self.next(code, pc.wrapping_add(1), gas - 2, depth - 1, below(top, 1), mut tracer)
     }
@@ -1689,10 +1692,10 @@ impl Vm {
     #[inline(always)]
     fn op_dup_n<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, n: usize) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < n {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let value = unsafe { *below(top, n) }
         self.push_next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer, value)
@@ -1765,10 +1768,10 @@ impl Vm {
     #[inline(always)]
     fn op_swap_n<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, n: usize) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth <= n {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         // Swapping a 64-bit piece at a time keeps two of them live, not
         // eight.
@@ -1787,10 +1790,10 @@ impl Vm {
     fn op_unary<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
                            cost: u64, op: i32) {
         if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - cost, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let word = below(top, 1)
         match unary_result(op, unsafe { *word }) {
@@ -1806,10 +1809,10 @@ impl Vm {
     fn op_binary<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T,
                             cost: u64, op: i32) {
         if gas < cost {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - cost, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         // The top word is the first operand; the result replaces the second.
         let second = below(top, 2)
@@ -1824,10 +1827,10 @@ impl Vm {
 
     fn op_mload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let word = below(top, 1)
         let offset = unsafe { *word }
@@ -1849,7 +1852,7 @@ impl Vm {
         }
         var gas = gas
         if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.memory_size = size
         unsafe { *word = self.memory.span().read_be_unchecked<u256>(offset.downcast_unchecked()) }
@@ -1871,10 +1874,10 @@ impl Vm {
 
     fn op_mstore<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let offset = unsafe { *below(top, 1) }
         if !self.in_memory(offset, len: 32) {
@@ -1894,7 +1897,7 @@ impl Vm {
         }
         var gas = gas
         if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.memory_size = size
         unsafe { self.memory.span().write_be_unchecked(offset: offset.downcast_unchecked(), value: *below(top, 2)) }
@@ -1916,10 +1919,10 @@ impl Vm {
 
     fn op_mstore8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let offset = unsafe { *below(top, 1) }
         if !self.in_memory(offset, len: 1) {
@@ -1939,7 +1942,7 @@ impl Vm {
         }
         var gas = gas
         if !spend(mut gas, small_growth_cost(current: self.memory_size, size)) {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.memory_size = size
         let byte: u8 = unsafe { *below(top, 2) }.downcast_truncate()
@@ -1998,10 +2001,10 @@ impl Vm {
     // reading as zero.
     fn op_calldataload<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let slot = below(top, 1)
         let offset = unsafe { *slot }
@@ -2030,10 +2033,10 @@ impl Vm {
     // BLOBHASH: the transaction's blob hash at the index on top, or zero.
     fn op_blobhash<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 3, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let slot = below(top, 1)
         let index = unsafe { *slot }
@@ -2129,24 +2132,24 @@ impl Vm {
 
     fn op_jump<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 8 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 1 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 8, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         let dest = unsafe { *below(top, 1) }
         if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), gas - 8, depth - 1)
+            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), 0, depth - 1)
         }
         self.next(code, dest.downcast_unchecked(), gas - 8, depth - 1, below(top, 1), mut tracer)
     }
 
     fn op_jumpi<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 10 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         if depth < 2 {
-            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), gas - 10, depth)
+            return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         if unsafe { *below(top, 2) } == 0 {
             return self.next(code, pc.wrapping_add(1), gas - 10, depth - 2, below(top, 2), mut tracer)
@@ -2154,28 +2157,28 @@ impl Vm {
         // Only a taken jump reads its destination.
         let dest = unsafe { *below(top, 1) }
         if !self.jump_ok(dest) {
-            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), gas - 10, depth - 2)
+            return self.faulted_at(ERR_INVALID_JUMP, pc.wrapping_add(1), 0, depth - 2)
         }
         self.next(code, dest.downcast_unchecked(), gas - 10, depth - 2, below(top, 2), mut tracer)
     }
 
     fn op_pc<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, pc as u256)
     }
 
     fn op_msize<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, self.memory_size as u256)
     }
 
     fn op_gas<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, (gas - 2) as u256)
     }
@@ -2185,7 +2188,7 @@ impl Vm {
     fn push_environment<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
                                    _ tracer: mut T, _ value: u256) {
         if gas < 2 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, value)
     }
@@ -2256,7 +2259,7 @@ impl Vm {
 
     fn op_jumpdest<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
         if gas < 1 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), gas, depth)
+            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         self.next(code, pc.wrapping_add(1), gas - 1, depth, top, mut tracer)
     }
