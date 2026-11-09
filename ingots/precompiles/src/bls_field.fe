@@ -83,6 +83,19 @@ fn reduce(_ t: [u64; 6], _ top: u64) -> [u64; 6] {
     if borrow == 1 { t } else { d }
 }
 
+// a * b * 2^-384 mod p for a and b below 2p, left below 2p: the CIOS rows
+// without the final subtraction. As 4p < 2^384, (a b + q p) / 2^384 is below
+// p + 4p^2 / 2^384 < 2p, so the word above the result is zero.
+fn mul_lazy(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 6] {
+    let (t, top) = first_row(a, b[0])
+    let (t, top) = row(a, b[1], t, top)
+    let (t, top) = row(a, b[2], t, top)
+    let (t, top) = row(a, b[3], t, top)
+    let (t, top) = row(a, b[4], t, top)
+    let (t, _) = row(a, b[5], t, top)
+    t
+}
+
 // The first CIOS row: a * b, then reduced.
 #[inline(always)]
 fn first_row(_ a: [u64; 6], _ b: u64) -> ([u64; 6], u64) {
@@ -438,17 +451,18 @@ impl Fp {
 
     /// self^((p+1)/4): a square root of a square, and of -self otherwise.
     pub fn sqrt_candidate(self) -> Fp {
+        // Values stay below 2p, unreduced, until the end (`mul_lazy`).
         // self^1, self^3, ..., self^31.
-        var odd: [Fp; 16] = [self; 16]
-        let square = self.square()
-        for i in 1..16 { odd[i] = odd[i - 1].mul(square) }
+        var odd: [[u64; 6]; 16] = [self.limbs; 16]
+        let square = mul_lazy(self.limbs, self.limbs)
+        for i in 1..16 { odd[i] = mul_lazy(odd[i - 1], square) }
         var result = odd[SQRT_WINDOWS[0][1] as usize]
         for i in 1..67 {
             let window = SQRT_WINDOWS[i]
-            for _ in 0..window[0] as usize { result = result.square() }
-            result = result.mul(odd[window[1] as usize])
+            for _ in 0..window[0] as usize { result = mul_lazy(result, result) }
+            result = mul_lazy(result, odd[window[1] as usize])
         }
-        result
+        Fp { limbs: reduce(result, 0) }
     }
 }
 
