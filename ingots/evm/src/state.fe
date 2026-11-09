@@ -55,8 +55,11 @@ pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256,
 
 /// A balance or nonce replacement: the previous value, whether the account
 /// existed, whether the value changed, whether the table could hold it and
-/// whether an addition overflowed instead.
-pub struct Replaced { pub previous: u256, pub found: bool, pub changed: bool, pub written: bool, pub overflowed: bool }
+/// whether an addition overflowed instead. `position` is the written
+/// account's, which `restore_at` takes to undo the write without a lookup.
+pub struct Replaced {
+    pub previous: u256, pub found: bool, pub changed: bool, pub written: bool, pub overflowed: bool, pub position: usize,
+}
 
 /// What validating a sender reads from its account.
 pub struct Sender { pub nonce: u256, pub balance: u256, pub code_len: usize }
@@ -287,7 +290,7 @@ impl WorldState {
         let lookup = self.index.get(address)
         let previous = self.field(balance, lookup)
         if add && amount > MAX_U256 - previous {
-            return Replaced { previous, found: lookup.found, changed: false, written: true, overflowed: true }
+            return Replaced { previous, found: lookup.found, changed: false, written: true, overflowed: true, position: 0 }
         }
         self.store(balance, address, lookup, previous, value: if add { previous + amount } else { previous - amount })
     }
@@ -318,16 +321,32 @@ impl WorldState {
     // Replaces `previous`, the balance (or nonce) of a looked-up account, with `value`.
     fn store(mut self, _ balance: bool, _ address: u256, _ lookup: Lookup<usize>, _ previous: u256,
              _ value: u256) -> Replaced {
-        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true, overflowed: false } }
+        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true, overflowed: false, position: 0 } }
         let at = if lookup.found { lookup.value } else {
             match self.add_record(address) {
                 Option::Some(at) => at,
-                Option::None => return Replaced { previous, found: false, changed: true, written: false, overflowed: false },
+                Option::None => return Replaced { previous, found: false, changed: true, written: false, overflowed: false, position: 0 },
             }
         }
         let account = mut self.accounts[at]
         if balance { account.balance = value } else { account.nonce = value }
-        Replaced { previous, found: lookup.found, changed: true, written: true, overflowed: false }
+        Replaced { previous, found: lookup.found, changed: true, written: true, overflowed: false, position: at }
+    }
+    /// `restore` of the account a write found at `position`, an address word's,
+    /// with no lookup while the record is still there: undoing a transaction's
+    /// changes in reverse leaves each account where its change found it.
+    pub fn restore_at(mut self, balance: bool, _ address: u256, _ position: usize, _ value: u256,
+                      existed: bool) -> bool {
+        if position >= self.accounts.len() || self.accounts[position].address != address {
+            return self.restore(balance, address, value, existed)
+        }
+        let account = mut self.accounts[position]
+        if balance { account.balance = value } else { account.nonce = value }
+        if !existed {
+            core::assert(self.empty_at(position))
+            self.remove_at(address, position)
+        }
+        true
     }
     /// Sets the balance (or nonce) of `address` back to `value` with one
     /// lookup. Undoing the change that created the account leaves it empty,
