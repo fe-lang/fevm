@@ -35,10 +35,15 @@ impl Fp2 {
             if y.square().equals(self.c0) { return Option::Some(Fp2 { c0: y, c1: Fp::zero() }) }
             return Option::Some(Fp2 { c0: Fp::zero(), c1: y })
         }
-        let alpha = match self.c0.square().add(self.c1.square()).sqrt() {
-            Option::Some(alpha) => alpha,
-            Option::None => return Option::None,
+        match self.c0.square().add(self.c1.square()).sqrt() {
+            Option::Some(alpha) => Option::Some(self.sqrt_from_norm_root(alpha)),
+            Option::None => Option::None,
         }
+    }
+
+    /// The square root of `self`, whose c1 is nonzero, from a square root
+    /// `alpha` of its norm.
+    pub fn sqrt_from_norm_root(self, _ alpha: Fp) -> Fp2 {
         let half = Fp::from_montgomery(HALF)
         // With c1 nonzero, c0 +- alpha is nonzero, and their halves multiply
         // to -(c1 / 2)^2: as -1 is not a square, exactly one is a square.
@@ -47,9 +52,9 @@ impl Fp2 {
         let g = self.c0.add(alpha).mul(half)
         let y = g.sqrt_candidate()
         if y.square().equals(g) {
-            return Option::Some(Fp2 { c0: y, c1: self.c1.mul(y.double().invert()) })
+            return Fp2 { c0: y, c1: self.c1.mul(y.double().invert()) }
         }
-        Option::Some(Fp2 { c0: self.c1.mul(y.double().invert()), c1: y })
+        Fp2 { c0: self.c1.mul(y.double().invert()), c1: y }
     }
 }
 

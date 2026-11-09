@@ -146,12 +146,23 @@ impl Root for Fp {
     fn sign(self) -> bool { self.sgn0() }
 }
 
+// sqrt(-N(Z)^3) for G2's Z = -2 - u, whose norm N(Z) is 5 (Montgomery form).
+const G2_SQRT_MINUS_NORM_Z3: [u64; 6] = [0xe4132bbd838cf70a, 0x01d769ac83772c19, 0xa83dd6e974c22e45, 0xbc8ec3e777b08dff, 0xc035c2042ecf5da3, 0x073929e97f0850bf]
+
 impl Root for Fp2 {
+    // An element is a square exactly when its norm is one in Fp. When the
+    // norm n is not, c = n^((p+1)/4) has c^2 = -n, and the norm of
+    // Z^3 u^6 self, N(Z)^3 N(u)^6 n, has the root sqrt(-N(Z)^3) N(u)^3 c:
+    // no second exponentiation for the other's norm.
     fn root_or(self, _ other: Fp2, u: Fp2) -> (Fp2, bool) {
-        match self.sqrt() {
-            Option::Some(y) => (y, true),
-            Option::None => (other.sqrt().unwrap(), false),
-        }
+        if self.c1.is_zero() { return (self.sqrt().unwrap(), true) }
+        let norm = self.c0.square().add(self.c1.square())
+        let c = norm.sqrt_candidate()
+        if c.square().equals(norm) { return (self.sqrt_from_norm_root(c), true) }
+        if other.c1.is_zero() { return (other.sqrt().unwrap(), false) }
+        let norm_u = u.c0.square().add(u.c1.square())
+        let alpha = Fp::from_montgomery(G2_SQRT_MINUS_NORM_Z3).mul(norm_u.square().mul(norm_u)).mul(c)
+        (other.sqrt_from_norm_root(alpha), false)
     }
     fn sign(self) -> bool { self.sgn0() }
 }
@@ -257,6 +268,7 @@ fn sswu_points_lie_on_the_isogenous_curves_with_the_input_sign() {
     let a2 = fp2(G2_A)
     let b2 = fp2(G2_B)
     var first: u64 = 0
+    var first2: u64 = 0
     for k in 1..21 {
         let limb: u64 = k.downcast_truncate()
         let u = Fp::from_canonical([limb, 0, 0, 0, 0, 0])
@@ -267,6 +279,9 @@ fn sswu_points_lie_on_the_isogenous_curves_with_the_input_sign() {
         let u2 = Fp2::new(c0: u, c1: Fp::one())
         let q = sswu(u2, a: a2, b: b2, z: fp2(G2_Z), minus_b_over_a: fp2(G2_MINUS_B_OVER_A), b_over_za: fp2(G2_B_OVER_ZA))
         core::assert(q.y.square().equals(q.x.square().mul(q.x).add(a2.mul(q.x)).add(b2)) && q.y.sign() == u2.sign())
+        let zu2_2 = fp2(G2_Z).mul(u2.square())
+        let x1 = fp2(G2_MINUS_B_OVER_A).mul(Fp2::one().add(zu2_2.square().add(zu2_2).invert()))
+        if q.x.equals(x1) { first2 += 1 }
     }
-    core::assert(first > 0 && first < 20)
+    core::assert(first > 0 && first < 20 && first2 > 0 && first2 < 20)
 }
