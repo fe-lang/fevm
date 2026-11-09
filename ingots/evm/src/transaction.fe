@@ -1,48 +1,16 @@
-use core::{MemSpan, MemVec, Option}
+use core::{MemSpan, MemVec, Option, Result}
 use ingot::logs::LogBuffer
-use ingot::constants::MAX_U256
-use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
-use ingot::journal::Change
-use ingot::state::{Charged, Replaced, Sender, StorageKey, WorldState, address_word, designator}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
+use ingot::journal::{Change, ChangeKind, Mark}
+use ingot::state::{Field, Sender, StorageKey, WorldState, WriteError, Written, address_word, designator}
 use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
 
-const BALANCE: u8 = 0
-const NONCE: u8 = 1
-const STORAGE: u8 = 2
-const TRANSIENT: u8 = 3
-const WARM_ACCOUNT: u8 = 4
-const WARM_STORAGE: u8 = 5
-const CODE: u8 = 6
-const TOUCHED: u8 = 7
-const DOOMED: u8 = 8
-// An EIP-7702 delegation: `slot` is 1 when the code was a designator to `previous`.
-const DELEGATION: u8 = 9
-// A touch without a mark, for touches gas bounds to a few per transaction:
-// writes that leave their value, and the transaction's own call. Undo has
-// nothing to restore.
-const TOUCHED_ONCE: u8 = 10
-// The transaction's nonce increment and gas purchase: `slot` is the
-// sender's previous nonce and `previous` its previous balance.
-const SENDER: u8 = 11
-// A new contract's first nonce and endowment: `slot` is its account's
-// position and `previous` its previous balance. Its nonce was zero.
-const CONTRACT: u8 = 12
-
-// An address's marks, the bits of its `marks` entry. Undo clears the warm,
-// touched and doomed marks a frame set; creation marks survive rollback.
-const MARK_WARM: u8 = 1
-const MARK_TOUCHED: u8 = 2
-const MARK_CREATED: u8 = 4
-const MARK_DOOMED: u8 = 8
-
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
-// `transient_empty`: no transient storage was set, so undoing to the
-// checkpoint empties it whole instead of entry by entry.
-pub struct Checkpoint { position: u64, depth: usize, was_static: bool, refund: i128, logs: u64, transient_empty: bool }
+pub struct Checkpoint { position: usize, depth: usize, was_static: bool, refund: i128, logs: u64 }
 
 pub struct TransactionResult {
     pub state: WorldState,
@@ -123,8 +91,7 @@ impl Transaction {
     pub fn take_logs(mut self) -> LogBuffer { core::mem::replace(mut self.logs, LogBuffer::new()) }
 
     pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
+        if !self.writable() { return ERR_STATIC_WRITE }
         if self.logs.append(address, topics, topic_count, data) { OK }
         else { ERR_HOST_ALLOCATION }
     }
@@ -154,16 +121,16 @@ impl Transaction {
     // Access-list initialization precedes all frames and is never rolled back.
     pub fn access_list_account(mut self, address: u256) -> bool {
         core::assert(!self.started)
-        self.add_mark(address_word(address), MARK_WARM)
+        self.add_mark(address_word(address), Mark::Warm)
     }
 
     pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
         core::assert(!self.started)
         let address = address_word(address)
-        let was_warm = self.marked(address, MARK_WARM)
-        if !self.add_mark(address, MARK_WARM) { return false }
+        let was_warm = self.marked(address, Mark::Warm)
+        if !self.add_mark(address, Mark::Warm) { return false }
         if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) {
-            if !was_warm { core::assert(self.unmark(address, MARK_WARM)) }
+            if !was_warm { core::assert(self.unmark(address, Mark::Warm)) }
             return false
         }
         true
@@ -171,7 +138,7 @@ impl Transaction {
 
     pub fn account_is_warm(self, _ address: u256) -> bool {
         let address = address_word(address)
-        self.always_warm(address) || self.marked(address, MARK_WARM)
+        self.always_warm(address) || self.marked(address, Mark::Warm)
     }
 
     // Whether `address`, an address word, is warm without a mark: a
@@ -182,25 +149,25 @@ impl Transaction {
     }
 
     // Whether `address`, an address word, has `mark`.
-    fn marked(self, _ address: u256, _ mark: u8) -> bool {
-        self.buffers.marks.get(address).value & mark != 0
+    fn marked(self, _ address: u256, _ mark: Mark) -> bool {
+        self.buffers.marks.get(address).value & mark.bit() != 0
     }
 
     // Adds `mark` to `address`'s marks, unjournaled; false, changing nothing,
     // if the table cannot grow.
-    fn add_mark(mut self, _ address: u256, _ mark: u8) -> bool {
+    fn add_mark(mut self, _ address: u256, _ mark: Mark) -> bool {
         let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return false }
         let marks = mut self.buffers.marks.value_at(slot)
-        marks |= mark
+        marks |= mark.bit()
         true
     }
 
     // Clears `mark` from `address`'s marks, which it has an entry for; an
     // address left without marks loses its entry. Neither grows the table.
-    fn unmark(mut self, _ address: u256, _ mark: u8) -> bool {
+    fn unmark(mut self, _ address: u256, _ mark: Mark) -> bool {
         let Option::Some(slot) = self.buffers.marks.find(address) else { return false }
         let marks = mut self.buffers.marks.value_at(slot)
-        marks &= ~mark
+        marks &= ~mark.bit()
         marks != 0 || self.buffers.marks.remove(address)
     }
 
@@ -208,67 +175,44 @@ impl Transaction {
         self.buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
-    // Adds the warm, touched or doomed mark of `kind` to `address`, journaled
-    // if new; a journal that cannot grow restores the marks.
-    fn mark(mut self, kind: u8, address: u256) -> i32 {
+    // Adds `mark` to `address`, journaled if new.
+    fn mark(mut self, _ mark: Mark, _ address: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        if kind == WARM_ACCOUNT && self.always_warm(address) { return OK }
-        let mark = mark_of(kind)
-        // A new address gets an entry without marks first.
-        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
-        let marks = mut self.buffers.marks.value_at(slot)
-        if marks & mark != 0 { return OK }
-        marks |= mark
-        if !self.buffers.journal.record(kind, address, slot: 0, previous: 0, existed: true) {
-            core::assert(self.unmark(address, mark))
-            return ERR_HOST_ALLOCATION
-        }
-        OK
+        if self.marked(address, mark) { return OK }
+        if !self.add_mark(address, mark) { return ERR_HOST_ALLOCATION }
+        self.journal(address, ChangeKind::Mark(mark))
     }
 
     pub fn warm_account(mut self, address: u256) -> i32 {
-        self.mark(kind: WARM_ACCOUNT, address)
+        self.started = true
+        if self.always_warm(address_word(address)) { return OK }
+        self.mark(Mark::Warm, address)
     }
 
-    // Inserts first, with one lookup, and journals only a new slot; a journal
-    // that cannot grow removes it again.
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
         self.started = true
-        let key = StorageKey { address: address_word(address), slot }
-        let before = self.buffers.warm_storage.len()
-        if !self.buffers.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
-        if self.buffers.warm_storage.len() == before { return OK }
-        if !self.buffers.journal.record(kind: WARM_STORAGE, address: key.address, slot, previous: 0, existed: true) {
-            let _ = self.buffers.warm_storage.remove(key)
-            return ERR_HOST_ALLOCATION
-        }
-        OK
+        let address = address_word(address)
+        if self.storage_is_warm(address, slot) { return OK }
+        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) { return ERR_HOST_ALLOCATION }
+        self.journal(address, ChangeKind::WarmSlot { slot })
     }
 
     pub fn touch(mut self, _ address: u256) -> i32 {
-        self.mark(kind: TOUCHED, address)
-    }
-
-    /// Touches `address` with a journal entry and no mark, which repeated
-    /// touches of one address would each add: for the transaction's own call.
-    pub fn touch_once(mut self, _ address: u256) -> i32 {
-        self.started = true
-        let change = Change { kind: TOUCHED_ONCE, address: address_word(address), slot: 0, previous: 0, existed: true }
-        if self.buffers.journal.append(change) { OK } else { ERR_HOST_ALLOCATION }
+        self.mark(Mark::Touched, address)
     }
 
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
     pub fn doom(mut self, _ address: u256) -> i32 {
-        self.mark(kind: DOOMED, address)
+        self.mark(Mark::Doomed, address)
     }
 
     pub fn mark_created(mut self, _ address: u256) -> i32 {
-        if self.add_mark(address_word(address), MARK_CREATED) { OK } else { ERR_HOST_ALLOCATION }
+        if self.add_mark(address_word(address), Mark::Created) { OK } else { ERR_HOST_ALLOCATION }
     }
 
     pub fn was_created(self, _ address: u256) -> bool {
-        self.marked(address_word(address), MARK_CREATED)
+        self.marked(address_word(address), Mark::Created)
     }
 
     pub fn original_storage(self, address: u256, slot: u256) -> u256 {
@@ -292,8 +236,8 @@ impl Transaction {
         self.started = true
         self.depth += 1
         let checkpoint = Checkpoint {
-            position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund, logs: self.logs.len(),
-            transient_empty: self.buffers.transient.is_empty(),
+            position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
+            logs: self.logs.len(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -307,60 +251,67 @@ impl Transaction {
 
     pub fn revert(mut self, _ checkpoint: own Checkpoint) {
         core::assert(self.depth == checkpoint.depth)
-        self.undo_to(checkpoint.position, transient: !checkpoint.transient_empty)
-        if checkpoint.transient_empty {
-            self.buffers.transient.clear()
-        }
+        self.undo_to(checkpoint.position)
         self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
         self.depth -= 1
         self.is_static = checkpoint.was_static
     }
 
-    // Undoes journal entries past `position`, but for transient storage's
-    // unless `transient`.
-    fn undo_to(mut self, _ position: u64, transient: bool) {
+    // Undoes the journal's changes past `position`, latest first.
+    fn undo_to(mut self, _ position: usize) {
         while self.buffers.journal.len() > position {
             let change = self.buffers.journal.pop()
-            // A balance or nonce change that created its account also
-            // removes it.
-            let restored = match change.kind {
-                BALANCE => self.state.restore_at(balance: true, change.address, position: change.slot.downcast_truncate(),
-                                                 value: change.previous, existed: change.existed),
-                NONCE => self.state.restore_at(balance: false, change.address, position: change.slot.downcast_truncate(),
-                                               value: change.previous, existed: change.existed),
-                CONTRACT => self.state.restore_at(balance: false, change.address,
-                                                  position: change.slot.downcast_truncate(), value: 0, existed: true)
-                    && self.state.restore_at(balance: true, change.address, position: change.slot.downcast_truncate(),
-                                             value: change.previous, existed: change.existed),
-                SENDER => self.state.set_nonce(change.address, change.slot)
-                    && self.state.restore(balance: true, change.address, value: change.previous,
-                                          existed: change.existed),
-                STORAGE => self.state.storage_store(change.address, change.slot, change.previous),
-                TRANSIENT => !transient || self.write_transient(change.address, change.slot, change.previous),
-                WARM_ACCOUNT | TOUCHED | DOOMED => self.unmark(change.address, mark_of(change.kind)),
-                WARM_STORAGE => self.buffers.warm_storage.remove(StorageKey { address: change.address, slot: change.slot }),
-                CODE => {
-                    let empty: [u8; 0] = []
-                    self.state.set_code(address: change.address, code: empty) == OK
-                },
-                DELEGATION => if change.slot == 1 {
-                    self.state.set_code_unhashed(address: change.address, code: designator(change.previous)) == OK
-                } else {
-                    let empty: [u8; 0] = []
-                    self.state.set_code(address: change.address, code: empty) == OK
-                },
-                TOUCHED_ONCE => true,
-                _ => core::panic(),
-            }
-            // Reverse replay restores entries the tables held before. A table
-            // that cannot allocate to hold one again is a fatal host failure.
-            core::assert(restored)
-            let account_write = change.kind == STORAGE || change.kind == CODE || change.kind == DELEGATION
-            if !change.existed && account_write {
-                core::assert(self.state.remove_empty_account(change.address))
-            }
+            self.undo(change)
         }
+    }
+
+    // Reverses `change`, the latest change not undone. It restores entries
+    // the tables held before; a table that cannot allocate to hold one again
+    // is a fatal host failure. Undoing the change that created an account
+    // removes it.
+    fn undo(mut self, _ change: Change) {
+        let empty: [u8; 0] = []
+        let address = change.address
+        match change.kind {
+            ChangeKind::Account { field, previous, .. } => self.state.restore(field, address, previous),
+            ChangeKind::Sender { nonce, balance, .. } => {
+                self.state.restore(Field::Nonce, address, nonce)
+                self.state.restore(Field::Balance, address, balance)
+            },
+            ChangeKind::Contract { balance, .. } => {
+                self.state.restore(Field::Nonce, address, 0)
+                self.state.restore(Field::Balance, address, balance)
+            },
+            ChangeKind::Storage { slot, previous, .. } => core::assert(self.state.storage_store(address, slot, previous)),
+            ChangeKind::Transient { slot, previous } => core::assert(self.write_transient(address, slot, previous)),
+            ChangeKind::Mark(mark) => core::assert(self.unmark(address, mark)),
+            ChangeKind::WarmSlot { slot } => core::assert(self.buffers.warm_storage.remove(StorageKey { address, slot })),
+            ChangeKind::Code { .. } => core::assert(self.state.set_code(address, code: empty) == OK),
+            ChangeKind::Delegation { previous, .. } => {
+                let restored = match previous {
+                    Option::Some(delegate) => self.state.set_code_unhashed(address, code: designator(delegate)),
+                    Option::None => self.state.set_code(address, code: empty),
+                }
+                core::assert(restored == OK)
+            },
+        }
+        if change.created() { self.state.remove_empty_account(address) }
+    }
+
+    // Journals a change to `address`, which the world or tables already
+    // made; a journal that cannot grow undoes it.
+    fn journal(mut self, _ address: u256, _ kind: ChangeKind) -> i32 {
+        let change = Change { address, kind }
+        if self.buffers.journal.push(change) { return OK }
+        self.undo(change)
+        ERR_HOST_ALLOCATION
+    }
+
+    // Starts a write, which a static frame may not make.
+    fn writable(mut self) -> bool {
+        self.started = true
+        !self.is_static
     }
 
     pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
@@ -383,6 +334,7 @@ impl Transaction {
     }
     pub fn block_hash(self, _ number: u256) -> u256 { self.state.block_hash(number) }
 
+    // The transient table holds no zeros.
     fn write_transient(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
         let key = StorageKey { address, slot }
         if value == 0 {
@@ -392,123 +344,82 @@ impl Transaction {
         self.buffers.transient.try_insert(key, value)
     }
 
-    fn write(mut self, kind: u8, address: u256, slot: u256, value: u256) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
-        let address = address_word(address)
-        if kind == BALANCE || kind == NONCE {
-            return self.journal_account(kind, address, self.state.replace(balance: kind == BALANCE, address, value))
+    // Journals a balance or nonce write of `address`, an address word, which
+    // touches the account even if the value is unchanged.
+    fn journal_write(mut self, _ field: Field, _ address: u256, _ written: Result<WriteError, Written>) -> i32 {
+        match written {
+            Result::Ok(written) => if written.changed {
+                self.journal(address, ChangeKind::Account { field, previous: written.previous, existed: written.existed })
+            } else {
+                self.touch(address)
+            },
+            Result::Err(error) => error.status(),
         }
-        core::assert(kind == STORAGE)
-        let previous = self.storage_load(address, slot)
-        if previous == value { return OK }
-        // Undo deletes an account its write created.
-        let existed = self.state.exists(address)
-        if !self.buffers.journal.record(kind, address, slot, previous, existed) {
-            return ERR_HOST_ALLOCATION
-        }
-        if !self.state.storage_store(address, slot, value) {
-            let _ = self.buffers.journal.pop()
-            return ERR_HOST_ALLOCATION
-        }
-        OK
     }
 
-    // Journals a balance or nonce write the world already made, which touches
-    // the account; a journal that cannot grow restores the previous value. An
-    // unchanged value still touches it.
-    fn journal_account(mut self, kind: u8, address: u256, _ replaced: Replaced) -> i32 {
-        if !replaced.written { return ERR_HOST_ALLOCATION }
-        if !replaced.changed { return self.touch_once(address) }
-        // A balance or nonce record keeps the account's position for `undo_to`.
-        if !self.buffers.journal.record(kind, address, slot: replaced.position as u256, previous: replaced.previous,
-                                        existed: replaced.found) {
-            // Restoring a value the record holds needs no allocation.
-            core::assert(self.state.replace(balance: kind != NONCE, address, value: replaced.previous).written)
-            if kind == CONTRACT { core::assert(self.state.replace(balance: false, address, value: 0).written) }
-            if !replaced.found { core::assert(self.state.remove_empty_account(address)) }
-            return ERR_HOST_ALLOCATION
-        }
-        OK
-    }
-
-    // Adds `amount` to a balance or nonce, or subtracts it, touching the
-    // account, with one account lookup. A transaction runs it a few times in
-    // different places, so it stays one copy.
-    #[inline(never)]
-    fn adjust(mut self, kind: u8, address: u256, amount: u256, add: bool) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
-        // Zero changes nothing and only touches the account: a value-free
-        // transfer's debit and credit need no lookup.
-        if amount == 0 { return self.touch_once(address) }
-        let address = address_word(address)
-        let replaced = self.state.adjust(balance: kind == BALANCE, address, amount, add)
-        if replaced.overflowed { return ERR_BALANCE_OVERFLOW }
-        self.journal_account(kind, address, replaced)
-    }
-
-    // Balance, nonce and code writes touch their account even when unchanged.
     pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
-        self.write(kind: BALANCE, address, slot: 0, value)
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        self.journal_write(Field::Balance, address, self.state.replace(Field::Balance, address, value))
     }
     pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
-        self.write(kind: NONCE, address, slot: 0, value)
-    }
-    /// Sets a new contract's nonce to one and credits it `value`, with one
-    /// lookup and one journal entry; one past 2^256 is ERR_BALANCE_OVERFLOW
-    /// and changes nothing.
-    pub fn endow(mut self, address: u256, value: u256) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
+        if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        let replaced = self.state.endow(address, amount: value)
-        if replaced.overflowed { return ERR_BALANCE_OVERFLOW }
-        self.journal_account(kind: CONTRACT, address, replaced)
+        self.journal_write(Field::Nonce, address, self.state.replace(Field::Nonce, address, value))
     }
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
-        self.adjust(kind: NONCE, address, amount: 1, add: true)
-    }
-    /// Increments the sender's nonce and subtracts `fee`, which its balance
-    /// must hold, with one lookup and one journal entry: the transaction's
-    /// nonce increment and gas purchase. A nonce of 2^256 - 1 is
-    /// ERR_BALANCE_OVERFLOW and changes nothing.
-    pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
-        let address = address_word(sender)
-        let charged: Charged = self.state.charge(address, fee)
-        if !charged.written { return ERR_HOST_ALLOCATION }
-        if charged.nonce == MAX_U256 { return ERR_BALANCE_OVERFLOW }
-        let change = Change { kind: SENDER, address, slot: charged.nonce, previous: charged.balance, existed: charged.found }
-        if !self.buffers.journal.append(change) {
-            // Restoring values the record holds needs no allocation.
-            core::assert(self.state.set_nonce(address, charged.nonce))
-            core::assert(self.state.set_balance(address, charged.balance))
-            if !charged.found { core::assert(self.state.remove_empty_account(address)) }
-            return ERR_HOST_ALLOCATION
-        }
-        OK
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        self.journal_write(Field::Nonce, address, self.state.add(Field::Nonce, address, amount: 1))
     }
     /// Adds `amount` to the balance, touching the account; one past 2^256 is
     /// ERR_BALANCE_OVERFLOW and changes no balance.
     pub fn credit(mut self, address: u256, amount: u256) -> i32 {
-        self.adjust(kind: BALANCE, address, amount, add: true)
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        self.journal_write(Field::Balance, address, self.state.add(Field::Balance, address, amount))
     }
     /// Subtracts `amount`, which the balance must hold, touching the account.
     pub fn debit(mut self, address: u256, amount: u256) -> i32 {
-        self.adjust(kind: BALANCE, address, amount, add: false)
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        self.journal_write(Field::Balance, address, self.state.subtract(Field::Balance, address, amount))
+    }
+    /// Sets a new contract's nonce to one and credits it `value`; one past
+    /// 2^256 is ERR_BALANCE_OVERFLOW and changes nothing.
+    pub fn endow(mut self, address: u256, value: u256) -> i32 {
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        match self.state.endow(address, amount: value) {
+            Result::Ok(written) => self.journal(address, ChangeKind::Contract {
+                balance: written.previous, existed: written.existed,
+            }),
+            Result::Err(error) => error.status(),
+        }
+    }
+    /// Increments the sender's nonce and subtracts `fee`, which its balance
+    /// must hold: the transaction's nonce increment and gas purchase. A nonce
+    /// of 2^256 - 1 is ERR_BALANCE_OVERFLOW and changes nothing.
+    pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 {
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(sender)
+        match self.state.charge(address, fee) {
+            Result::Ok(charged) => self.journal(address, ChangeKind::Sender {
+                nonce: charged.nonce, balance: charged.balance, existed: charged.existed,
+            }),
+            Result::Err(error) => error.status(),
+        }
     }
     // Contract deployment writes code to an account that has none (EIP-684).
     pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
+        if !self.writable() { return ERR_STATIC_WRITE }
         // Empty code leaves the account as it is, with nothing to undo.
         if code.len() == 0 { return OK }
         let address = address_word(address)
         let existing = self.state.existing_code_len(address)
         core::assert(existing.unwrap_or(default: 0) == 0)
-        if !self.buffers.journal.record(kind: CODE, address, slot: 0, previous: 0, existed: existing.is_some()) {
+        // Journaled first: undoing a code write cannot fail, but code writes can.
+        if !self.buffers.journal.push(Change { address, kind: ChangeKind::Code { existed: existing.is_some() } }) {
             return ERR_HOST_ALLOCATION
         }
         let written = self.state.set_code_unhashed(address, code)
@@ -522,12 +433,11 @@ impl Transaction {
         let address = address_word(address)
         let previous = self.state.delegate(address)
         core::assert(self.state.code_size(address) == 0 || previous.is_some())
-        let (was_delegated, previous_delegate): (u256, u256) = match previous {
-            Option::Some(previous) => (1, previous),
-            Option::None => (0, 0),
+        // Journaled first: restoring a designator can need allocation.
+        let kind = ChangeKind::Delegation { previous, existed: self.state.exists(address) }
+        if !self.buffers.journal.push(Change { address, kind }) {
+            return ERR_HOST_ALLOCATION
         }
-        let change = Change { kind: DELEGATION, address, slot: was_delegated, previous: previous_delegate, existed: self.state.exists(address) }
-        if !self.buffers.journal.append(change) { return ERR_HOST_ALLOCATION }
         let empty: [u8; 0] = []
         let written = if delegate == 0 { self.state.set_code(address, code: empty) }
             else { self.state.set_code_unhashed(address, code: designator(delegate)) }
@@ -535,46 +445,34 @@ impl Transaction {
         written
     }
     pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
-        if self.is_static { return ERR_STATIC_WRITE }
+        if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
         let charge = self.storage_charge(address, slot, value)
+        let previous = self.storage_load(address, slot)
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
-        if !self.buffers.originals.contains(key)
-            && !self.buffers.originals.try_insert(key, self.storage_load(address, slot)) {
+        if !self.buffers.originals.contains(key) && !self.buffers.originals.try_insert(key, previous) {
             return ERR_HOST_ALLOCATION
         }
-        let status = self.write(kind: STORAGE, address, slot, value)
-        if status == OK { self.refund += charge.refund }
-        status
-    }
-    // TSTORE's write, journaled, with one search of the transient table when
-    // the value is not zero. The table holds no zeros, so an entry the search
-    // finds at zero is the one it just inserted.
-    pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
-        self.started = true
-        if self.is_static { return ERR_STATIC_WRITE }
-        let key = StorageKey { address: address_word(address), slot }
-        if value == 0 {
-            let Option::Some(at) = self.buffers.transient.find(key) else { return OK }
-            let previous = self.buffers.transient.value_at(at)
-            if !self.buffers.journal.record(kind: TRANSIENT, address: key.address, slot, previous, existed: true) {
-                return ERR_HOST_ALLOCATION
-            }
-            let _ = self.buffers.transient.remove(key)
-            return OK
+        if previous != value {
+            // Undo deletes an account its write created.
+            let existed = self.state.exists(address)
+            if !self.state.storage_store(address, slot, value) { return ERR_HOST_ALLOCATION }
+            let status = self.journal(address, ChangeKind::Storage { slot, previous, existed })
+            if status != OK { return status }
         }
-        let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
-        let previous = self.buffers.transient.value_at(at)
-        if previous == value { return OK }
-        if !self.buffers.journal.record(kind: TRANSIENT, address: key.address, slot, previous, existed: true) {
-            if previous == 0 { let _ = self.buffers.transient.remove(key) }
-            return ERR_HOST_ALLOCATION
-        }
-        let stored = mut self.buffers.transient.value_at(at)
-        stored = value
+        self.refund += charge.refund
         OK
+    }
+    // TSTORE's write (EIP-1153).
+    pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
+        if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        let previous = self.transient_load(address, slot)
+        if previous == value { return OK }
+        if !self.write_transient(address, slot, value) { return ERR_HOST_ALLOCATION }
+        self.journal(address, ChangeKind::Transient { slot, previous })
     }
 
     // End-of-transaction deletions, after every frame has closed and fees are
@@ -583,28 +481,10 @@ impl Transaction {
     // updates are not journaled.
     pub fn settle(mut self) {
         core::assert(self.depth == 0)
-        // The journal holds the changes and marks that survived their frames:
-        // each touch, as a mark or as a balance, nonce or code change. It
-        // mostly touches the sender, destination and coinbase, repeatedly, and
-        // settling changes no balance, so an address checked recently is
-        // skipped. No address word is 2^256 - 1.
-        var recent: [u256; 4] = [MAX_U256; 4]
-        var next: usize = 0
-        var position: u64 = 0
-        while position < self.buffers.journal.len() {
-            let change = self.buffers.journal.change(position)
-            let kind = change.kind
-            let address = change.address
-            if kind == DOOMED { self.state.remove_account(address) }
-            let touched = kind == TOUCHED || kind == TOUCHED_ONCE || kind == BALANCE || kind == NONCE
-                || kind == SENDER || kind == CONTRACT || kind == CODE || kind == DELEGATION
-            if touched && address != recent[0] && address != recent[1] && address != recent[2]
-                && address != recent[3] {
-                self.state.remove_if_empty(address)
-                recent[next] = address
-                next = (next + 1) % 4
-            }
-            position += 1
+        // The journal holds the changes and marks that survived their frames.
+        for change in self.buffers.journal.changes() {
+            if let ChangeKind::Mark(Mark::Doomed) = change.kind { self.state.remove_account(change.address) }
+            if change.touches() { self.state.remove_if_empty(change.address) }
         }
     }
 
@@ -615,7 +495,7 @@ impl Transaction {
     pub fn end(mut self, commit: bool) {
         core::assert(self.depth == 0)
         if !commit {
-            self.undo_to(0, transient: false)
+            self.undo_to(0)
             self.logs.truncate(0)
         }
         self.buffers.journal.clear()
@@ -634,14 +514,5 @@ impl Transaction {
         TransactionResult {
             state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded, buffers: self.buffers,
         }
-    }
-}
-
-// The mark a journaled kind sets.
-fn mark_of(_ kind: u8) -> u8 {
-    match kind {
-        WARM_ACCOUNT => MARK_WARM,
-        TOUCHED => MARK_TOUCHED,
-        _ => MARK_DOOMED,
     }
 }

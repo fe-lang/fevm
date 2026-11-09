@@ -191,12 +191,11 @@ pub struct Buffers {
     // A transaction's tables, empty between transactions, which keep their
     // slots for the next one. `transient` is EIP-1153 transient storage.
     // `marks` holds warm accounts, other than those `always_warm` names;
-    // accounts that calls from code touched, which settlement removes if
-    // left empty with the journal's other touches, its balance, nonce and
-    // code changes and TOUCHED_ONCE entries (the specification's
-    // modify_state deletion rule); accounts created by this transaction
-    // (created_accounts); and the self-destructed ones among those, which
-    // settlement deletes.
+    // touched accounts, which settlement removes if left empty with the
+    // journal's other touches, its balance, nonce and code changes (the
+    // specification's modify_state deletion rule); accounts created by this
+    // transaction (created_accounts); and the self-destructed ones among
+    // those, which settlement deletes.
     pub(ingot) transient: SwissTable<StorageKey, u256>,
     pub(ingot) marks: SwissTable<u256, u8>,
     pub(ingot) warm_storage: SwissTable<StorageKey, bool>,

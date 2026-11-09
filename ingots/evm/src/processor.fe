@@ -359,7 +359,7 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
     }
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
-    let moved = if value == 0 { tx.touch_once(target) } else { transfer(mut tx, from: sender, to: target, value) }
+    let moved = if value == 0 { tx.touch(target) } else { transfer(mut tx, from: sender, to: target, value) }
     if moved != OK {
         tx.revert(checkpoint)
         return status_result(moved)
