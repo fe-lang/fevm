@@ -167,13 +167,13 @@ fn extend_limb(_ word: u256, _ shift: i64) -> u256 {
     extended.downcast_unchecked()
 }
 
-// SAR: `value` shifted right by `shift` bits, filling with its sign bit.
+// SAR: `value` shifted right by `shift` bits, filling with its sign bit. A
+// shift by 255 already fills every bit with it, as any longer one does, so
+// the count is a choice of two values below 256 and the shift branches on
+// neither the count nor the sign.
 fn sar(shift: u256, value: u256) -> u256 {
     let signed: i256 = value.downcast_unchecked()
-    if shift >= 256 {
-        return if signed < 0 { MAX_U256 } else { 0 }
-    }
-    let count: i256 = shift.downcast_unchecked()
+    let count: i256 = if shift >= 256 { 255 } else { (shift & 255).downcast_unchecked() }
     (signed >> count).downcast_unchecked()
 }
 
