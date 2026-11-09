@@ -1271,71 +1271,71 @@ impl Vm {
             0x09 => self.op_mulmod(code, pc, gas, depth, top, mut tracer),
             0x0a => self.op_exp(code, pc, gas, depth, top, mut tracer),
             0x5f => self.op_push0(code, pc, gas, depth, top, mut tracer),
-            0x60 => self.op_push1(code, pc, gas, depth, top, mut tracer),
-            0x61 => self.op_push2(code, pc, gas, depth, top, mut tracer),
-            0x63 => self.op_push4(code, pc, gas, depth, top, mut tracer),
-            0x7f => self.op_push32(code, pc, gas, depth, top, mut tracer),
-            0x62 => self.op_push_n<3, T>(code, pc, gas, depth, top, mut tracer),
-            0x64 => self.op_push_n<5, T>(code, pc, gas, depth, top, mut tracer),
-            0x65 => self.op_push_n<6, T>(code, pc, gas, depth, top, mut tracer),
-            0x66 => self.op_push_n<7, T>(code, pc, gas, depth, top, mut tracer),
-            0x67 => self.op_push_n<8, T>(code, pc, gas, depth, top, mut tracer),
-            0x68 => self.op_push_n<9, T>(code, pc, gas, depth, top, mut tracer),
-            0x69 => self.op_push_n<10, T>(code, pc, gas, depth, top, mut tracer),
-            0x6a => self.op_push_n<11, T>(code, pc, gas, depth, top, mut tracer),
-            0x6b => self.op_push_n<12, T>(code, pc, gas, depth, top, mut tracer),
-            0x6c => self.op_push_n<13, T>(code, pc, gas, depth, top, mut tracer),
-            0x6d => self.op_push_n<14, T>(code, pc, gas, depth, top, mut tracer),
-            0x6e => self.op_push_n<15, T>(code, pc, gas, depth, top, mut tracer),
-            0x6f => self.op_push_n<16, T>(code, pc, gas, depth, top, mut tracer),
-            0x70 => self.op_push_n<17, T>(code, pc, gas, depth, top, mut tracer),
-            0x71 => self.op_push_n<18, T>(code, pc, gas, depth, top, mut tracer),
-            0x72 => self.op_push_n<19, T>(code, pc, gas, depth, top, mut tracer),
-            0x73 => self.op_push_n<20, T>(code, pc, gas, depth, top, mut tracer),
-            0x74 => self.op_push_n<21, T>(code, pc, gas, depth, top, mut tracer),
-            0x75 => self.op_push_n<22, T>(code, pc, gas, depth, top, mut tracer),
-            0x76 => self.op_push_n<23, T>(code, pc, gas, depth, top, mut tracer),
-            0x77 => self.op_push_n<24, T>(code, pc, gas, depth, top, mut tracer),
-            0x78 => self.op_push_n<25, T>(code, pc, gas, depth, top, mut tracer),
-            0x79 => self.op_push_n<26, T>(code, pc, gas, depth, top, mut tracer),
-            0x7a => self.op_push_n<27, T>(code, pc, gas, depth, top, mut tracer),
-            0x7b => self.op_push_n<28, T>(code, pc, gas, depth, top, mut tracer),
-            0x7c => self.op_push_n<29, T>(code, pc, gas, depth, top, mut tracer),
-            0x7d => self.op_push_n<30, T>(code, pc, gas, depth, top, mut tracer),
-            0x7e => self.op_push_n<31, T>(code, pc, gas, depth, top, mut tracer),
+            0x60 => self.op_push<1, T>(code, pc, gas, depth, top, mut tracer),
+            0x61 => self.op_push<2, T>(code, pc, gas, depth, top, mut tracer),
+            0x62 => self.op_push<3, T>(code, pc, gas, depth, top, mut tracer),
+            0x63 => self.op_push<4, T>(code, pc, gas, depth, top, mut tracer),
+            0x64 => self.op_push<5, T>(code, pc, gas, depth, top, mut tracer),
+            0x65 => self.op_push<6, T>(code, pc, gas, depth, top, mut tracer),
+            0x66 => self.op_push<7, T>(code, pc, gas, depth, top, mut tracer),
+            0x67 => self.op_push<8, T>(code, pc, gas, depth, top, mut tracer),
+            0x68 => self.op_push<9, T>(code, pc, gas, depth, top, mut tracer),
+            0x69 => self.op_push<10, T>(code, pc, gas, depth, top, mut tracer),
+            0x6a => self.op_push<11, T>(code, pc, gas, depth, top, mut tracer),
+            0x6b => self.op_push<12, T>(code, pc, gas, depth, top, mut tracer),
+            0x6c => self.op_push<13, T>(code, pc, gas, depth, top, mut tracer),
+            0x6d => self.op_push<14, T>(code, pc, gas, depth, top, mut tracer),
+            0x6e => self.op_push<15, T>(code, pc, gas, depth, top, mut tracer),
+            0x6f => self.op_push<16, T>(code, pc, gas, depth, top, mut tracer),
+            0x70 => self.op_push<17, T>(code, pc, gas, depth, top, mut tracer),
+            0x71 => self.op_push<18, T>(code, pc, gas, depth, top, mut tracer),
+            0x72 => self.op_push<19, T>(code, pc, gas, depth, top, mut tracer),
+            0x73 => self.op_push<20, T>(code, pc, gas, depth, top, mut tracer),
+            0x74 => self.op_push<21, T>(code, pc, gas, depth, top, mut tracer),
+            0x75 => self.op_push<22, T>(code, pc, gas, depth, top, mut tracer),
+            0x76 => self.op_push<23, T>(code, pc, gas, depth, top, mut tracer),
+            0x77 => self.op_push<24, T>(code, pc, gas, depth, top, mut tracer),
+            0x78 => self.op_push<25, T>(code, pc, gas, depth, top, mut tracer),
+            0x79 => self.op_push<26, T>(code, pc, gas, depth, top, mut tracer),
+            0x7a => self.op_push<27, T>(code, pc, gas, depth, top, mut tracer),
+            0x7b => self.op_push<28, T>(code, pc, gas, depth, top, mut tracer),
+            0x7c => self.op_push<29, T>(code, pc, gas, depth, top, mut tracer),
+            0x7d => self.op_push<30, T>(code, pc, gas, depth, top, mut tracer),
+            0x7e => self.op_push<31, T>(code, pc, gas, depth, top, mut tracer),
+            0x7f => self.op_push<32, T>(code, pc, gas, depth, top, mut tracer),
             0x50 => self.op_pop(code, pc, gas, depth, top, mut tracer),
-            0x80 => self.op_dup1(code, pc, gas, depth, top, mut tracer),
-            0x81 => self.op_dup2(code, pc, gas, depth, top, mut tracer),
-            0x82 => self.op_dup3(code, pc, gas, depth, top, mut tracer),
-            0x83 => self.op_dup4(code, pc, gas, depth, top, mut tracer),
-            0x84 => self.op_dup5(code, pc, gas, depth, top, mut tracer),
-            0x85 => self.op_dup6(code, pc, gas, depth, top, mut tracer),
-            0x86 => self.op_dup7(code, pc, gas, depth, top, mut tracer),
-            0x87 => self.op_dup8(code, pc, gas, depth, top, mut tracer),
-            0x88 => self.op_dup9(code, pc, gas, depth, top, mut tracer),
-            0x89 => self.op_dup10(code, pc, gas, depth, top, mut tracer),
-            0x8a => self.op_dup11(code, pc, gas, depth, top, mut tracer),
-            0x8b => self.op_dup12(code, pc, gas, depth, top, mut tracer),
-            0x8c => self.op_dup13(code, pc, gas, depth, top, mut tracer),
-            0x8d => self.op_dup14(code, pc, gas, depth, top, mut tracer),
-            0x8e => self.op_dup15(code, pc, gas, depth, top, mut tracer),
-            0x8f => self.op_dup16(code, pc, gas, depth, top, mut tracer),
-            0x90 => self.op_swap1(code, pc, gas, depth, top, mut tracer),
-            0x91 => self.op_swap2(code, pc, gas, depth, top, mut tracer),
-            0x92 => self.op_swap3(code, pc, gas, depth, top, mut tracer),
-            0x93 => self.op_swap4(code, pc, gas, depth, top, mut tracer),
-            0x94 => self.op_swap5(code, pc, gas, depth, top, mut tracer),
-            0x95 => self.op_swap6(code, pc, gas, depth, top, mut tracer),
-            0x96 => self.op_swap7(code, pc, gas, depth, top, mut tracer),
-            0x97 => self.op_swap8(code, pc, gas, depth, top, mut tracer),
-            0x98 => self.op_swap9(code, pc, gas, depth, top, mut tracer),
-            0x99 => self.op_swap10(code, pc, gas, depth, top, mut tracer),
-            0x9a => self.op_swap11(code, pc, gas, depth, top, mut tracer),
-            0x9b => self.op_swap12(code, pc, gas, depth, top, mut tracer),
-            0x9c => self.op_swap13(code, pc, gas, depth, top, mut tracer),
-            0x9d => self.op_swap14(code, pc, gas, depth, top, mut tracer),
-            0x9e => self.op_swap15(code, pc, gas, depth, top, mut tracer),
-            0x9f => self.op_swap16(code, pc, gas, depth, top, mut tracer),
+            0x80 => self.op_dup<1, T>(code, pc, gas, depth, top, mut tracer),
+            0x81 => self.op_dup<2, T>(code, pc, gas, depth, top, mut tracer),
+            0x82 => self.op_dup<3, T>(code, pc, gas, depth, top, mut tracer),
+            0x83 => self.op_dup<4, T>(code, pc, gas, depth, top, mut tracer),
+            0x84 => self.op_dup<5, T>(code, pc, gas, depth, top, mut tracer),
+            0x85 => self.op_dup<6, T>(code, pc, gas, depth, top, mut tracer),
+            0x86 => self.op_dup<7, T>(code, pc, gas, depth, top, mut tracer),
+            0x87 => self.op_dup<8, T>(code, pc, gas, depth, top, mut tracer),
+            0x88 => self.op_dup<9, T>(code, pc, gas, depth, top, mut tracer),
+            0x89 => self.op_dup<10, T>(code, pc, gas, depth, top, mut tracer),
+            0x8a => self.op_dup<11, T>(code, pc, gas, depth, top, mut tracer),
+            0x8b => self.op_dup<12, T>(code, pc, gas, depth, top, mut tracer),
+            0x8c => self.op_dup<13, T>(code, pc, gas, depth, top, mut tracer),
+            0x8d => self.op_dup<14, T>(code, pc, gas, depth, top, mut tracer),
+            0x8e => self.op_dup<15, T>(code, pc, gas, depth, top, mut tracer),
+            0x8f => self.op_dup<16, T>(code, pc, gas, depth, top, mut tracer),
+            0x90 => self.op_swap<1, T>(code, pc, gas, depth, top, mut tracer),
+            0x91 => self.op_swap<2, T>(code, pc, gas, depth, top, mut tracer),
+            0x92 => self.op_swap<3, T>(code, pc, gas, depth, top, mut tracer),
+            0x93 => self.op_swap<4, T>(code, pc, gas, depth, top, mut tracer),
+            0x94 => self.op_swap<5, T>(code, pc, gas, depth, top, mut tracer),
+            0x95 => self.op_swap<6, T>(code, pc, gas, depth, top, mut tracer),
+            0x96 => self.op_swap<7, T>(code, pc, gas, depth, top, mut tracer),
+            0x97 => self.op_swap<8, T>(code, pc, gas, depth, top, mut tracer),
+            0x98 => self.op_swap<9, T>(code, pc, gas, depth, top, mut tracer),
+            0x99 => self.op_swap<10, T>(code, pc, gas, depth, top, mut tracer),
+            0x9a => self.op_swap<11, T>(code, pc, gas, depth, top, mut tracer),
+            0x9b => self.op_swap<12, T>(code, pc, gas, depth, top, mut tracer),
+            0x9c => self.op_swap<13, T>(code, pc, gas, depth, top, mut tracer),
+            0x9d => self.op_swap<14, T>(code, pc, gas, depth, top, mut tracer),
+            0x9e => self.op_swap<15, T>(code, pc, gas, depth, top, mut tracer),
+            0x9f => self.op_swap<16, T>(code, pc, gas, depth, top, mut tracer),
             0x01 => self.op_add(code, pc, gas, depth, top, mut tracer),
             0x02 => self.op_mul(code, pc, gas, depth, top, mut tracer),
             0x03 => self.op_sub(code, pc, gas, depth, top, mut tracer),
@@ -1604,50 +1604,23 @@ impl Vm {
         self.push_next(code, pc.wrapping_add(1), gas - 2, depth, top, mut tracer, 0)
     }
 
-    // The common widths read just their immediate; padding gives every
-    // immediate a whole word of code after it.
-    fn op_push1<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        let value = unsafe { read_code<u8>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(2), gas - 3, depth, top, mut tracer, value as u256)
-    }
-
-    fn op_push2<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        let value = unsafe { read_code<u16>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(3), gas - 3, depth, top, mut tracer, value as u256)
-    }
-
-    fn op_push4<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        let value = unsafe { read_code<u32>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(5), gas - 3, depth, top, mut tracer, value as u256)
-    }
-
-    fn op_push32<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        if gas < 3 {
-            return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
-        }
-        let value = unsafe { read_code<u256>(code, pc.wrapping_add(1)) }
-        self.push_next(code, pc.wrapping_add(33), gas - 3, depth, top, mut tracer, value)
-    }
-
-    // The other widths, each its own handler: the immediate is the top N
-    // bytes of an eight-, sixteen- or 32-byte read, shifted by a constant.
+    // PUSH1 to PUSH32: the immediate is the top N bytes of the smallest
+    // whole word that holds it, which padding puts after every immediate.
     #[arithmetic(unchecked)]
-    fn op_push_n<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
-                                           _ tracer: mut T) {
+    fn op_push<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                         _ tracer: mut T) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
         let at = pc.wrapping_add(1)
-        let value: u256 = if N <= 8 {
+        let value: u256 = if N == 1 {
+            unsafe { read_code<u8>(code, at) } as u256
+        } else if N == 2 {
+            unsafe { read_code<u16>(code, at) } as u256
+        } else if N <= 4 {
+            let shift: u32 = ((4 - N) * 8).downcast_truncate()
+            (unsafe { read_code<u32>(code, at) } >> shift) as u256
+        } else if N <= 8 {
             let shift: u64 = ((8 - N) * 8).downcast_truncate()
             (unsafe { read_code<u64>(code, at) } >> shift) as u256
         } else if N <= 16 {
@@ -1669,159 +1642,32 @@ impl Vm {
         self.next(code, pc.wrapping_add(1), gas - 2, depth - 1, below(top, 1), mut tracer)
     }
 
-    fn op_dup1<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 1)
-    }
-
-    fn op_dup2<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 2)
-    }
-
-    fn op_dup3<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 3)
-    }
-
-    fn op_dup4<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 4)
-    }
-
-    fn op_dup5<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 5)
-    }
-
-    fn op_dup6<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 6)
-    }
-
-    fn op_dup7<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 7)
-    }
-
-    fn op_dup8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 8)
-    }
-
-    fn op_dup9<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 9)
-    }
-
-    fn op_dup10<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 10)
-    }
-
-    fn op_dup11<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 11)
-    }
-
-    fn op_dup12<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 12)
-    }
-
-    fn op_dup13<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 13)
-    }
-
-    fn op_dup14<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 14)
-    }
-
-    fn op_dup15<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 15)
-    }
-
-    fn op_dup16<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_dup_n(code, pc, gas, depth, top, mut tracer, n: 16)
-    }
-
-    // Each DUP and SWAP has a handler of its own, so its depth is a constant.
-    #[inline(always)]
-    fn op_dup_n<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, n: usize) {
+    // DUP1 to DUP16, each its own handler, with its depth a constant.
+    fn op_dup<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                        _ tracer: mut T) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
-        if depth < n {
+        if depth < N {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
-        let value = unsafe { *below(top, n) }
+        let value = unsafe { *below(top, N) }
         self.push_next(code, pc.wrapping_add(1), gas - 3, depth, top, mut tracer, value)
     }
 
-    fn op_swap1<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 1)
-    }
-
-    fn op_swap2<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 2)
-    }
-
-    fn op_swap3<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 3)
-    }
-
-    fn op_swap4<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 4)
-    }
-
-    fn op_swap5<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 5)
-    }
-
-    fn op_swap6<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 6)
-    }
-
-    fn op_swap7<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 7)
-    }
-
-    fn op_swap8<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 8)
-    }
-
-    fn op_swap9<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 9)
-    }
-
-    fn op_swap10<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 10)
-    }
-
-    fn op_swap11<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 11)
-    }
-
-    fn op_swap12<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 12)
-    }
-
-    fn op_swap13<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 13)
-    }
-
-    fn op_swap14<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 14)
-    }
-
-    fn op_swap15<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 15)
-    }
-
-    fn op_swap16<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T) {
-        self.op_swap_n(code, pc, gas, depth, top, mut tracer, n: 16)
-    }
-
-    #[inline(always)]
-    fn op_swap_n<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256, _ tracer: mut T, n: usize) {
+    // SWAP1 to SWAP16, as DUP.
+    fn op_swap<const N: usize, T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ depth: usize, _ top: *u256,
+                                         _ tracer: mut T) {
         if gas < 3 {
             return self.faulted_at(ERR_OUT_OF_GAS, pc.wrapping_add(1), 0, depth)
         }
-        if depth <= n {
+        if depth <= N {
             return self.faulted_at(ERR_STACK_UNDERFLOW, pc.wrapping_add(1), 0, depth)
         }
         // Swapping a 64-bit piece at a time keeps two of them live, not
         // eight.
         let first = cast<u256, u64>(below(top, 1))
-        let other = cast<u256, u64>(below(top, n + 1))
+        let other = cast<u256, u64>(below(top, N + 1))
         unsafe {
             swap_piece(first, other, 0)
             swap_piece(first, other, 1)
