@@ -70,6 +70,20 @@ impl Program {
         core::assert(len <= source.len())
         Self::new(InputData::copy_from(source, offset: 0, len))
     }
+    /// A copy of `code`, such as initcode from frame memory, with its padding
+    /// reserved first so the code is copied once.
+    pub fn from_code(_ code: MemSpan) -> Self {
+        let len = code.len()
+        var bytes = MemBuffer::empty()
+        var jumpdests = MemBuffer::empty()
+        if !bytes.try_reserve(len + CODE_PADDING) || !jumpdests.try_resize(jumpdest_map_len(len)) {
+            return Self { bytes, len: 0, jumpdests, status: ERR_HOST_ALLOCATION }
+        }
+        bytes.extend_from(code)
+        core::assert(bytes.try_resize(len + CODE_PADDING))
+        mark_jumpdests(bytes.slice(offset: 0, len), mut jumpdests.span())
+        Self { bytes, len, jumpdests, status: OK }
+    }
     /// A copy of `code` whose `mark_jumpdests` bitmap is `jumpdests`.
     pub fn analyzed(_ code: MemSpan, jumpdests: MemSpan) -> Self {
         let len = code.len()
