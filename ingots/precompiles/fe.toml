@@ -3,4 +3,4 @@ name = "fevm_precompiles"
 version = "0.1.0"
 
 [dependencies]
-keccak = { source = "https://github.com/fe-lang/keccak", rev = "97f02443d0bd68c091ea8f79a3ce33038821e7ec" }
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "9080b3728f3ace646ac8f7ce52a3880840b83669" }
