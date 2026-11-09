@@ -1,6 +1,6 @@
 use core::{MemArray, MemBuffer, Option}
 use keccak::ByteSource
-use ingot::{Output, SUCCESS, failure, host_allocation}
+use ingot::{Output, SUCCESS, failure, host_allocation, word_at}
 use ingot::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_map::{map_to_g1, map_to_g2}
@@ -179,11 +179,6 @@ fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
     Output { status: SUCCESS, gas_used: used, output }
 }
 
-fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
-    var value: u256 = 0
-    for i in 0..32 { value = (value << 8) | input.byte_at(offset + i) as u256 }
-    value
-}
 
 /// Run BLS12-381 precompile `address` (0x0b through 0x11) with `gas`.
 pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {

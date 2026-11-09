@@ -1,5 +1,6 @@
 use core::Option
 use keccak::ByteSource
+use ingot::word_at
 use ingot::bls_curve::{Affine, ORDER, Point, decompress_g1, g1_generator, g2_generator, multiply_two}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_pairing::pairing_product_is_one
@@ -22,11 +23,6 @@ const TAU_G2_X1: [u64; 6] = [0x11a3670749dfd455, 0x04991d7b3abffadc, 0x85446a8e1
 const TAU_G2_Y0: [u64; 6] = [0xaa130838793b2317, 0xe236dd220f891637, 0x6502782925760980, 0xd05c25f60557ec89, 0x6095767a44064474, 0x185693917080d405]
 const TAU_G2_Y1: [u64; 6] = [0x549f9e175b03dc0a, 0x32c0c95a77106cfe, 0x64a74eae5705d080, 0x53deeaf56659ed9e, 0x09a1d368508afb93, 0x12cf3a4525b5e9bd]
 
-fn word<T: ByteSource>(_ source: T, offset: usize) -> u256 {
-    var value: u256 = 0
-    for i in 0..32 { value = (value << 8) | source.byte_at(offset + i) as u256 }
-    value
-}
 
 /// KZG commitments and proofs: the encoded identity, or a valid compressed
 /// point in the prime-order subgroup (validate_kzg_g1 and KeyValidate).
@@ -56,9 +52,9 @@ pub fn verify<T: ByteSource>(_ input: T) -> bool {
     core::assert(input.len() == INPUT_LEN)
     // The versioned hash is 0x01 followed by the commitment digest's last 31 bytes.
     let versioned = (1 << 248) | (sha256(input, offset: 96, len: 48) & ((1 << 248) - 1))
-    if word(input, offset: 0) != versioned { return false }
-    let z = word(input, offset: 32)
-    let y = word(input, offset: 64)
+    if word_at(input, offset: 0) != versioned { return false }
+    let z = word_at(input, offset: 32)
+    let y = word_at(input, offset: 64)
     if z >= BLS_MODULUS || y >= BLS_MODULUS { return false }
     let commitment = match decode_kzg_g1(input, offset: 96) {
         Option::Some(point) => point,
