@@ -391,12 +391,13 @@ impl Field for Fp {
         Fp { limbs: reduce(sum, 0) }
     }
 
+    // Adds p back and chooses with a select rather than a branch: whether
+    // the subtraction borrows depends on the data, so a branch mispredicts.
     #[inline(always)]
     fn sub(self, _ other: Fp) -> Fp {
         let (difference, borrow) = subtract(self.limbs, other.limbs)
-        if borrow == 0 { return Fp { limbs: difference } }
         let (wrapped, _) = add_limbs(difference, MODULUS)
-        Fp { limbs: wrapped }
+        Fp { limbs: if borrow == 1 { wrapped } else { difference } }
     }
 
     // Montgomery multiplication (CIOS): a * b * 2^-384 mod p.

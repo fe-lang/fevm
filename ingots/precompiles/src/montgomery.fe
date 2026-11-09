@@ -188,12 +188,13 @@ impl<M: Modulus> Field for Mont<M> {
         let (d1, b) = sbb(self.l1, other.l1, b)
         let (d2, b) = sbb(self.l2, other.l2, b)
         let (d3, b) = sbb(self.l3, other.l3, b)
-        if b == 0 { return Mont { l0: d0, l1: d1, l2: d2, l3: d3 } }
+        // Adds p back and chooses with a select rather than a branch, which
+        // mispredicts.
         let (s0, c) = adc(d0, M::P0, 0)
         let (s1, c) = adc(d1, M::P1, c)
         let (s2, c) = adc(d2, M::P2, c)
         let (s3, _) = adc(d3, M::P3, c)
-        Mont { l0: s0, l1: s1, l2: s2, l3: s3 }
+        if b == 1 { Mont { l0: s0, l1: s1, l2: s2, l3: s3 } } else { Mont { l0: d0, l1: d1, l2: d2, l3: d3 } }
     }
     fn mul(self, _ other: Self) -> Self {
         let (t, top) = self.first_row(other.l0)
