@@ -1,5 +1,5 @@
 use core::Option
-use ingot::bls_field::{Field, Fp}
+use ingot::bls_field::{Field, Fp, mul_quadratic}
 
 // The BLS12-381 tower used by the zkcrypto bls12_381 crate:
 // Fp2 = Fp[u]/(u^2 + 1), Fp6 = Fp2[v]/(v^3 - (u + 1)), Fp12 = Fp6[w]/(w^2 - v).
@@ -61,10 +61,8 @@ impl Field for Fp2 {
     fn add(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.add(other.c0), c1: self.c1.add(other.c1) } }
     fn sub(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.sub(other.c0), c1: self.c1.sub(other.c1) } }
     fn mul(self, _ other: Fp2) -> Fp2 {
-        let aa = self.c0.mul(other.c0)
-        let bb = self.c1.mul(other.c1)
-        let cross = self.c0.add(self.c1).mul(other.c0.add(other.c1))
-        Fp2 { c0: aa.sub(bb), c1: cross.sub(aa).sub(bb) }
+        let (c0, c1) = mul_quadratic(self.c0, self.c1, other.c0, other.c1)
+        Fp2 { c0, c1 }
     }
     fn square(self) -> Fp2 {
         let product = self.c0.mul(self.c1)
