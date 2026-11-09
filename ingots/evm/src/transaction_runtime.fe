@@ -62,6 +62,21 @@ fn empty_code_deployment_changes_nothing() {
 }
 
 #[test]
+fn contract_endowments_revert_to_the_previous_accounts() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(7, 5) && world.set_balance(9, 1))
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
+                              config: Config::osaka(), buffers: Buffers::new())
+    let parent = checkpoint(mut tx, is_static: false)
+    core::assert(tx.endow(address: 7, value: 3) == OK && tx.endow(address: 8, value: 0) == OK)
+    core::assert(tx.nonce(7) == 1 && tx.balance(7) == 8 && tx.nonce(8) == 1 && tx.exists(8))
+    core::assert(tx.endow(address: 9, value: MAX_U256) == ERR_BALANCE_OVERFLOW)
+    core::assert(tx.nonce(9) == 0 && tx.balance(9) == 1)
+    tx.revert(parent)
+    core::assert(tx.nonce(7) == 0 && tx.balance(7) == 5 && !tx.exists(8))
+}
+
+#[test]
 fn transfers_credit_and_debit_both_accounts_unless_the_credit_overflows() {
     var world = WorldState::empty()
     core::assert(world.set_balance(7, 10) && world.set_balance(8, MAX_U256 - 4))

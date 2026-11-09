@@ -911,13 +911,15 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation
-/// mark, the new account's first nonce and its endowment. Initcode failure or a
-/// rejected deposit reverts all of it.
+/// mark, the new account's first nonce and its endowment from the sender, which
+/// the address cannot be. Initcode failure or a rejected deposit reverts all of
+/// it.
 pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
     let checkpoint = state.checkpoint(is_static: false)
     var status = state.mark_created(address)
-    if status == OK { status = state.increment_nonce(address) }
-    if status == OK && value != 0 { status = transfer(mut state, from: sender, to: address, value) }
+    // Crediting first finds an overflow before any balance changes.
+    if status == OK { status = state.endow(address, value) }
+    if status == OK && value != 0 { status = state.debit(address: sender, amount: value) }
     if status == OK { return Result::Ok(checkpoint) }
     state.revert(checkpoint)
     Result::Err(status)
