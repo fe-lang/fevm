@@ -184,7 +184,8 @@ fn frobenius_times(_ f: Fp12, _ times: u64) -> Fp12 {
 /// Raise a nonzero Miller loop result to (p^12 - 1) / r, following the
 /// zkcrypto bls12_381 final exponentiation.
 pub fn final_exponentiation(_ f: Fp12) -> Fp12 {
-    var t0 = frobenius_times(f, 6)
+    // f^(p^6) is f's conjugate: Fp6 is fixed by the p^6 power and w^(p^6) = -w.
+    var t0 = f.conjugate()
     var t1 = f.invert()
     var t2 = t0.mul(t1)
     t1 = t2
