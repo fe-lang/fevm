@@ -42,9 +42,10 @@ impl<F> Point<F> where F: Field + Copy {
     pub fn is_identity(self) -> bool { self.z.is_zero() }
     pub fn neg(self) -> Point<F> { Point { x: self.x, y: self.y.neg(), z: self.z } }
 
-    // dbl-2009-l for a = 0.
-    pub fn double(self) -> Point<F> {
-        if self.is_identity() { return self }
+    // dbl-2009-l for a = 0, in place, so that loops doubling a point keep it
+    // in one place rather than copying it into a new one each time.
+    pub fn double_assign(mut self) {
+        if self.is_identity() { return }
         let a = self.x.square()
         let b = self.y.square()
         let c = b.square()
@@ -52,8 +53,16 @@ impl<F> Point<F> where F: Field + Copy {
         let e = a.double().add(a)
         let f = e.square()
         let x = f.sub(d.double())
-        let y = e.mul(d.sub(x)).sub(c.double().double().double())
-        Point { x, y, z: self.y.mul(self.z).double() }
+        let z = self.y.mul(self.z).double()
+        self.y = e.mul(d.sub(x)).sub(c.double().double().double())
+        self.x = x
+        self.z = z
+    }
+
+    pub fn double(self) -> Point<F> {
+        var point = self
+        point.double_assign()
+        point
     }
 
     // add-2007-bl, with the doubling and inverse cases.
@@ -106,7 +115,7 @@ impl<F> Point<F> where F: Field + Copy {
         var bit: u64 = (256 - core::num::leading_zeros(scalar)).downcast_truncate()
         while bit > 0 {
             bit -= 1
-            result = result.double()
+            result.double_assign()
             if (scalar >> bit as u256) & 1 == 1 { result = result.add(self) }
         }
         result
@@ -125,7 +134,7 @@ impl<F> Point<F> where F: Field + Copy {
         var bit: u64 = 63
         while bit > 0 {
             bit -= 1
-            result = result.double()
+            result.double_assign()
             if (X_ABS >> bit) & 1 == 1 { result = result.add(self) }
         }
         result
