@@ -1199,7 +1199,7 @@ impl Vm {
         let balance = state.balance(me)
         var gas: u128 = 5000
         if !state.account_is_warm(beneficiary) { gas += 2600 }
-        if state.is_empty(beneficiary) && balance != 0 { gas += 25000 }
+        if balance != 0 && state.is_empty(beneficiary) { gas += 25000 }
         if !self.charge(gas) { return }
         self.fault(state.warm_account(address: beneficiary))
         if !self.ok() { return }
@@ -1209,7 +1209,9 @@ impl Vm {
         }
         var status = transfer(mut state, from: me, to: beneficiary, value: balance)
         if status == OK && state.was_created(me) {
-            status = state.set_balance(address: me, value: 0)
+            // A balance the transfer kept, as one to itself, is burned. The
+            // transfer touched the account already.
+            if balance != 0 { status = state.set_balance(address: me, value: 0) }
             if status == OK { status = state.doom(me) }
         }
         self.fault(status)
