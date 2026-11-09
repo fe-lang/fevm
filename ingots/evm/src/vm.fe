@@ -1166,7 +1166,7 @@ impl Vm {
                 return Option::None
             },
         }
-        let program = Program::new(InputData::copy_bytes(self.memory.slice(offset: start, len: count)))
+        let program = Program::from_code(self.memory.slice(offset: start, len: count))
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
