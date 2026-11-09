@@ -4,5 +4,5 @@ version = "0.1.0"
 
 [dependencies]
 swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "bc263262e026940652401c46c36735d1cb8ddd34" }
-keccak = { source = "https://github.com/fe-lang/keccak", rev = "9080b3728f3ace646ac8f7ce52a3880840b83669" }
+keccak = { source = "https://github.com/fe-lang/keccak", rev = "436c43cbdaa3e866a8472248f4806359556cb44d" }
 fevm_precompiles = true
