@@ -352,6 +352,25 @@ impl Vm {
         }
     }
 
+    /// Faults unless the stack holds `count` words, which `take` then pops
+    /// with no check of its own: one check for an opcode's operands, where
+    /// `pop` checks each and keeps the stack's length in memory across them.
+    fn holds(mut self, _ count: usize) -> bool {
+        if self.stack.len() < count {
+            self.fault(ERR_STACK_UNDERFLOW)
+            return false
+        }
+        true
+    }
+
+    /// The top word, popped from a stack `holds` checked.
+    fn take(mut self) -> u256 {
+        let top = self.stack.len().wrapping_sub(1)
+        let word = unsafe { self.stack.get_unchecked(top) }
+        unsafe { self.stack.set_len(top) }
+        word
+    }
+
     fn push_bool(mut self, _ value: bool) {
         if value { self.push(1) } else { self.push(0) }
     }
@@ -426,9 +445,9 @@ impl Vm {
     }
 
     fn sha3(mut self) {
-        let offset = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(2) { return }
+        let offset = self.take()
+        let len = self.take()
         // A range within active memory pays only the per-word gas.
         if len <= self.memory_size as u256 && self.in_memory(offset, len: len.downcast_unchecked()) {
             let words: u64 = (len / 32 + if len % 32 == 0 { 0 } else { 1 }).downcast_unchecked()
@@ -528,10 +547,10 @@ impl Vm {
     }
 
     fn codecopy(mut self, _ program: Program) {
-        let offset = self.pop()
-        let source = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(3) { return }
+        let offset = self.take()
+        let source = self.take()
+        let len = self.take()
         match self.plan_memory(offset, len, copying: true) {
             Option::Some(plan,) => if !self.expand_memory(plan.size) {
                 return
@@ -558,10 +577,10 @@ impl Vm {
     }
 
     fn mcopy(mut self) {
-        let dest = self.pop()
-        let source = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(3) { return }
+        let dest = self.take()
+        let source = self.take()
+        let len = self.take()
         match copy_expansion(current: self.memory_size, dest, source, len) {
             Option::Some(plan,) => {
                 if !self.charge_expansion(plan, len, copying: true)
@@ -584,10 +603,10 @@ impl Vm {
     }
 
     fn calldatacopy(mut self, _ calldata: InputData) {
-        let offset = self.pop()
-        let source = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(3) { return }
+        let offset = self.take()
+        let source = self.take()
+        let len = self.take()
         match self.plan_memory(offset, len, copying: true) {
             Option::Some(plan,) => if !self.expand_memory(plan.size) {
                 return
@@ -613,10 +632,10 @@ impl Vm {
     }
 
     fn returndatacopy(mut self) {
-        let offset = self.pop()
-        let source = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(3) { return }
+        let offset = self.take()
+        let source = self.take()
+        let len = self.take()
         // Charge first, then check bounds even for length zero, then allocate.
         match self.plan_memory(offset, len, copying: true) {
             Option::Some(plan,) => {
@@ -634,9 +653,9 @@ impl Vm {
     }
 
     fn finish_from_memory(mut self, _ status: i32) {
-        let offset = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(2) { return }
+        let offset = self.take()
+        let len = self.take()
         match self.plan_memory(offset, len, copying: false) {
             Option::Some(plan,) => if !self.expand_memory(plan.size) {
                 return
@@ -734,11 +753,11 @@ impl Vm {
     }
 
     fn extcodecopy(mut self, _ state: mut Transaction) {
-        let address = address_word(self.pop())
-        let dest = self.pop()
-        let source = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds(4) { return }
+        let address = address_word(self.take())
+        let dest = self.take()
+        let source = self.take()
+        let len = self.take()
         let warm = state.account_is_warm(address)
         if !self.charge(if warm { 100 } else { 2600 }) { return }
         let plan = match self.plan_memory(offset: dest, len, copying: true) {
@@ -764,9 +783,9 @@ impl Vm {
             self.fault(ERR_STATIC_WRITE)
             return
         }
-        let offset = self.pop()
-        let len = self.pop()
-        if !self.ok() { return }
+        if !self.holds((2 + topics_count).downcast_unchecked()) { return }
+        let offset = self.take()
+        let len = self.take()
         let plan = match memory_expansion(current: self.memory_size, offset, len) {
             Option::Some(plan) => plan,
             Option::None => {
@@ -779,10 +798,10 @@ impl Vm {
         var topics: [u256; 4] = [0; 4]
         var topic: u64 = 0
         while topic < topics_count {
-            topics[topic.downcast_truncate()] = self.pop()
+            topics[topic.downcast_truncate()] = self.take()
             topic += 1
         }
-        if !self.ok() || !self.expand_memory(plan.size) { return }
+        if !self.expand_memory(plan.size) { return }
         let start: usize = if length == 0 { 0 } else { offset.downcast_unchecked() }
         self.fault(state.emit_log(address: self.call.address, topics, topic_count: topics_count,
                                   data: self.memory.slice(offset: start, len: length.downcast_truncate())))
@@ -1107,11 +1126,11 @@ impl Vm {
 
     fn start_create<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                                _ tracer: mut T) -> Option<Box<Frame>> {
-        let value = self.pop()
-        let offset = self.pop()
-        let len = self.pop()
-        let salt = if op == 0xf5 { self.pop() } else { 0 }
-        if !self.ok() { return Option::None }
+        if !self.holds(if op == 0xf5 { 4 } else { 3 }) { return Option::None }
+        let value = self.take()
+        let offset = self.take()
+        let len = self.take()
+        let salt = if op == 0xf5 { self.take() } else { 0 }
         let plan = match self.plan_memory(offset, len, copying: false) {
             Option::Some(plan) => plan,
             Option::None => return Option::None,
