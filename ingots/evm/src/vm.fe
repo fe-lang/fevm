@@ -1528,7 +1528,6 @@ impl Vm {
 
     // PUSH1 to PUSH32: the immediate is the top N bytes of the smallest
     // whole word that holds it, which padding puts after every immediate.
-    #[arithmetic(unchecked)]
     fn op_push<const N: usize, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
         if !c.charge(3) { return self.out_of_gas(c) }
         let value: u256 = if N == 1 {
