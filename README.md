@@ -30,8 +30,8 @@ Keccak-256; `ingots/evm/fe.toml` pins both to Git revisions.
 
 ## Building
 
-fevm needs Fe master `22b156fff`
-([argotorg/fe#1966](https://github.com/argotorg/fe/pull/1966)) with its pinned
+fevm needs Fe master `4608e5fdf`
+([argotorg/fe#1977](https://github.com/argotorg/fe/pull/1977)) with its pinned
 Sonatina and Rust 1.99.0.
 [`native/toolchain.json`](native/toolchain.json) records the revisions and lock
 hash, and bootstrap builds that compiler. Native hosts are x86_64 Linux and
