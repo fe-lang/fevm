@@ -36,7 +36,6 @@ use ingot::status::{
 }
 
 // Charges `cost` against `gas`, or fails without charging.
-#[inline(always)]
 fn spend(_ gas: mut u64, _ cost: u64) -> bool {
     if cost > gas {
         return false
@@ -46,7 +45,6 @@ fn spend(_ gas: mut u64, _ cost: u64) -> bool {
 }
 
 /// The big-endian `T` at `offset` bytes into `code`, which holds all of it.
-#[inline(always)]
 unsafe fn read_code<T: IntWord>(_ code: *u8, _ offset: usize) -> T {
     from_be(*cast<u8, T>(offset_bytes(code, offset)))
 }
@@ -360,7 +358,6 @@ impl Vm {
     }
 
     // `push` for the dispatch loop, which stops when it fails.
-    #[inline(always)]
     fn pushed(mut self, _ value: u256) -> bool {
         if self.stack.len() >= STACK_LIMIT {
             self.fault(ERR_STACK_OVERFLOW)
@@ -453,7 +450,6 @@ impl Vm {
     // too small doubles, or takes just the size if doubling fails.
     // Expansion plans never shrink memory, so a plan of the current size
     // changes nothing.
-    #[inline(always)]
     fn expand_memory(mut self, _ size: u64) -> bool {
         size == self.memory_size || self.resize_memory(size)
     }
@@ -499,8 +495,9 @@ impl Vm {
     }
 
     // The Keccak-256 hash of `len` bytes of memory at `offset`, a range
-    // within memory. Out of line, so the hashing handler keeps its arguments
-    // in registers.
+    // within memory. Out of line: inlined, the hasher's state is a local
+    // object that the hashing calls take, and Sonatina then lets none of the
+    // handler's calls be a tail call.
     #[inline(never)]
     fn hash_memory(self, _ offset: u256, _ len: u256) -> u256 {
         var hash = Keccak256::new()
@@ -518,7 +515,6 @@ impl Vm {
 
     // The word-rounded size covering a range that `in_memory` rejected, when
     // the buffer already holds it and the offset is below SMALL_EXTENT, or zero.
-    #[inline(always)]
     fn buffered_growth(self, _ offset: u256, len: u64) -> u64 {
         if offset >= SMALL_EXTENT as u256 {
             return 0
@@ -1747,7 +1743,6 @@ impl Vm {
 
     // The calldata word at `offset`, which runs past the end: its bytes
     // within the calldata, then zeros.
-    #[inline(never)]
     fn calldata_tail(self, _ offset: u256) -> u256 {
         let len = self.calldata_len
         if offset >= len as u256 { return 0 }
@@ -1855,18 +1850,11 @@ impl Vm {
                 *cast<u8, u256>(offset_bytes(base, dest.downcast_unchecked())) = word
             }
         } else if len != 0 {
-            self.move_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
+            self.memory.span().copy_within(source: source.downcast_unchecked(), dest: dest.downcast_unchecked(), len: len.downcast_unchecked())
         }
         c.discard(3)
         c.advance(1)
         self.next(c, mut tracer)
-    }
-
-    // Out of line: the memory view it borrows would keep `op_mcopy` from
-    // tail-calling the next handler.
-    #[inline(never)]
-    fn move_within(mut self, source: usize, dest: usize, len: usize) {
-        self.memory.span().copy_within(source, dest, len)
     }
 
     fn op_jump<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
