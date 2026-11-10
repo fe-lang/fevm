@@ -1289,9 +1289,13 @@ impl Vm {
     // cursor (`save`) to stop or to call code that uses them. Out of line,
     // so that `run_until_child`'s loop does not hold the cursor.
     #[inline(never)]
-    fn dispatch<T: Tracer>(mut self, _ code: *u8, _ pc: usize, _ gas: u64, _ tracer: mut T) {
+    fn dispatch<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.next(c, mut tracer) }
+
+    // The cursor at `pc` in `code` with `gas`, over the stack `self` holds.
+    fn cursor(self, _ code: *u8, _ pc: usize, _ gas: u64) -> Cursor {
         let depth = self.stack.len()
-        self.next(Cursor { code, pc, gas, top: offset_bytes(self.stack.ptr(), depth * 32), depth }, mut tracer)
+        // At most `STACK_LIMIT` words, whose offset cannot overflow.
+        Cursor { code, pc, gas, top: offset_bytes(self.stack.ptr(), depth.wrapping_mul(32)), depth }
     }
 
     // Runs the opcode at the cursor. Every arm tail-calls its handler, which
@@ -1446,7 +1450,7 @@ impl Vm {
     // Runs the handlers again after code that used `self`'s pc, gas and
     // stack, unless it failed.
     fn resume<T: Tracer>(mut self, _ code: *u8, _ tracer: mut T) {
-        if self.ok() { self.dispatch(code, self.pc, self.gas_remaining, mut tracer) }
+        if self.ok() { self.dispatch(self.cursor(code, self.pc, self.gas_remaining), mut tracer) }
     }
 
     // A handler's faults, exceptional halts, which leave the frame no gas.
@@ -1786,9 +1790,7 @@ impl Vm {
     // For the copy whose destination, source and length are the cursor's
     // top three words, copy `len` bytes from `size` bytes at `from`,
     // starting at `source`, into memory at `dest`, zero past the end; the
-    // range is within memory and not empty. Out of line, so the copy
-    // handlers keep their arguments in registers.
-    #[inline(never)]
+    // range is within memory and not empty.
     fn copy_padded(mut self, _ c: Cursor, from: *u8, size: usize) {
         let dest = c.peek(1)
         let source = c.peek(2)
@@ -2060,7 +2062,7 @@ impl Vm {
         if self.ok() {
             while true {
                 // Handlers run the common opcodes and stop at any other.
-                self.dispatch(code.ptr(), pc, gas, mut tracer)
+                self.dispatch(self.cursor(code.ptr(), pc, gas), mut tracer)
                 pc = self.pc
                 gas = self.gas_remaining
                 if self.halted || !self.ok() {
