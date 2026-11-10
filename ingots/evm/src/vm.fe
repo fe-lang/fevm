@@ -495,10 +495,7 @@ impl Vm {
     }
 
     // The Keccak-256 hash of `len` bytes of memory at `offset`, a range
-    // within memory. Out of line: inlined, the hasher's state is a local
-    // object that the hashing calls take, and Sonatina then lets none of the
-    // handler's calls be a tail call.
-    #[inline(never)]
+    // within memory.
     fn hash_memory(self, _ offset: u256, _ len: u256) -> u256 {
         var hash = Keccak256::new()
         if len != 0 {
