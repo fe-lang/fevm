@@ -336,7 +336,7 @@ impl WorldState {
         let old_size = self.code.len()
         // Bound before addition and before ByteSource traversal/allocation,
         // leaving room for the bitmap, an eighth of the code.
-        if len != 0 && (old_size > 0x3fffffffffffffff - 64 || len > 0x3fffffffffffffff - 64 - old_size) {
+        if len != 0 && (old_size > (usize::max() >> 2) - 64 || len > (usize::max() >> 2) - 64 - old_size) {
             return ERR_HOST_ALLOCATION
         }
         let new_size = old_size + if len == 0 { 0 } else { record_len(len) }

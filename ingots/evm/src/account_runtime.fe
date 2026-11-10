@@ -8,7 +8,7 @@ use ingot::vm::Buffers
 
 struct OversizedCode {}
 impl ByteSource for OversizedCode {
-    fn len(self) -> usize { 0xffffffffffffffff }
+    fn len(self) -> usize { usize::max() }
     fn byte_at(self, _ index: usize) -> u8 { core::panic() }
 }
 
