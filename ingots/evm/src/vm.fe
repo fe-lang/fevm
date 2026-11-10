@@ -51,10 +51,9 @@ unsafe fn read_code<T: IntWord>(_ code: *u8, _ offset: usize) -> T {
     from_be(*cast<u8, T>(offset_bytes(code, offset)))
 }
 
-/// Binary opcode `op`'s result, or `None` for other opcodes.
-#[inline(always)]
-fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
-    Option::Some(match op {
+/// Binary opcode `OP`'s result.
+fn binary_result<const OP: i32>(_ lhs: u256, _ rhs: u256) -> u256 {
+    match OP {
         0x01 => lhs.wrapping_add(rhs),
         0x02 => lhs.wrapping_mul(rhs),
         0x03 => lhs.wrapping_sub(rhs),
@@ -74,13 +73,12 @@ fn binary_result(_ op: i32, _ lhs: u256, _ rhs: u256) -> Option<u256> {
         0x13 => if signed_less(rhs, lhs) { 1 } else { 0 },
         0x0b => signextend(byte_index: lhs, value: rhs),
         0x1d => sar(shift: lhs, value: rhs),
-        _ => return Option::None,
-    })
+        _ => core::panic(),
+    }
 }
 
 /// SDIV: the quotient of two's complement words, rounded toward zero, with a
 /// zero divisor giving zero and `MIN / -1` wrapping to `MIN`.
-#[inline(always)]
 fn sdiv(_ lhs: u256, _ rhs: u256) -> u256 {
     if rhs == 0 {
         return 0
@@ -95,7 +93,6 @@ fn sdiv(_ lhs: u256, _ rhs: u256) -> u256 {
 
 /// SMOD: the remainder of two's complement words, taking the dividend's
 /// sign, with a zero divisor giving zero.
-#[inline(always)]
 fn smod(_ lhs: u256, _ rhs: u256) -> u256 {
     let lhs_signed: i256 = lhs.downcast_unchecked()
     let rhs_signed: i256 = rhs.downcast_unchecked()
@@ -105,14 +102,13 @@ fn smod(_ lhs: u256, _ rhs: u256) -> u256 {
     (lhs_signed % rhs_signed).downcast_unchecked()
 }
 
-/// Unary opcode `op`'s result, or `None` for other opcodes.
-#[inline(always)]
-fn unary_result(_ op: i32, _ value: u256) -> Option<u256> {
-    match op {
-        0x15 => Option::Some(if value == 0 { 1 } else { 0 }),
-        0x19 => Option::Some(!value),
-        0x1e => Option::Some(leading_zeros(value)),
-        _ => Option::None,
+/// Unary opcode `OP`'s result.
+fn unary_result<const OP: i32>(_ value: u256) -> u256 {
+    match OP {
+        0x15 => if value == 0 { 1 } else { 0 },
+        0x19 => !value,
+        0x1e => leading_zeros(value),
+        _ => core::panic(),
     }
 }
 
@@ -1298,12 +1294,12 @@ impl Vm {
         tracer.step(Step { pc: c.pc, op, gas: c.gas, stack_len: c.depth, memory_size: self.memory_size, depth: self.call_depth })
         match op as i32 {
             0x00 => self.op_stop(c, mut tracer),
-            0x04 => self.op_div(c, mut tracer),
-            0x05 => self.op_sdiv(c, mut tracer),
-            0x06 => self.op_mod(c, mut tracer),
-            0x07 => self.op_smod(c, mut tracer),
-            0x08 => self.op_addmod(c, mut tracer),
-            0x09 => self.op_mulmod(c, mut tracer),
+            0x04 => self.op_binary<0x04, T>(c, mut tracer),
+            0x05 => self.op_binary<0x05, T>(c, mut tracer),
+            0x06 => self.op_binary<0x06, T>(c, mut tracer),
+            0x07 => self.op_binary<0x07, T>(c, mut tracer),
+            0x08 => self.op_modular<0x08, T>(c, mut tracer),
+            0x09 => self.op_modular<0x09, T>(c, mut tracer),
             0x0a => self.op_exp(c, mut tracer),
             0x5f => self.op_push0(c, mut tracer),
             0x60 => self.op_push<1, T>(c, mut tracer),
@@ -1371,25 +1367,25 @@ impl Vm {
             0x9d => self.op_swap<14, T>(c, mut tracer),
             0x9e => self.op_swap<15, T>(c, mut tracer),
             0x9f => self.op_swap<16, T>(c, mut tracer),
-            0x01 => self.op_add(c, mut tracer),
-            0x02 => self.op_mul(c, mut tracer),
-            0x03 => self.op_sub(c, mut tracer),
-            0x0b => self.op_signextend(c, mut tracer),
-            0x10 => self.op_lt(c, mut tracer),
-            0x11 => self.op_gt(c, mut tracer),
-            0x12 => self.op_slt(c, mut tracer),
-            0x13 => self.op_sgt(c, mut tracer),
-            0x14 => self.op_eq(c, mut tracer),
-            0x15 => self.op_iszero(c, mut tracer),
-            0x16 => self.op_and(c, mut tracer),
-            0x17 => self.op_or(c, mut tracer),
-            0x18 => self.op_xor(c, mut tracer),
-            0x19 => self.op_not(c, mut tracer),
-            0x1e => self.op_clz(c, mut tracer),
+            0x01 => self.op_binary<0x01, T>(c, mut tracer),
+            0x02 => self.op_binary<0x02, T>(c, mut tracer),
+            0x03 => self.op_binary<0x03, T>(c, mut tracer),
+            0x0b => self.op_binary<0x0b, T>(c, mut tracer),
+            0x10 => self.op_binary<0x10, T>(c, mut tracer),
+            0x11 => self.op_binary<0x11, T>(c, mut tracer),
+            0x12 => self.op_binary<0x12, T>(c, mut tracer),
+            0x13 => self.op_binary<0x13, T>(c, mut tracer),
+            0x14 => self.op_binary<0x14, T>(c, mut tracer),
+            0x15 => self.op_unary<0x15, T>(c, mut tracer),
+            0x16 => self.op_binary<0x16, T>(c, mut tracer),
+            0x17 => self.op_binary<0x17, T>(c, mut tracer),
+            0x18 => self.op_binary<0x18, T>(c, mut tracer),
+            0x19 => self.op_unary<0x19, T>(c, mut tracer),
+            0x1e => self.op_unary<0x1e, T>(c, mut tracer),
             0x1a => self.op_byte(c, mut tracer),
-            0x1b => self.op_shl(c, mut tracer),
-            0x1c => self.op_shr(c, mut tracer),
-            0x1d => self.op_sar(c, mut tracer),
+            0x1b => self.op_binary<0x1b, T>(c, mut tracer),
+            0x1c => self.op_binary<0x1c, T>(c, mut tracer),
+            0x1d => self.op_binary<0x1d, T>(c, mut tracer),
             0x51 => self.op_mload(c, mut tracer),
             0x52 => self.op_mstore(c, mut tracer),
             0x53 => self.op_mstore8(c, mut tracer),
@@ -1474,18 +1470,6 @@ impl Vm {
     #[inline(never)]
     fn op_other<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.save(c) }
 
-    fn op_add<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x01) }
-    fn op_mul<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x02) }
-    fn op_sub<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x03) }
-    fn op_signextend<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x0b) }
-    fn op_lt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x10) }
-    fn op_gt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x11) }
-    fn op_slt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x12) }
-    fn op_sgt<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x13) }
-    fn op_eq<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x14) }
-    fn op_and<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x16) }
-    fn op_or<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x17) }
-    fn op_xor<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x18) }
 
     // The top word indexes a byte of the second from its most significant
     // end. A native word holds its bytes least significant first, so the
@@ -1502,31 +1486,18 @@ impl Vm {
         self.next(c, mut tracer)
     }
 
-    fn op_shl<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1b) }
-    fn op_shr<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1c) }
-    fn op_sar<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 3, op: 0x1d) }
-    fn op_iszero<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 3, op: 0x15) }
-    fn op_not<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 3, op: 0x19) }
-    fn op_clz<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_unary(c, mut tracer, cost: 5, op: 0x1e) }
-    fn op_div<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x04) }
-    fn op_sdiv<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x05) }
-    fn op_mod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x06) }
-    fn op_smod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_binary(c, mut tracer, cost: 5, op: 0x07) }
-    fn op_addmod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_modular(c, mut tracer, op: 0x08) }
-    fn op_mulmod<T: Tracer>(mut self, _ c: own Cursor, _ tracer: mut T) { self.op_modular(c, mut tracer, op: 0x09) }
 
     // ADDMOD and MULMOD: the top two words' sum or product modulo the third
     // replaces the third.
-    #[inline(always)]
-    fn op_modular<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, op: i32) {
-        if !c.charge(8) { return self.out_of_gas(c) }
+    fn op_modular<const OP: i32, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(base_cost(OP)) { return self.out_of_gas(c) }
         if !c.holds(3) { return self.underflow(c) }
         let lhs = c.pop()
         let rhs = c.pop()
         // A zero modulus gives zero, which the third word already holds.
         let modulus = c.peek(1)
         if modulus != 0 {
-            c.set(1, if op == 0x08 { addmod(lhs, rhs, modulus) } else { mulmod(lhs, rhs, modulus) })
+            c.set(1, if OP == 0x08 { addmod(lhs, rhs, modulus) } else { mulmod(lhs, rhs, modulus) })
         }
         c.advance(1)
         self.next(c, mut tracer)
@@ -1612,30 +1583,22 @@ impl Vm {
         self.next(c, mut tracer)
     }
 
-    #[inline(always)]
-    fn op_unary<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, cost: u64, op: i32) {
-        if !c.charge(cost) { return self.out_of_gas(c) }
+    // A unary opcode's handler, whose result replaces the top word.
+    fn op_unary<const OP: i32, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(base_cost(OP)) { return self.out_of_gas(c) }
         if !c.holds(1) { return self.underflow(c) }
-        match unary_result(op, c.peek(1)) {
-            Option::Some(result) => c.set(1, result),
-            Option::None => {},
-        }
+        c.set(1, unary_result<OP>(c.peek(1)))
         c.advance(1)
         self.next(c, mut tracer)
     }
 
-    // Each binary and unary opcode has a handler of its own, which inlines
-    // its one operation. The top word is the first operand; the result
-    // replaces the second.
-    #[inline(always)]
-    fn op_binary<T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T, cost: u64, op: i32) {
-        if !c.charge(cost) { return self.out_of_gas(c) }
+    // A binary opcode's handler. The top word is the first operand; the
+    // result replaces the second.
+    fn op_binary<const OP: i32, T: Tracer>(mut self, var _ c: own Cursor, _ tracer: mut T) {
+        if !c.charge(base_cost(OP)) { return self.out_of_gas(c) }
         if !c.holds(2) { return self.underflow(c) }
         let lhs = c.pop()
-        match binary_result(op, lhs, c.peek(1)) {
-            Option::Some(result) => c.set(1, result),
-            Option::None => {},
-        }
+        c.set(1, binary_result<OP>(lhs, c.peek(1)))
         c.advance(1)
         self.next(c, mut tracer)
     }
