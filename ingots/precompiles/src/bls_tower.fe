@@ -1,5 +1,5 @@
 use core::Option
-use ingot::bls_field::{Field, Fp}
+use ingot::bls_field::{Field, Fp, mul_quadratic}
 
 // The BLS12-381 tower used by the zkcrypto bls12_381 crate:
 // Fp2 = Fp[u]/(u^2 + 1), Fp6 = Fp2[v]/(v^3 - (u + 1)), Fp12 = Fp6[w]/(w^2 - v).
@@ -29,29 +29,32 @@ impl Fp2 {
     /// x0^2 = (c0 +- a) / 2 and x1 = c1 / (2 x0).
     pub fn sqrt(self) -> Option<Fp2> {
         if self.c1.is_zero() {
-            // An element of Fp is c0 or -c0 = (c1 u)^2 for a root of -c0.
-            return match self.c0.sqrt() {
-                Option::Some(root) => Option::Some(Fp2 { c0: root, c1: Fp::zero() }),
-                Option::None => match self.c0.neg().sqrt() {
-                    Option::Some(root) => Option::Some(Fp2 { c0: Fp::zero(), c1: root }),
-                    Option::None => Option::None,
-                },
-            }
+            // Every element of Fp is a square here: y = c0^((p+1)/4) is a
+            // root of c0, or has y^2 = -c0 and then (y u)^2 = c0.
+            let y = self.c0.sqrt_candidate()
+            if y.square().equals(self.c0) { return Option::Some(Fp2 { c0: y, c1: Fp::zero() }) }
+            return Option::Some(Fp2 { c0: Fp::zero(), c1: y })
         }
-        let alpha = match self.c0.square().add(self.c1.square()).sqrt() {
-            Option::Some(alpha) => alpha,
-            Option::None => return Option::None,
+        match self.c0.square().add(self.c1.square()).sqrt() {
+            Option::Some(alpha) => Option::Some(self.sqrt_from_norm_root(alpha)),
+            Option::None => Option::None,
         }
+    }
+
+    /// The square root of `self`, whose c1 is nonzero, from a square root
+    /// `alpha` of its norm.
+    pub fn sqrt_from_norm_root(self, _ alpha: Fp) -> Fp2 {
         let half = Fp::from_montgomery(HALF)
-        // With c1 nonzero, c0 +- alpha is nonzero, so x0 is too.
-        let x0 = match self.c0.add(alpha).mul(half).sqrt() {
-            Option::Some(x0) => x0,
-            Option::None => match self.c0.sub(alpha).mul(half).sqrt() {
-                Option::Some(x0) => x0,
-                Option::None => return Option::None,
-            },
+        // With c1 nonzero, c0 +- alpha is nonzero, and their halves multiply
+        // to -(c1 / 2)^2: as -1 is not a square, exactly one is a square.
+        // When g = (c0 + alpha) / 2 is not, y = g^((p+1)/4) has y^2 = -g,
+        // so x0 = c1 / (2 y) is a root of the other, and x1 = y.
+        let g = self.c0.add(alpha).mul(half)
+        let y = g.sqrt_candidate()
+        if y.square().equals(g) {
+            return Fp2 { c0: y, c1: self.c1.mul(y.double().invert()) }
         }
-        Option::Some(Fp2 { c0: x0, c1: self.c1.mul(x0.double().invert()) })
+        Fp2 { c0: self.c1.mul(y.double().invert()), c1: y }
     }
 }
 
@@ -63,10 +66,8 @@ impl Field for Fp2 {
     fn add(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.add(other.c0), c1: self.c1.add(other.c1) } }
     fn sub(self, _ other: Fp2) -> Fp2 { Fp2 { c0: self.c0.sub(other.c0), c1: self.c1.sub(other.c1) } }
     fn mul(self, _ other: Fp2) -> Fp2 {
-        let aa = self.c0.mul(other.c0)
-        let bb = self.c1.mul(other.c1)
-        let cross = self.c0.add(self.c1).mul(other.c0.add(other.c1))
-        Fp2 { c0: aa.sub(bb), c1: cross.sub(aa).sub(bb) }
+        let (c0, c1) = mul_quadratic(self.c0, self.c1, other.c0, other.c1)
+        Fp2 { c0, c1 }
     }
     fn square(self) -> Fp2 {
         let product = self.c0.mul(self.c1)

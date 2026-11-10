@@ -4,22 +4,10 @@
 // `L` signed 62-bit limbs, least significant first; every limb but the top one
 // is in [0, 2^62), and the top one carries the sign.
 
+use core::num::trailing_zeros
+
 const M62: u64 = 0x3fffffffffffffff
 const M62_SIGNED: i64 = 0x3fffffffffffffff
-
-// The bit index of `1 << i` from the top six bits of `(1 << i) * DE_BRUIJN`.
-const DE_BRUIJN: u64 = 0x03f79d71b4ca8b09
-const DE_BRUIJN_INDEX: [u8; 64] = [
-    0, 1, 56, 2, 57, 49, 28, 3, 61, 58, 42, 50, 38, 29, 17, 4, 62, 47, 59, 36, 45, 43, 51, 22, 53, 39, 33, 30, 24, 18,
-    12, 5, 63, 55, 48, 27, 60, 41, 37, 16, 46, 35, 44, 21, 52, 32, 23, 11, 54, 26, 40, 15, 34, 20, 31, 10, 25, 14, 19,
-    9, 13, 8, 7, 6,
-]
-
-// The number of trailing zeros of a nonzero `x`.
-#[arithmetic(unchecked)]
-pub fn trailing_zeros(_ x: u64) -> u64 {
-    DE_BRUIJN_INDEX[(((x & (0 - x)) * DE_BRUIJN) >> 58).downcast_truncate()] as u64
-}
 
 // The transition matrix [u v; q r] of 62 divsteps, scaled by 2^62.
 struct Transition { u: i64, v: i64, q: i64, r: i64 }

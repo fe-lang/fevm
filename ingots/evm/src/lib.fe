@@ -18,7 +18,7 @@ pub use types::{
     empty_bytes,
 }
 pub use vm::{self, Buffers, execute}
-pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact, transact_in}
 
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     cli::run()

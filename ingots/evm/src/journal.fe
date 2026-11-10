@@ -1,14 +1,86 @@
-use core::MemVec
+use core::{MemVec, Option}
+use ingot::state::Field
 
-pub struct Change {
-    pub kind: u8,
-    pub address: u256,
-    pub slot: u256,
-    pub previous: u256,
-    pub existed: bool,
+/// A mark on an address, one bit of its entry in the marks table. Undo
+/// clears the warm, touched and doomed marks a frame set; creation marks
+/// survive rollback.
+pub enum Mark {
+    /// Accessed (EIP-2929).
+    Warm,
+    /// Touched, so deleted at the end of the transaction if empty (EIP-161).
+    Touched,
+    /// Self-destructed in the transaction that created it (EIP-6780).
+    Doomed,
+    /// Created by this transaction.
+    Created,
+}
+impl Copy for Mark {}
+
+impl Mark {
+    pub fn bit(self) -> u8 {
+        match self {
+            Mark::Warm => 1,
+            Mark::Touched => 2,
+            Mark::Doomed => 4,
+            Mark::Created => 8,
+        }
+    }
 }
 
+/// A change to an account or to the transaction's tables about it, with
+/// what undo needs to reverse it.
+pub struct Change { pub address: u256, pub kind: ChangeKind }
 impl Copy for Change {}
+
+pub enum ChangeKind {
+    /// A balance or nonce write.
+    Account { pub field: Field, pub previous: u256, pub existed: bool },
+    /// The transaction's nonce increment and gas purchase.
+    Sender { pub nonce: u256, pub balance: u256, pub existed: bool },
+    /// A new contract's first nonce and endowment. Its nonce was zero.
+    Contract { pub balance: u256, pub existed: bool },
+    Storage { pub slot: u256, pub previous: u256, pub existed: bool },
+    Transient { pub slot: u256, pub previous: u256 },
+    /// A new mark.
+    Mark(Mark),
+    /// A touch without a mark (EIP-161), for the few a transaction makes
+    /// outside code: its own call, and writes that leave a value as it was.
+    /// Code's touches, which can repeat without bound, are marks.
+    Touch,
+    WarmSlot { pub slot: u256 },
+    /// Code deployed to an account without code.
+    Code { pub existed: bool },
+    /// An EIP-7702 delegation, which replaced the delegation to `previous`,
+    /// or no code.
+    Delegation { pub previous: Option<u256>, pub existed: bool },
+}
+impl Copy for ChangeKind {}
+
+impl Change {
+    /// Whether the change created its account's record, which undoing it
+    /// removes.
+    pub fn created(self) -> bool {
+        match self.kind {
+            ChangeKind::Account { existed, .. } => !existed,
+            ChangeKind::Sender { existed, .. } => !existed,
+            ChangeKind::Contract { existed, .. } => !existed,
+            ChangeKind::Storage { existed, .. } => !existed,
+            ChangeKind::Code { existed } => !existed,
+            ChangeKind::Delegation { existed, .. } => !existed,
+            _ => false,
+        }
+    }
+
+    /// Whether the change touches its account (EIP-161).
+    pub fn touches(self) -> bool {
+        match self.kind {
+            ChangeKind::Account { .. } | ChangeKind::Sender { .. } | ChangeKind::Contract { .. }
+                | ChangeKind::Code { .. } | ChangeKind::Delegation { .. } | ChangeKind::Mark(Mark::Touched)
+                | ChangeKind::Touch => true,
+            _ => false,
+        }
+    }
+}
 
 // A growable list of changes. Undo only reads and pops changes, so it cannot
 // fail to allocate while unwinding a failed frame.
@@ -17,13 +89,12 @@ pub struct Journal { changes: MemVec<Change> }
 impl Journal {
     pub fn new() -> Self { Self { changes: MemVec::new() } }
 
-    pub fn len(self) -> u64 { self.changes.len().downcast_unchecked() }
+    pub fn len(self) -> usize { self.changes.len() }
 
-    pub fn append(mut self, _ change: Change) -> bool {
-        self.changes.try_push(change).is_ok()
-    }
+    /// Appends `change`; false if the journal cannot grow.
+    pub fn push(mut self, _ change: Change) -> bool { self.changes.try_push(change).is_ok() }
 
-    pub fn change(self, _ index: u64) -> Change { self.changes[index.downcast_truncate()] }
+    pub fn changes(self) -> ref MemVec<Change> { ref self.changes }
 
     pub fn pop(mut self) -> Change { self.changes.pop().unwrap() }
 

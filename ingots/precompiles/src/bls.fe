@@ -1,6 +1,6 @@
 use core::{MemArray, MemBuffer, Option}
 use keccak::ByteSource
-use ingot::{Output, SUCCESS, failure, host_allocation}
+use ingot::{Output, SUCCESS, failure, host_allocation, word_at}
 use ingot::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
 use ingot::bls_field::{Field, Fp}
 use ingot::bls_map::{map_to_g1, map_to_g2}
@@ -36,9 +36,7 @@ const G2_DISCOUNT: [u16; 128] = [
 ]
 
 fn fp_at<T: ByteSource>(_ input: T, offset: usize) -> Option<Fp> {
-    for i in 0..16 {
-        if input.byte_at(offset + i) != 0 { return Option::None }
-    }
+    if (input.lane_at(offset) | input.lane_at(offset + 8)) != 0 { return Option::None }
     Fp::from_be_bytes(input, offset: offset + 16, masked: false)
 }
 
@@ -73,11 +71,7 @@ fn g2_at<T: ByteSource>(_ input: T, offset: usize, subgroup: bool) -> Option<Aff
 // Write `value` as 64 big-endian bytes at `offset`.
 fn write_fp(_ out: mut MemBuffer, offset: usize, _ value: Fp) {
     let limbs = value.to_canonical()
-    var i: u64 = 0
-    while i < 48 {
-        out[offset + 16 + i.downcast_truncate()] = (limbs[((47 - i) / 8).downcast_truncate()] >> (((47 - i) % 8) * 8)).downcast_truncate()
-        i += 1
-    }
+    for i in 0..6 { out.write_be<u64>(offset: offset + 16 + 8 * i, value: limbs[5 - i]) }
 }
 
 fn g1_output(_ point: Point<Fp>, gas_used: u64) -> Output {
@@ -179,11 +173,6 @@ fn pairing<T: ByteSource>(_ input: T, gas: u64) -> Output {
     Output { status: SUCCESS, gas_used: used, output }
 }
 
-fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
-    var value: u256 = 0
-    for i in 0..32 { value = (value << 8) | input.byte_at(offset + i) as u256 }
-    value
-}
 
 /// Run BLS12-381 precompile `address` (0x0b through 0x11) with `gas`.
 pub fn run<T: ByteSource>(address: u256, input: T, gas: u64) -> Output {

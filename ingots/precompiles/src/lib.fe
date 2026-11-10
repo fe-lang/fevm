@@ -1,4 +1,5 @@
-use core::{MemBuffer, Option}
+use core::{MemBuffer, MemSpan, Option}
+use core::num::swap_bytes
 use keccak::{ByteSource, Keccak256}
 pub use hashes::{ripemd160, sha256}
 
@@ -28,6 +29,17 @@ pub(ingot) fn host_allocation(_ gas_used: u64) -> Output {
     Output { status: HOST_ALLOCATION, gas_used, output: MemBuffer::empty() }
 }
 
+/// The identity precompile (0x04) on input in memory: one bulk copy.
+pub fn identity(_ input: MemSpan, gas: u64) -> Output {
+    let cost = 15 + 3 * word_count(input.len())
+    if cost > gas as u128 { return failure(gas) }
+    let gas_used: u64 = cost.downcast_unchecked()
+    match MemBuffer::try_from_span(input) {
+        Option::Some(output) => Output { status: SUCCESS, gas_used, output },
+        Option::None => host_allocation(gas_used),
+    }
+}
+
 // An output of `source`'s bytes, eight at a time.
 fn copied<T: ByteSource>(_ source: T, gas_used: u64) -> Output {
     let len = source.len()
@@ -51,8 +63,15 @@ fn words<const N: usize>(_ values: [u256; N], gas_used: u64) -> Output {
     Output { status: SUCCESS, gas_used, output }
 }
 
-// The big-endian word at `offset`, zero-padded past the input as buffer_read.
-fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
+/// The big-endian word at `offset`, zero-padded past the input as buffer_read:
+/// four big-endian lanes when the input holds it.
+pub fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
+    if offset + 32 <= input.len() {
+        return (swap_bytes(input.lane_at(offset)) as u256) << 192
+            | (swap_bytes(input.lane_at(offset + 8)) as u256) << 128
+            | (swap_bytes(input.lane_at(offset + 16)) as u256) << 64
+            | swap_bytes(input.lane_at(offset + 24)) as u256
+    }
     var value: u256 = 0
     for index in offset..offset + 32 {
         value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }

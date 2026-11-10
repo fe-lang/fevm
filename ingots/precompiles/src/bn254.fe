@@ -1,5 +1,6 @@
 use core::Option
 use keccak::ByteSource
+use ingot::word_at
 use ingot::bn254_curve::{Point, on_curve}
 use ingot::bn254_field::{Field, Fp, Fp2, Fp12, MODULUS, fp, fp_value}
 use ingot::bn254_pairing::{CHUNK, Pair, final_exponentiation, frobenius, miller_loop, twist_b}
@@ -7,19 +8,10 @@ use ingot::bn254_pairing::{CHUNK, Pair, final_exponentiation, frobenius, miller_
 // 6x^2 = p - 1 mod r, the eigenvalue of the Frobenius on G2.
 const SIX_X_SQUARED: u256 = 0x6f4d8248eeb859fbf83e9682e87cfd46
 
-// A big-endian word at `offset`; bytes past the input read as zero.
-fn word<T: ByteSource>(_ input: T, offset: usize) -> u256 {
-    var value: u256 = 0
-    for index in offset..offset + 32 {
-        value = (value << 8) | if index < input.len() { input.byte_at(index) as u256 } else { 0 }
-    }
-    value
-}
-
 // EIP-196 G1 encoding: (x, y) below p and on y^2 = x^3 + 3; (0, 0) is infinity.
 fn g1_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp>> {
-    let x = word(input, offset)
-    let y = word(input, offset: offset + 32)
+    let x = word_at(input, offset)
+    let y = word_at(input, offset: offset + 32)
     if x >= MODULUS || y >= MODULUS { return Option::None }
     if x == 0 && y == 0 { return Option::Some(Point::infinity()) }
     let point = Point::affine(x: fp(x), y: fp(y))
@@ -30,10 +22,10 @@ fn g1_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp>> {
 // EIP-197 G2 encoding: x = x0 * u + x1 and y = y0 * u + y1, each word below p,
 // on the twist; all zeros is infinity. Subgroup membership is checked separately.
 fn g2_point<T: ByteSource>(_ input: T, offset: usize) -> Option<Point<Fp2>> {
-    let x_im = word(input, offset)
-    let x_re = word(input, offset: offset + 32)
-    let y_im = word(input, offset: offset + 64)
-    let y_re = word(input, offset: offset + 96)
+    let x_im = word_at(input, offset)
+    let x_re = word_at(input, offset: offset + 32)
+    let y_im = word_at(input, offset: offset + 64)
+    let y_re = word_at(input, offset: offset + 96)
     if x_im >= MODULUS || x_re >= MODULUS || y_im >= MODULUS || y_re >= MODULUS { return Option::None }
     if x_im == 0 && x_re == 0 && y_im == 0 && y_re == 0 { return Option::Some(Point::infinity()) }
     let point = Point::affine(x: Fp2 { c0: fp(x_re), c1: fp(x_im) }, y: Fp2 { c0: fp(y_re), c1: fp(y_im) })
@@ -56,13 +48,64 @@ pub fn add<T: ByteSource>(_ input: T) -> Option<[u256; 2]> {
     }
 }
 
+// The order r of G1.
+const ORDER: u256 = 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+// The cube root of unity beta in Fp for which (beta x, y) = [lambda] (x, y)
+// on G1, lambda = 0xb3c4d79d41a917585bfc41088d8daaa78b17ea66b99c90dd.
+const BETA: u256 = 0x59e26bcea0d48bacd4f263f1acdb5c4f5763473177fffffe
+// A reduced basis (a1, -b1), (a2, b2) of the vectors (u, v) with
+// u + v lambda = 0 mod r, and floor(b2 2^256 / r), floor(b1 2^256 / r).
+const GLV_A1: u256 = 0x89d3256894d213e3
+const GLV_B1: u256 = 0x6f4d8248eeb859fc8211bbeb7d4f1128
+const GLV_A2: u256 = 0x6f4d8248eeb859fd0be4e1541221250b
+const GLV_B2: u256 = 0x89d3256894d213e3
+const GLV_G1: u256 = 0x2d91d232ec7e0b3d7
+const GLV_G2: u256 = 0x24ccef014a773d2cf7a7bd9d4391eb18d
+
+// The magnitude of a 256-bit two's complement word, and whether it is negative.
+fn magnitude(_ word: u256) -> (u256, bool) {
+    let zero: u256 = 0
+    if word >> 255 == 1 { (zero.wrapping_sub(word), true) } else { (word, false) }
+}
+
+// [scalar] point for an affine G1 point, by the GLV method: scalar = k1 +
+// k2 lambda mod r with |k1|, |k2| below 2^130, from the lattice basis and
+// the top half of the scalar (the quotients are off by at most a few, which
+// the bound allows). One double-and-add over both halves adds point,
+// (beta x, y) or their precomputed affine sum, each negated with its half.
+pub(ingot) fn multiply_g1(_ point: Point<Fp>, _ scalar: u256) -> Point<Fp> {
+    let k = scalar % ORDER
+    let high = k >> 128
+    let c1 = (high * GLV_G1) >> 128
+    let c2 = (high * GLV_G2) >> 128
+    let (k1, negative1) = magnitude(k.wrapping_sub(c1 * GLV_A1).wrapping_sub(c2 * GLV_A2))
+    let (k2, negative2) = magnitude((c1 * GLV_B1).wrapping_sub(c2 * GLV_B2))
+    let x1 = point.x
+    let y1 = if negative1 { point.y.neg() } else { point.y }
+    let x2 = point.x.mul(fp(BETA))
+    let y2 = if negative2 { point.y.neg() } else { point.y }
+    let (x3, y3) = Point::affine(x: x1, y: y1).add_affine(x2, y2).to_affine()
+    var result = Point::infinity()
+    var bit: u64 = (256 - core::num::leading_zeros(k1 | k2)).downcast_truncate()
+    while bit > 0 {
+        bit -= 1
+        result = result.double()
+        let in1 = (k1 >> bit as u256) & 1 == 1
+        let in2 = (k2 >> bit as u256) & 1 == 1
+        if in1 && in2 { result = result.add_affine(x2: x3, y2: y3) }
+        else if in1 { result = result.add_affine(x2: x1, y2: y1) }
+        else if in2 { result = result.add_affine(x2, y2) }
+    }
+    result
+}
+
 /// ECMUL (0x07): the encoded product of a G1 point and a 256-bit scalar.
 pub fn mul<T: ByteSource>(_ input: T) -> Option<[u256; 2]> {
     match g1_point(input, offset: 0) {
         Option::Some(point) => {
-            let scalar = word(input, offset: 64)
+            let scalar = word_at(input, offset: 64)
             if point.is_infinity() || scalar == 0 { return Option::Some([0, 0]) }
-            Option::Some(encode(point.multiply(scalar)))
+            Option::Some(encode(multiply_g1(point, scalar)))
         },
         Option::None => Option::None,
     }

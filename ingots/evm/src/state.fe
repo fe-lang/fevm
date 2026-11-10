@@ -1,9 +1,9 @@
-use core::{MemBuffer, MemSpan, MemVec, Option}
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
 use core::default::Default
 use swisstable::{Lookup, SwissKey, SwissTable, hash_u256}
 use ingot::constants::MAX_U256
 use keccak::{ByteSource, keccak256_word}
-use ingot::status::{ERR_HOST_ALLOCATION, OK}
+use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, OK}
 use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
@@ -13,6 +13,7 @@ struct Account {
     address: u256,
     balance: u256,
     nonce: u256,
+    // Zero for code set by `set_code_unhashed` until the first `code_hash`.
     code_hash: u256,
     code_offset: usize,
     code_len: usize,
@@ -21,6 +22,48 @@ struct Account {
     storage_slots: u64,
 }
 impl Copy for Account {}
+
+impl Account {
+    fn get(self, _ field: Field) -> u256 {
+        match field {
+            Field::Balance => self.balance,
+            Field::Nonce => self.nonce,
+        }
+    }
+    fn set(mut self, _ field: Field, _ value: u256) {
+        match field {
+            Field::Balance => self.balance = value,
+            Field::Nonce => self.nonce = value,
+        }
+    }
+}
+
+/// One of an account's two numbers.
+pub enum Field { Balance, Nonce }
+impl Copy for Field {}
+
+/// Why a balance or nonce write changed nothing.
+pub enum WriteError {
+    /// The value would pass 2^256 - 1.
+    Overflow,
+    /// The account table could not grow to hold a new account.
+    Allocation,
+}
+impl Copy for WriteError {}
+
+impl WriteError {
+    pub fn status(self) -> i32 {
+        match self {
+            WriteError::Overflow => ERR_BALANCE_OVERFLOW,
+            WriteError::Allocation => ERR_HOST_ALLOCATION,
+        }
+    }
+}
+
+/// A balance or nonce write: the value it replaced, whether the account
+/// existed, and whether the value changed.
+pub struct Written { pub previous: u256, pub existed: bool, pub changed: bool }
+impl Copy for Written {}
 
 // EVM account operands use only their low 160 bits.
 pub fn address_word(_ word: u256) -> u256 { word & 0xffffffffffffffffffffffffffffffffffffffff }
@@ -53,12 +96,13 @@ pub struct AccountEntry {
 }
 pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
 
-/// A balance or nonce replacement: the previous value, whether the account
-/// existed, whether the value changed and whether the table could hold it.
-pub struct Replaced { pub previous: u256, pub found: bool, pub changed: bool, pub written: bool }
-
 /// What validating a sender reads from its account.
 pub struct Sender { pub nonce: u256, pub balance: u256, pub code_len: usize }
+
+/// A sender's nonce and balance before `charge`, and whether its account
+/// existed.
+pub struct Charged { pub nonce: u256, pub balance: u256, pub existed: bool }
+impl Copy for Charged {}
 
 impl Copy for StorageKey {}
 
@@ -161,14 +205,17 @@ impl WorldState {
     // Removes the record of `address`, an address word, if it has one.
     fn remove_record(mut self, _ address: u256) -> bool {
         let lookup = self.index.get(address)
-        if !lookup.found { return false }
+        if lookup.found { self.remove_at(address, lookup.value) }
+        lookup.found
+    }
+    // Removes the record of `address`, an address word, at `position`.
+    fn remove_at(mut self, _ address: u256, _ position: usize) {
         let _ = self.index.remove(address)
-        let _ = self.accounts.swap_remove(lookup.value)
-        if lookup.value < self.accounts.len() {
+        let _ = self.accounts.swap_remove(position)
+        if position < self.accounts.len() {
             // Moving an existing key does not grow the table.
-            core::assert(self.index.try_insert(self.accounts[lookup.value].address, lookup.value))
+            core::assert(self.index.try_insert(self.accounts[position].address, position))
         }
-        true
     }
 
     pub fn exists(self, _ address: u256) -> bool {
@@ -208,6 +255,19 @@ impl WorldState {
             slot += 1
         }
     }
+    /// EIP-684/EIP-7610: whether creation can use `address`, which needs no
+    /// nonce, code or storage.
+    pub fn deployable(self, _ address: u256) -> bool {
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return true }
+        let account = ref self.accounts[lookup.value]
+        account.nonce == 0 && account.code_len == 0 && account.storage_slots == 0
+    }
+    /// The length of the code of `address`, if it has a record.
+    pub fn existing_code_len(self, _ address: u256) -> Option<usize> {
+        let lookup = self.index.get(address_word(address))
+        if lookup.found { Option::Some(self.accounts[lookup.value].code_len) } else { Option::None }
+    }
     pub fn has_storage(self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
         lookup.found && self.accounts[lookup.value].storage_slots != 0
@@ -226,22 +286,27 @@ impl WorldState {
     pub fn ensure_account(mut self, _ address: u256) -> bool {
         self.record(address_word(address)).is_some()
     }
-    // Used only by undo after restoring every write that created this account.
-    pub fn remove_empty_account(mut self, _ address: u256) -> bool {
+    /// Removes the record of `address`, which must be empty: undo of the
+    /// change that created it.
+    pub fn remove_empty_account(mut self, _ address: u256) {
         let address = address_word(address)
-        core::assert(self.is_empty(address))
-        self.remove_record(address)
+        let lookup = self.index.get(address)
+        core::assert(lookup.found && self.empty_at(lookup.value))
+        self.remove_at(address, lookup.value)
     }
     pub fn balance(self, _ address: u256) -> u256 {
         let lookup = self.index.get(address_word(address))
         if lookup.found { self.accounts[lookup.value].balance } else { 0 }
     }
     pub fn set_balance(mut self, _ address: u256, _ value: u256) -> bool {
-        self.replace(balance: true, address, value).written
+        self.replace(Field::Balance, address, value).is_ok()
     }
     pub fn nonce(self, _ address: u256) -> u256 {
         let lookup = self.index.get(address_word(address))
         if lookup.found { self.accounts[lookup.value].nonce } else { 0 }
+    }
+    pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
+        self.replace(Field::Nonce, address, value).is_ok()
     }
     pub fn sender(self, _ address: u256) -> Sender {
         let lookup = self.index.get(address_word(address))
@@ -249,47 +314,84 @@ impl WorldState {
         let account = ref self.accounts[lookup.value]
         Sender { nonce: account.nonce, balance: account.balance, code_len: account.code_len }
     }
-    /// Sets the balance (or nonce) with one lookup; an absent account stays
-    /// absent for zero.
-    pub fn replace(mut self, balance: bool, _ address: u256, _ value: u256) -> Replaced {
+    /// Sets `field` of `address`; an absent account stays absent for zero.
+    pub fn replace(mut self, _ field: Field, _ address: u256, _ value: u256) -> Result<WriteError, Written> {
         let address = address_word(address)
         let lookup = self.index.get(address)
-        let previous = self.field(balance, lookup)
-        self.store(balance, address, lookup, previous, value)
+        self.write(field, address, lookup, value)
     }
-    /// Adds `amount` to the balance (or nonce), or subtracts it, which the
-    /// value must hold, with one lookup. An addition past 2^256 changes
-    /// nothing; an absent account stays absent for zero.
-    pub fn adjust(mut self, balance: bool, _ address: u256, amount: u256, add: bool) -> Replaced {
+    /// Adds `amount` to `field` of `address`.
+    pub fn add(mut self, _ field: Field, _ address: u256, _ amount: u256) -> Result<WriteError, Written> {
         let address = address_word(address)
         let lookup = self.index.get(address)
-        let previous = self.field(balance, lookup)
-        if add && amount > MAX_U256 - previous {
-            return Replaced { previous, found: lookup.found, changed: false, written: true }
-        }
-        self.store(balance, address, lookup, previous, value: if add { previous + amount } else { previous - amount })
+        let previous = self.value(field, lookup)
+        if amount > MAX_U256 - previous { return Result::Err(WriteError::Overflow) }
+        self.write(field, address, lookup, value: previous + amount)
     }
-    // The balance (or nonce) of a looked-up account.
-    fn field(self, _ balance: bool, _ lookup: Lookup<usize>) -> u256 {
-        if !lookup.found { return 0 }
-        if balance { self.accounts[lookup.value].balance } else { self.accounts[lookup.value].nonce }
+    /// Subtracts `amount`, which `field` of `address` must hold.
+    pub fn subtract(mut self, _ field: Field, _ address: u256, _ amount: u256) -> Result<WriteError, Written> {
+        let address = address_word(address)
+        let lookup = self.index.get(address)
+        let previous = self.value(field, lookup)
+        core::assert(amount <= previous)
+        self.write(field, address, lookup, value: previous - amount)
     }
-    // Replaces `previous`, the balance (or nonce) of a looked-up account, with `value`.
-    fn store(mut self, _ balance: bool, _ address: u256, _ lookup: Lookup<usize>, _ previous: u256,
-             _ value: u256) -> Replaced {
-        if previous == value { return Replaced { previous, found: lookup.found, changed: false, written: true } }
-        let at = if lookup.found { lookup.value } else {
-            match self.add_record(address) {
-                Option::Some(at) => at,
-                Option::None => return Replaced { previous, found: false, changed: true, written: false },
-            }
-        }
+    /// Opens the account of a new contract at `address`, an address word,
+    /// whose nonce is zero (EIP-684): sets the nonce to one and adds `amount`
+    /// to the balance. `previous` is the balance before.
+    pub fn endow(mut self, _ address: u256, amount: u256) -> Result<WriteError, Written> {
+        let lookup = self.index.get(address)
+        let previous = self.value(Field::Balance, lookup)
+        if amount > MAX_U256 - previous { return Result::Err(WriteError::Overflow) }
+        let at = self.position_or_add(address, lookup)?
         let account = mut self.accounts[at]
-        if balance { account.balance = value } else { account.nonce = value }
-        Replaced { previous, found: lookup.found, changed: true, written: true }
+        core::assert(account.nonce == 0)
+        account.nonce = 1
+        account.balance = previous + amount
+        Result::Ok(Written { previous, existed: lookup.found, changed: true })
     }
-    pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
-        self.replace(balance: false, address, value).written
+    /// Increments the nonce of `address`, an address word, and subtracts
+    /// `fee`, which its balance must hold: a transaction's nonce increment
+    /// and gas purchase. A nonce of 2^256 - 1 cannot grow.
+    pub fn charge(mut self, _ address: u256, fee: u256) -> Result<WriteError, Charged> {
+        let lookup = self.index.get(address)
+        if self.value(Field::Nonce, lookup) == MAX_U256 { return Result::Err(WriteError::Overflow) }
+        let at = self.position_or_add(address, lookup)?
+        let account = mut self.accounts[at]
+        let charged = Charged { nonce: account.nonce, balance: account.balance, existed: lookup.found }
+        account.nonce += 1
+        account.balance -= fee
+        Result::Ok(charged)
+    }
+    // `field` of a looked-up account, zero for an absent one.
+    fn value(self, _ field: Field, _ lookup: Lookup<usize>) -> u256 {
+        if lookup.found { self.accounts[lookup.value].get(field) } else { 0 }
+    }
+    // The position of a looked-up account, given a record if it had none.
+    fn position_or_add(mut self, _ address: u256, _ lookup: Lookup<usize>) -> Result<WriteError, usize> {
+        if lookup.found { return Result::Ok(lookup.value) }
+        match self.add_record(address) {
+            Option::Some(at) => Result::Ok(at),
+            Option::None => Result::Err(WriteError::Allocation),
+        }
+    }
+    // Sets `field` of a looked-up account to `value`.
+    fn write(mut self, _ field: Field, _ address: u256, _ lookup: Lookup<usize>, _ value: u256)
+        -> Result<WriteError, Written> {
+        let previous = self.value(field, lookup)
+        let written = Written { previous, existed: lookup.found, changed: previous != value }
+        if written.changed {
+            let at = self.position_or_add(address, lookup)?
+            self.accounts[at].set(field, value)
+        }
+        Result::Ok(written)
+    }
+    /// Sets `field` of `address` back to `value`, as undo does: the account
+    /// exists while one of its changes is undone.
+    pub fn restore(mut self, _ field: Field, _ address: u256, _ value: u256) {
+        let lookup = self.index.get(address_word(address))
+        core::assert(lookup.found)
+        self.accounts[lookup.value].set(field, value)
     }
     pub fn code_size(self, _ address: u256) -> usize {
         let lookup = self.index.get(address_word(address))
@@ -297,9 +399,14 @@ impl WorldState {
     }
     // EIP-1052: even an explicitly present account hashes to zero if its
     // balance, nonce and code are empty. Storage is not part of that predicate.
-    pub fn code_hash(self, _ address: u256) -> u256 {
+    pub fn code_hash(mut self, _ address: u256) -> u256 {
         let lookup = self.index.get(address_word(address))
-        if !lookup.found || self.empty_at(lookup.value) { 0 } else { self.accounts[lookup.value].code_hash }
+        if !lookup.found || self.empty_at(lookup.value) { return 0 }
+        let account = self.accounts[lookup.value]
+        if account.code_hash != 0 { return account.code_hash }
+        let hash = keccak256_word(self.code.slice(offset: account.code_offset + 64, len: account.code_len))
+        self.accounts[lookup.value].code_hash = hash
+        hash
     }
     // The arena offset and length of an account's code. One without code has
     // no arena record to address.
@@ -323,9 +430,18 @@ impl WorldState {
         let jumpdests = self.code.slice(offset: offset + len, len: jumpdest_map_len(len))
         Program::analyzed(self.code.slice(offset, len), jumpdests)
     }
-    // Copies `code` into the arena with its jump-destination map and hash. Hosts
-    // set up accounts with it; code deposits and EIP-7702 delegations use it too.
+    // Copies `code` into the arena with its jump-destination map and hash.
+    // Hosts set up accounts with it.
     pub fn set_code<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
+        self.store_code(address, code, hashed: true)
+    }
+    // `set_code` for code deposits and EIP-7702 delegations, leaving the hash
+    // to the first `code_hash`: most such code is never hashed, and code that
+    // a SELFDESTRUCT removes in its creating transaction never can be.
+    pub fn set_code_unhashed<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
+        self.store_code(address, code, hashed: false)
+    }
+    fn store_code<T: ByteSource>(mut self, address: u256, code: T, hashed: bool) -> i32 {
         let address = address_word(address)
         let lookup = self.index.get(address)
         let len = code.len()
@@ -343,7 +459,8 @@ impl WorldState {
         if new_size > old_size && !self.code.try_resize(new_size) { return ERR_HOST_ALLOCATION }
         // The arena is unchanged until here, so an account without a record
         // that cannot get one leaves the world as it was.
-        let at = match self.record(address) {
+        let added = if lookup.found { Option::Some(lookup.value) } else { self.add_record(address) }
+        let at = match added {
             Option::Some(at) => at,
             Option::None => {
                 self.code.truncate(old_size)
@@ -354,22 +471,30 @@ impl WorldState {
             self.code.span().write_word(offset: code_offset, value: DEAD_CODE)
             self.dead_code += record_len(code_len)
         }
-        var hash = EMPTY_CODE_HASH
         if len != 0 {
             self.code.span().write_word(offset: old_size, value: address)
             self.code.span().write_word(offset: old_size + 32, value: len as u256)
-            for i in 0..len { self.code[old_size + 64 + i] = code.byte_at(i) }
+            // Eight bytes at a time, then the tail.
+            let start = old_size + 64
+            var i: usize = 0
+            while i + 8 <= len {
+                self.code.write_le<u64>(offset: start + i, value: code.lane_at(i))
+                i += 8
+            }
+            while i < len {
+                self.code[start + i] = code.byte_at(i)
+                i += 1
+            }
             // Growth can expose old bytes where the bitmap goes.
             let map = old_size + 64 + len
             let map_len = jumpdest_map_len(len)
             self.code.slice(offset: map, len: map_len).zero()
             mark_jumpdests(code, mut self.code.slice(offset: map, len: map_len))
-            hash = keccak256_word(code)
         }
         let account = mut self.accounts[at]
         account.code_offset = old_size
         account.code_len = len
-        account.code_hash = hash
+        account.code_hash = if len == 0 { EMPTY_CODE_HASH } else if hashed { keccak256_word(code) } else { 0 }
         if self.dead_code > self.code.len() - self.dead_code { self.compact_code() }
         OK
     }

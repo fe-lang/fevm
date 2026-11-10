@@ -1,7 +1,8 @@
 use core::Option
+use core::num::swap_bytes
 use core::ops::WrappingMul
 use ingot::inversion::invert_384
-use ingot::montgomery::{adc, mac, sbb}
+use ingot::montgomery::{adc, mul_wide, sbb}
 use keccak::ByteSource
 
 // BLS12-381 base field: p = 0x1a0111ea...ffaaab (381 bits). Elements are six
@@ -17,8 +18,11 @@ const R2: [u64; 6] = [0xf4df1f341c341746, 0x0a76e6a609d104f1, 0x8de5476c4c95b6d5
 const MODULUS_62: [i64; 7] = [0x39feffffffffaaab, 0x3aaffffac54ffffe, 0x330d2a0f6b0f6241, 0x1dd2e13ce144afd9, 0x1ba7b6434bacd764, 0x0447a8e5ff9a692c, 0x1a0]
 const INV62: u64 = 0x360c000300030003
 const R3: [u64; 6] = [0xed48ac6bd94ca1e0, 0x315f831e03a7adf8, 0x9a53352a615e29dd, 0x34c04e5e921e1761, 0x2512d43565724728, 0x0aa6346091755d4d]
-// (p + 1) / 4: p = 3 mod 4, so a^((p+1)/4) is a square root of any square a.
-const SQRT_EXPONENT: [u64; 6] = [0xee7fbfffffffeaab, 0x07aaffffac54ffff, 0xd9cc34a83dac3d89, 0xd91dd2e13ce144af, 0x92c6e9ed90d2eb35, 0x0680447a8e5ff9a6]
+// (p + 1) / 4 as sliding windows of up to five bits from its top, which
+// ends in a one: each window as the squarings before its multiplication
+// (its width, plus the zero bits above it) and the index of its odd value
+// among 1, 3, ..., 31. 375 squarings and 66 multiplications.
+const SQRT_WINDOWS: [[u8; 2]; 67] = [[0, 6], [13, 8], [7, 7], [4, 2], [6, 3], [7, 11], [5, 15], [5, 12], [3, 2], [6, 6], [6, 4], [3, 1], [8, 13], [3, 2], [6, 7], [6, 13], [3, 0], [8, 6], [7, 11], [5, 5], [6, 6], [6, 14], [4, 4], [8, 14], [4, 6], [7, 11], [9, 9], [5, 12], [2, 1], [7, 2], [7, 4], [6, 11], [5, 14], [5, 9], [5, 9], [8, 6], [7, 10], [9, 7], [5, 6], [3, 1], [8, 7], [3, 1], [7, 4], [9, 7], [6, 10], [6, 15], [5, 15], [5, 15], [4, 6], [3, 1], [8, 10], [7, 15], [5, 15], [5, 15], [4, 7], [4, 3], [7, 15], [5, 14], [5, 15], [5, 15], [5, 15], [5, 15], [5, 15], [5, 15], [4, 6], [6, 10], [5, 5]]
 const HALF_MODULUS: [u64; 6] = [0xdcff7fffffffd555, 0x0f55ffff58a9ffff, 0xb39869507b587b12, 0xb23ba5c279c2895f, 0x258dd3db21a5d66b, 0x0d0088f51cbff34d]
 
 /// Operations shared by the base field and its quadratic extension, so curve
@@ -79,26 +83,331 @@ fn reduce(_ t: [u64; 6], _ top: u64) -> [u64; 6] {
     if borrow == 1 { t } else { d }
 }
 
-// One CIOS row: accumulate a * b into t, then add the multiple of p that
-// clears the low word and shift down one word.
+// a * b * 2^-384 mod p for a and b below 2p, left below 2p: the CIOS rows
+// without the final subtraction. As 4p < 2^384, (a b + q p) / 2^384 is below
+// p + 4p^2 / 2^384 < 2p, so the word above the result is zero.
+fn mul_lazy(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 6] {
+    let (t, top) = first_row(a, b[0])
+    let (t, top) = row(a, b[1], t, top)
+    let (t, top) = row(a, b[2], t, top)
+    let (t, top) = row(a, b[3], t, top)
+    let (t, top) = row(a, b[4], t, top)
+    let (t, _) = row(a, b[5], t, top)
+    t
+}
+
+// The first CIOS row: a * b, then reduced.
+#[inline(always)]
+fn first_row(_ a: [u64; 6], _ b: u64) -> ([u64; 6], u64) {
+    let (s0, h0) = mul_wide(b, a[0])
+    let (l1, h1) = mul_wide(b, a[1])
+    let (s1, c) = adc(h0, l1, 0)
+    let (l2, h2) = mul_wide(b, a[2])
+    let (s2, c) = adc(h1, l2, c)
+    let (l3, h3) = mul_wide(b, a[3])
+    let (s3, c) = adc(h2, l3, c)
+    let (l4, h4) = mul_wide(b, a[4])
+    let (s4, c) = adc(h3, l4, c)
+    let (l5, h5) = mul_wide(b, a[5])
+    let (s5, c) = adc(h4, l5, c)
+    let (s6, _) = adc(h5, 0, c)
+    shift_reduced([s0, s1, s2, s3, s4, s5, s6], 0)
+}
+
+// One later CIOS row: t + a * b, then reduced. Each product adds its low
+// words in one carry chain (`ca`) and its high words, a word up, in another
+// (`cb`): with ADX the two interleave, one through CF and one through OF.
+// The words above the chains are carry ops too, which stay in place: a
+// plain addition would move to its use, inside the next chains, and
+// clobber their flags.
 #[inline(always)]
 fn row(_ a: [u64; 6], _ b: u64, _ t: [u64; 6], _ top: u64) -> ([u64; 6], u64) {
-    let (t0, c) = mac(a[0], b, t[0], 0)
-    let (t1, c) = mac(a[1], b, t[1], c)
-    let (t2, c) = mac(a[2], b, t[2], c)
-    let (t3, c) = mac(a[3], b, t[3], c)
-    let (t4, c) = mac(a[4], b, t[4], c)
-    let (t5, c) = mac(a[5], b, t[5], c)
-    let (t6, t7) = adc(top, c, 0)
-    let m = t0.wrapping_mul(INV)
-    let (_, c) = mac(m, MODULUS[0], t0, 0)
-    let (r0, c) = mac(m, MODULUS[1], t1, c)
-    let (r1, c) = mac(m, MODULUS[2], t2, c)
-    let (r2, c) = mac(m, MODULUS[3], t3, c)
-    let (r3, c) = mac(m, MODULUS[4], t4, c)
-    let (r4, c) = mac(m, MODULUS[5], t5, c)
-    let (r5, c) = adc(t6, 0, c)
-    ([r0, r1, r2, r3, r4, r5], t7 + c)
+    let (l0, h0) = mul_wide(b, a[0])
+    let (s0, ca) = adc(t[0], l0, 0)
+    let (s1, cb) = adc(t[1], h0, 0)
+    let (l1, h1) = mul_wide(b, a[1])
+    let (s1, ca) = adc(s1, l1, ca)
+    let (s2, cb) = adc(t[2], h1, cb)
+    let (l2, h2) = mul_wide(b, a[2])
+    let (s2, ca) = adc(s2, l2, ca)
+    let (s3, cb) = adc(t[3], h2, cb)
+    let (l3, h3) = mul_wide(b, a[3])
+    let (s3, ca) = adc(s3, l3, ca)
+    let (s4, cb) = adc(t[4], h3, cb)
+    let (l4, h4) = mul_wide(b, a[4])
+    let (s4, ca) = adc(s4, l4, ca)
+    let (s5, cb) = adc(t[5], h4, cb)
+    let (l5, h5) = mul_wide(b, a[5])
+    let (s5, ca) = adc(s5, l5, ca)
+    // A product's high word is at most 2^64 - 2, so it takes `ca` without
+    // carrying, and the chains end one after the other.
+    let (h5, _) = adc(h5, 0, ca)
+    let (s6, cb) = adc(top, h5, cb)
+    shift_reduced([s0, s1, s2, s3, s4, s5, s6], cb)
+}
+
+// s plus the multiple of p that clears its low word, shifted down one
+// word, with s7 the word above s. Two carry chains as in `row`.
+#[inline(always)]
+fn shift_reduced(_ s: [u64; 7], _ s7: u64) -> ([u64; 6], u64) {
+    let m = s[0].wrapping_mul(INV)
+    let (k0, j0) = mul_wide(m, MODULUS[0])
+    let (_, ca) = adc(s[0], k0, 0)
+    let (u1, cb) = adc(s[1], j0, 0)
+    let (k1, j1) = mul_wide(m, MODULUS[1])
+    let (u1, ca) = adc(u1, k1, ca)
+    let (u2, cb) = adc(s[2], j1, cb)
+    let (k2, j2) = mul_wide(m, MODULUS[2])
+    let (u2, ca) = adc(u2, k2, ca)
+    let (u3, cb) = adc(s[3], j2, cb)
+    let (k3, j3) = mul_wide(m, MODULUS[3])
+    let (u3, ca) = adc(u3, k3, ca)
+    let (u4, cb) = adc(s[4], j3, cb)
+    let (k4, j4) = mul_wide(m, MODULUS[4])
+    let (u4, ca) = adc(u4, k4, ca)
+    let (u5, cb) = adc(s[5], j4, cb)
+    let (k5, j5) = mul_wide(m, MODULUS[5])
+    let (u5, ca) = adc(u5, k5, ca)
+    // `j5` takes `ca` without carrying, as in `row`.
+    let (j5, _) = adc(j5, 0, ca)
+    let (u6, cb) = adc(s[6], j5, cb)
+    let (u7, _) = adc(s7, 0, cb)
+    ([u1, u2, u3, u4, u5, u6], u7)
+}
+
+// The 768-bit product a * b, low word first: a row per word of b, as in
+// `row`, each handing its lowest word down.
+#[inline(never)]
+fn product(_ a: [u64; 6], _ b: [u64; 6]) -> [u64; 12] {
+    let (w0, t) = first_wide_row(a, b[0])
+    let (w1, t) = wide_row(a, b[1], t)
+    let (w2, t) = wide_row(a, b[2], t)
+    let (w3, t) = wide_row(a, b[3], t)
+    let (w4, t) = wide_row(a, b[4], t)
+    let (w5, t) = wide_row(a, b[5], t)
+    [w0, w1, w2, w3, w4, w5, t[0], t[1], t[2], t[3], t[4], t[5]]
+}
+
+// a * b: its low word, and the six above it.
+#[inline(always)]
+fn first_wide_row(_ a: [u64; 6], _ b: u64) -> (u64, [u64; 6]) {
+    let (s0, h0) = mul_wide(b, a[0])
+    let (l1, h1) = mul_wide(b, a[1])
+    let (s1, c) = adc(h0, l1, 0)
+    let (l2, h2) = mul_wide(b, a[2])
+    let (s2, c) = adc(h1, l2, c)
+    let (l3, h3) = mul_wide(b, a[3])
+    let (s3, c) = adc(h2, l3, c)
+    let (l4, h4) = mul_wide(b, a[4])
+    let (s4, c) = adc(h3, l4, c)
+    let (l5, h5) = mul_wide(b, a[5])
+    let (s5, c) = adc(h4, l5, c)
+    let (s6, _) = adc(h5, 0, c)
+    (s0, [s1, s2, s3, s4, s5, s6])
+}
+
+// t + a * b: its low word, and the six above it. The sum is below 2^448,
+// so the top word takes both chains' carries.
+#[inline(always)]
+fn wide_row(_ a: [u64; 6], _ b: u64, _ t: [u64; 6]) -> (u64, [u64; 6]) {
+    let (l0, h0) = mul_wide(b, a[0])
+    let (s0, ca) = adc(t[0], l0, 0)
+    let (s1, cb) = adc(t[1], h0, 0)
+    let (l1, h1) = mul_wide(b, a[1])
+    let (s1, ca) = adc(s1, l1, ca)
+    let (s2, cb) = adc(t[2], h1, cb)
+    let (l2, h2) = mul_wide(b, a[2])
+    let (s2, ca) = adc(s2, l2, ca)
+    let (s3, cb) = adc(t[3], h2, cb)
+    let (l3, h3) = mul_wide(b, a[3])
+    let (s3, ca) = adc(s3, l3, ca)
+    let (s4, cb) = adc(t[4], h3, cb)
+    let (l4, h4) = mul_wide(b, a[4])
+    let (s4, ca) = adc(s4, l4, ca)
+    let (s5, cb) = adc(t[5], h4, cb)
+    let (l5, h5) = mul_wide(b, a[5])
+    let (s5, ca) = adc(s5, l5, ca)
+    let (s6, _) = adc(h5, 0, cb)
+    let (s6, _) = adc(s6, 0, ca)
+    (s0, [s1, s2, s3, s4, s5, s6])
+}
+
+// (t + m p) / 2^64 for the m that clears t's low word. t is below 2^384, so
+// t + m p is below 2^446 and the quotient fits six words; two carry chains
+// as in `row`, and the top word takes both carries.
+#[inline(always)]
+fn redc_round(_ t: [u64; 6]) -> [u64; 6] {
+    let m = t[0].wrapping_mul(INV)
+    let (k0, j0) = mul_wide(m, MODULUS[0])
+    let (_, ca) = adc(t[0], k0, 0)
+    let (u1, cb) = adc(t[1], j0, 0)
+    let (k1, j1) = mul_wide(m, MODULUS[1])
+    let (u1, ca) = adc(u1, k1, ca)
+    let (u2, cb) = adc(t[2], j1, cb)
+    let (k2, j2) = mul_wide(m, MODULUS[2])
+    let (u2, ca) = adc(u2, k2, ca)
+    let (u3, cb) = adc(t[3], j2, cb)
+    let (k3, j3) = mul_wide(m, MODULUS[3])
+    let (u3, ca) = adc(u3, k3, ca)
+    let (u4, cb) = adc(t[4], j3, cb)
+    let (k4, j4) = mul_wide(m, MODULUS[4])
+    let (u4, ca) = adc(u4, k4, ca)
+    let (u5, cb) = adc(t[5], j4, cb)
+    let (k5, j5) = mul_wide(m, MODULUS[5])
+    let (u5, ca) = adc(u5, k5, ca)
+    let (u6, _) = adc(j5, 0, cb)
+    let (u6, _) = adc(u6, 0, ca)
+    [u1, u2, u3, u4, u5, u6]
+}
+
+// Montgomery reduction of t below p 2^384: t 2^-384 mod p. Six rounds take
+// the low half to (low + M p) / 2^384, at most p; the high half, below p,
+// adds on, and one subtraction brings the sum below p.
+#[inline(always)]
+fn montgomery_reduce(_ t: [u64; 12]) -> Fp {
+    let u = redc_round([t[0], t[1], t[2], t[3], t[4], t[5]])
+    let u = redc_round(u)
+    let u = redc_round(u)
+    let u = redc_round(u)
+    let u = redc_round(u)
+    let u = redc_round(u)
+    let (sum, carry) = add_limbs(u, [t[6], t[7], t[8], t[9], t[10], t[11]])
+    Fp { limbs: reduce(sum, carry) }
+}
+
+#[inline(never)]
+fn redc(_ t: [u64; 12]) -> Fp {
+    montgomery_reduce(t)
+}
+
+// a - b over twelve words, with the borrow out.
+#[inline(always)]
+fn subtract_wide(_ a: [u64; 12], _ b: [u64; 12]) -> ([u64; 12], u64) {
+    let (d0, borrow) = sbb(a[0], b[0], 0)
+    let (d1, borrow) = sbb(a[1], b[1], borrow)
+    let (d2, borrow) = sbb(a[2], b[2], borrow)
+    let (d3, borrow) = sbb(a[3], b[3], borrow)
+    let (d4, borrow) = sbb(a[4], b[4], borrow)
+    let (d5, borrow) = sbb(a[5], b[5], borrow)
+    let (d6, borrow) = sbb(a[6], b[6], borrow)
+    let (d7, borrow) = sbb(a[7], b[7], borrow)
+    let (d8, borrow) = sbb(a[8], b[8], borrow)
+    let (d9, borrow) = sbb(a[9], b[9], borrow)
+    let (d10, borrow) = sbb(a[10], b[10], borrow)
+    let (d11, borrow) = sbb(a[11], b[11], borrow)
+    ([d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11], borrow)
+}
+
+// The coefficients of (a0 + a1 u)(b0 + b1 u) for u^2 = -1, from the
+// products aa = a0 b0, bb = a1 b1 and cross = (a0 + a1)(b0 + b1), each
+// 768-bit: c1 = cross - aa - bb = a0 b1 + a1 b0, below 2 p^2, and
+// c0 = aa - bb, plus p 2^384 when negative; both are below p 2^384, which
+// `redc` takes.
+#[inline(never)]
+fn combine(_ aa: [u64; 12], _ bb: [u64; 12], _ cross: [u64; 12]) -> (Fp, Fp) {
+    let (c1, _) = subtract_wide(cross, aa)
+    let (c1, _) = subtract_wide(c1, bb)
+    let (c0, borrow) = subtract_wide(aa, bb)
+    let zero: u64 = 0
+    let mask = zero.wrapping_sub(borrow)
+    let (h0, carry) = adc(c0[6], MODULUS[0] & mask, 0)
+    let (h1, carry) = adc(c0[7], MODULUS[1] & mask, carry)
+    let (h2, carry) = adc(c0[8], MODULUS[2] & mask, carry)
+    let (h3, carry) = adc(c0[9], MODULUS[3] & mask, carry)
+    let (h4, carry) = adc(c0[10], MODULUS[4] & mask, carry)
+    let (h5, _) = adc(c0[11], MODULUS[5] & mask, carry)
+    (redc([c0[0], c0[1], c0[2], c0[3], c0[4], c0[5], h0, h1, h2, h3, h4, h5]), redc(c1))
+}
+
+/// (a0 + a1 u)(b0 + b1 u) for u^2 = -1, as its two coefficients: Karatsuba
+/// over 768-bit products, with one Montgomery reduction per coefficient.
+pub fn mul_quadratic(_ a0: Fp, _ a1: Fp, _ b0: Fp, _ b1: Fp) -> (Fp, Fp) {
+    // Each operand is below p < 2^381, so the sums fit six limbs.
+    let (a_sum, _) = add_limbs(a0.limbs, a1.limbs)
+    let (b_sum, _) = add_limbs(b0.limbs, b1.limbs)
+    combine(product(a0.limbs, b0.limbs), product(a1.limbs, b1.limbs), product(a_sum, b_sum))
+}
+
+// x + y over twelve words, both below p 2^384, less p 2^384 when the sum
+// reaches it.
+#[inline(always)]
+fn add_wide_reduced(_ x: [u64; 12], _ y: [u64; 12]) -> [u64; 12] {
+    let (s0, c) = adc(x[0], y[0], 0)
+    let (s1, c) = adc(x[1], y[1], c)
+    let (s2, c) = adc(x[2], y[2], c)
+    let (s3, c) = adc(x[3], y[3], c)
+    let (s4, c) = adc(x[4], y[4], c)
+    let (s5, c) = adc(x[5], y[5], c)
+    let (s6, c) = adc(x[6], y[6], c)
+    let (s7, c) = adc(x[7], y[7], c)
+    let (s8, c) = adc(x[8], y[8], c)
+    let (s9, c) = adc(x[9], y[9], c)
+    let (s10, c) = adc(x[10], y[10], c)
+    let (s11, c) = adc(x[11], y[11], c)
+    let high = reduce([s6, s7, s8, s9, s10, s11], c)
+    [s0, s1, s2, s3, s4, s5, high[0], high[1], high[2], high[3], high[4], high[5]]
+}
+
+// x - y over twelve words, both below p 2^384, plus p 2^384 when negative.
+#[inline(always)]
+fn sub_wide_reduced(_ x: [u64; 12], _ y: [u64; 12]) -> [u64; 12] {
+    let (d, borrow) = subtract_wide(x, y)
+    let zero: u64 = 0
+    let mask = zero.wrapping_sub(borrow)
+    let (high, _) = add_limbs(
+        [d[6], d[7], d[8], d[9], d[10], d[11]],
+        [MODULUS[0] & mask, MODULUS[1] & mask, MODULUS[2] & mask, MODULUS[3] & mask, MODULUS[4] & mask, MODULUS[5] & mask],
+    )
+    [d[0], d[1], d[2], d[3], d[4], d[5], high[0], high[1], high[2], high[3], high[4], high[5]]
+}
+
+// The unreduced square of a0 + a1 u, u^2 = -1: (a0 + a1)(a0 + p - a1),
+// below 4 p^2, and 2 a0 a1, below 2 p^2. Each factor is below 2 p and fits
+// six limbs.
+#[inline(always)]
+fn square_wide(_ a0: [u64; 6], _ a1: [u64; 6]) -> ([u64; 12], [u64; 12]) {
+    let (sum, _) = add_limbs(a0, a1)
+    let (lifted, _) = add_limbs(a0, MODULUS)
+    let (difference, _) = subtract(lifted, a1)
+    let (twice, _) = add_limbs(a0, a0)
+    (product(sum, difference), product(twice, a1))
+}
+
+/// The square of a + b w in Fp4 = Fp2[w]/(w^2 - (u + 1)), with a = a0 + a1 u
+/// and b = b0 + b1 u, as cyclotomic squaring takes it: c0 = b^2 (u + 1) + a^2
+/// and c1 = (a + b)^2 - a^2 - b^2, from three unreduced Fp2 squares combined
+/// below p 2^384 and reduced once per coefficient. The coefficients come as
+/// c0's two then c1's two.
+#[inline(never)]
+pub fn fp4_square(_ a0: Fp, _ a1: Fp, _ b0: Fp, _ b1: Fp) -> (Fp, Fp, Fp, Fp) {
+    let (aa_re, aa_im) = square_wide(a0.limbs, a1.limbs)
+    let (bb_re, bb_im) = square_wide(b0.limbs, b1.limbs)
+    let (ss_re, ss_im) = square_wide(a0.add(b0).limbs, a1.add(b1).limbs)
+    // b^2 (u + 1) is (bb_re - bb_im) + (bb_re + bb_im) u.
+    (
+        reduce_difference_sum(bb_re, bb_im, aa_re),
+        reduce_sum_sum(bb_re, bb_im, aa_im),
+        reduce_difference_difference(ss_re, aa_re, bb_re),
+        reduce_difference_difference(ss_im, aa_im, bb_im),
+    )
+}
+
+// The Montgomery reductions of x - y + z, x + y + z and x - y - z, each of
+// x, y and z below p 2^384, combined below p 2^384 first. Each runs out of
+// line, so that only its own three products are live.
+#[inline(never)]
+fn reduce_difference_sum(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(add_wide_reduced(sub_wide_reduced(x, y), z))
+}
+
+#[inline(never)]
+fn reduce_sum_sum(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(add_wide_reduced(add_wide_reduced(x, y), z))
+}
+
+#[inline(never)]
+fn reduce_difference_difference(_ x: [u64; 12], _ y: [u64; 12], _ z: [u64; 12]) -> Fp {
+    montgomery_reduce(sub_wide_reduced(sub_wide_reduced(x, y), z))
 }
 
 impl Fp {
@@ -114,12 +423,10 @@ impl Fp {
     /// A 48-byte big-endian integer from `source` at `offset`, ignoring the top
     /// three bits when `masked` (compressed-point flags); None if not below p.
     pub fn from_be_bytes<T: ByteSource>(_ source: T, offset: usize, masked: bool) -> Option<Fp> {
+        // Six big-endian words, most significant first.
         var limbs: [u64; 6] = [0; 6]
-        for i in 0..48 {
-            var byte = source.byte_at(offset + i)
-            if i == 0 && masked { byte &= 0x1f }
-            limbs[(47 - i) / 8] |= (byte as u64) << (((47 - i) % 8) * 8).downcast_unchecked()
-        }
+        for i in 0..6 { limbs[5 - i] = swap_bytes(source.lane_at(offset + 8 * i)) }
+        if masked { limbs[5] &= 0x1fffffffffffffff }
         if at_least(limbs, MODULUS) { return Option::None }
         Option::Some(Fp::from_canonical(limbs))
     }
@@ -135,24 +442,29 @@ impl Fp {
         at_least(value, HALF_MODULUS) && !at_least(HALF_MODULUS, value)
     }
 
-    pub fn pow(self, _ exponent: [u64; 6]) -> Fp {
-        var result = Fp { limbs: R1 }
-        var i: u64 = 384
-        while i > 0 {
-            i -= 1
-            result = result.square()
-            if (exponent[(i / 64).downcast_truncate()] >> (i % 64)) & 1 == 1 { result = result.mul(self) }
-        }
-        result
-    }
-
     /// RFC 9380's sgn0: the parity of the canonical value.
     pub fn sgn0(self) -> bool { self.to_canonical()[0] & 1 == 1 }
 
     /// A square root, if one exists.
     pub fn sqrt(self) -> Option<Fp> {
-        let root = self.pow(SQRT_EXPONENT)
+        let root = self.sqrt_candidate()
         if root.square().equals(self) { Option::Some(root) } else { Option::None }
+    }
+
+    /// self^((p+1)/4): a square root of a square, and of -self otherwise.
+    pub fn sqrt_candidate(self) -> Fp {
+        // Values stay below 2p, unreduced, until the end (`mul_lazy`).
+        // self^1, self^3, ..., self^31.
+        var odd: [[u64; 6]; 16] = [self.limbs; 16]
+        let square = mul_lazy(self.limbs, self.limbs)
+        for i in 1..16 { odd[i] = mul_lazy(odd[i - 1], square) }
+        var result = odd[SQRT_WINDOWS[0][1] as usize]
+        for i in 1..67 {
+            let window = SQRT_WINDOWS[i]
+            for _ in 0..window[0] as usize { result = mul_lazy(result, result) }
+            result = mul_lazy(result, odd[window[1] as usize])
+        }
+        Fp { limbs: reduce(result, 0) }
     }
 }
 
@@ -176,19 +488,20 @@ impl Field for Fp {
         Fp { limbs: reduce(sum, 0) }
     }
 
+    // Adds p back and chooses with a select rather than a branch: whether
+    // the subtraction borrows depends on the data, so a branch mispredicts.
     #[inline(always)]
     fn sub(self, _ other: Fp) -> Fp {
         let (difference, borrow) = subtract(self.limbs, other.limbs)
-        if borrow == 0 { return Fp { limbs: difference } }
         let (wrapped, _) = add_limbs(difference, MODULUS)
-        Fp { limbs: wrapped }
+        Fp { limbs: if borrow == 1 { wrapped } else { difference } }
     }
 
     // Montgomery multiplication (CIOS): a * b * 2^-384 mod p.
     fn mul(self, _ other: Fp) -> Fp {
         let a = self.limbs
         let b = other.limbs
-        let (t, top) = row(a, b[0], [0; 6], 0)
+        let (t, top) = first_row(a, b[0])
         let (t, top) = row(a, b[1], t, top)
         let (t, top) = row(a, b[2], t, top)
         let (t, top) = row(a, b[3], t, top)

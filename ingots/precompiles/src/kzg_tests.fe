@@ -1,10 +1,20 @@
 use core::Option
 use ingot::{FAILURE, Output, SUCCESS, run}
-use ingot::bls_curve::{ORDER, decompress_g1, g1_generator, g2_generator}
+use ingot::bls_curve::{Affine, ORDER, decompress_g1, g1_generator, g2_generator}
 use ingot::bls_field::{Field, Fp}
-use ingot::bls_pairing::pairing_product_is_one
+use ingot::bls_pairing::{miller_loop, miller_loop_lines, pairing_product_is_one}
 use ingot::bls_tower::{Fp12, Fp2, Fp6}
 use ingot::kzg::{BLS_MODULUS, decode_kzg_g1}
+use ingot::kzg_lines::{NEG_G2_LINES, TAU_G2_LINES}
+
+// [tau]G2, monomial G2 point 1 of the mainnet KZG trusted setup: compressed
+// 0xb5bfd7dd8cdeb128...a20c1def2, line 4100 of c-kzg-4844's src/trusted_setup.txt
+// and KZG_SETUP_G2_MONOMIAL_1 in execution-specs' ethereum/crypto/kzg.py.
+// Stored decompressed, in Montgomery form (x = x0 + x1 u, y = y0 + y1 u).
+const TAU_G2_X0: [u64; 6] = [0x6120a2099b0379f9, 0xa2df815cb8210e4e, 0xcb57be5577bd3d4f, 0x62da0ea89a0c93f8, 0x02e0ee16968e150d, 0x171f09aea833acd5]
+const TAU_G2_X1: [u64; 6] = [0x11a3670749dfd455, 0x04991d7b3abffadc, 0x85446a8e14437f41, 0x27174e7b4e76e3f2, 0x7bfa6dd397f60a20, 0x02fcc329ac07080f]
+const TAU_G2_Y0: [u64; 6] = [0xaa130838793b2317, 0xe236dd220f891637, 0x6502782925760980, 0xd05c25f60557ec89, 0x6095767a44064474, 0x185693917080d405]
+const TAU_G2_Y1: [u64; 6] = [0x549f9e175b03dc0a, 0x32c0c95a77106cfe, 0x64a74eae5705d080, 0x53deeaf56659ed9e, 0x09a1d368508afb93, 0x12cf3a4525b5e9bd]
 
 const P_LIMBS: [u64; 6] = [0xb9feffffffffaaab, 0x1eabfffeb153ffff, 0x6730d2a0f6b0f624, 0x64774b84f38512bf, 0x4b1ba7b6434bacd7, 0x1a0111ea397fe69a]
 
@@ -203,3 +213,18 @@ const INCORRECT: [u8; 192] = [
     0xc3, 0x68, 0x8c, 0x4f, 0x97, 0x74, 0xb9, 0x05, 0xa1, 0x4e, 0x3a, 0x3f, 0x17, 0x1b, 0xac, 0x58,
     0x6c, 0x55, 0xe8, 0x3f, 0xf9, 0x7a, 0x1a, 0xef, 0xfb, 0x3a, 0xf0, 0x0a, 0xdb, 0x22, 0xc6, 0xbb,
 ]
+
+#[test]
+fn kzg_precomputed_lines_match_the_miller_loop() {
+    let neg_g2 = g2_generator().neg().to_affine()
+    let tau = Affine {
+        x: Fp2::new(c0: Fp::from_montgomery(TAU_G2_X0), c1: Fp::from_montgomery(TAU_G2_X1)),
+        y: Fp2::new(c0: Fp::from_montgomery(TAU_G2_Y0), c1: Fp::from_montgomery(TAU_G2_Y1)),
+        infinity: false,
+    }
+    let g1 = g1_generator().to_affine()
+    let p = g1_generator().double().add(g1_generator()).to_affine()
+    for (p1, p2) in [(g1, p), (Affine<Fp>::identity(), p), (g1, Affine<Fp>::identity())] {
+        core::assert(miller_loop_lines(p1, NEG_G2_LINES, p2, TAU_G2_LINES).equals(miller_loop(p1, neg_g2, p2, tau)))
+    }
+}

@@ -55,12 +55,14 @@ impl LogBuffer {
     }
     pub fn append(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> bool {
         core::assert(topic_count <= 4)
-        if !self.entries.try_reserve(1) || !self.topics.try_reserve(topic_count.downcast_truncate())
-            || !self.data.try_reserve(data.len()) {
+        // Empty data and no topics, as LOG0 of nothing, reserve and copy nothing.
+        if !self.entries.try_reserve(1)
+            || (topic_count != 0 && !self.topics.try_reserve(topic_count.downcast_truncate()))
+            || (data.len() != 0 && !self.data.try_reserve(data.len())) {
             return false
         }
         let start: u64 = self.data.len().downcast_unchecked()
-        self.data.extend_from(data)
+        if data.len() != 0 { self.data.extend_from(data) }
         let topic_start: u64 = self.topics.len().downcast_unchecked()
         for topic in 0..topic_count.downcast_truncate() { self.topics.push(topics[topic]) }
         self.entries.push(Stored {

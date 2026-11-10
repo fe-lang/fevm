@@ -15,6 +15,11 @@ const G1_B: [u64; 6] = [0xfb996971fe22a1e0, 0x9aa93eb35b742d6f, 0x8c476013de99c5
 
 const G1_Z: [u64; 6] = [0x886c00000023ffdc, 0x0f70008d3090001d, 0x77672417ed5828c3, 0x9dac23e943dc1740, 0x50553f1b9c131521, 0x078c712fbe0ab6e8]
 
+// -B / A and B / (Z A), x1 for nonzero and zero tv1, and sqrt(-Z^3).
+const G1_MINUS_B_OVER_A: [u64; 6] = [0x052583c93555a7fe, 0x3b40d72430f93c82, 0x1b75faa0105ec983, 0x2527e7dc63851767, 0x99fffd1f34fc181d, 0x097cab54770ca0d3]
+const G1_B_OVER_ZA: [u64; 6] = [0xaefbc579583dc22f, 0x70cca69e8ca26edc, 0xaf05f2a3b113ce57, 0x4ed257417860c764, 0xbb16a0c0d526ff96, 0x1469e7cf3b7ec553]
+const G1_SQRT_MINUS_Z3: [u64; 6] = [0x43b571cad3215f1f, 0xccb460ef1c702dc2, 0x742d884f4f97100b, 0xdb2c3e3238a3382b, 0xe40f3fa13fce8f88, 0x0073a2af9892a2ff]
+
 // The 11-isogeny's coefficients, k_0 first; the denominators are monic.
 const G1_X_NUM: [[u64; 6]; 12] = [
     [0x4d18b6f3af00131c, 0x19fa219793fee28c, 0x3f2885f1467f19ae, 0x23dcea34f2ffb304, 0xd15b58d2ffc00054, 0x0913be200a20bef4],
@@ -88,6 +93,10 @@ const G2_B: [[u64; 6]; 2] = [[0x22ea00000cf89db2, 0x6ec832df71380aa4, 0x6e1b9440
 
 const G2_Z: [[u64; 6]; 2] = [[0x87ebfffffff9555c, 0x656fffe5da8ffffa, 0x0fd0749345d33ad2, 0xd951e663066576f4, 0xde291a3d41e980d3, 0x0815664c7dfe040d], [0x43f5fffffffcaaae, 0x32b7fff2ed47fffd, 0x07e83a49a2e99d69, 0xeca8f3318332bb7a, 0xef148d1ea0f4c069, 0x040ab3263eff0206]]
 
+// -B / A and B / (Z A).
+const G2_MINUS_B_OVER_A: [[u64; 6]; 2] = [[0x903c555555474fb3, 0x5f98cc95ce451105, 0x9f8e582eefe0fade, 0xc68946b6aebbd062, 0x467a4ad10ee6de53, 0x0e7146f483e23a05], [0x29c2aaaaaab85af8, 0xbf133368e30eeefa, 0xc7a27a7206cffb45, 0x9dee04ce44c9425c, 0x04a15ce53464ce83, 0x0b8fcaf5b59dac95]]
+const G2_B_OVER_ZA: [[u64; 6]; 2] = [[0xf2d8444444414324, 0x2585c28393a69d00, 0x5dd35cd05d972c42, 0xfd963b744ea89b53, 0x07f5d9fd91c1fa91, 0x127db28a3ce062c4], [0x55743333333b3695, 0xeb72b871590828fc, 0x1c186171cb4d5da5, 0x34a33031ee956644, 0xc971692a149d16d0, 0x168a1e1ff5de8b82]]
+
 // The 3-isogeny's coefficients, k_0 first; the denominators are monic.
 const G2_X_NUM: [[[u64; 6]; 2]; 4] = [
     [[0x47f671c71ce05e62, 0x06dd57071206393e, 0x7c80cd2af3fd71a2, 0x048103ea9e6cd062, 0xc54516acc8d037f6, 0x13808f550920ea41], [0x47f671c71ce05e62, 0x06dd57071206393e, 0x7c80cd2af3fd71a2, 0x048103ea9e6cd062, 0xc54516acc8d037f6, 0x13808f550920ea41]],
@@ -114,40 +123,58 @@ const G2_Y_DEN: [[[u64; 6]; 2]; 3] = [
     [[0x66b10000003affc5, 0xcb1400e764ec0030, 0xa73e5eb56fa5d106, 0x8984c913a0fe09a9, 0x11e10afb78ad7f13, 0x05429d0e3e918f52], [0x534dffffffc4aae6, 0x5397ff174c67ffcf, 0xbff273eb870b251d, 0xdaf2827152870915, 0x393a9cbaca9e2dc3, 0x14be74dbfaee5748]],
 ]
 
-// G1's h_eff, 1 - x.
-const G1_COFACTOR: u256 = 0xd201000000010001
 
 /// Square roots and RFC 9380's sgn0 in Fp and Fp2.
 pub trait Root {
-    fn root(self) -> Option<Self>
+    /// A square root of `self` and true, or else one of `other`, which the
+    /// SWU map makes Z^3 u^6 `self` and so a square, and false.
+    fn root_or(self, _ other: Self, u: Self) -> (Self, bool)
     fn sign(self) -> bool
 }
 
 impl Root for Fp {
-    fn root(self) -> Option<Fp> { self.sqrt() }
+    // p = 3 mod 4, so for a nonsquare g, y = g^((p+1)/4) has y^2 = -g, and
+    // sqrt(-Z^3) u^3 y is a root of Z^3 u^6 g with no second exponentiation
+    // (RFC 9380 appendix F.2.1.2). Only G1's map uses roots in Fp.
+    fn root_or(self, _ other: Fp, u: Fp) -> (Fp, bool) {
+        let y = self.sqrt_candidate()
+        if y.square().equals(self) { return (y, true) }
+        (y.mul(Fp::from_montgomery(G1_SQRT_MINUS_Z3)).mul(u.square().mul(u)), false)
+    }
     fn sign(self) -> bool { self.sgn0() }
 }
 
+// sqrt(-N(Z)^3) for G2's Z = -2 - u, whose norm N(Z) is 5 (Montgomery form).
+const G2_SQRT_MINUS_NORM_Z3: [u64; 6] = [0xe4132bbd838cf70a, 0x01d769ac83772c19, 0xa83dd6e974c22e45, 0xbc8ec3e777b08dff, 0xc035c2042ecf5da3, 0x073929e97f0850bf]
+
 impl Root for Fp2 {
-    fn root(self) -> Option<Fp2> { self.sqrt() }
+    // An element is a square exactly when its norm is one in Fp. When the
+    // norm n is not, c = n^((p+1)/4) has c^2 = -n, and the norm of
+    // Z^3 u^6 self, N(Z)^3 N(u)^6 n, has the root sqrt(-N(Z)^3) N(u)^3 c:
+    // no second exponentiation for the other's norm.
+    fn root_or(self, _ other: Fp2, u: Fp2) -> (Fp2, bool) {
+        if self.c1.is_zero() { return (self.sqrt().unwrap(), true) }
+        let norm = self.c0.square().add(self.c1.square())
+        let c = norm.sqrt_candidate()
+        if c.square().equals(norm) { return (self.sqrt_from_norm_root(c), true) }
+        if other.c1.is_zero() { return (other.sqrt().unwrap(), false) }
+        let norm_u = u.c0.square().add(u.c1.square())
+        let alpha = Fp::from_montgomery(G2_SQRT_MINUS_NORM_Z3).mul(norm_u.square().mul(norm_u)).mul(c)
+        (other.sqrt_from_norm_root(alpha), false)
+    }
     fn sign(self) -> bool { self.sgn0() }
 }
 
 // The simplified SWU map (RFC 9380 section 6.6.2) to y^2 = x^3 + a x + b.
-fn sswu<F: Field + Root + Copy>(_ u: F, a: F, b: F, z: F) -> Affine<F> {
+// `minus_b_over_a` and `b_over_za` are -b / a and b / (z a).
+fn sswu<F: Field + Root + Copy>(_ u: F, a: F, b: F, z: F, minus_b_over_a: F, b_over_za: F) -> Affine<F> {
     let zu2 = z.mul(u.square())
     let tv1 = zu2.square().add(zu2)
-    let x1 = if tv1.is_zero() { b.mul(z.mul(a).invert()) }
-        else { b.neg().mul(a.invert()).mul(F::one().add(tv1.invert())) }
+    let x1 = if tv1.is_zero() { b_over_za } else { minus_b_over_a.mul(F::one().add(tv1.invert())) }
     let gx1 = x1.square().mul(x1).add(a.mul(x1)).add(b)
-    // When gx1 is not a square, gx2 is.
-    let (x, y) = match gx1.root() {
-        Option::Some(y) => (x1, y),
-        Option::None => {
-            let x2 = zu2.mul(x1)
-            (x2, x2.square().mul(x2).add(a.mul(x2)).add(b).root().unwrap())
-        },
-    }
+    // When gx1 is not a square, gx2 = g(z u^2 x1) = (z u^2)^3 gx1 is.
+    let (y, first) = gx1.root_or(zu2.square().mul(zu2).mul(gx1), u)
+    let x = if first { x1 } else { zu2.mul(x1) }
     Affine { x, y: if u.sign() != y.sign() { y.neg() } else { y }, infinity: false }
 }
 
@@ -175,25 +202,32 @@ fn fp2_poly<const N: usize>(_ coefficients: [[[u64; 6]; 2]; N], x: Fp2, monic: b
 
 fn fp2(_ limbs: [[u64; 6]; 2]) -> Fp2 { Fp2::new(c0: Fp::from_montgomery(limbs[0]), c1: Fp::from_montgomery(limbs[1])) }
 
-// (x, y) -> (x_num / x_den, y * y_num / y_den); a zero denominator gives the identity.
+// (x, y) -> (x_num / x_den, y * y_num / y_den) in Jacobian coordinates, with no
+// inversion: z = x_den y_den, x = x_num x_den y_den^2, y = y y_num x_den^3 y_den^2.
+// A zero denominator makes z zero, the identity.
 fn isogeny<F: Field + Copy>(_ point: Affine<F>, x_num: F, x_den: F, y_num: F, y_den: F) -> Point<F> {
-    if x_den.is_zero() || y_den.is_zero() { return Point::identity() }
-    Point::from_affine(Affine {
-        x: x_num.mul(x_den.invert()), y: point.y.mul(y_num).mul(y_den.invert()), infinity: false,
-    })
+    let x_den_y_den2 = x_den.mul(y_den.square())
+    Point {
+        x: x_num.mul(x_den_y_den2),
+        y: point.y.mul(y_num).mul(x_den.square()).mul(x_den_y_den2),
+        z: x_den.mul(y_den),
+    }
 }
 
 /// MAP_FP_TO_G1: the G1 point of a field element.
 pub fn map_to_g1(_ u: Fp) -> Point<Fp> {
-    let p = sswu(u, a: Fp::from_montgomery(G1_A), b: Fp::from_montgomery(G1_B), z: Fp::from_montgomery(G1_Z))
+    let p = sswu(u, a: Fp::from_montgomery(G1_A), b: Fp::from_montgomery(G1_B), z: Fp::from_montgomery(G1_Z),
+                 minus_b_over_a: Fp::from_montgomery(G1_MINUS_B_OVER_A), b_over_za: Fp::from_montgomery(G1_B_OVER_ZA))
     let mapped = isogeny(p, x_num: fp_poly(G1_X_NUM, x: p.x, monic: false), x_den: fp_poly(G1_X_DEN, x: p.x, monic: true),
                          y_num: fp_poly(G1_Y_NUM, x: p.x, monic: false), y_den: fp_poly(G1_Y_DEN, x: p.x, monic: true))
-    mapped.multiply(G1_COFACTOR)
+    // h_eff = |x| + 1.
+    mapped.multiply_by_x_abs().add(mapped)
 }
 
 /// MAP_FP2_TO_G2: the G2 point of an Fp2 element.
 pub fn map_to_g2(_ u: Fp2) -> Point<Fp2> {
-    let p = sswu(u, a: fp2(G2_A), b: fp2(G2_B), z: fp2(G2_Z))
+    let p = sswu(u, a: fp2(G2_A), b: fp2(G2_B), z: fp2(G2_Z), minus_b_over_a: fp2(G2_MINUS_B_OVER_A),
+                 b_over_za: fp2(G2_B_OVER_ZA))
     let mapped = isogeny(p, x_num: fp2_poly(G2_X_NUM, x: p.x, monic: false), x_den: fp2_poly(G2_X_DEN, x: p.x, monic: true),
                          y_num: fp2_poly(G2_Y_NUM, x: p.x, monic: false), y_den: fp2_poly(G2_Y_DEN, x: p.x, monic: true))
     mapped.clear_cofactor()
@@ -220,4 +254,33 @@ fn map_to_curve_matches_known_points() {
     core::assert(g2.y.equals(Fp2::new(c0: Fp::from_canonical(TEST_G2_Y0), c1: Fp::from_canonical(TEST_G2_Y1))))
     // Mapped points lie in the subgroups.
     core::assert(map_to_g1(Fp::from_canonical(TEST_G1_U)).in_subgroup() && map_to_g2(u).in_subgroup())
+}
+
+#[test]
+fn sswu_points_lie_on_the_isogenous_curves_with_the_input_sign() {
+    // About half of these u give a nonsquare gx1, so each field's root is
+    // reached both ways.
+    let a = Fp::from_montgomery(G1_A)
+    let b = Fp::from_montgomery(G1_B)
+    let z = Fp::from_montgomery(G1_Z)
+    let minus_b_over_a = Fp::from_montgomery(G1_MINUS_B_OVER_A)
+    let a2 = fp2(G2_A)
+    let b2 = fp2(G2_B)
+    var first: u64 = 0
+    var first2: u64 = 0
+    for k in 1..21 {
+        let limb: u64 = k.downcast_truncate()
+        let u = Fp::from_canonical([limb, 0, 0, 0, 0, 0])
+        let p = sswu(u, a, b, z, minus_b_over_a, b_over_za: Fp::from_montgomery(G1_B_OVER_ZA))
+        core::assert(p.y.square().equals(p.x.square().mul(p.x).add(a.mul(p.x)).add(b)) && p.y.sign() == u.sign())
+        let zu2 = z.mul(u.square())
+        if p.x.equals(minus_b_over_a.mul(Fp::one().add(zu2.square().add(zu2).invert()))) { first += 1 }
+        let u2 = Fp2::new(c0: u, c1: Fp::one())
+        let q = sswu(u2, a: a2, b: b2, z: fp2(G2_Z), minus_b_over_a: fp2(G2_MINUS_B_OVER_A), b_over_za: fp2(G2_B_OVER_ZA))
+        core::assert(q.y.square().equals(q.x.square().mul(q.x).add(a2.mul(q.x)).add(b2)) && q.y.sign() == u2.sign())
+        let zu2_2 = fp2(G2_Z).mul(u2.square())
+        let x1 = fp2(G2_MINUS_B_OVER_A).mul(Fp2::one().add(zu2_2.square().add(zu2_2).invert()))
+        if q.x.equals(x1) { first2 += 1 }
+    }
+    core::assert(first > 0 && first < 20 && first2 > 0 && first2 < 20)
 }
