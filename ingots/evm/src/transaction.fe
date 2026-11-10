@@ -486,16 +486,14 @@ impl Transaction {
         OK
     }
     // TSTORE's write (EIP-1153). The transient table holds no zeros: a zero
-    // removes the entry, and another value finds or makes one with a single
-    // search.
+    // takes the entry out, and another value finds or makes one, each with
+    // a single search.
     pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
         let previous = if value == 0 {
-            let Option::Some(at) = self.buffers.transient.find(key) else { return OK }
-            let previous = self.buffers.transient.value_at(at)
-            let _ = self.buffers.transient.remove(key)
+            let Option::Some(previous) = self.buffers.transient.take(key) else { return OK }
             previous
         } else {
             let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
