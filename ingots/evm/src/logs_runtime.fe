@@ -37,28 +37,30 @@ fn logs_copy_data_grow_and_reuse_truncated_storage() {
 fn logs_follow_nested_checkpoints_and_receipts_own_their_data() {
     var source = MemBuffer::new(1)
     source[0] = 17
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    core::assert(tx.emit_log(address: 1, topics: [1; 4], topic_count: 1, data: source.slice(offset: 0, len: 1)) == OK)
-    let parent = checkpoint(mut tx, is_static: false)
-    let child = checkpoint(mut tx, is_static: false)
-    core::assert(tx.emit_log(address: 2, topics: [2; 4], topic_count: 2, data: source.slice(offset: 0, len: 1)) == OK)
-    tx.commit(child)
-    tx.revert(parent)
-    core::assert(tx.logs().len() == 1 && tx.logs().entry(0).address == 1)
-    let parent = checkpoint(mut tx, is_static: true)
-    let child = checkpoint(mut tx, is_static: false)
-    core::assert(tx.emit_log(address: 3, topics: [0; 4], topic_count: 0, data: source.slice(offset: 0, len: 1)) == ERR_STATIC_WRITE)
-    tx.commit(child)
-    tx.revert(parent)
-    let receipt = tx.finish(commit: true, gas_spent: 0)
-    var next = Transaction::new(receipt.state, sender: 0, destination: 0, coinbase: 0,
-                                config: Config::osaka(), buffers: Buffers::new())
-    source[0] = 34
-    core::assert(next.emit_log(address: 4, topics: [0; 4], topic_count: 0, data: source.slice(offset: 0, len: 1)) == OK)
-    let aborted = next.finish(commit: false, gas_spent: 0)
-    core::assert(aborted.logs.len() == 0 && receipt.logs.len() == 1)
-    core::assert(receipt.logs.byte_at(entry: 0, index: 0) == 17)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        core::assert(tx.emit_log(address: 1, topics: [1; 4], topic_count: 1, data: source.slice(offset: 0, len: 1)) == OK)
+        let parent = checkpoint(mut tx, is_static: false)
+        let child = checkpoint(mut tx, is_static: false)
+        core::assert(tx.emit_log(address: 2, topics: [2; 4], topic_count: 2, data: source.slice(offset: 0, len: 1)) == OK)
+        tx.commit(child)
+        tx.revert(parent)
+        core::assert(tx.logs().len() == 1 && tx.logs().entry(0).address == 1)
+        let parent = checkpoint(mut tx, is_static: true)
+        let child = checkpoint(mut tx, is_static: false)
+        core::assert(tx.emit_log(address: 3, topics: [0; 4], topic_count: 0, data: source.slice(offset: 0, len: 1)) == ERR_STATIC_WRITE)
+        tx.commit(child)
+        tx.revert(parent)
+        let receipt = tx.finish(commit: true, gas_spent: 0)
+        var next = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+        source[0] = 34
+        core::assert(next.emit_log(address: 4, topics: [0; 4], topic_count: 0, data: source.slice(offset: 0, len: 1)) == OK)
+        let aborted = next.finish(commit: false, gas_spent: 0)
+        core::assert(aborted.logs.len() == 0 && receipt.logs.len() == 1)
+        core::assert(receipt.logs.byte_at(entry: 0, index: 0) == 17)
+    }
 }
 
 #[test]
@@ -80,62 +82,71 @@ fn log_empty_full_width_offsets_obey_exact_gas_for_every_topic_count() {
                 size += 1
             }
             code[size] = (0xa0 + count).downcast_unchecked()
-            var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                      config: Config::osaka(), buffers: Buffers::new())
-            var vm = Vm::new()
-            var tracer = ()
-            var call = default_call_env()
-            call.gas_limit = gas
-            vm.run(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
-            core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
-            if gas < cost {
-                core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
-            } else {
-                core::assert(vm.status == OK && vm.gas_remaining == gas - cost && vm.stack.len() == 0)
-                core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topic_count == count)
+            var world = WorldState::empty()
+            var buffers = Buffers::new()
+            var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+            with (mut world, mut buffers) {
+                var vm = Vm::new()
+                var tracer = ()
+                var call = default_call_env()
+                call.gas_limit = gas
+                vm.run(Program::copy_from(code, len: size + 1), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
+                core::assert(vm.memory_size == 0 && vm.memory.capacity() == 0)
+                if gas < cost {
+                    core::assert(vm.status == ERR_OUT_OF_GAS && vm.gas_remaining == 0 && tx.logs().len() == 0)
+                } else {
+                    core::assert(vm.status == OK && vm.gas_remaining == gas - cost && vm.stack.len() == 0)
+                    core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topic_count == count)
+                }
+                tx.finish(commit: true, gas_spent: gas)
             }
-            tx.finish(commit: true, gas_spent: gas)
         }
     }
 }
 
 #[test]
 fn log_copies_frame_memory_and_preserves_topic_stack_order() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    var vm = Vm::new()
-    var tracer = ()
-    // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
-    vm.run(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
-                    0x60, 1, 0x5f, 0xa2, 0x60, 0xcd, 0x5f, 0x53]),
-           empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
-    core::assert(vm.status == OK && vm.memory[0] == 0xcd)
-    core::assert(tx.logs().byte_at(entry: 0, index: 0) == 0xab)
-    core::assert(tx.logs().entry(0).topics[0] == 0x22 && tx.logs().entry(0).topics[1] == 0x11)
-    tx.finish(commit: true, gas_spent: 0)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        var vm = Vm::new()
+        var tracer = ()
+        // Store 0xab, LOG2 with topics 0x22/0x11, overwrite the byte.
+        vm.run(program([0x60, 0xab, 0x5f, 0x53, 0x60, 0x11, 0x60, 0x22,
+                        0x60, 1, 0x5f, 0xa2, 0x60, 0xcd, 0x5f, 0x53]),
+               empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
+        core::assert(vm.status == OK && vm.memory[0] == 0xcd)
+        core::assert(tx.logs().byte_at(entry: 0, index: 0) == 0xab)
+        core::assert(tx.logs().entry(0).topics[0] == 0x22 && tx.logs().entry(0).topics[1] == 0x11)
+        tx.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
 fn blob_hashes_use_full_width_indices_and_transaction_lifetime() {
     let first = (1 << 248) | 0x1234
     let second = (1 << 248) | 0x5678
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    core::assert(tx.add_blob_hash(first) && tx.add_blob_hash(second))
-    let point = checkpoint(mut tx, is_static: true)
-    core::assert(tx.blob_hash(0) == first && tx.blob_hash(1) == second)
-    for index in [2 as u256, 1 << 64, !(0 as u256)] { core::assert(tx.blob_hash(index) == 0) }
-    tx.revert(point)
-    core::assert(tx.blob_hash(1) == second)
-    var vm = Vm::new()
-    var tracer = ()
-    var call = default_call_env()
-    call.is_static = true
-    call.gas_limit = 5
-    vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
-    core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack[0] == first)
-    let next = Transaction::new(tx.finish(commit: true, gas_spent: 5).state, sender: 0, destination: 0, coinbase: 0,
-                                config: Config::osaka(), buffers: Buffers::new())
-    core::assert(next.blob_hash(0) == 0)
-    next.finish(commit: true, gas_spent: 0)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        core::assert(tx.add_blob_hash(first) && tx.add_blob_hash(second))
+        let point = checkpoint(mut tx, is_static: true)
+        core::assert(tx.blob_hash(0) == first && tx.blob_hash(1) == second)
+        for index in [2 as u256, 1 << 64, !(0 as u256)] { core::assert(tx.blob_hash(index) == 0) }
+        tx.revert(point)
+        core::assert(tx.blob_hash(1) == second)
+        var vm = Vm::new()
+        var tracer = ()
+        var call = default_call_env()
+        call.is_static = true
+        call.gas_limit = 5
+        vm.run(program([0x5f, 0x49]), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
+        core::assert(vm.status == OK && vm.gas_remaining == 0 && vm.stack[0] == first)
+        tx.finish(commit: true, gas_spent: 5)
+        var next = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+        core::assert(next.blob_hash(0) == 0)
+        next.finish(commit: true, gas_spent: 0)
+    }
 }

@@ -268,15 +268,14 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
         if runs > 0 {
             runs -= 1
             if execute {
-                let gas = transact(world, request, block, config, mut buffers, mut tracer).receipt.gas_used
+                let gas = transact(mut world, request, block, config, mut buffers, mut tracer).gas_used
                 core::assert(!repeated || gas == repeated_gas)
                 repeated_gas = gas
                 repeated = true
             }
             continue
         }
-        let applied = transact(world, request, block, config, mut buffers, mut tracer)
-        let receipt = applied.receipt
+        let receipt = transact(mut world, request, block, config, mut buffers, mut tracer)
         core::assert(!repeated || receipt.gas_used == repeated_gas)
         var text = MemBuffer::empty()
         with (mut text) {
@@ -297,7 +296,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
             ",\"logs_hash\":\"".fmt(mut text)
             write_hex_word(logs_hash(receipt.logs))
             "\"".fmt(mut text)
-            write_world(applied.state)
+            write_world(world)
             "}\n".fmt(mut text)
         }
         print!(text)

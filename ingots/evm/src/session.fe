@@ -3,7 +3,7 @@
 // many bytes. native/client/README.md specifies the requests and responses.
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use std::io::{Stdin, Stdout}
-use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+use ingot::processor::{Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::OK
 use ingot::trace::{Trace, Tracer}
@@ -249,13 +249,11 @@ struct Session {
 
 impl Session {
     fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Receipt {
-        let applied = if commit {
-            transact(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
+        if commit {
+            transact(mut self.world, request, self.block, self.config, mut self.buffers, mut tracer)
         } else {
-            simulate(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
+            simulate(mut self.world, request, self.block, self.config, mut self.buffers, mut tracer)
         }
-        self.world = applied.state
-        applied.receipt
     }
 
     fn handle(mut self, _ reader: mut Reader) -> Writer {

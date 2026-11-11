@@ -13,21 +13,23 @@ pub fn main() -> i32 {
     let relay = [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xcc, 0x5a, 0xf1]
     core::assert(world.set_code(address: 0xbb, code: relay) == OK)
     core::assert(world.set_code(address: 0xcc, code: [0x60 as u8, 1, 0x5f, 0x55]) == OK)
-    var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    var call = default_call_env()
-    call.address = 0xaa
-    let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1]
-    var vm = Vm::new()
-    var tracer = ()
-    vm.run(Program::copy_from(ops, len: 9), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
-    let completed = vm.status == OK
-    core::assert(completed || vm.status == ERR_HOST_ALLOCATION)
-    core::assert(!completed || (vm.stack.len() == 1 && vm.stack[0] == 1))
-    for address in [0xbb as u256, 0xcc] {
-        core::assert(tx.storage_load(address, slot: 0) == if completed { 1 } else { 0 })
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        var call = default_call_env()
+        call.address = 0xaa
+        let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xbb, 0x5a, 0xf1]
+        var vm = Vm::new()
+        var tracer = ()
+        vm.run(Program::copy_from(ops, len: 9), empty_bytes(), call, default_block_env(), mut tx, mut tracer)
+        let completed = vm.status == OK
+        core::assert(completed || vm.status == ERR_HOST_ALLOCATION)
+        core::assert(!completed || (vm.stack.len() == 1 && vm.stack[0] == 1))
+        for address in [0xbb as u256, 0xcc] {
+            core::assert(world.storage_load(address, slot: 0) == if completed { 1 } else { 0 })
+        }
+        core::assert(tx.depth() == 0)
+        let _ = tx.finish(commit: completed, gas_spent: 0)
     }
-    core::assert(tx.depth() == 0)
-    let _ = tx.finish(commit: completed, gas_spent: 0)
     0
 }

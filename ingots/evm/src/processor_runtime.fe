@@ -1,7 +1,7 @@
 use core::Option
 use ingot::address::create_address
 use ingot::constants::MAX_U256
-use ingot::processor::{Applied, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
+use ingot::processor::{Receipt, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, simulate, transact}
 use ingot::state::{WorldState, designator}
 use ingot::status::{
     ERR_OUT_OF_GAS,
@@ -40,10 +40,10 @@ fn call(to: u256) -> TxEnv {
     }
 }
 
-fn send(_ world: own WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Applied {
+fn send(_ world: mut WorldState, _ env: TxEnv, _ data: own InputData, _ block: BlockEnv, _ config: Config) -> Receipt {
     var buffers = Buffers::new()
     var tracer = ()
-    transact(world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
+    transact(mut world, TxRequest::new(env, data), block, config, mut buffers, mut tracer)
 }
 
 // Initcode that returns `len` zero bytes as the new code: PUSH3 len; PUSH0; RETURN.
@@ -60,28 +60,26 @@ fn config_checks_can_be_skipped() {
     var env = call(to: 0xbb)
     env.chain_id = Option::Some(2)
     var config = Config::osaka()
-    let wrong_chain = send(funded(), env, empty_bytes(), block(), config)
-    core::assert(wrong_chain.receipt.invalid == INVALID_CHAIN_ID)
+    var world = funded()
+    core::assert(send(mut world, env, empty_bytes(), block(), config).invalid == INVALID_CHAIN_ID)
     config.check_chain_id = false
-    core::assert(send(wrong_chain.state, env, empty_bytes(), block(), config).receipt.invalid == VALID)
+    core::assert(send(mut world, env, empty_bytes(), block(), config).invalid == VALID)
 
     env = call(to: 0xbb)
     env.nonce = 5
     config = Config::osaka()
-    let wrong_nonce = send(funded(), env, empty_bytes(), block(), config)
-    core::assert(wrong_nonce.receipt.invalid == INVALID_NONCE)
+    world = funded()
+    core::assert(send(mut world, env, empty_bytes(), block(), config).invalid == INVALID_NONCE)
     config.check_nonce = false
-    let applied = send(wrong_nonce.state, env, empty_bytes(), block(), config)
     // The sender's nonce still increments.
-    core::assert(applied.receipt.invalid == VALID && applied.state.nonce(SENDER) == 1)
+    core::assert(send(mut world, env, empty_bytes(), block(), config).invalid == VALID && world.nonce(SENDER) == 1)
 
-    var world = funded()
+    world = funded()
     core::assert(world.set_code(address: SENDER, code: [0x00 as u8]) == OK)
     config = Config::osaka()
-    let with_code = send(world, call(to: 0xbb), empty_bytes(), block(), config)
-    core::assert(with_code.receipt.invalid == INVALID_SENDER_CODE)
+    core::assert(send(mut world, call(to: 0xbb), empty_bytes(), block(), config).invalid == INVALID_SENDER_CODE)
     config.check_sender_code = false
-    core::assert(send(with_code.state, call(to: 0xbb), empty_bytes(), block(), config).receipt.invalid == VALID)
+    core::assert(send(mut world, call(to: 0xbb), empty_bytes(), block(), config).invalid == VALID)
 }
 
 #[test]
@@ -94,14 +92,14 @@ fn config_admits_prices_below_the_base_fee() {
     env.gas_price = 4
     env.max_priority_fee_per_gas = 4
     var config = Config::osaka()
-    let rejected = send(funded(), env, empty_bytes(), block, config)
-    core::assert(rejected.receipt.invalid == INVALID_FEE_CAP)
+    var world = funded()
+    core::assert(send(mut world, env, empty_bytes(), block, config).invalid == INVALID_FEE_CAP)
     config.check_base_fee = false
-    let applied = send(rejected.state, env, empty_bytes(), block, config)
+    let receipt = send(mut world, env, empty_bytes(), block, config)
     // The transaction pays its fee cap and the coinbase no priority fee.
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.gas_used == 21_000)
-    core::assert(applied.state.balance(SENDER) == 1_000_000_000_000 - 21_000 * 4)
-    core::assert(applied.state.balance(0xc0) == 0)
+    core::assert(receipt.invalid == VALID && receipt.gas_used == 21_000)
+    core::assert(world.balance(SENDER) == 1_000_000_000_000 - 21_000 * 4)
+    core::assert(world.balance(0xc0) == 0)
 }
 
 #[test]
@@ -110,25 +108,25 @@ fn config_sets_code_size_limits() {
     env.creates = true
     env.gas_limit = 16_000_000
     // 30,000 bytes exceeds EIP-170's 24,576, which the deposit charges as out of gas.
-    let osaka = send(funded(), env, deployer(len: 30_000), block(), Config::osaka())
-    core::assert(osaka.receipt.invalid == VALID && osaka.receipt.status == ERR_OUT_OF_GAS)
-    core::assert(osaka.receipt.created.is_none())
+    var world = funded()
+    let osaka = send(mut world, env, deployer(len: 30_000), block(), Config::osaka())
+    core::assert(osaka.invalid == VALID && osaka.status == ERR_OUT_OF_GAS && osaka.created.is_none())
     var config = Config::osaka()
     config.max_code_size = 32_768
     env.nonce = 1
-    let raised = send(osaka.state, env, deployer(len: 30_000), block(), config)
+    let raised = send(mut world, env, deployer(len: 30_000), block(), config)
     let created = create_address(sender: SENDER, nonce: 1)
-    core::assert(raised.receipt.status == OK && raised.state.code_size(created) == 30_000)
-    core::assert(raised.receipt.created.unwrap_or(default: 0) == created)
+    core::assert(raised.status == OK && world.code_size(created) == 30_000)
+    core::assert(raised.created.unwrap_or(default: 0) == created)
 
     // EIP-3860's initcode limit is 49,152 bytes; zero bytes are STOPs.
     let initcode: [u8; 49_153] = [0; 49_153]
     env.nonce = 2
-    let rejected = send(raised.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), Config::osaka())
-    core::assert(rejected.receipt.invalid == INVALID_INITCODE_SIZE)
+    let rejected = send(mut world, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), Config::osaka())
+    core::assert(rejected.invalid == INVALID_INITCODE_SIZE)
     config.max_initcode_size = 65_536
-    let applied = send(rejected.state, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), config)
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    let applied = send(mut world, env, InputData::copy_from(initcode, offset: 0, len: 49_153), block(), config)
+    core::assert(applied.invalid == VALID && applied.status == OK)
 }
 
 #[test]
@@ -146,7 +144,7 @@ fn fees_past_256_bits_are_unaffordable() {
         var env = call(to: 0xbb)
         env.gas_price = gas_price
         env.value = value
-        let receipt = send(world, env, empty_bytes(), block(), Config::osaka()).receipt
+        let receipt = send(mut world, env, empty_bytes(), block(), Config::osaka())
         core::assert(receipt.invalid == if valid { VALID } else { INVALID_BALANCE })
     }
 }
@@ -157,8 +155,7 @@ fn receipt_reports_the_refund() {
     // SSTORE(0, 0) on a slot holding 1: a cold reset that refunds 4,800.
     core::assert(world.set_code(address: 0xbb, code: [0x5f as u8, 0x5f, 0x55]) == OK)
     core::assert(world.storage_store(0xbb, 0, 1))
-    let applied = send(world, call(to: 0xbb), empty_bytes(), block(), Config::osaka())
-    let receipt = applied.receipt
+    let receipt = send(mut world, call(to: 0xbb), empty_bytes(), block(), Config::osaka())
     // 21,000 intrinsic, two PUSH0 and a cold SSTORE reset (2,100 + 2,900).
     let spent: u64 = 21_000 + 2 + 2 + 5_000
     core::assert(receipt.status == OK && receipt.gas_refunded == 4_800 && receipt.gas_used == spent - 4_800)
@@ -172,17 +169,15 @@ fn simulate_gives_the_receipt_and_keeps_the_state() {
     core::assert(world.set_code(address: 0xbb, code: [0x60 as u8, 1, 0x5f, 0x55, 0x5f, 0x5f, 0xa0]) == OK)
     var buffers = Buffers::new()
     var tracer = ()
-    let simulated = simulate(world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+    let simulated = simulate(mut world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
                              Config::osaka(), mut buffers, mut tracer)
-    let receipt = simulated.receipt
-    core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.logs.len() == 1)
-    let state = simulated.state
-    core::assert(state.storage_load(0xbb, 0) == 0 && state.nonce(SENDER) == 0)
-    core::assert(state.balance(SENDER) == 1_000_000_000_000)
-    let applied = transact(state, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
+    core::assert(simulated.invalid == VALID && simulated.status == OK && simulated.logs.len() == 1)
+    core::assert(world.storage_load(0xbb, 0) == 0 && world.nonce(SENDER) == 0)
+    core::assert(world.balance(SENDER) == 1_000_000_000_000)
+    let applied = transact(mut world, TxRequest::new(call(to: 0xbb), data: empty_bytes()), block(),
                            Config::osaka(), mut buffers, mut tracer)
-    core::assert(applied.receipt.gas_used == receipt.gas_used && applied.receipt.logs.len() == 1)
-    core::assert(applied.state.storage_load(0xbb, 0) == 1 && applied.state.nonce(SENDER) == 1)
+    core::assert(applied.gas_used == simulated.gas_used && applied.logs.len() == 1)
+    core::assert(world.storage_load(0xbb, 0) == 1 && world.nonce(SENDER) == 1)
 }
 
 // A calls B, the identity precompile and the codeless 0xcc, each with
@@ -199,21 +194,22 @@ fn calling_world() -> WorldState {
     world
 }
 
-fn traced<T: Tracer>(_ world: own WorldState, nonce: u256, _ tracer: mut T) -> Applied {
+fn traced<T: Tracer>(_ world: mut WorldState, nonce: u256, _ tracer: mut T) -> Receipt {
     var env = call(to: 0xaa)
     env.nonce = nonce
     var buffers = Buffers::new()
-    transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
+    transact(mut world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers, mut tracer)
 }
 
 #[test]
 fn trace_records_steps_and_calls_in_order() {
+    var world = calling_world()
     var none = ()
-    let untraced = traced(calling_world(), nonce: 0, mut none)
-    core::assert(untraced.receipt.status == OK)
+    let untraced = traced(mut world, nonce: 0, mut none)
+    core::assert(untraced.status == OK)
     var trace = Trace::new(steps: true, calls: true)
-    let applied = traced(untraced.state, nonce: 1, mut trace)
-    core::assert(applied.receipt.status == OK && applied.receipt.gas_used == untraced.receipt.gas_used)
+    let applied = traced(mut world, nonce: 1, mut trace)
+    core::assert(applied.status == OK && applied.gas_used == untraced.gas_used)
     core::assert(trace.complete)
     // A runs 28 opcodes and B two.
     core::assert(trace.step_count() == 30)
@@ -235,7 +231,7 @@ fn trace_records_steps_and_calls_in_order() {
     core::assert(!leave_a.enter && leave_a.depth == 0 && leave_a.steps == 30)
 
     var calls = Trace::new(steps: false, calls: true)
-    let _ = traced(applied.state, nonce: 2, mut calls)
+    let _ = traced(mut world, nonce: 2, mut calls)
     core::assert(calls.step_count() == 0 && calls.call_count() == 8 && calls.call(7).steps == 0)
 }
 
@@ -252,12 +248,11 @@ fn trace_records_no_steps_for_a_message_without_code() {
         env.nonce = nonce
         env.value = 7
         var buffers = Buffers::new()
-        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(), mut buffers,
-                               mut trace)
-        core::assert(applied.receipt.status == OK && applied.receipt.gas_used == 21_000)
+        let receipt = transact(mut world, TxRequest::new(env, data: empty_bytes()), block(), Config::osaka(),
+                               mut buffers, mut trace)
+        core::assert(receipt.status == OK && receipt.gas_used == 21_000)
         core::assert(trace.step_count() == 0 && trace.call_count() == 2 && trace.call(1).gas == 100_000 - 21_000)
-        core::assert(applied.state.balance(to) == 7)
-        world = applied.state
+        core::assert(world.balance(to) == 7)
         nonce += 1
     }
 }
@@ -271,8 +266,8 @@ impl Tracer for DepthCounter {
 
 #[test]
 fn trace_runs_a_custom_tracer() {
+    var world = calling_world()
     var counter = DepthCounter { counts: [0, 0] }
-    let applied = traced(calling_world(), nonce: 0, mut counter)
-    core::assert(applied.receipt.status == OK)
+    core::assert(traced(mut world, nonce: 0, mut counter).status == OK)
     core::assert(counter.counts[0] == 28 && counter.counts[1] == 2)
 }

@@ -67,8 +67,9 @@ the protocol.
 
 ### Transactions
 
-`transact(world, request, block, config, buffers, tracer)` runs one
-transaction and returns `Applied { state, receipt }`.
+`transact(mut world, request, block, config, mut buffers, mut tracer)` runs
+one transaction on `world` and returns its `Receipt`. `simulate` takes the same
+arguments and returns the same receipt, but leaves `world` as it was.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -89,7 +90,7 @@ transaction and returns `Applied { state, receipt }`.
   stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
 
-An invalid transaction returns the untouched state and a receipt whose
+An invalid transaction leaves the world untouched, and its receipt's
 `invalid` field names the reason. A valid one buys its gas, increments the
 sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
@@ -97,7 +98,7 @@ the EIP-7623 calldata floor, refunds unused gas and the capped refund, pays the
 priority fee, and deletes self-destructed new accounts and touched empty
 accounts. The receipt has the status, gas used and refunded, the created
 contract's address, the output and the logs. A host failure (allocation,
-balance overflow) returns the pre-state with that status.
+balance overflow) leaves the pre-state, with that status.
 
 ### Tracing
 
@@ -142,11 +143,23 @@ file.
 
 ### Frames
 
-`execute` and `execute_vm` run one frame's code against a `Transaction`, the
-journaled view of a `WorldState` during a transaction. `Transaction`
+`execute` and `execute_vm` run one frame's code in a `Transaction`, which
+holds a transaction's own state: its logs, refund, checkpoint depth and
+endpoints. The world and buffers it works on are lent as effects, so code that
+runs a frame provides them:
+
+```fe
+var tx = Transaction::new(sender, destination, coinbase, config: Config::osaka())
+with (mut world, mut buffers) {
+    let result = execute(program, calldata, call, block, mut tx)
+    tx.finish(commit: result.status == OK, gas_spent)
+}
+```
+
+Every write to the world passes the journal in the buffers, so `Transaction`
 checkpoints nest: a child commit stays reversible by its parent, and every
-frame runs under its own. `finish(commit, gas_spent)` returns the state, logs,
-capped refund and net gas used. CALL and CREATE children run on an explicit
+frame runs under its own. `finish(commit, gas_spent)` undoes the transaction
+unless `commit`, and returns its logs, capped refund and net gas used. CALL and CREATE children run on an explicit
 frame stack, so the 1,024-frame depth limit does not depend on the native
 stack.
 

@@ -32,11 +32,9 @@ pub fn main() -> i32 uses (args: Args) {
             kind: TX_LEGACY, chain_id: Option::None, sender: 0x1000, to: 0xaa, creates: false, nonce,
             gas_limit: 1_000_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
         }
-        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block,
+        let receipt = transact(mut world, TxRequest::new(env, data: empty_bytes()), block,
                                Config::osaka(), mut buffers, mut tracer)
-        core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-        core::assert(applied.receipt.logs.len() == 1)
-        world = applied.state
+        core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.logs.len() == 1)
         nonce += 1
     }
     0

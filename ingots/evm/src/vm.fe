@@ -2,7 +2,7 @@ use core::{Box, MemBuffer, MemVec, Option}
 use keccak::Keccak256
 use ingot::memory::{MemoryExpansion, SMALL_EXTENT, memory_expansion, copy_expansion, copy_gas, small_growth_cost}
 use ingot::gas::base_cost
-use ingot::state::{StorageKey, address_word}
+use ingot::state::{StorageKey, WorldState, address_word}
 use swisstable::SwissTable
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use ingot::constants::STACK_LIMIT
@@ -131,7 +131,7 @@ impl Vm {
 
     // A frame that has allocated nothing takes over a finished frame's
     // memory and stack, which hold no bytes or words.
-    fn adopt(mut self, _ buffers: mut Buffers) {
+    fn adopt(mut self) uses (buffers: mut Buffers) {
         if self.memory.capacity() == 0 {
             match buffers.memories.pop() {
                 Option::Some(memory) => self.memory = memory,
@@ -540,7 +540,7 @@ impl Vm {
         self.push(result)
     }
 
-    fn sload(mut self, _ state: mut Transaction) {
+    fn sload(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         let slot = self.pop()
         if !self.ok() { return }
         // A warm slot needs no journal entry.
@@ -550,10 +550,10 @@ impl Vm {
             self.fault(state.warm_slot(address: self.call.address, slot))
             if !self.ok() { return }
         }
-        self.push(state.storage_load(address: self.call.address, slot))
+        self.push(world.storage_load(address: self.call.address, slot))
     }
 
-    fn sstore(mut self, _ state: mut Transaction) {
+    fn sstore(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -573,14 +573,14 @@ impl Vm {
         }
     }
 
-    fn tload(mut self, _ state: Transaction) {
+    fn tload(mut self, _ state: Transaction) uses (buffers: Buffers) {
         let slot = self.pop()
         if self.ok() {
             self.push(state.transient_load(address: self.call.address, slot))
         }
     }
 
-    fn tstore(mut self, _ state: mut Transaction) {
+    fn tstore(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -592,7 +592,7 @@ impl Vm {
         }
     }
 
-    fn extcodecopy(mut self, _ state: mut Transaction) {
+    fn extcodecopy(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.holds(4) { return }
         let address = address_word(self.take())
         let dest = self.take()
@@ -606,7 +606,7 @@ impl Vm {
         }
         if !warm { self.fault(state.warm_account(address)) }
         if !self.ok() || !self.expand_memory(plan.size) || len == 0 { return }
-        let code = state.code(address)
+        let code = world.code(address)
         let size = code.len() as u256
         let available = if source < size { size - source } else { 0 }
         let copied: u64 = (if len < available { len } else { available }).downcast_unchecked()
@@ -648,16 +648,16 @@ impl Vm {
     }
 
     /// BALANCE, EXTCODESIZE and EXTCODEHASH, charging for a cold account.
-    fn account_field(mut self, _ op: i32, _ state: mut Transaction) {
+    fn account_field(mut self, _ op: i32, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         let address = address_word(self.pop())
         if self.ok() {
             let warm = state.account_is_warm(address)
             if self.charge(if warm { 100 } else { 2600 }) {
                 if !warm { self.fault(state.warm_account(address)) }
                 if self.ok() {
-                    let value = if op == 0x31 { state.balance(address) }
-                        else if op == 0x3b { state.code_size(address) as u256 }
-                        else { state.code_hash(address) }
+                    let value = if op == 0x31 { world.balance(address) }
+                        else if op == 0x3b { world.code_size(address) as u256 }
+                        else { world.code_hash(address) }
                     self.push(value)
                 }
             }
@@ -665,7 +665,8 @@ impl Vm {
     }
 
     fn run_until_child<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ state: mut Transaction,
-                                  depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+                                  depth: usize, _ tracer: mut T) -> Option<Box<Frame>>
+    uses (world: mut WorldState, buffers: mut Buffers) {
         // Pushes skip the capacity check, so the stack holds its limit first.
         if !self.stack.try_reserve(STACK_LIMIT - self.stack.len()) {
             self.fault(ERR_HOST_ALLOCATION)
@@ -750,11 +751,11 @@ impl Vm {
                             let number = self.pop()
                             if !self.ok() { break }
                             let hash = if number < self.block.number && self.block.number - number <= 256 {
-                                state.block_hash(number)
+                                world.block_hash(number)
                             } else { 0 }
                             if !self.pushed(hash) { break }
                         },
-                        0x47 => if !self.pushed(state.balance(self.call.address)) { break },
+                        0x47 => if !self.pushed(world.balance(self.call.address)) { break },
                         0x53 => {
                             self.gas_remaining = gas
                             self.mstore8()
@@ -844,7 +845,8 @@ impl Vm {
     }
 
     pub fn run<T: Tracer>(mut self, _ program: Program, _ calldata: InputData,
-                          _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
+                          _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T)
+    uses (world: mut WorldState, buffers: mut Buffers) {
         self.run_root(program, calldata, call, block, mut state, mut tracer, creates: false)
     }
 
@@ -852,13 +854,15 @@ impl Vm {
     /// output as code at `call.address`. Callers open the creation with
     /// `begin_create`, whose checkpoint encloses this one.
     pub fn create<T: Tracer>(mut self, _ program: Program, _ call: CallEnv, _ block: BlockEnv,
-                             _ state: mut Transaction, _ tracer: mut T) {
+                             _ state: mut Transaction, _ tracer: mut T)
+    uses (world: mut WorldState, buffers: mut Buffers) {
         self.run_root(program, empty_bytes(), call, block, mut state, mut tracer, creates: true)
     }
 
     fn run_root<T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ call: CallEnv,
-                           _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T, creates: bool) {
-        self.adopt(mut state.buffers())
+                           _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T, creates: bool)
+    uses (world: mut WorldState, buffers: mut Buffers) {
+        self.adopt()
         self.reset(gas: call.gas_limit)
         if program.status != OK || calldata.status != OK {
             self.fault(if program.status != OK { program.status } else { calldata.status })
@@ -881,12 +885,12 @@ impl Vm {
         }
     }
     /// The frame's result. Its memory and stack, emptied, go to `buffers`.
-    pub fn into_result(var own self, _ buffers: mut Buffers) -> ExecutionResult {
-        self.take_result(mut buffers)
+    pub fn into_result(var own self) -> ExecutionResult uses (buffers: mut Buffers) {
+        self.take_result()
     }
 
     /// As `into_result`, leaving the VM without output, memory or stack.
-    fn take_result(mut self, _ buffers: mut Buffers) -> ExecutionResult {
+    fn take_result(mut self) -> ExecutionResult uses (buffers: mut Buffers) {
         let stack_len = self.stack.len()
         let stack_top: u256 = if stack_len == 0 {
             0
@@ -920,7 +924,7 @@ pub fn execute_vm(
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,
-) -> Vm {
+) -> Vm uses (world: mut WorldState, buffers: mut Buffers) {
     var vm = Vm::new()
     var tracer = ()
     vm.run(program, calldata, call, block, mut state, mut tracer)
@@ -933,6 +937,6 @@ pub fn execute(
     _ call: CallEnv,
     _ block: BlockEnv,
     _ state: mut Transaction,
-) -> ExecutionResult {
-    execute_vm(program, calldata, call, block, mut state).into_result(mut state.buffers())
+) -> ExecutionResult uses (world: mut WorldState, buffers: mut Buffers) {
+    execute_vm(program, calldata, call, block, mut state).into_result()
 }

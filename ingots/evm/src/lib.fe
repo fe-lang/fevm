@@ -18,7 +18,7 @@ pub use types::{
     empty_bytes,
 }
 pub use vm::{self, Buffers, execute}
-pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+pub use processor::{self, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 
 #[cfg(target = "native")]
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
@@ -47,20 +47,23 @@ fn evm_sload_sstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(
-        program,
-        empty_bytes(),
-        call,
-        default_block_env(),
-        mut state,
-    )
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var state = Transaction::new(sender: call.origin, destination: call.address, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(
+            program,
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut state,
+        )
 
-    core::assert(result.status == OK)
-    core::assert(result.stack_top == 0x2a)
-    core::assert(state.storage_load(address: 0xaa, slot: 3) == 0x2a)
-    state.finish(commit: true, gas_spent: 0)
+        core::assert(result.status == OK)
+        core::assert(result.stack_top == 0x2a)
+        core::assert(world.storage_load(address: 0xaa, slot: 3) == 0x2a)
+        state.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
@@ -88,23 +91,25 @@ fn evm_balance_selfbalance_and_blockhash_use_state() {
     }
     var world = WorldState::empty()
     core::assert(world.set_block_hash(7, 5))
-    var state = Transaction::new(world, sender: call.origin, destination: call.address, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
-    core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
-    core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
-    var block = default_block_env()
-    block.number = 8
-    let result = execute(
-        program,
-        empty_bytes(),
-        call,
-        block,
-        mut state,
-    )
+    var buffers = Buffers::new()
+    var state = Transaction::new(sender: call.origin, destination: call.address, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        core::assert(state.set_balance(address: 0xaa, value: 100) == OK)
+        core::assert(state.set_balance(address: 0xbb, value: 23) == OK)
+        var block = default_block_env()
+        block.number = 8
+        let result = execute(
+            program,
+            empty_bytes(),
+            call,
+            block,
+            mut state,
+        )
 
-    core::assert(result.status == OK)
-    core::assert(result.stack_top == 128)
-    state.finish(commit: true, gas_spent: 0)
+        core::assert(result.status == OK)
+        core::assert(result.stack_top == 128)
+        state.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
@@ -129,21 +134,24 @@ fn evm_tload_tstore_roundtrip() {
         gas_limit: 1_000_000,
         is_static: false,
     }
-    var state = Transaction::new(WorldState::empty(), sender: call.origin, destination: call.address, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(
-        program,
-        empty_bytes(),
-        call,
-        default_block_env(),
-        mut state,
-    )
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var state = Transaction::new(sender: call.origin, destination: call.address, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(
+            program,
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut state,
+        )
 
-    core::assert(result.status == OK)
-    core::assert(result.stack_top == 9)
-    core::assert(state.transient_load(address: 0xaa, slot: 4) == 9)
-    core::assert(result.gas_remaining == 999791)
-    state.finish(commit: true, gas_spent: 0)
+        core::assert(result.status == OK)
+        core::assert(result.stack_top == 9)
+        core::assert(state.transient_load(address: 0xaa, slot: 4) == 9)
+        core::assert(result.gas_remaining == 999791)
+        state.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
@@ -182,23 +190,26 @@ fn evm_interleaves_state_and_owned_memory() {
         len += 1
     }
     let program = Program::copy_from(bytes, len)
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(
-        program,
-        empty_bytes(),
-        default_call_env(),
-        default_block_env(),
-        mut state,
-    )
-    core::assert(result.status == OK && result.stack_len == 0)
-    core::assert(
-        result.output_valid && result.output.len() == 64,
-    )
-    core::assert(
-        result.output[31 as usize] == 0x2a && result.output[63 as usize] == 0x2a,
-    )
-    core::assert(state.storage_load(address: 0, slot: 3) == 0x2a)
-    core::assert(state.transient_load(address: 0, slot: 4) == 0x2a)
-    state.finish(commit: true, gas_spent: 0)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var state = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(
+            program,
+            empty_bytes(),
+            default_call_env(),
+            default_block_env(),
+            mut state,
+        )
+        core::assert(result.status == OK && result.stack_len == 0)
+        core::assert(
+            result.output_valid && result.output.len() == 64,
+        )
+        core::assert(
+            result.output[31 as usize] == 0x2a && result.output[63 as usize] == 0x2a,
+        )
+        core::assert(world.storage_load(address: 0, slot: 3) == 0x2a)
+        core::assert(state.transient_load(address: 0, slot: 4) == 0x2a)
+        state.finish(commit: true, gas_spent: 0)
+    }
 }

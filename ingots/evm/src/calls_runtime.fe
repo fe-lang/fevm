@@ -63,45 +63,47 @@ pub fn call_variants_preserve_environment_and_value() {
                     )
                 == OK,
         )
-        var tx = Transaction::new(world, sender: 0xcc, destination: 0xaa, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        var call = default_call_env()
-        call.address = 0xaa
-        call.caller = 0xcc
-        call.origin = 0xcc
-        call.callvalue = 9
-        var vm = Vm::new()
-        var tracer = ()
-        vm.run(
-            env_call(op),
-            empty_bytes(),
-            call,
-            default_block_env(),
-            mut tx,
-            mut tracer,
-        )
-        core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 1)
-        core::assert(vm.return_data.len() == 128 && vm.memory_size == 128)
-        core::assert(
-            vm.memory[31] == if op == 0xf2 || op == 0xf4 {
-                    0xaa
-                } else {
-                    0xbb
-                },
-        )
-        core::assert(
-            vm.memory[63] == if op == 0xf4 { 0xcc } else { 0xaa },
-        )
-        core::assert(
-            vm.memory[95] == if op == 0xf4 {
-                    9
-                } else if op == 0xfa { 0 } else { 7 },
-        )
-        core::assert(vm.memory[96] == 42)
-        core::assert(tx.balance(0xaa) == if op == 0xf1 { 93 } else { 100 })
-        core::assert(tx.balance(0xbb) == if op == 0xf1 { 7 } else { 0 })
-        core::assert(tx.depth() == 0 && !tx.is_static())
-        tx.finish(commit: true, gas_spent: 0)
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0xcc, destination: 0xaa, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            var call = default_call_env()
+            call.address = 0xaa
+            call.caller = 0xcc
+            call.origin = 0xcc
+            call.callvalue = 9
+            var vm = Vm::new()
+            var tracer = ()
+            vm.run(
+                env_call(op),
+                empty_bytes(),
+                call,
+                default_block_env(),
+                mut tx,
+                mut tracer,
+            )
+            core::assert(vm.status == OK && vm.stack.len() == 1 && vm.stack[0] == 1)
+            core::assert(vm.return_data.len() == 128 && vm.memory_size == 128)
+            core::assert(
+                vm.memory[31] == if op == 0xf2 || op == 0xf4 {
+                        0xaa
+                    } else {
+                        0xbb
+                    },
+            )
+            core::assert(
+                vm.memory[63] == if op == 0xf4 { 0xcc } else { 0xaa },
+            )
+            core::assert(
+                vm.memory[95] == if op == 0xf4 {
+                        9
+                    } else if op == 0xfa { 0 } else { 7 },
+            )
+            core::assert(vm.memory[96] == 42)
+            core::assert(world.balance(0xaa) == if op == 0xf1 { 93 } else { 100 })
+            core::assert(world.balance(0xbb) == if op == 0xf1 { 7 } else { 0 })
+            core::assert(tx.depth() == 0 && !tx.is_static())
+            tx.finish(commit: true, gas_spent: 0)
+        }
     }
 }
 
@@ -119,61 +121,63 @@ pub fn call_revert_restores_state_and_keeps_output_prefix() {
         for byte in prefix { append(mut code, byte) }
         for byte in [0x60 as u8, 2, 0x60, 30, exit] { append(mut code, byte) }
         core::assert(world.set_code(address: 0xbb, code) == OK)
-        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        var call = default_call_env()
-        call.address = 0xaa
-        let ops = [
-            0x61 as u8,
-            0xaa,
-            0xbb,
-            0x5f,
-            0x52,
-            0x60,
-            1,
-            0x60,
-            30,
-            0x5f,
-            0x5f,
-            0x60,
-            7,
-            0x60,
-            0xbb,
-            0x62,
-            1,
-            0x86,
-            0xa0,
-            0xf1,
-        ]
-        var vm = Vm::new()
-        var tracer = ()
-        vm.run(
-            Program::copy_from(ops, len: 20),
-            empty_bytes(),
-            call,
-            default_block_env(),
-            mut tx,
-            mut tracer,
-        )
-        core::assert(vm.status == OK)
-        core::assert(vm.stack.len() == 1 && vm.stack[0] == if exit == 0xf3 { 1 } else { 0 })
-        let returned = exit == 0xf3 || exit == 0xfd
-        core::assert(vm.return_data.len() == if returned { 2 } else { 0 })
-        core::assert(
-            vm.memory[30] == if returned { 0x11 } else { 0xaa },
-        )
-        core::assert(vm.memory[31] == 0xbb)
-        core::assert(tx.balance(0xaa) == if exit == 0xf3 { 93 } else { 100 })
-        core::assert(
-            tx.storage_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 9 } else { 0 },
-        )
-        core::assert(
-            tx.transient_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 8 } else { 0 },
-        )
-        core::assert(tx.account_is_warm(0xbb))
-        core::assert(tx.account_is_warm(0xcc) == (exit == 0xf3))
-        core::assert(tx.depth() == 0)
-        tx.finish(commit: true, gas_spent: 0)
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            var call = default_call_env()
+            call.address = 0xaa
+            let ops = [
+                0x61 as u8,
+                0xaa,
+                0xbb,
+                0x5f,
+                0x52,
+                0x60,
+                1,
+                0x60,
+                30,
+                0x5f,
+                0x5f,
+                0x60,
+                7,
+                0x60,
+                0xbb,
+                0x62,
+                1,
+                0x86,
+                0xa0,
+                0xf1,
+            ]
+            var vm = Vm::new()
+            var tracer = ()
+            vm.run(
+                Program::copy_from(ops, len: 20),
+                empty_bytes(),
+                call,
+                default_block_env(),
+                mut tx,
+                mut tracer,
+            )
+            core::assert(vm.status == OK)
+            core::assert(vm.stack.len() == 1 && vm.stack[0] == if exit == 0xf3 { 1 } else { 0 })
+            let returned = exit == 0xf3 || exit == 0xfd
+            core::assert(vm.return_data.len() == if returned { 2 } else { 0 })
+            core::assert(
+                vm.memory[30] == if returned { 0x11 } else { 0xaa },
+            )
+            core::assert(vm.memory[31] == 0xbb)
+            core::assert(world.balance(0xaa) == if exit == 0xf3 { 93 } else { 100 })
+            core::assert(
+                world.storage_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 9 } else { 0 },
+            )
+            core::assert(
+                tx.transient_load(address: 0xbb, slot: 0) == if exit == 0xf3 { 8 } else { 0 },
+            )
+            core::assert(tx.account_is_warm(0xbb))
+            core::assert(tx.account_is_warm(0xcc) == (exit == 0xf3))
+            core::assert(tx.depth() == 0)
+            tx.finish(commit: true, gas_spent: 0)
+        }
     }
 }
 
@@ -187,24 +191,26 @@ pub fn call_empty_and_insufficient_funds_charge_exact_gas() {
     ] {
         var world = WorldState::empty()
         core::assert(world.set_balance(0xaa, balance))
-        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        var call = default_call_env()
-        call.address = 0xaa
-        let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x60, value, 0x60, 0xbb, 0x5f, 0xf1]
-        let program = Program::copy_from(ops, len: 10)
-        var vm = Vm::new()
-        var tracer = ()
-        vm.run(program, empty_bytes(), call, default_block_env(), mut tx, mut tracer)
-        core::assert(
-            vm.status == OK && vm.stack[0] == success && vm.gas_remaining == expected_gas,
-        )
-        core::assert(vm.return_data.len() == 0 && tx.account_is_warm(0xbb))
-        if value == 0 {
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            var call = default_call_env()
+            call.address = 0xaa
+            let ops = [0x5f as u8, 0x5f, 0x5f, 0x5f, 0x60, value, 0x60, 0xbb, 0x5f, 0xf1]
+            let program = Program::copy_from(ops, len: 10)
+            var vm = Vm::new()
+            var tracer = ()
             vm.run(program, empty_bytes(), call, default_block_env(), mut tx, mut tracer)
-            core::assert(vm.gas_remaining == 999884)
+            core::assert(
+                vm.status == OK && vm.stack[0] == success && vm.gas_remaining == expected_gas,
+            )
+            core::assert(vm.return_data.len() == 0 && tx.account_is_warm(0xbb))
+            if value == 0 {
+                vm.run(program, empty_bytes(), call, default_block_env(), mut tx, mut tracer)
+                core::assert(vm.gas_remaining == 999884)
+            }
+            tx.finish(commit: true, gas_spent: 0)
         }
-        tx.finish(commit: true, gas_spent: 0)
     }
 }
 
@@ -213,28 +219,30 @@ pub fn call_static_rules_and_return_data_bounds() {
     for op in [0xf1 as u8, 0xf2] {
         var world = WorldState::empty()
         core::assert(world.set_balance(0xaa, 100))
-        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        var call = default_call_env()
-        call.address = 0xaa
-        call.is_static = true
-        var vm = Vm::new()
-        var tracer = ()
-        vm.run(
-            env_call(op),
-            empty_bytes(),
-            call,
-            default_block_env(),
-            mut tx,
-            mut tracer,
-        )
-        core::assert(
-            vm.status == if op == 0xf1 { ERR_STATIC_WRITE } else { OK },
-        )
-        core::assert(
-            tx.balance(0xaa) == 100 && tx.depth() == 0 && !tx.is_static(),
-        )
-        tx.finish(commit: true, gas_spent: 0)
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            var call = default_call_env()
+            call.address = 0xaa
+            call.is_static = true
+            var vm = Vm::new()
+            var tracer = ()
+            vm.run(
+                env_call(op),
+                empty_bytes(),
+                call,
+                default_block_env(),
+                mut tx,
+                mut tracer,
+            )
+            core::assert(
+                vm.status == if op == 0xf1 { ERR_STATIC_WRITE } else { OK },
+            )
+            core::assert(
+                world.balance(0xaa) == 100 && tx.depth() == 0 && !tx.is_static(),
+            )
+            tx.finish(commit: true, gas_spent: 0)
+        }
     }
     for source in [2 as u8, 3] {
         var world = WorldState::empty()
@@ -246,54 +254,56 @@ pub fn call_static_rules_and_return_data_bounds() {
                     )
                 == OK,
         )
-        var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        let ops = [
-            0x5f as u8,
-            0x5f,
-            0x5f,
-            0x5f,
-            0x5f,
-            0x60,
-            0xbb,
-            0x61,
-            0xff,
-            0xff,
-            0xf1,
-            0x60,
-            2,
-            0x5f,
-            0x5f,
-            0x3e,
-            0x3d,
-            0x5f,
-            0x60,
-            source,
-            0x5f,
-            0x3e,
-        ]
-        var vm = Vm::new()
-        var tracer = ()
-        vm.run(
-            Program::copy_from(ops, len: 22),
-            empty_bytes(),
-            default_call_env(),
-            default_block_env(),
-            mut tx,
-            mut tracer,
-        )
-        core::assert(
-            vm.status == if source == 2 {
-                    OK
-                } else {
-                    ERR_RETURN_DATA_OOB
-                },
-        )
-        core::assert(
-            vm.memory[0] == 0x11 && vm.memory[1] == 0x22,
-        )
-        core::assert(vm.return_data.len() == 2 && vm.stack[1] == 2)
-        tx.finish(commit: true, gas_spent: 0)
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            let ops = [
+                0x5f as u8,
+                0x5f,
+                0x5f,
+                0x5f,
+                0x5f,
+                0x60,
+                0xbb,
+                0x61,
+                0xff,
+                0xff,
+                0xf1,
+                0x60,
+                2,
+                0x5f,
+                0x5f,
+                0x3e,
+                0x3d,
+                0x5f,
+                0x60,
+                source,
+                0x5f,
+                0x3e,
+            ]
+            var vm = Vm::new()
+            var tracer = ()
+            vm.run(
+                Program::copy_from(ops, len: 22),
+                empty_bytes(),
+                default_call_env(),
+                default_block_env(),
+                mut tx,
+                mut tracer,
+            )
+            core::assert(
+                vm.status == if source == 2 {
+                        OK
+                    } else {
+                        ERR_RETURN_DATA_OOB
+                    },
+            )
+            core::assert(
+                vm.memory[0] == 0x11 && vm.memory[1] == 0x22,
+            )
+            core::assert(vm.return_data.len() == 2 && vm.stack[1] == 2)
+            tx.finish(commit: true, gas_spent: 0)
+        }
     }
 }
 
@@ -329,26 +339,28 @@ pub fn call_protocol_depth_is_iterative_and_independent_of_checkpoints() {
     ]
     var world = WorldState::empty()
     core::assert(world.set_code(address: 0xaa, code: ops) == OK)
-    var tx = Transaction::new(world, sender: 0, destination: 0xaa, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let outer = tx.checkpoint(is_static: false)
-    var call = default_call_env()
-    call.address = 0xaa
-    call.gas_limit = 0xffffffffffffffff
-    var vm = Vm::new()
-    var tracer = ()
-    vm.run(
-        Program::copy_from(ops, len: 24),
-        empty_bytes(),
-        call,
-        default_block_env(),
-        mut tx,
-        mut tracer,
-    )
-    core::assert(vm.status == OK && tx.depth() == 1)
-    core::assert(tx.transient_load(address: 0xaa, slot: 0) == 1025)
-    core::assert(tx.transient_load(address: 0xaa, slot: 1) == 1)
-    tx.revert(outer)
-    core::assert(tx.transient_load(address: 0xaa, slot: 0) == 0)
-    tx.finish(commit: true, gas_spent: 0)
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0xaa, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let outer = tx.checkpoint(is_static: false)
+        var call = default_call_env()
+        call.address = 0xaa
+        call.gas_limit = 0xffffffffffffffff
+        var vm = Vm::new()
+        var tracer = ()
+        vm.run(
+            Program::copy_from(ops, len: 24),
+            empty_bytes(),
+            call,
+            default_block_env(),
+            mut tx,
+            mut tracer,
+        )
+        core::assert(vm.status == OK && tx.depth() == 1)
+        core::assert(tx.transient_load(address: 0xaa, slot: 0) == 1025)
+        core::assert(tx.transient_load(address: 0xaa, slot: 1) == 1)
+        tx.revert(outer)
+        core::assert(tx.transient_load(address: 0xaa, slot: 0) == 0)
+        tx.finish(commit: true, gas_spent: 0)
+    }
 }

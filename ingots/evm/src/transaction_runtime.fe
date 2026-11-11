@@ -12,7 +12,7 @@ pub fn program<const N: usize>(_ ops: [u8; N]) -> Program {
     Program::copy_from(ops, len: N)
 }
 
-pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint {
+pub fn checkpoint(_ transaction: mut Transaction, is_static: bool) -> Checkpoint uses (buffers: Buffers) {
     transaction.checkpoint(is_static)
 }
 
@@ -22,24 +22,26 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
     core::assert(world.set_balance(7, 10))
     core::assert(world.set_nonce(7, 2))
     core::assert(world.storage_store(7, 8, 11))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut tx, is_static: false)
-    core::assert(tx.set_balance(address: 7, value: 30) == OK)
-    core::assert(tx.set_nonce(address: 7, value: 3) == OK)
-    core::assert(tx.storage_store(address: 7, slot: 8, value: 0) == OK)
-    core::assert(tx.transient_store(address: 7, slot: 8, value: 9) == OK)
-    let child = checkpoint(mut tx, is_static: false)
-    core::assert(tx.set_balance(address: 7, value: 0) == OK)
-    core::assert(tx.storage_store(address: 7, slot: 8, value: 50) == OK)
-    core::assert(tx.transient_store(address: 7, slot: 8, value: 0) == OK)
-    tx.commit(child)
-    core::assert(tx.balance(7) == 0 && tx.storage_load(address: 7, slot: 8) == 50)
-    tx.revert(parent)
-    core::assert(tx.balance(7) == 10 && tx.nonce(7) == 2)
-    core::assert(tx.storage_load(address: 7, slot: 8) == 11)
-    core::assert(tx.transient_load(address: 7, slot: 8) == 0)
-    let world = tx.finish(commit: true, gas_spent: 0).state
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut tx, is_static: false)
+        core::assert(tx.set_balance(address: 7, value: 30) == OK)
+        core::assert(tx.set_nonce(address: 7, value: 3) == OK)
+        core::assert(tx.storage_store(address: 7, slot: 8, value: 0) == OK)
+        core::assert(tx.transient_store(address: 7, slot: 8, value: 9) == OK)
+        let child = checkpoint(mut tx, is_static: false)
+        core::assert(tx.set_balance(address: 7, value: 0) == OK)
+        core::assert(tx.storage_store(address: 7, slot: 8, value: 50) == OK)
+        core::assert(tx.transient_store(address: 7, slot: 8, value: 0) == OK)
+        tx.commit(child)
+        core::assert(world.balance(7) == 0 && world.storage_load(address: 7, slot: 8) == 50)
+        tx.revert(parent)
+        core::assert(world.balance(7) == 10 && world.nonce(7) == 2)
+        core::assert(world.storage_load(address: 7, slot: 8) == 11)
+        core::assert(tx.transient_load(address: 7, slot: 8) == 0)
+        let _ = tx.finish(commit: true, gas_spent: 0)
+    }
     core::assert(world.storage_load(7, 8) == 11)
 }
 
@@ -47,95 +49,107 @@ fn transaction_reverts_committed_children_and_restores_all_state_kinds() {
 fn empty_code_deployment_changes_nothing() {
     var world = WorldState::empty()
     core::assert(world.set_nonce(7, 1))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let empty = MemBuffer::empty()
-    let frozen = checkpoint(mut tx, is_static: true)
-    core::assert(tx.deploy_code(address: 7, code: empty.span()) == ERR_STATIC_WRITE)
-    tx.revert(frozen)
-    let parent = checkpoint(mut tx, is_static: false)
-    core::assert(tx.deploy_code(address: 7, code: empty.span()) == OK)
-    core::assert(tx.deploy_code(address: 8, code: empty.span()) == OK)
-    core::assert(tx.code_size(7) == 0 && tx.nonce(7) == 1 && !tx.exists(8))
-    tx.revert(parent)
-    core::assert(tx.code_size(7) == 0 && tx.nonce(7) == 1 && !tx.exists(8))
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let empty = MemBuffer::empty()
+        let frozen = checkpoint(mut tx, is_static: true)
+        core::assert(tx.deploy_code(address: 7, code: empty.span()) == ERR_STATIC_WRITE)
+        tx.revert(frozen)
+        let parent = checkpoint(mut tx, is_static: false)
+        core::assert(tx.deploy_code(address: 7, code: empty.span()) == OK)
+        core::assert(tx.deploy_code(address: 8, code: empty.span()) == OK)
+        core::assert(world.code_size(7) == 0 && world.nonce(7) == 1 && !world.exists(8))
+        tx.revert(parent)
+        core::assert(world.code_size(7) == 0 && world.nonce(7) == 1 && !world.exists(8))
+    }
 }
 
 #[test]
 fn contract_endowments_revert_to_the_previous_accounts() {
     var world = WorldState::empty()
     core::assert(world.set_balance(7, 5) && world.set_balance(9, 1))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut tx, is_static: false)
-    core::assert(tx.endow(address: 7, value: 3) == OK && tx.endow(address: 8, value: 0) == OK)
-    core::assert(tx.nonce(7) == 1 && tx.balance(7) == 8 && tx.nonce(8) == 1 && tx.exists(8))
-    core::assert(tx.endow(address: 9, value: MAX_U256) == ERR_BALANCE_OVERFLOW)
-    core::assert(tx.nonce(9) == 0 && tx.balance(9) == 1)
-    tx.revert(parent)
-    core::assert(tx.nonce(7) == 0 && tx.balance(7) == 5 && !tx.exists(8))
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut tx, is_static: false)
+        core::assert(tx.endow(address: 7, value: 3) == OK && tx.endow(address: 8, value: 0) == OK)
+        core::assert(world.nonce(7) == 1 && world.balance(7) == 8 && world.nonce(8) == 1 && world.exists(8))
+        core::assert(tx.endow(address: 9, value: MAX_U256) == ERR_BALANCE_OVERFLOW)
+        core::assert(world.nonce(9) == 0 && world.balance(9) == 1)
+        tx.revert(parent)
+        core::assert(world.nonce(7) == 0 && world.balance(7) == 5 && !world.exists(8))
+    }
 }
 
 #[test]
 fn transfers_credit_and_debit_both_accounts_unless_the_credit_overflows() {
     var world = WorldState::empty()
     core::assert(world.set_balance(7, 10) && world.set_balance(8, MAX_U256 - 4))
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    // A new account gets a record for its credit.
-    let paid = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 9, value: 3) == OK)
-    core::assert(tx.balance(7) == 7 && tx.balance(9) == 3 && tx.exists(9))
-    tx.commit(paid)
-    let overflow = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 8, value: 5) == ERR_BALANCE_OVERFLOW)
-    core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)
-    tx.revert(overflow)
-    let filled = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 8, value: 4) == OK)
-    core::assert(tx.balance(7) == 3 && tx.balance(8) == MAX_U256)
-    tx.revert(filled)
-    core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)
-    core::assert(tx.increment_nonce(9) == OK && tx.nonce(9) == 1)
-    let world = tx.finish(commit: false, gas_spent: 0).state
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        // A new account gets a record for its credit.
+        let paid = checkpoint(mut tx, is_static: false)
+        core::assert(transfer(mut tx, from: 7, to: 9, value: 3) == OK)
+        core::assert(world.balance(7) == 7 && world.balance(9) == 3 && world.exists(9))
+        tx.commit(paid)
+        let overflow = checkpoint(mut tx, is_static: false)
+        core::assert(transfer(mut tx, from: 7, to: 8, value: 5) == ERR_BALANCE_OVERFLOW)
+        core::assert(world.balance(7) == 7 && world.balance(8) == MAX_U256 - 4)
+        tx.revert(overflow)
+        let filled = checkpoint(mut tx, is_static: false)
+        core::assert(transfer(mut tx, from: 7, to: 8, value: 4) == OK)
+        core::assert(world.balance(7) == 3 && world.balance(8) == MAX_U256)
+        tx.revert(filled)
+        core::assert(world.balance(7) == 7 && world.balance(8) == MAX_U256 - 4)
+        core::assert(tx.increment_nonce(9) == OK && world.nonce(9) == 1)
+        let _ = tx.finish(commit: false, gas_spent: 0)
+    }
     core::assert(world.balance(7) == 10 && !world.exists(9))
 }
 
 #[test]
 fn transaction_child_revert_preserves_parent_and_transaction_abort_undoes_it() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut tx, is_static: false)
-    core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
-    core::assert(tx.transient_store(address: 1, slot: 2, value: 4) == OK)
-    let child = checkpoint(mut tx, is_static: false)
-    core::assert(tx.storage_store(address: 1, slot: 2, value: 5) == OK)
-    core::assert(tx.transient_store(address: 1, slot: 2, value: 6) == OK)
-    tx.revert(child)
-    core::assert(tx.storage_load(address: 1, slot: 2) == 3)
-    core::assert(tx.transient_load(address: 1, slot: 2) == 4)
-    tx.commit(parent)
-    let world = tx.finish(commit: false, gas_spent: 0).state
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut tx, is_static: false)
+        core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
+        core::assert(tx.transient_store(address: 1, slot: 2, value: 4) == OK)
+        let child = checkpoint(mut tx, is_static: false)
+        core::assert(tx.storage_store(address: 1, slot: 2, value: 5) == OK)
+        core::assert(tx.transient_store(address: 1, slot: 2, value: 6) == OK)
+        tx.revert(child)
+        core::assert(world.storage_load(address: 1, slot: 2) == 3)
+        core::assert(tx.transient_load(address: 1, slot: 2) == 4)
+        tx.commit(parent)
+        let _ = tx.finish(commit: false, gas_spent: 0)
+    }
     core::assert(world.storage_load(1, 2) == 0)
 }
 
 #[test]
 fn transaction_static_mode_is_inherited_and_restored() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut tx, is_static: true)
-    let child = checkpoint(mut tx, is_static: false)
-    core::assert(tx.is_static())
-    core::assert(tx.set_balance(address: 1, value: 2) == ERR_STATIC_WRITE)
-    core::assert(tx.set_nonce(address: 1, value: 2) == ERR_STATIC_WRITE)
-    core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == ERR_STATIC_WRITE)
-    core::assert(tx.transient_store(address: 1, slot: 2, value: 0) == ERR_STATIC_WRITE)
-    tx.commit(child)
-    core::assert(tx.is_static())
-    tx.revert(parent)
-    core::assert(!tx.is_static())
-    core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
-    let world = tx.finish(commit: true, gas_spent: 0).state
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut tx, is_static: true)
+        let child = checkpoint(mut tx, is_static: false)
+        core::assert(tx.is_static())
+        core::assert(tx.set_balance(address: 1, value: 2) == ERR_STATIC_WRITE)
+        core::assert(tx.set_nonce(address: 1, value: 2) == ERR_STATIC_WRITE)
+        core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == ERR_STATIC_WRITE)
+        core::assert(tx.transient_store(address: 1, slot: 2, value: 0) == ERR_STATIC_WRITE)
+        tx.commit(child)
+        core::assert(tx.is_static())
+        tx.revert(parent)
+        core::assert(!tx.is_static())
+        core::assert(tx.storage_store(address: 1, slot: 2, value: 3) == OK)
+        let _ = tx.finish(commit: true, gas_spent: 0)
+    }
     core::assert(world.storage_load(1, 2) == 3)
 }
 
@@ -147,24 +161,26 @@ fn transaction_undo_restores_tables_grown_past_their_first_capacity() {
         core::assert(world.storage_store(1, slot, slot + 1))
         slot += 1
     }
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let point = checkpoint(mut tx, is_static: false)
-    core::assert(tx.storage_store(address: 1, slot: 0, value: 0) == OK)
-    slot = 256
-    while slot < 1000 {
-        core::assert(tx.storage_store(address: 1, slot, value: 2) == OK)
-        slot += 1
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let point = checkpoint(mut tx, is_static: false)
+        core::assert(tx.storage_store(address: 1, slot: 0, value: 0) == OK)
+        slot = 256
+        while slot < 1000 {
+            core::assert(tx.storage_store(address: 1, slot, value: 2) == OK)
+            slot += 1
+        }
+        // Hundreds of updates to one slot must grow the journal, not impose a new
+        // consensus instruction-count limit.
+        var value: u256 = 3
+        while value < 600 {
+            core::assert(tx.storage_store(address: 1, slot: 256, value) == OK)
+            value += 1
+        }
+        tx.revert(point)
+        let _ = tx.finish(commit: true, gas_spent: 0)
     }
-    // Hundreds of updates to one slot must grow the journal, not impose a new
-    // consensus instruction-count limit.
-    var value: u256 = 3
-    while value < 600 {
-        core::assert(tx.storage_store(address: 1, slot: 256, value) == OK)
-        value += 1
-    }
-    tx.revert(point)
-    let world = tx.finish(commit: true, gas_spent: 0).state
     core::assert(world.storage_load(1, 0) == 1)
     core::assert(world.storage_load(1, 255) == 256)
     core::assert(world.storage_load(1, 256) == 0)
@@ -173,102 +189,122 @@ fn transaction_undo_restores_tables_grown_past_their_first_capacity() {
 
 #[test]
 fn transaction_checkpoints_do_not_consume_evm_call_depth() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut tx, is_static: false)
-    var vm = Vm::new()
-    var tracer = ()
-    vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
-    core::assert(vm.status == OK && tx.depth() == 1)
-    tx.commit(parent)
-    tx.finish(commit: true, gas_spent: 0)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut tx, is_static: false)
+        var vm = Vm::new()
+        var tracer = ()
+        vm.run(program([0x00]), empty_bytes(), default_call_env(), default_block_env(), mut tx, mut tracer)
+        core::assert(vm.status == OK && tx.depth() == 1)
+        tx.commit(parent)
+        tx.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
 fn vm_rollback_covers_revert_exceptional_and_operational_exits() {
     // Both persistent and transient writes precede each exit.
     for exit in [0xfd, 0xfe, 0x01] {
-        var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                  config: Config::osaka(), buffers: Buffers::new())
-        // ADD has two operands here; use a second ADD to trigger underflow.
-        let selected = if exit == 0x01 {
-            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
-        } else {
-            program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
+        var world = WorldState::empty()
+        var buffers = Buffers::new()
+        var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+        with (mut world, mut buffers) {
+            // ADD has two operands here; use a second ADD to trigger underflow.
+            let selected = if exit == 0x01 {
+                program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x01])
+            } else {
+                program([0x60, 9, 0x5f, 0x55, 0x60, 8, 0x5f, 0x5d, 0x5f, 0x5f, exit])
+            }
+            let expected = match exit {
+                0xfd => ERR_REVERT,
+                0xfe => ERR_INVALID_OPCODE,
+                _ => ERR_STACK_UNDERFLOW,
+            }
+            let result = execute(selected, empty_bytes(), default_call_env(), default_block_env(), mut tx)
+            core::assert(result.status == expected && tx.depth() == 0)
+            core::assert(world.storage_load(address: 0, slot: 0) == 0)
+            core::assert(tx.transient_load(address: 0, slot: 0) == 0)
+            tx.finish(commit: true, gas_spent: 0)
         }
-        let expected = match exit {
-            0xfd => ERR_REVERT,
-            0xfe => ERR_INVALID_OPCODE,
-            _ => ERR_STACK_UNDERFLOW,
-        }
-        let result = execute(selected, empty_bytes(), default_call_env(), default_block_env(), mut tx)
-        core::assert(result.status == expected && tx.depth() == 0)
-        core::assert(tx.storage_load(address: 0, slot: 0) == 0)
+    }
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        var call = default_call_env()
+        call.gas_limit = 208
+        let result = execute(
+            program([0x60, 8, 0x5f, 0x5d, 0x60, 9, 0x5f, 0x5d]),
+            empty_bytes(), call, default_block_env(), mut tx,
+        )
+        core::assert(result.status == ERR_OUT_OF_GAS && result.gas_remaining == 0)
         core::assert(tx.transient_load(address: 0, slot: 0) == 0)
         tx.finish(commit: true, gas_spent: 0)
     }
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    var call = default_call_env()
-    call.gas_limit = 208
-    let result = execute(
-        program([0x60, 8, 0x5f, 0x5d, 0x60, 9, 0x5f, 0x5d]),
-        empty_bytes(), call, default_block_env(), mut tx,
-    )
-    core::assert(result.status == ERR_OUT_OF_GAS && result.gas_remaining == 0)
-    core::assert(tx.transient_load(address: 0, slot: 0) == 0)
-    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
 fn vm_transient_state_is_shared_by_frames_and_cleared_between_transactions() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let write = program([0x60, 9, 0x5f, 0x5d, 0x60, 7, 0x5f, 0x55])
-    let read = program([0x5f, 0x5c])
-    let result = execute(write, empty_bytes(), default_call_env(), default_block_env(), mut tx)
-    core::assert(result.status == OK)
-    let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut tx)
-    core::assert(result.status == OK && result.stack_top == 9)
-    let world = tx.finish(commit: true, gas_spent: 0).state
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let write = program([0x60, 9, 0x5f, 0x5d, 0x60, 7, 0x5f, 0x55])
+        let read = program([0x5f, 0x5c])
+        let result = execute(write, empty_bytes(), default_call_env(), default_block_env(), mut tx)
+        core::assert(result.status == OK)
+        let result = execute(read, empty_bytes(), default_call_env(), default_block_env(), mut tx)
+        core::assert(result.status == OK && result.stack_top == 9)
+        let _ = tx.finish(commit: true, gas_spent: 0)
+    }
     core::assert(world.storage_load(0, 0) == 7)
-    var next = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                                config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(program([0x5f, 0x5c]), empty_bytes(), default_call_env(), default_block_env(), mut next)
-    core::assert(result.status == OK && result.stack_top == 0)
-    next.finish(commit: true, gas_spent: 0)
+    // The next transaction reuses the buffers, whose transient table `finish` emptied.
+    var next = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(program([0x5f, 0x5c]), empty_bytes(), default_call_env(), default_block_env(), mut next)
+        core::assert(result.status == OK && result.stack_top == 0)
+        next.finish(commit: true, gas_spent: 0)
+    }
 }
 
 #[test]
 fn vm_static_storage_writes_fault_but_reads_are_allowed() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    var call = default_call_env()
-    call.is_static = true
-    for op in [0x55, 0x5d] {
-        let result = execute(program([0x60, 9, 0x5f, op]), empty_bytes(), call, default_block_env(), mut tx)
-        core::assert(result.status == ERR_STATIC_WRITE && result.gas_remaining == 0)
-        core::assert(!tx.is_static() && tx.depth() == 0)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        var call = default_call_env()
+        call.is_static = true
+        for op in [0x55, 0x5d] {
+            let result = execute(program([0x60, 9, 0x5f, op]), empty_bytes(), call, default_block_env(), mut tx)
+            core::assert(result.status == ERR_STATIC_WRITE && result.gas_remaining == 0)
+            core::assert(!tx.is_static() && tx.depth() == 0)
+        }
+        let result = execute(program([0x5f, 0x54, 0x5f, 0x5c]), empty_bytes(), call, default_block_env(), mut tx)
+        core::assert(result.status == OK && result.stack_top == 0)
+        tx.finish(commit: true, gas_spent: 0)
     }
-    let result = execute(program([0x5f, 0x54, 0x5f, 0x5c]), empty_bytes(), call, default_block_env(), mut tx)
-    core::assert(result.status == OK && result.stack_top == 0)
-    tx.finish(commit: true, gas_spent: 0)
 }
 
 #[test]
 fn transient_storage_reverts_to_empty_whole_and_to_earlier_values_entry_by_entry() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    let outer = checkpoint(mut tx, is_static: false)
-    for slot in 0..40 { core::assert(tx.transient_store(address: 1, slot: slot as u256, value: slot as u256 + 1) == OK) }
-    tx.revert(outer)
-    for slot in 0..40 { core::assert(tx.transient_load(address: 1, slot: slot as u256) == 0) }
-    let first = checkpoint(mut tx, is_static: false)
-    core::assert(tx.transient_store(address: 1, slot: 5, value: 9) == OK)
-    let inner = checkpoint(mut tx, is_static: false)
-    core::assert(tx.transient_store(address: 1, slot: 5, value: 10) == OK)
-    core::assert(tx.transient_store(address: 1, slot: 6, value: 11) == OK)
-    tx.revert(inner)
-    core::assert(tx.transient_load(address: 1, slot: 5) == 9 && tx.transient_load(address: 1, slot: 6) == 0)
-    tx.commit(first)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let outer = checkpoint(mut tx, is_static: false)
+        for slot in 0..40 { core::assert(tx.transient_store(address: 1, slot: slot as u256, value: slot as u256 + 1) == OK) }
+        tx.revert(outer)
+        for slot in 0..40 { core::assert(tx.transient_load(address: 1, slot: slot as u256) == 0) }
+        let first = checkpoint(mut tx, is_static: false)
+        core::assert(tx.transient_store(address: 1, slot: 5, value: 9) == OK)
+        let inner = checkpoint(mut tx, is_static: false)
+        core::assert(tx.transient_store(address: 1, slot: 5, value: 10) == OK)
+        core::assert(tx.transient_store(address: 1, slot: 6, value: 11) == OK)
+        tx.revert(inner)
+        core::assert(tx.transient_load(address: 1, slot: 5) == 9 && tx.transient_load(address: 1, slot: 6) == 0)
+        tx.commit(first)
+    }
 }

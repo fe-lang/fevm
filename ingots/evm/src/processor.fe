@@ -117,7 +117,7 @@ impl TxRequest {
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
 /// outcome (OK, ERR_REVERT or an exceptional halt); any other status is a host
-/// failure, after which the pre-state is returned. `created` is the new
+/// failure, after which the world is as it was. `created` is the new
 /// contract's address when a creation succeeds. `gas_refunded` is the refund
 /// that reduced `gas_used`.
 pub struct Receipt {
@@ -129,8 +129,6 @@ pub struct Receipt {
     pub output: MemBuffer,
     pub logs: LogBuffer,
 }
-
-pub struct Applied { pub state: WorldState, pub receipt: Receipt }
 
 // `a * b`, or none past 256 bits. With `b` split at bit 64, `a` times the
 // high part fits in 256 bits and times the low part in 128.
@@ -274,13 +272,14 @@ fn empty_receipt(invalid: i32, status: i32) -> Receipt {
 }
 
 // A host failure during a valid transaction leaves the pre-state.
-fn host_failure(_ tx: mut Transaction, status: i32) -> Receipt {
+fn host_failure(_ tx: mut Transaction, status: i32) -> Receipt uses (world: mut WorldState, buffers: mut Buffers) {
     tx.end(commit: false)
     empty_receipt(invalid: VALID, status)
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
-fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
+fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32
+uses (world: mut WorldState, buffers: mut Buffers) {
     for address in request.access_accounts {
         if !tx.access_list_account(address) { return ERR_HOST_ALLOCATION }
     }
@@ -322,16 +321,17 @@ fn authority(_ authorization: Authorization, chain_id: u256) -> Option<u256> {
 // recovered authority is warmed; a valid one gets the delegation and its next
 // nonce, and refunds part of the intrinsic charge if the account existed. The
 // changes precede the message's checkpoint, so they survive its failure.
-fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32 {
+fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32
+uses (world: mut WorldState, buffers: mut Buffers) {
     for authorization in request.authorizations {
         let signer = authority(authorization, chain_id)
         if signer.is_none() { continue }
         let authority = signer.unwrap()
         var status = tx.warm_account(address: authority)
         if status != OK { return status }
-        let delegable = tx.code_size(authority) == 0 || tx.delegate(authority).is_some()
-        if !delegable || tx.nonce(authority) != authorization.nonce { continue }
-        if tx.exists(authority) { tx.add_refund(EXISTING_AUTHORITY_REFUND) }
+        let delegable = world.code_size(authority) == 0 || world.delegate(authority).is_some()
+        if !delegable || world.nonce(authority) != authorization.nonce { continue }
+        if world.exists(authority) { tx.add_refund(EXISTING_AUTHORITY_REFUND) }
         status = tx.delegate_code(address: authority, delegate: address_word(authorization.address))
         if status == OK { status = tx.increment_nonce(authority) }
         if status != OK { return status }
@@ -341,12 +341,12 @@ fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32
 
 // The top-level message: a creation or a call, each under its own checkpoint.
 fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv,
-                              _ tracer: mut T) -> ExecutionResult {
+                              _ tracer: mut T) -> ExecutionResult uses (world: mut WorldState, buffers: mut Buffers) {
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
     if request.env.creates {
-        if !tx.deployable(target) { return status_result(ERR_ADDRESS_COLLISION) }
+        if !world.deployable(target) { return status_result(ERR_ADDRESS_COLLISION) }
         let checkpoint = match begin_create(mut tx, sender, address: target, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => return status_result(status),
@@ -355,7 +355,7 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         var vm = Vm::new()
         vm.create(program, call, block, mut tx, mut tracer)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-        return vm.into_result(mut tx.buffers())
+        return vm.into_result()
     }
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
@@ -365,16 +365,16 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         return status_result(moved)
     }
     // A delegated account runs its delegate's code, never a precompile (EIP-7702).
-    if is_precompile(target) && tx.delegate(target).is_none() {
+    if is_precompile(target) && world.delegate(target).is_none() {
         let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return result
     }
-    let code = tx.code(target)
+    let code = world.code(target)
     let delegate = delegation(code)
     // A precompile delegate runs nothing.
     let runs_code = match delegate {
-        Option::Some(address) => !is_precompile(address) && tx.code_size(address) != 0,
+        Option::Some(address) => !is_precompile(address) && world.code_size(address) != 0,
         Option::None => code.len() != 0,
     }
     if let Option::Some(address) = delegate {
@@ -392,50 +392,43 @@ fn execute_message<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call:
         return result
     }
     var vm = Vm::new()
-    vm.run(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer)
+    vm.run(world.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-    vm.into_result(mut tx.buffers())
+    vm.into_result()
 }
 
-/// Validate and execute one Osaka transaction against `world`. Valid
-/// transactions pay for gas, run their message, refund unused and refunded gas
-/// to the sender, pay the priority fee to the coinbase, and settle deletions.
-/// The journal and frames reuse the allocations in `buffers`, and leave theirs there.
+/// Validate and execute one Osaka transaction on `world`. Valid transactions
+/// pay for gas, run their message, refund unused and refunded gas to the
+/// sender, pay the priority fee to the coinbase, and settle deletions; an
+/// invalid one, or a host failure, leaves `world` as it was. The journal and
+/// frames reuse the allocations in `buffers`, and leave theirs there.
 /// `tracer` sees each opcode and each call and creation, the transaction's own
 /// message among them; pass `()` to trace nothing.
-pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: true)
+pub fn transact<T: Tracer>(_ world: mut WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                           _ buffers: mut Buffers, _ tracer: mut T) -> Receipt {
+    with (mut world, mut buffers) { apply(request, block, config, mut tracer, commit: true) }
 }
 
-/// Runs a transaction as `transact` does but keeps none of its changes: the
-/// returned state is the pre-state. The receipt is the one `transact` would give.
-pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: false)
+/// Runs a transaction as `transact` does but keeps none of its changes:
+/// `world` is left as it was. The receipt is the one `transact` would give.
+pub fn simulate<T: Tracer>(_ world: mut WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                           _ buffers: mut Buffers, _ tracer: mut T) -> Receipt {
+    with (mut world, mut buffers) { apply(request, block, config, mut tracer, commit: false) }
 }
 
-fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                    _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
-    let receipt = apply_in(mut tx, request, block, config, mut tracer, commit)
-    let (state, lent) = tx.release()
-    buffers = lent
-    Applied { state, receipt }
-}
-
-fn apply_in<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                       _ tracer: mut T, commit: bool) -> Receipt {
+fn apply<T: Tracer>(_ request: TxRequest, _ block: BlockEnv, _ config: Config, _ tracer: mut T, commit: bool) -> Receipt
+uses (world: mut WorldState, buffers: mut Buffers) {
+    core::assert(buffers.journal.len() == 0)
     let env = request.env
-    let checked = checked(tx.world(), request, block, config)
+    let checked = checked(world, request, block, config)
     if checked.invalid != VALID {
         return empty_receipt(invalid: checked.invalid, status: OK)
     }
     let intrinsic = checked.intrinsic
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
-    let target = if env.creates { create_address(sender, nonce: tx.world().nonce(sender)) } else { address_word(env.to) }
-    tx.begin(sender, destination: target, coinbase: block.coinbase, config)
+    let target = if env.creates { create_address(sender, nonce: world.nonce(sender)) } else { address_word(env.to) }
+    var tx = Transaction::new(sender, destination: target, coinbase: block.coinbase, config)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
     let call = CallEnv {

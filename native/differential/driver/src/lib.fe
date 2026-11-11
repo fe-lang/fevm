@@ -68,10 +68,14 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
             return 2
         },
     }
-    var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
-    let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
-    state.finish(commit: vm.status == OK, gas_spent: call.gas_limit - vm.gas_remaining)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var state = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    let vm = with (mut world, mut buffers) {
+        let vm = execute_vm(program, calldata, call, default_block_env(), mut state)
+        state.finish(commit: vm.status == OK, gas_spent: call.gas_limit - vm.gas_remaining)
+        vm
+    }
     if !is_evm_outcome(vm.status) {
         return 3
     }

@@ -3,7 +3,7 @@ use std::env::Args
 use fevm::{Buffers, Checkpoint, Config, Transaction, WorldState, OK}
 use fevm::status::ERR_HOST_ALLOCATION
 
-fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
+fn checkpoint(_ tx: mut Transaction) -> Checkpoint uses (buffers: Buffers) {
     tx.checkpoint(is_static: false)
 }
 
@@ -11,41 +11,47 @@ fn checkpoint(_ tx: mut Transaction) -> Checkpoint {
 // retained first entry.
 fn headers() {
     let data = MemBuffer::empty()
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    core::assert(tx.emit_log(address: 1, topics: [7; 4], topic_count: 1, data: data.slice(offset: 0, len: 0)) == OK)
-    let point = checkpoint(mut tx)
-    var count: u64 = 1
-    var status = OK
-    while count < 350 && status == OK {
-        status = tx.emit_log(address: count as u256, topics: [0; 4], topic_count: 0, data: data.slice(offset: 0, len: 0))
-        if status == OK { count += 1 }
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        core::assert(tx.emit_log(address: 1, topics: [7; 4], topic_count: 1, data: data.slice(offset: 0, len: 0)) == OK)
+        let point = checkpoint(mut tx)
+        var count: u64 = 1
+        var status = OK
+        while count < 350 && status == OK {
+            status = tx.emit_log(address: count as u256, topics: [0; 4], topic_count: 0, data: data.slice(offset: 0, len: 0))
+            if status == OK { count += 1 }
+        }
+        core::assert(tx.logs().len() == count)
+        core::assert((status == OK && count == 350) || (status == ERR_HOST_ALLOCATION && count == 256))
+        tx.revert(point)
+        core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topics[0] == 7)
+        core::assert(tx.emit_log(address: 2, topics: [9; 4], topic_count: 4, data: data.slice(offset: 0, len: 0)) == OK)
+        let receipt = tx.finish(commit: true, gas_spent: 0)
+        core::assert(receipt.logs.len() == 2 && receipt.logs.entry(1).topics[3] == 9)
     }
-    core::assert(tx.logs().len() == count)
-    core::assert((status == OK && count == 350) || (status == ERR_HOST_ALLOCATION && count == 256))
-    tx.revert(point)
-    core::assert(tx.logs().len() == 1 && tx.logs().entry(0).topics[0] == 7)
-    core::assert(tx.emit_log(address: 2, topics: [9; 4], topic_count: 4, data: data.slice(offset: 0, len: 0)) == OK)
-    let receipt = tx.finish(commit: true, gas_spent: 0)
-    core::assert(receipt.logs.len() == 2 && receipt.logs.entry(1).topics[3] == 9)
 }
 
 // WATCH_SIZE=128 or 256 tests the first allocation of four hashes and the
 // atomic growth to eight.
 fn blobs() {
-    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                              config: Config::osaka(), buffers: Buffers::new())
-    var count: u256 = 0
-    while count < 5 && tx.add_blob_hash(count + 7) {
-        count += 1
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var tx = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        var count: u256 = 0
+        while count < 5 && tx.add_blob_hash(count + 7) {
+            count += 1
+        }
+        core::assert(count == 0 || count == 4 || count == 5)
+        var index: u256 = 0
+        while index < 5 {
+            core::assert(tx.blob_hash(index) == if index < count { index + 7 } else { 0 })
+            index += 1
+        }
+        tx.finish(commit: true, gas_spent: 0)
     }
-    core::assert(count == 0 || count == 4 || count == 5)
-    var index: u256 = 0
-    while index < 5 {
-        core::assert(tx.blob_hash(index) == if index < count { index + 7 } else { 0 })
-        index += 1
-    }
-    tx.finish(commit: true, gas_spent: 0)
 }
 
 pub fn main() -> i32 uses (args: Args) {

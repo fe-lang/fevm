@@ -15,11 +15,14 @@ fn clz(_ value: u256, gas_limit: u64) -> (i32, u256, u64) {
     bytes[33] = 0x1e
     var call = default_call_env()
     call.gas_limit = gas_limit
-    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                       config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, default_block_env(), mut transaction)
-    transaction.finish(commit: result.status == OK, gas_spent: gas_limit - result.gas_remaining)
-    (result.status, result.stack_top, result.gas_remaining)
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var transaction = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(Program::copy_from(bytes, len: 34), empty_bytes(), call, default_block_env(), mut transaction)
+        transaction.finish(commit: result.status == OK, gas_spent: gas_limit - result.gas_remaining)
+        (result.status, result.stack_top, result.gas_remaining)
+    }
 }
 
 #[test]
@@ -54,11 +57,14 @@ fn sar(_ value: u256, shift: u256) -> u256 {
         index += 1
     }
     bytes[66] = 0x1d
-    var transaction = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                       config: Config::osaka(), buffers: Buffers::new())
-    let result = execute(Program::copy_from(bytes, len: 67), empty_bytes(), default_call_env(), default_block_env(), mut transaction)
-    core::assert(result.status == OK)
-    result.stack_top
+    var world = WorldState::empty()
+    var buffers = Buffers::new()
+    var transaction = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let result = execute(Program::copy_from(bytes, len: 67), empty_bytes(), default_call_env(), default_block_env(), mut transaction)
+        core::assert(result.status == OK)
+        result.stack_top
+    }
 }
 
 #[test]

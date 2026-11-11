@@ -1,7 +1,7 @@
 use fevm::{Buffers, Checkpoint, Config, Transaction, WorldState, OK}
 use fevm::status::ERR_HOST_ALLOCATION
 
-fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
+fn checkpoint(_ transaction: mut Transaction) -> Checkpoint uses (buffers: Buffers) {
     transaction.checkpoint(is_static: false)
 }
 
@@ -11,30 +11,32 @@ fn checkpoint(_ transaction: mut Transaction) -> Checkpoint {
 pub fn main() -> i32 {
     var world = WorldState::empty()
     core::assert(world.storage_store(7, 3, 9000))
-    var transaction = Transaction::new(world, sender: 0, destination: 0, coinbase: 0,
-                                       config: Config::osaka(), buffers: Buffers::new())
-    let parent = checkpoint(mut transaction)
-    var value: u256 = 1
-    var status = OK
-    while value < 2048 && status == OK {
-        status = transaction.storage_store(address: 7, slot: 3, value)
-        if status == OK {
-            core::assert(transaction.storage_load(address: 7, slot: 3) == value)
-            value += 1
+    var buffers = Buffers::new()
+    var transaction = Transaction::new(sender: 0, destination: 0, coinbase: 0, config: Config::osaka())
+    with (mut world, mut buffers) {
+        let parent = checkpoint(mut transaction)
+        var value: u256 = 1
+        var status = OK
+        while value < 2048 && status == OK {
+            status = transaction.storage_store(address: 7, slot: 3, value)
+            if status == OK {
+                core::assert(world.storage_load(address: 7, slot: 3) == value)
+                value += 1
+            }
         }
-    }
-    core::assert(status == ERR_HOST_ALLOCATION && value > 1 && value < 2048)
-    core::assert(transaction.storage_load(address: 7, slot: 3) == value - 1)
-    transaction.revert(parent)
-    core::assert(transaction.storage_load(address: 7, slot: 3) == 9000)
-    core::assert(transaction.depth() == 0)
+        core::assert(status == ERR_HOST_ALLOCATION && value > 1 && value < 2048)
+        core::assert(world.storage_load(address: 7, slot: 3) == value - 1)
+        transaction.revert(parent)
+        core::assert(world.storage_load(address: 7, slot: 3) == 9000)
+        core::assert(transaction.depth() == 0)
 
-    // Existing capacity remains usable after failure and rollback. Neither
-    // replay nor this smaller write may attempt another large allocation.
-    let child = checkpoint(mut transaction)
-    core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
-    transaction.revert(child)
-    let world = transaction.finish(commit: true, gas_spent: 0).state
+        // Existing capacity remains usable after failure and rollback. Neither
+        // replay nor this smaller write may attempt another large allocation.
+        let child = checkpoint(mut transaction)
+        core::assert(transaction.storage_store(address: 7, slot: 3, value: 42) == OK)
+        transaction.revert(child)
+        let _ = transaction.finish(commit: true, gas_spent: 0)
+    }
     core::assert(world.storage_load(7, 3) == 9000)
     0
 }

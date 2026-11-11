@@ -96,7 +96,8 @@ fn write_logs(_ logs: LogBuffer) uses (text: mut MemBuffer) {
     "]".fmt(mut text)
 }
 
-fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (text: mut MemBuffer) {
+fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128)
+uses (text: mut MemBuffer, world: WorldState, buffers: Buffers) {
     ",\"refund_delta\":".fmt(mut text)
     refund_delta.fmt(mut text)
     ",\"refund_counter\":".fmt(mut text)
@@ -107,7 +108,7 @@ fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (t
         if index != 0 { ",".fmt(mut text) }
         let address = watch.accounts[index]
         "{\"balance\":\"".fmt(mut text)
-        write_hex_word(tx.balance(address))
+        write_hex_word(world.balance(address))
         "\",\"warm\":".fmt(mut text)
         tx.account_is_warm(address).fmt(mut text)
         "}".fmt(mut text)
@@ -119,7 +120,7 @@ fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (t
         if index != 0 { ",".fmt(mut text) }
         let key = watch.slots[index]
         "{\"value\":\"".fmt(mut text)
-        write_hex_word(tx.storage_load(address: key.address, slot: key.slot))
+        write_hex_word(world.storage_load(address: key.address, slot: key.slot))
         "\",\"original\":\"".fmt(mut text)
         write_hex_word(tx.original_storage(address: key.address, slot: key.slot))
         "\",\"transient\":\"".fmt(mut text)
@@ -135,7 +136,8 @@ fn write_snapshot(_ tx: Transaction, _ watch: Watch, refund_delta: i128) uses (t
 }
 
 #[inline(never)]
-fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv) -> u64 uses (text: mut MemBuffer) {
+fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv) -> u64
+uses (text: mut MemBuffer, world: mut WorldState, buffers: mut Buffers) {
     var call = call
     call.is_static = reader.flag()
     call.gas_limit = reader.word(bytes: 8).downcast_unchecked()
@@ -150,7 +152,9 @@ fn run_frame(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call
     gas_spent
 }
 
-fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv, _ emitted: mut bool) -> u64 uses (text: mut MemBuffer) {
+fn run_actions(_ tx: mut Transaction, _ reader: mut Reader, _ watch: Watch, _ call: CallEnv, _ block: BlockEnv,
+               _ emitted: mut bool) -> u64
+uses (text: mut MemBuffer, world: mut WorldState, buffers: mut Buffers) {
     let count = reader.count()
     var index: usize = 0
     var gas_spent: u64 = 0
@@ -225,6 +229,7 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
     let watch = read_watch(mut reader)
     let transactions = reader.count()
     index = 0
+    var buffers = Buffers::new()
     var text = MemBuffer::empty()
     with (mut text) {
         "[".fmt(mut text)
@@ -234,71 +239,71 @@ pub fn main() -> i32 uses (args: Args, out: mut Stdout) {
             let destination = reader.word(bytes: 20)
             let coinbase = reader.word(bytes: 20)
             let block_number = reader.word(bytes: 32)
-            var tx = Transaction::new(world, sender, destination, coinbase,
-                                      config: Config::osaka(), buffers: Buffers::new())
-            let blobs = reader.count()
-            var blob: usize = 0
-            while blob < blobs {
-                core::assert(tx.add_blob_hash(reader.word(bytes: 32)))
-                blob += 1
+            var tx = Transaction::new(sender, destination, coinbase, config: Config::osaka())
+            with (mut world, mut buffers) {
+                let blobs = reader.count()
+                var blob: usize = 0
+                while blob < blobs {
+                    core::assert(tx.add_blob_hash(reader.word(bytes: 32)))
+                    blob += 1
+                }
+                let commit = reader.flag()
+                let accounts = reader.count()
+                var entry: usize = 0
+                while entry < accounts {
+                    core::assert(tx.access_list_account(address: reader.word(bytes: 20)))
+                    entry += 1
+                }
+                let slots = reader.count()
+                entry = 0
+                while entry < slots {
+                    let address = reader.word(bytes: 20)
+                    let slot = reader.word(bytes: 32)
+                    core::assert(tx.access_list_slot(address, slot))
+                    entry += 1
+                }
+                var call = default_call_env()
+                call.address = destination
+                call.caller = sender
+                call.origin = sender
+                var block = default_block_env()
+                block.coinbase = coinbase
+                block.number = block_number
+                var emitted = false
+                "{\"steps\":[".fmt(mut text)
+                let gas_spent = run_actions(mut tx, mut reader, watch, call, block, mut emitted)
+                "],\"refund_counter\":".fmt(mut text)
+                let refund: i128 = if commit { tx.refund() } else { 0 }
+                refund.fmt(mut text)
+                let settled = tx.finish(commit, gas_spent)
+                ",\"gas_refunded\":".fmt(mut text)
+                settled.gas_refunded.fmt(mut text)
+                ",\"gas_used\":".fmt(mut text)
+                settled.gas_used.fmt(mut text)
+                ",\"balances\":[".fmt(mut text)
+                entry = 0
+                while entry < watch.account_count {
+                    if entry != 0 { ",".fmt(mut text) }
+                    "\"".fmt(mut text)
+                    write_hex_word(world.balance(watch.accounts[entry]))
+                    "\"".fmt(mut text)
+                    entry += 1
+                }
+                "],\"storage\":[".fmt(mut text)
+                entry = 0
+                while entry < watch.slot_count {
+                    if entry != 0 { ",".fmt(mut text) }
+                    let key = watch.slots[entry]
+                    "\"".fmt(mut text)
+                    write_hex_word(world.storage_load(key.address, key.slot))
+                    "\"".fmt(mut text)
+                    entry += 1
+                }
+                "],\"logs\":".fmt(mut text)
+                write_logs(settled.logs)
+                "}".fmt(mut text)
+                index += 1
             }
-            let commit = reader.flag()
-            let accounts = reader.count()
-            var entry: usize = 0
-            while entry < accounts {
-                core::assert(tx.access_list_account(address: reader.word(bytes: 20)))
-                entry += 1
-            }
-            let slots = reader.count()
-            entry = 0
-            while entry < slots {
-                let address = reader.word(bytes: 20)
-                let slot = reader.word(bytes: 32)
-                core::assert(tx.access_list_slot(address, slot))
-                entry += 1
-            }
-            var call = default_call_env()
-            call.address = destination
-            call.caller = sender
-            call.origin = sender
-            var block = default_block_env()
-            block.coinbase = coinbase
-            block.number = block_number
-            var emitted = false
-            "{\"steps\":[".fmt(mut text)
-            let gas_spent = run_actions(mut tx, mut reader, watch, call, block, mut emitted)
-            "],\"refund_counter\":".fmt(mut text)
-            let refund: i128 = if commit { tx.refund() } else { 0 }
-            refund.fmt(mut text)
-            let settled = tx.finish(commit, gas_spent)
-            ",\"gas_refunded\":".fmt(mut text)
-            settled.gas_refunded.fmt(mut text)
-            ",\"gas_used\":".fmt(mut text)
-            settled.gas_used.fmt(mut text)
-            ",\"balances\":[".fmt(mut text)
-            entry = 0
-            while entry < watch.account_count {
-                if entry != 0 { ",".fmt(mut text) }
-                "\"".fmt(mut text)
-                write_hex_word(settled.state.balance(watch.accounts[entry]))
-                "\"".fmt(mut text)
-                entry += 1
-            }
-            "],\"storage\":[".fmt(mut text)
-            entry = 0
-            while entry < watch.slot_count {
-                if entry != 0 { ",".fmt(mut text) }
-                let key = watch.slots[entry]
-                "\"".fmt(mut text)
-                write_hex_word(settled.state.storage_load(key.address, key.slot))
-                "\"".fmt(mut text)
-                entry += 1
-            }
-            "],\"logs\":".fmt(mut text)
-            write_logs(settled.logs)
-            "}".fmt(mut text)
-            world = settled.state
-            index += 1
         }
         "]\n".fmt(mut text)
     }

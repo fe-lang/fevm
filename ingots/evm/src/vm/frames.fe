@@ -2,7 +2,7 @@
 // them beneath the root.
 use core::{Box, MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
-use ingot::state::{address_word, delegation}
+use ingot::state::{WorldState, address_word, delegation}
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
 use ingot::trace::{CallEnd, CallStart, Tracer}
@@ -50,28 +50,29 @@ impl Frame {
         self.creates = creates
     }
 
-    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>>
+    uses (world: mut WorldState, buffers: mut Buffers) {
         self.vm.run_until_child(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
-    fn finish(mut self, _ state: mut Transaction) -> ChildResult {
+    fn finish(mut self, _ state: mut Transaction) -> ChildResult uses (world: mut WorldState, buffers: mut Buffers) {
         let creates = self.creates
         let address = self.vm.call.address
         if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
         let checkpoint = self.checkpoint.take().unwrap()
         if self.vm.status == OK { state.commit(checkpoint) }
         else { state.revert(checkpoint) }
-        ChildResult { result: self.vm.take_result(mut state.buffers()), offset: self.output_offset, len: self.output_len, creates, address }
+        ChildResult { result: self.vm.take_result(), offset: self.output_offset, len: self.output_len, creates, address }
     }
 
-    fn abort(mut self, _ state: mut Transaction) {
+    fn abort(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         state.revert(self.checkpoint.take().unwrap())
     }
 }
 
 /// An allocation for a child frame: a finished frame's, or a new one. Calls
 /// fill it in place, and it never moves.
-fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
+fn frame_allocation() -> Option<Box<Frame>> uses (buffers: mut Buffers) {
     match buffers.frames.pop() {
         Option::Some(frame) => Option::Some(frame),
         Option::None => match Box::try_new(Frame::idle()) {
@@ -83,10 +84,11 @@ fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
 
 /// Move ether as the specification's move_ether, touching both accounts. The
 /// sender must hold `value`. On failure the caller reverts its checkpoint.
-pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
+pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32
+uses (world: mut WorldState, buffers: mut Buffers) {
     // A self-transfer changes no balance, so static frames may perform it.
     if from == to {
-        core::assert(state.balance(from) >= value)
+        core::assert(world.balance(from) >= value)
         return state.touch(from)
     }
     // Crediting first finds an overflow before any balance changes.
@@ -99,7 +101,8 @@ pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> 
 /// mark, the new account's first nonce and its endowment from the sender, which
 /// the address cannot be. Initcode failure or a rejected deposit reverts all of
 /// it.
-pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
+pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint>
+uses (world: mut WorldState, buffers: mut Buffers) {
     let checkpoint = state.checkpoint(is_static: false)
     var status = state.mark_created(address)
     // Crediting first finds an overflow before any balance changes.
@@ -168,7 +171,8 @@ impl Vm {
 
     // Deposit successful initcode output: EIP-3541 prefix, 200 gas per byte and
     // the EIP-170 size limit. A rejected deposit is an exceptional halt.
-    pub(super) fn deposit_code(mut self, address: u256, _ state: mut Transaction) {
+    pub(super) fn deposit_code(mut self, address: u256, _ state: mut Transaction)
+    uses (world: mut WorldState, buffers: mut Buffers) {
         let len: u64 = self.output.len().downcast_unchecked()
         if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
@@ -184,7 +188,7 @@ impl Vm {
     }
 
     pub(super) fn start_call<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
-                             _ tracer: mut T) -> Option<Box<Frame>> {
+                             _ tracer: mut T) -> Option<Box<Frame>> uses (world: mut WorldState, buffers: mut Buffers) {
         let requested = self.pop()
         let code_address = address_word(self.pop())
         let sender = address_word(self.call.address)
@@ -218,11 +222,11 @@ impl Vm {
             }
         }
         // EIP-7702: a delegated account runs its delegate's code, whose access is charged too.
-        let code = state.code(code_address)
+        let code = world.code(code_address)
         let delegate = delegation(code)
         // A delegate that is a precompile runs nothing.
         let runs_code = match delegate {
-            Option::Some(delegate) => !is_precompile(delegate) && state.code_size(delegate) != 0,
+            Option::Some(delegate) => !is_precompile(delegate) && world.code_size(delegate) != 0,
             Option::None => code.len() != 0,
         }
         var delegate_access: u128 = 0
@@ -235,7 +239,7 @@ impl Vm {
             }
         }
         let extra: u128 = (if cold { 2500 } else { 0 }) + delegate_access
-            + if op == 0xf1 && has_value && state.is_empty(code_address) { 25000 } else { 0 }
+            + if op == 0xf1 && has_value && world.is_empty(code_address) { 25000 } else { 0 }
         if !self.charge(extra) { return Option::None }
         let cap = self.gas_remaining - self.gas_remaining / 64
         let forwarded: u64 = if requested < cap as u256 { requested.downcast_unchecked() } else { cap }
@@ -243,7 +247,7 @@ impl Vm {
         let child_gas = forwarded + if has_value { 2300 } else { 0 }
         self.return_data.clear()
         // Target warming belongs to the caller checkpoint, including failures.
-        if depth == CALL_DEPTH_LIMIT || (has_value && state.balance(sender) < value) {
+        if depth == CALL_DEPTH_LIMIT || (has_value && world.balance(sender) < value) {
             self.gas_remaining += child_gas
             self.push(0)
             return Option::None
@@ -287,7 +291,7 @@ impl Vm {
             self.push(1)
             return Option::None
         }
-        let program = state.program(delegate.unwrap_or(default: code_address))
+        let program = world.program(delegate.unwrap_or(default: code_address))
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)
@@ -298,7 +302,7 @@ impl Vm {
             callvalue: if op == 0xf4 { self.call.callvalue } else { value },
             origin: self.call.origin, gasprice: self.call.gasprice, gas_limit: child_gas, is_static,
         }
-        var frame = match frame_allocation(mut state.buffers()) {
+        var frame = match frame_allocation() {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -312,7 +316,8 @@ impl Vm {
     }
 
     pub(super) fn start_create<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
-                               _ tracer: mut T) -> Option<Box<Frame>> {
+                               _ tracer: mut T) -> Option<Box<Frame>>
+    uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.holds(if op == 0xf5 { 4 } else { 3 }) { return Option::None }
         let value = self.take()
         let offset = self.take()
@@ -334,7 +339,7 @@ impl Vm {
         let count: usize = len.downcast_unchecked()
         let start: usize = if count == 0 { 0 } else { offset.downcast_unchecked() }
         let sender = address_word(self.call.address)
-        let account = state.sender(sender)
+        let account = world.sender(sender)
         let address = if op == 0xf0 {
             create_address(sender, nonce: account.nonce)
         } else {
@@ -357,7 +362,7 @@ impl Vm {
         self.fault(state.warm_account(address))
         if !self.ok() { return Option::None }
         // A collision with existing code or nonce consumes the forwarded gas.
-        if !state.deployable(address) {
+        if !world.deployable(address) {
             self.fault(state.increment_nonce(sender))
             self.push(0)
             return Option::None
@@ -383,7 +388,7 @@ impl Vm {
             address, caller: sender, callvalue: value, origin: self.call.origin,
             gasprice: self.call.gasprice, gas_limit: create_gas, is_static: false,
         }
-        var frame = match frame_allocation(mut state.buffers()) {
+        var frame = match frame_allocation() {
             Option::Some(frame) => frame,
             Option::None => {
                 self.fault(ERR_HOST_ALLOCATION)
@@ -398,14 +403,14 @@ impl Vm {
 
     // EIP-6780: the balance moves to the beneficiary; only an account created by
     // this transaction is deleted, at settlement, and loses ether sent to itself.
-    pub(super) fn selfdestruct(mut self, _ state: mut Transaction) {
+    pub(super) fn selfdestruct(mut self, _ state: mut Transaction) uses (world: mut WorldState, buffers: mut Buffers) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
         let me = address_word(self.call.address)
-        let balance = state.balance(me)
+        let balance = world.balance(me)
         var gas: u128 = 5000
         if !state.account_is_warm(beneficiary) { gas += 2600 }
-        if balance != 0 && state.is_empty(beneficiary) { gas += 25000 }
+        if balance != 0 && world.is_empty(beneficiary) { gas += 25000 }
         if !self.charge(gas) { return }
         self.fault(state.warm_account(address: beneficiary))
         if !self.ok() { return }
@@ -425,7 +430,8 @@ impl Vm {
     }
 
     pub(super) fn run_children<T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
-                               _ state: mut Transaction, _ tracer: mut T) {
+                               _ state: mut Transaction, _ tracer: mut T)
+    uses (world: mut WorldState, buffers: mut Buffers) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
         var frames: MemVec<Box<Frame>> = MemVec::new()
@@ -434,7 +440,7 @@ impl Vm {
             match next {
                 Option::Some(frame) => {
                     var frame = frame
-                    frame.get().vm.adopt(mut state.buffers())
+                    frame.get().vm.adopt()
                     match frames.try_push(frame) {
                         Result::Ok(()) => {},
                         // Like other host failures while starting a child, this fails the parent.
@@ -455,7 +461,7 @@ impl Vm {
                     tracer.leave(CallEnd { depth, status: result.result.status, gas: result.result.gas_remaining },
                                  output: result.result.output.span())
                     // A pool that cannot grow frees it.
-                    let _ = state.buffers().frames.try_push(frame)
+                    let _ = buffers.frames.try_push(frame)
                     if depth == 1 { self.accept_child(result) }
                     else { frames[depth - 2].get().vm.accept_child(result) }
                 },

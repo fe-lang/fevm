@@ -2,8 +2,8 @@ use core::{MemSpan, MemVec, Option, Result}
 use ingot::logs::LogBuffer
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, ChangeKind, Mark}
-use ingot::state::{Field, Sender, StorageKey, WorldState, WriteError, Written, address_word, designator}
-use ingot::types::{Config, Program}
+use ingot::state::{Field, StorageKey, WorldState, WriteError, Written, address_word, designator}
+use ingot::types::Config
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
@@ -15,19 +15,17 @@ use fevm_precompiles::is_precompile
 pub struct Checkpoint { position: usize, depth: usize, was_static: bool, refund: i128, logs: u64, transient_empty: bool }
 
 pub struct TransactionResult {
-    pub state: WorldState,
     pub logs: LogBuffer,
     // Gas charged after the transaction refund cap; refunds never refill a frame.
     pub gas_used: u64,
     pub gas_refunded: u64,
-    // The buffers the transaction was lent, for the next.
-    pub buffers: Buffers,
 }
 
-// The persistent database is unavailable to callers until finish consumes the
-// transaction. Every write during execution must therefore pass the journal.
+/// A transaction in progress: what it keeps of its own. It runs on a world
+/// and buffers its caller lends as effects (`uses (world: mut WorldState,
+/// buffers: mut Buffers)`), and every write to the world passes the journal
+/// in the buffers, so a revert can undo it.
 pub struct Transaction {
-    state: WorldState,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
     // The sender, destination and coinbase, warm from the start (EIP-2929,
@@ -38,20 +36,13 @@ pub struct Transaction {
     depth: usize,
     is_static: bool,
     config: Config,
-    // Lent by the caller for the journal, the transaction's frames and its
-    // tables (see `Buffers`).
-    buffers: Buffers,
 }
 
 impl Transaction {
-    /// A transaction on `state` from `sender` to `destination` (the created
-    /// address for a creation), with `buffers` lent until `finish` returns
-    /// them.
-    pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256, config: Config,
-               buffers: own Buffers) -> Self {
-        core::assert(buffers.journal.len() == 0)
+    /// A transaction from `sender` to `destination` (the created address for
+    /// a creation).
+    pub fn new(sender: u256, destination: u256, coinbase: u256, config: Config) -> Self {
         Self {
-            state,
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
             endpoints: [address_word(sender), address_word(destination), address_word(coinbase)],
@@ -60,28 +51,10 @@ impl Transaction {
             depth: 0,
             is_static: false,
             config,
-            buffers,
         }
     }
 
-    /// Starts the next transaction on the same state and buffers, as `new`
-    /// does, after `end` closed the last one.
-    pub fn begin(mut self, sender: u256, destination: u256, coinbase: u256, config: Config) {
-        core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
-        self.endpoints = [address_word(sender), address_word(destination), address_word(coinbase)]
-        self.refund = 0
-        self.started = false
-        self.is_static = false
-        self.config = config
-        self.blob_hashes.clear()
-    }
-
-    /// The state, between transactions.
-    pub fn world(self) -> ref WorldState { ref self.state }
-
     pub fn config(self) -> Config { self.config }
-
-    pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
 
     pub fn logs(self) -> ref LogBuffer { ref self.logs }
     pub fn take_logs(mut self) -> LogBuffer { core::mem::replace(mut self.logs, LogBuffer::new()) }
@@ -115,24 +88,24 @@ impl Transaction {
     }
 
     // Access-list initialization precedes all frames and is never rolled back.
-    pub fn access_list_account(mut self, address: u256) -> bool {
+    pub fn access_list_account(mut self, address: u256) -> bool uses (buffers: mut Buffers) {
         core::assert(!self.started)
         self.add_mark(address_word(address), Mark::Warm)
     }
 
-    pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool {
+    pub fn access_list_slot(mut self, address: u256, slot: u256) -> bool uses (buffers: mut Buffers) {
         core::assert(!self.started)
         let address = address_word(address)
         let was_warm = self.marked(address, Mark::Warm)
         if !self.add_mark(address, Mark::Warm) { return false }
-        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) {
+        if !buffers.warm_storage.try_insert(StorageKey { address, slot }, true) {
             if !was_warm { core::assert(self.unmark(address, Mark::Warm)) }
             return false
         }
         true
     }
 
-    pub fn account_is_warm(self, _ address: u256) -> bool {
+    pub fn account_is_warm(self, _ address: u256) -> bool uses (buffers: Buffers) {
         let address = address_word(address)
         self.always_warm(address) || self.marked(address, Mark::Warm)
     }
@@ -145,92 +118,93 @@ impl Transaction {
     }
 
     // Whether `address`, an address word, has `mark`.
-    fn marked(self, _ address: u256, _ mark: Mark) -> bool {
-        self.buffers.marks.get(address).value & mark.bit() != 0
+    fn marked(self, _ address: u256, _ mark: Mark) -> bool uses (buffers: Buffers) {
+        buffers.marks.get(address).value & mark.bit() != 0
     }
 
     // Adds `mark` to `address`'s marks, unjournaled; false, changing nothing,
     // if the table cannot grow.
-    fn add_mark(mut self, _ address: u256, _ mark: Mark) -> bool {
-        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return false }
-        let marks = mut self.buffers.marks.value_at(slot)
+    fn add_mark(mut self, _ address: u256, _ mark: Mark) -> bool uses (buffers: mut Buffers) {
+        let Option::Some(slot) = buffers.marks.try_find_or_insert(address) else { return false }
+        let marks = mut buffers.marks.value_at(slot)
         marks |= mark.bit()
         true
     }
 
     // Clears `mark` from `address`'s marks, which it has an entry for; an
     // address left without marks loses its entry. Neither grows the table.
-    fn unmark(mut self, _ address: u256, _ mark: Mark) -> bool {
-        let Option::Some(slot) = self.buffers.marks.find(address) else { return false }
-        let marks = mut self.buffers.marks.value_at(slot)
+    fn unmark(mut self, _ address: u256, _ mark: Mark) -> bool uses (buffers: mut Buffers) {
+        let Option::Some(slot) = buffers.marks.find(address) else { return false }
+        let marks = mut buffers.marks.value_at(slot)
         marks &= ~mark.bit()
-        marks != 0 || self.buffers.marks.remove(address)
+        marks != 0 || buffers.marks.remove(address)
     }
 
-    pub fn storage_is_warm(self, address: u256, slot: u256) -> bool {
-        self.buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
+    pub fn storage_is_warm(self, address: u256, slot: u256) -> bool uses (buffers: Buffers) {
+        buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
     // Adds `mark` to `address`, journaled if new. A new address gets an
     // entry without marks first.
-    fn mark(mut self, _ mark: Mark, _ address: u256) -> i32 {
+    fn mark(mut self, _ mark: Mark, _ address: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         self.started = true
         let address = address_word(address)
-        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
-        let marks = mut self.buffers.marks.value_at(slot)
+        let Option::Some(slot) = buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
+        let marks = mut buffers.marks.value_at(slot)
         if marks & mark.bit() != 0 { return OK }
         marks |= mark.bit()
         self.journal(address, ChangeKind::Mark(mark))
     }
 
-    pub fn warm_account(mut self, address: u256) -> i32 {
+    pub fn warm_account(mut self, address: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         self.started = true
         if self.always_warm(address_word(address)) { return OK }
         self.mark(Mark::Warm, address)
     }
 
-    pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
+    pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         self.started = true
         let address = address_word(address)
         if self.storage_is_warm(address, slot) { return OK }
-        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) { return ERR_HOST_ALLOCATION }
+        if !buffers.warm_storage.try_insert(StorageKey { address, slot }, true) { return ERR_HOST_ALLOCATION }
         self.journal(address, ChangeKind::WarmSlot { slot })
     }
 
-    pub fn touch(mut self, _ address: u256) -> i32 {
+    pub fn touch(mut self, _ address: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         self.mark(Mark::Touched, address)
     }
 
     /// Touches `address` with a journal entry and no mark: for the
     /// transaction's own call, which touches its target once.
-    pub fn touch_unmarked(mut self, _ address: u256) -> i32 {
+    pub fn touch_unmarked(mut self, _ address: u256) -> i32 uses (buffers: mut Buffers) {
         self.started = true
-        if self.buffers.journal.push(Change { address: address_word(address), kind: ChangeKind::Touch }) { OK }
+        if buffers.journal.push(Change { address: address_word(address), kind: ChangeKind::Touch }) { OK }
         else { ERR_HOST_ALLOCATION }
     }
 
     // SELFDESTRUCT of an account created by this transaction (EIP-6780).
-    pub fn doom(mut self, _ address: u256) -> i32 {
+    pub fn doom(mut self, _ address: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         self.mark(Mark::Doomed, address)
     }
 
-    pub fn mark_created(mut self, _ address: u256) -> i32 {
+    pub fn mark_created(mut self, _ address: u256) -> i32 uses (buffers: mut Buffers) {
         if self.add_mark(address_word(address), Mark::Created) { OK } else { ERR_HOST_ALLOCATION }
     }
 
-    pub fn was_created(self, _ address: u256) -> bool {
+    pub fn was_created(self, _ address: u256) -> bool uses (buffers: Buffers) {
         self.marked(address_word(address), Mark::Created)
     }
 
-    pub fn original_storage(self, address: u256, slot: u256) -> u256 {
-        let original = self.buffers.originals.get(StorageKey { address: address_word(address), slot })
-        if original.found { original.value } else { self.storage_load(address, slot) }
+    pub fn original_storage(self, address: u256, slot: u256) -> u256 uses (world: WorldState, buffers: Buffers) {
+        let original = buffers.originals.get(StorageKey { address: address_word(address), slot })
+        if original.found { original.value } else { world.storage_load(address, slot) }
     }
 
-    pub fn storage_charge(self, address: u256, slot: u256, value: u256) -> StorageCharge {
+    pub fn storage_charge(self, address: u256, slot: u256, value: u256) -> StorageCharge
+    uses (world: WorldState, buffers: Buffers) {
         storage_charge(
             original: self.original_storage(address, slot),
-            current: self.storage_load(address, slot), value,
+            current: world.storage_load(address, slot), value,
             cold: !self.storage_is_warm(address, slot),
         )
     }
@@ -239,12 +213,12 @@ impl Transaction {
     pub fn depth(self) -> usize { self.depth }
 
     // Administrative checkpoints do not count toward EVM call depth.
-    pub fn checkpoint(mut self, is_static: bool) -> Checkpoint {
+    pub fn checkpoint(mut self, is_static: bool) -> Checkpoint uses (buffers: Buffers) {
         self.started = true
         self.depth += 1
         let checkpoint = Checkpoint {
-            position: self.buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
-            logs: self.logs.len(), transient_empty: self.buffers.transient.is_empty(),
+            position: buffers.journal.len(), depth: self.depth, was_static: self.is_static, refund: self.refund,
+            logs: self.logs.len(), transient_empty: buffers.transient.is_empty(),
         }
         self.is_static = self.is_static || is_static
         checkpoint
@@ -256,9 +230,9 @@ impl Transaction {
         self.is_static = checkpoint.was_static
     }
 
-    pub fn revert(mut self, _ checkpoint: own Checkpoint) {
+    pub fn revert(mut self, _ checkpoint: own Checkpoint) uses (world: mut WorldState, buffers: mut Buffers) {
         core::assert(self.depth == checkpoint.depth)
-        if checkpoint.transient_empty { self.buffers.transient.clear() }
+        if checkpoint.transient_empty { buffers.transient.clear() }
         self.undo_to(checkpoint.position, transient: !checkpoint.transient_empty)
         self.logs.truncate(checkpoint.logs)
         self.refund = checkpoint.refund
@@ -268,9 +242,9 @@ impl Transaction {
 
     // Undoes the journal's changes past `position`, latest first, but for
     // transient storage's unless `transient`.
-    fn undo_to(mut self, _ position: usize, transient: bool) {
-        while self.buffers.journal.len() > position {
-            let change = self.buffers.journal.pop()
+    fn undo_to(mut self, _ position: usize, transient: bool) uses (world: mut WorldState, buffers: mut Buffers) {
+        while buffers.journal.len() > position {
+            let change = buffers.journal.pop()
             let skip = match change.kind {
                 ChangeKind::Transient { .. } => !transient,
                 _ => false,
@@ -283,41 +257,42 @@ impl Transaction {
     // the tables held before; a table that cannot allocate to hold one again
     // is a fatal host failure. Undoing the change that created an account
     // removes it.
-    fn undo(mut self, _ change: Change) {
+    fn undo(mut self, _ change: Change) uses (world: mut WorldState, buffers: mut Buffers) {
         let empty: [u8; 0] = []
         let address = change.address
         match change.kind {
-            ChangeKind::Account { field, previous, .. } => self.state.restore(field, address, previous),
+            ChangeKind::Account { field, previous, .. } => world.restore(field, address, previous),
             ChangeKind::Sender { nonce, balance, .. } => {
-                self.state.restore(Field::Nonce, address, nonce)
-                self.state.restore(Field::Balance, address, balance)
+                world.restore(Field::Nonce, address, nonce)
+                world.restore(Field::Balance, address, balance)
             },
             ChangeKind::Contract { balance, .. } => {
-                self.state.restore(Field::Nonce, address, 0)
-                self.state.restore(Field::Balance, address, balance)
+                world.restore(Field::Nonce, address, 0)
+                world.restore(Field::Balance, address, balance)
             },
-            ChangeKind::Storage { slot, previous, .. } => core::assert(self.state.storage_store(address, slot, previous)),
+            ChangeKind::Storage { slot, previous, .. } => core::assert(world.storage_store(address, slot, previous)),
             ChangeKind::Transient { slot, previous } => core::assert(self.write_transient(address, slot, previous)),
             ChangeKind::Mark(mark) => core::assert(self.unmark(address, mark)),
-            ChangeKind::WarmSlot { slot } => core::assert(self.buffers.warm_storage.remove(StorageKey { address, slot })),
-            ChangeKind::Code { .. } => core::assert(self.state.set_code(address, code: empty) == OK),
+            ChangeKind::WarmSlot { slot } => core::assert(buffers.warm_storage.remove(StorageKey { address, slot })),
+            ChangeKind::Code { .. } => core::assert(world.set_code(address, code: empty) == OK),
             ChangeKind::Touch => {},
             ChangeKind::Delegation { previous, .. } => {
                 let restored = match previous {
-                    Option::Some(delegate) => self.state.set_code_unhashed(address, code: designator(delegate)),
-                    Option::None => self.state.set_code(address, code: empty),
+                    Option::Some(delegate) => world.set_code_unhashed(address, code: designator(delegate)),
+                    Option::None => world.set_code(address, code: empty),
                 }
                 core::assert(restored == OK)
             },
         }
-        if change.created() { self.state.remove_empty_account(address) }
+        if change.created() { world.remove_empty_account(address) }
     }
 
     // Journals a change to `address`, which the world or tables already
     // made; a journal that cannot grow undoes it.
-    fn journal(mut self, _ address: u256, _ kind: ChangeKind) -> i32 {
+    fn journal(mut self, _ address: u256, _ kind: ChangeKind) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         let change = Change { address, kind }
-        if self.buffers.journal.push(change) { return OK }
+        if buffers.journal.push(change) { return OK }
         self.undo(change)
         ERR_HOST_ALLOCATION
     }
@@ -328,39 +303,24 @@ impl Transaction {
         !self.is_static
     }
 
-    pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
-    pub fn is_empty(self, _ address: u256) -> bool { self.state.is_empty(address) }
-    // EIP-684/EIP-7610: creation needs an address without nonce, code or storage.
-    pub fn deployable(self, _ address: u256) -> bool { self.state.deployable(address) }
-    pub fn sender(self, _ address: u256) -> Sender { self.state.sender(address) }
-    pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
-    pub fn code_hash(mut self, _ address: u256) -> u256 { self.state.code_hash(address) }
-    pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
-    pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
-    pub fn program(self, _ address: u256) -> Program { self.state.program(address) }
-    pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
-    pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
-    pub fn storage_load(self, address: u256, slot: u256) -> u256 {
-        self.state.storage_load(address, slot)
+    pub fn transient_load(self, address: u256, slot: u256) -> u256 uses (buffers: Buffers) {
+        buffers.transient.get(StorageKey { address: address_word(address), slot }).value
     }
-    pub fn transient_load(self, address: u256, slot: u256) -> u256 {
-        self.buffers.transient.get(StorageKey { address: address_word(address), slot }).value
-    }
-    pub fn block_hash(self, _ number: u256) -> u256 { self.state.block_hash(number) }
 
     // The transient table holds no zeros.
-    fn write_transient(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+    fn write_transient(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool uses (buffers: mut Buffers) {
         let key = StorageKey { address, slot }
         if value == 0 {
-            let _ = self.buffers.transient.remove(key)
+            let _ = buffers.transient.remove(key)
             return true
         }
-        self.buffers.transient.try_insert(key, value)
+        buffers.transient.try_insert(key, value)
     }
 
     // Journals a balance or nonce write of `address`, an address word, which
     // touches the account even if the value is unchanged.
-    fn journal_write(mut self, _ field: Field, _ address: u256, _ written: Result<WriteError, Written>) -> i32 {
+    fn journal_write(mut self, _ field: Field, _ address: u256, _ written: Result<WriteError, Written>) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         match written {
             Result::Ok(written) => if written.changed {
                 self.journal(address, ChangeKind::Account { field, previous: written.previous, existed: written.existed })
@@ -371,40 +331,40 @@ impl Transaction {
         }
     }
 
-    pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
+    pub fn set_balance(mut self, address: u256, value: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        self.journal_write(Field::Balance, address, self.state.replace(Field::Balance, address, value))
+        self.journal_write(Field::Balance, address, world.replace(Field::Balance, address, value))
     }
-    pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
+    pub fn set_nonce(mut self, address: u256, value: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        self.journal_write(Field::Nonce, address, self.state.replace(Field::Nonce, address, value))
+        self.journal_write(Field::Nonce, address, world.replace(Field::Nonce, address, value))
     }
-    pub fn increment_nonce(mut self, _ address: u256) -> i32 {
+    pub fn increment_nonce(mut self, _ address: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        self.journal_write(Field::Nonce, address, self.state.add(Field::Nonce, address, amount: 1))
+        self.journal_write(Field::Nonce, address, world.add(Field::Nonce, address, amount: 1))
     }
     /// Adds `amount` to the balance, touching the account; one past 2^256 is
     /// ERR_BALANCE_OVERFLOW and changes no balance.
-    pub fn credit(mut self, address: u256, amount: u256) -> i32 {
+    pub fn credit(mut self, address: u256, amount: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        self.journal_write(Field::Balance, address, self.state.add(Field::Balance, address, amount))
+        self.journal_write(Field::Balance, address, world.add(Field::Balance, address, amount))
     }
     /// Subtracts `amount`, which the balance must hold, touching the account.
-    pub fn debit(mut self, address: u256, amount: u256) -> i32 {
+    pub fn debit(mut self, address: u256, amount: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        self.journal_write(Field::Balance, address, self.state.subtract(Field::Balance, address, amount))
+        self.journal_write(Field::Balance, address, world.subtract(Field::Balance, address, amount))
     }
     /// Sets a new contract's nonce to one and credits it `value`; one past
     /// 2^256 is ERR_BALANCE_OVERFLOW and changes nothing.
-    pub fn endow(mut self, address: u256, value: u256) -> i32 {
+    pub fn endow(mut self, address: u256, value: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
-        match self.state.endow(address, amount: value) {
+        match world.endow(address, amount: value) {
             Result::Ok(written) => self.journal(address, ChangeKind::Contract {
                 balance: written.previous, existed: written.existed,
             }),
@@ -414,10 +374,10 @@ impl Transaction {
     /// Increments the sender's nonce and subtracts `fee`, which its balance
     /// must hold: the transaction's nonce increment and gas purchase. A nonce
     /// of 2^256 - 1 is ERR_BALANCE_OVERFLOW and changes nothing.
-    pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 {
+    pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(sender)
-        match self.state.charge(address, fee) {
+        match world.charge(address, fee) {
             Result::Ok(charged) => self.journal(address, ChangeKind::Sender {
                 nonce: charged.nonce, balance: charged.balance, existed: charged.existed,
             }),
@@ -425,54 +385,57 @@ impl Transaction {
         }
     }
     // Contract deployment writes code to an account that has none (EIP-684).
-    pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {
+    pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         // Empty code leaves the account as it is, with nothing to undo.
         if code.len() == 0 { return OK }
         let address = address_word(address)
-        let existing = self.state.existing_code_len(address)
+        let existing = world.existing_code_len(address)
         core::assert(existing.unwrap_or(default: 0) == 0)
         // Journaled first: undoing a code write cannot fail, but code writes can.
-        if !self.buffers.journal.push(Change { address, kind: ChangeKind::Code { existed: existing.is_some() } }) {
+        if !buffers.journal.push(Change { address, kind: ChangeKind::Code { existed: existing.is_some() } }) {
             return ERR_HOST_ALLOCATION
         }
-        let written = self.state.set_code_unhashed(address, code)
-        if written != OK { let _ = self.buffers.journal.pop() }
+        let written = world.set_code_unhashed(address, code)
+        if written != OK { let _ = buffers.journal.pop() }
         written
     }
     // EIP-7702: point an authority's code at `delegate`, or clear it for zero.
     // The code must be empty or a designator, which the journal can restore.
-    pub fn delegate_code(mut self, address: u256, delegate: u256) -> i32 {
+    pub fn delegate_code(mut self, address: u256, delegate: u256) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         self.started = true
         let address = address_word(address)
-        let previous = self.state.delegate(address)
-        core::assert(self.state.code_size(address) == 0 || previous.is_some())
+        let previous = world.delegate(address)
+        core::assert(world.code_size(address) == 0 || previous.is_some())
         // Journaled first: restoring a designator can need allocation.
-        let kind = ChangeKind::Delegation { previous, existed: self.state.exists(address) }
-        if !self.buffers.journal.push(Change { address, kind }) {
+        let kind = ChangeKind::Delegation { previous, existed: world.exists(address) }
+        if !buffers.journal.push(Change { address, kind }) {
             return ERR_HOST_ALLOCATION
         }
         let empty: [u8; 0] = []
-        let written = if delegate == 0 { self.state.set_code(address, code: empty) }
-            else { self.state.set_code_unhashed(address, code: designator(delegate)) }
-        if written != OK { let _ = self.buffers.journal.pop() }
+        let written = if delegate == 0 { world.set_code(address, code: empty) }
+            else { world.set_code_unhashed(address, code: designator(delegate)) }
+        if written != OK { let _ = buffers.journal.pop() }
         written
     }
-    pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
+    pub fn storage_store(mut self, address: u256, slot: u256, value: u256) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
         let charge = self.storage_charge(address, slot, value)
-        let previous = self.storage_load(address, slot)
+        let previous = world.storage_load(address, slot)
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
-        if !self.buffers.originals.contains(key) && !self.buffers.originals.try_insert(key, previous) {
+        if !buffers.originals.contains(key) && !buffers.originals.try_insert(key, previous) {
             return ERR_HOST_ALLOCATION
         }
         if previous != value {
             // Undo deletes an account its write created.
-            let existed = self.state.exists(address)
-            if !self.state.storage_store(address, slot, value) { return ERR_HOST_ALLOCATION }
+            let existed = world.exists(address)
+            if !world.storage_store(address, slot, value) { return ERR_HOST_ALLOCATION }
             let status = self.journal(address, ChangeKind::Storage { slot, previous, existed })
             if status != OK { return status }
         }
@@ -482,16 +445,17 @@ impl Transaction {
     // TSTORE's write (EIP-1153). The transient table holds no zeros: a zero
     // takes the entry out, and another value finds or makes one, each with
     // a single search.
-    pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32 {
+    pub fn transient_store(mut self, address: u256, slot: u256, value: u256) -> i32
+    uses (world: mut WorldState, buffers: mut Buffers) {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
         let previous = if value == 0 {
-            let Option::Some(previous) = self.buffers.transient.take(key) else { return OK }
+            let Option::Some(previous) = buffers.transient.take(key) else { return OK }
             previous
         } else {
-            let Option::Some(at) = self.buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
-            let stored = mut self.buffers.transient.value_at(at)
+            let Option::Some(at) = buffers.transient.try_find_or_insert(key) else { return ERR_HOST_ALLOCATION }
+            let stored = mut buffers.transient.value_at(at)
             if stored == value { return OK }
             core::mem::replace(mut stored, value)
         }
@@ -502,12 +466,12 @@ impl Transaction {
     // paid: self-destructed accounts created by this transaction, and touched
     // accounts left empty. Each loses its code and storage. These direct world
     // updates are not journaled.
-    pub fn settle(mut self) {
+    pub fn settle(mut self) uses (world: mut WorldState, buffers: Buffers) {
         core::assert(self.depth == 0)
         // The journal holds the changes and marks that survived their frames.
-        for change in self.buffers.journal.changes() {
-            if let ChangeKind::Mark(Mark::Doomed) = change.kind { self.state.remove_account(change.address) }
-            if change.touches() { self.state.remove_if_empty(change.address) }
+        for change in buffers.journal.changes() {
+            if let ChangeKind::Mark(Mark::Doomed) = change.kind { world.remove_account(change.address) }
+            if change.touches() { world.remove_if_empty(change.address) }
         }
     }
 
@@ -515,27 +479,23 @@ impl Transaction {
     // Transient storage is dropped at this boundary, never at a frame boundary.
     /// Closes the transaction in place: undoes it unless `commit`, and empties
     /// its tables. The logs stay for `take_logs`.
-    pub fn end(mut self, commit: bool) {
+    pub fn end(mut self, commit: bool) uses (world: mut WorldState, buffers: mut Buffers) {
         core::assert(self.depth == 0)
         if !commit {
             self.undo_to(0, transient: false)
             self.logs.truncate(0)
         }
-        self.buffers.journal.clear()
-        self.buffers.transient.clear()
-        self.buffers.marks.clear()
-        self.buffers.warm_storage.clear()
-        self.buffers.originals.clear()
+        buffers.journal.clear()
+        buffers.transient.clear()
+        buffers.marks.clear()
+        buffers.warm_storage.clear()
+        buffers.originals.clear()
     }
 
-    /// The state and buffers, after `end`.
-    pub fn release(var own self) -> (WorldState, Buffers) { (self.state, self.buffers) }
-
-    pub fn finish(var own self, commit: bool, gas_spent: u64) -> TransactionResult {
+    pub fn finish(var own self, commit: bool, gas_spent: u64) -> TransactionResult
+    uses (world: mut WorldState, buffers: mut Buffers) {
         self.end(commit)
         let gas_refunded = if commit { self.capped_refund(gas_spent) } else { 0 }
-        TransactionResult {
-            state: self.state, logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded, buffers: self.buffers,
-        }
+        TransactionResult { logs: self.logs, gas_used: gas_spent - gas_refunded, gas_refunded }
     }
 }
