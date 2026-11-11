@@ -248,13 +248,14 @@ struct Session {
 }
 
 impl Session {
-    fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Applied {
-        let world = core::mem::replace(mut self.world, WorldState::empty())
-        if commit {
-            transact(world, request, self.block, self.config, mut self.buffers, mut tracer)
+    fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Receipt {
+        let applied = if commit {
+            transact(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
         } else {
-            simulate(world, request, self.block, self.config, mut self.buffers, mut tracer)
+            simulate(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
         }
+        self.world = applied.state
+        applied.receipt
     }
 
     fn handle(mut self, _ reader: mut Reader) -> Writer {
@@ -351,14 +352,13 @@ impl Session {
                 }
                 let commit = (flags & COMMIT) != 0
                 var trace = Trace::new(steps: (flags & TRACE_STEPS) != 0, calls: (flags & TRACE_CALLS) != 0)
-                let applied = if (flags & (TRACE_STEPS | TRACE_CALLS)) == 0 {
+                let receipt = if (flags & (TRACE_STEPS | TRACE_CALLS)) == 0 {
                     var untraced = ()
                     self.apply(request, commit, mut untraced)
                 } else {
                     self.apply(request, commit, mut trace)
                 }
-                self.world = applied.state
-                receipt_response(applied.receipt, trace)
+                receipt_response(receipt, trace)
             },
             SNAPSHOT => {
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }

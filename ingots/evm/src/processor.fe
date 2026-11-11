@@ -417,8 +417,7 @@ pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ bloc
 
 fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config,
-                              buffers: core::mem::replace(mut buffers, Buffers::new()))
+    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
     let receipt = apply_in(mut tx, request, block, config, mut tracer, commit)
     let (state, lent) = tx.release()
     buffers = lent
