@@ -415,13 +415,6 @@ pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ bloc
     apply(world, request, block, config, mut buffers, mut tracer, commit: false)
 }
 
-/// `transact` on the state `tx` holds between transactions (see
-/// `Transaction::load`), which keeps it and its buffers in place.
-pub fn transact_in<T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                              _ tracer: mut T) -> Receipt {
-    apply_in(mut tx, request, block, config, mut tracer, commit: true)
-}
-
 fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
     var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config,
