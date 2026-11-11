@@ -173,3 +173,7 @@ a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 state tests it does not count have malformed signatures, which fevm, given a
 recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
 evm-benchmarks state tests against revm and evmone.
+
+## License
+
+fevm is licensed under the [Apache License, Version 2.0](LICENSE).
