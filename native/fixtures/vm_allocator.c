@@ -58,6 +58,18 @@ void free(void *pointer) {
     munmap(header, header->info.extent);
 }
 
+// Fe grows buffers past 1032 bytes with `realloc`. A resize here allocates,
+// copies and releases, so it counts as `malloc` and `free` do, and a use of
+// the old address faults.
+void *realloc(void *pointer, size_t size) {
+    void *resized = malloc(size);
+    if (resized == NULL || pointer == NULL) return resized;
+    size_t old = ((Header *)pointer - 1)->info.extent - sizeof(Header);
+    memcpy(resized, pointer, old < size ? old : size);
+    free(pointer);
+    return resized;
+}
+
 __attribute__((destructor)) static void check_releases(void) {
     unsigned expected = FAIL_AT ? FAIL_AT - 1 : SUCCESS_ALLOCS;
     if (attempts != (FAIL_AT ? FAIL_AT : SUCCESS_ALLOCS) ||
