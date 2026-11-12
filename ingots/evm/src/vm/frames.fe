@@ -2,6 +2,8 @@
 // them beneath the root.
 use core::{Box, MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
+use ingot::fork::Rules
+use ingot::gas::{ACCOUNT_WRITE, NEW_ACCOUNT, STATE_BYTE, StateGas, account_access}
 use ingot::state::{address_word, delegation}
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
@@ -24,22 +26,27 @@ pub(super) struct Frame {
     output_len: u64,
     // CREATE frames deposit their output as code at `call.address`.
     creates: bool,
+    // EIP-8037: the state gas the parent charged for the account the call or
+    // creation makes, which the frame's failure refills.
+    refill: u64,
 }
 
-struct ChildResult { result: ExecutionResult, offset: u64, len: u64, creates: bool, address: u256 }
+struct ChildResult { result: ExecutionResult, offset: u64, len: u64, creates: bool, address: u256, refill: u64 }
 
 impl Frame {
     // A new allocation's contents until a call fills it.
     fn idle() -> Self {
         Frame {
             vm: Vm::new(), program: Program::new(empty_bytes()), calldata: empty_bytes(),
-            checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false,
+            checkpoint: Option::None, output_offset: 0, output_len: 0, creates: false, refill: 0,
         }
     }
 
-    fn start(mut self, gas: u64, _ program: own Program, _ calldata: own InputData, _ call: CallEnv,
-             _ block: BlockEnv, _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64, creates: bool) {
-        self.vm.reset(gas)
+    fn start(mut self, gas: u64, reservoir: u64, refill: u64, _ program: own Program, _ calldata: own InputData,
+             _ call: CallEnv, _ block: BlockEnv, _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64,
+             creates: bool) {
+        self.vm.reset(gas, state_gas: StateGas::new(reservoir))
+        self.refill = refill
         self.program = program
         self.calldata = calldata
         self.vm.call = call
@@ -50,18 +57,25 @@ impl Frame {
         self.creates = creates
     }
 
-    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
-        self.vm.run_until_child(self.program, self.calldata, mut state, depth, mut tracer)
+    fn resume<F: Rules, T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        self.vm.run_until_child<F, T>(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
-    fn finish(mut self, _ state: mut Transaction) -> ChildResult {
+    fn finish<F: Rules>(mut self, _ state: mut Transaction) -> ChildResult {
         let creates = self.creates
         let address = self.vm.call.address
-        if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
+        if creates && self.vm.status == OK { self.vm.deposit_code<F>(address, mut state) }
         let checkpoint = self.checkpoint.take().unwrap()
-        if self.vm.status == OK { state.commit(checkpoint) }
-        else { state.revert(checkpoint) }
-        ChildResult { result: self.vm.take_result(mut state.buffers()), offset: self.output_offset, len: self.output_len, creates, address }
+        if self.vm.status == OK {
+            state.commit(checkpoint)
+        } else {
+            state.revert(checkpoint)
+            if F::STATE_GAS { self.vm.restore_state_gas() }
+        }
+        ChildResult {
+            result: self.vm.take_result(mut state.buffers()), offset: self.output_offset, len: self.output_len, creates,
+            address, refill: self.refill,
+        }
     }
 
     fn abort(mut self, _ state: mut Transaction) {
@@ -81,30 +95,33 @@ fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
     }
 }
 
-/// Move ether as the specification's move_ether, touching both accounts. The
-/// sender must hold `value`. On failure the caller reverts its checkpoint.
-pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
+/// Move ether as the specification's move_ether, touching both accounts, and
+/// log it if `F` logs transfers. The sender must hold `value`. On failure the
+/// caller reverts its checkpoint.
+pub fn transfer<F: Rules>(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
     // A self-transfer changes no balance, so static frames may perform it.
     if from == to {
         core::assert(state.balance(from) >= value)
         return state.touch(from)
     }
     // Crediting first finds an overflow before any balance changes.
-    let status = state.credit(address: to, amount: value)
-    if status != OK { return status }
-    state.debit(address: from, amount: value)
+    var status = state.credit(address: to, amount: value)
+    if status == OK { status = state.debit(address: from, amount: value) }
+    if status == OK && F::TRANSFER_LOGS && value != 0 { status = state.log_transfer(from, to, value) }
+    status
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation
 /// mark, the new account's first nonce and its endowment from the sender, which
 /// the address cannot be. Initcode failure or a rejected deposit reverts all of
 /// it.
-pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
+pub fn begin_create<F: Rules>(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
     let checkpoint = state.checkpoint(is_static: false)
     var status = state.mark_created(address)
     // Crediting first finds an overflow before any balance changes.
     if status == OK { status = state.endow(address, value) }
     if status == OK && value != 0 { status = state.debit(address: sender, amount: value) }
+    if status == OK && F::TRANSFER_LOGS && value != 0 { status = state.log_transfer(from: sender, to: address, value) }
     if status == OK { return Result::Ok(checkpoint) }
     state.revert(checkpoint)
     Result::Err(status)
@@ -128,6 +145,8 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
         output_valid: status == OK,
         stack_top: 0,
         stack_len: 0,
+        reservoir: 0,
+        spilled: 0,
     }
 }
 
@@ -135,12 +154,12 @@ pub fn run_precompile(address: u256, input: InputData, gas: u64) -> ExecutionRes
 pub fn status_result(_ status: i32) -> ExecutionResult {
     ExecutionResult {
         status, output: MemBuffer::empty(), gas_remaining: 0, refund_delta: 0,
-        output_valid: false, stack_top: 0, stack_len: 0,
+        output_valid: false, stack_top: 0, stack_len: 0, reservoir: 0, spilled: 0,
     }
 }
 
 impl Vm {
-    pub(super) fn accept_child(mut self, _ child: own ChildResult) {
+    pub(super) fn accept_child<F: Rules>(mut self, _ child: own ChildResult) {
         let result = child.result
         if !is_evm_outcome(result.status) {
             // Host failures abort the execution. They must never be reported
@@ -150,6 +169,14 @@ impl Vm {
         }
         if result.status == OK || result.status == ERR_REVERT {
             self.gas_remaining += result.gas_remaining
+        }
+        if F::STATE_GAS {
+            // A failed child has refilled its reservoir and returned its
+            // spill already; either way the reservoir comes back.
+            self.state_gas.reservoir += result.reservoir
+            self.state_gas.spilled += result.spilled
+            if result.status == OK { self.state_gas.repay(mut self.gas_remaining) }
+            else { self.state_gas.refund(mut self.gas_remaining, child.refill) }
         }
         if child.creates {
             // A successful creation leaves the return data empty; a failed one
@@ -166,15 +193,20 @@ impl Vm {
         self.return_data = result.output
     }
 
-    // Deposit successful initcode output: EIP-3541 prefix, 200 gas per byte and
-    // the EIP-170 size limit. A rejected deposit is an exceptional halt.
-    pub(super) fn deposit_code(mut self, address: u256, _ state: mut Transaction) {
+    // Deposit successful initcode output: EIP-3541 prefix, the EIP-170 size
+    // limit, and 200 gas per byte, or from EIP-8037 the hash of its words and
+    // state gas for its bytes. A rejected deposit is an exceptional halt.
+    pub(super) fn deposit_code<F: Rules>(mut self, address: u256, _ state: mut Transaction) {
         let len: u64 = self.output.len().downcast_unchecked()
         if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
-        } else if len > state.config().max_code_size || !self.charge(len as u128 * 200) {
+        } else if len > state.config().max_code_size {
             self.fault(ERR_OUT_OF_GAS)
-        } else {
+        } else if F::STATE_GAS {
+            if self.charge(((len + 31) / 32) as u128 * 6) && self.charge_state(len * STATE_BYTE) {
+                self.fault(state.deploy_code(address, code: self.output.span()))
+            }
+        } else if self.charge(len as u128 * 200) {
             self.fault(state.deploy_code(address, code: self.output.span()))
         }
         if !self.ok() {
@@ -183,7 +215,7 @@ impl Vm {
         }
     }
 
-    pub(super) fn start_call<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
+    pub(super) fn start_call<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                              _ tracer: mut T) -> Option<Box<Frame>> {
         let requested = self.pop()
         let code_address = address_word(self.pop())
@@ -208,7 +240,7 @@ impl Vm {
             }
         }
         let has_value = transfers && value != 0
-        if !self.charge(100 + if has_value { 9000 } else { 0 }) { return Option::None }
+        if !self.charge(100 + if has_value { F::CALL_VALUE as u128 } else { 0 }) { return Option::None }
         let cold = !state.account_is_warm(code_address)
         if cold {
             let access_status = state.warm_account(address: code_address)
@@ -227,16 +259,21 @@ impl Vm {
         }
         var delegate_access: u128 = 0
         if let Option::Some(delegate) = delegate {
-            delegate_access = if state.account_is_warm(delegate) { 100 } else { 2600 }
+            delegate_access = account_access<F>(warm: state.account_is_warm(delegate)) as u128
             let warmed = state.warm_account(address: delegate)
             if warmed != OK {
                 self.fault(warmed)
                 return Option::None
             }
         }
-        let extra: u128 = (if cold { 2500 } else { 0 }) + delegate_access
-            + if op == 0xf1 && has_value && state.is_empty(code_address) { 25000 } else { 0 }
+        // A CALL of value to an empty account creates it, for 25,000 gas or
+        // from EIP-8037 state gas, which the call's failure refills.
+        let creates_account = op == 0xf1 && has_value && state.is_empty(code_address)
+        let extra: u128 = (if cold { F::COLD_ACCOUNT_ACCESS as u128 - 100 } else { 0 }) + delegate_access
+            + if creates_account && !F::STATE_GAS { 25000 } else { 0 }
         if !self.charge(extra) { return Option::None }
+        let refill = if F::STATE_GAS && creates_account { NEW_ACCOUNT } else { 0 }
+        if refill != 0 && !self.charge_state(refill) { return Option::None }
         let cap = self.gas_remaining - self.gas_remaining / 64
         let forwarded: u64 = if requested < cap as u256 { requested.downcast_unchecked() } else { cap }
         self.gas_remaining -= forwarded
@@ -245,6 +282,7 @@ impl Vm {
         // Target warming belongs to the caller checkpoint, including failures.
         if depth == CALL_DEPTH_LIMIT || (has_value && state.balance(sender) < value) {
             self.gas_remaining += child_gas
+            if refill != 0 { self.state_gas.refund(mut self.gas_remaining, refill) }
             self.push(0)
             return Option::None
         }
@@ -252,7 +290,7 @@ impl Vm {
         let is_static = state.is_static() || op == 0xfa
         let checkpoint = state.checkpoint(is_static)
         // The call touches its target even without value; a failed call undoes the touch.
-        let moved = if has_value { transfer(mut state, from: sender, to: address, value) } else { state.touch(address) }
+        let moved = if has_value { transfer<F>(mut state, from: sender, to: address, value) } else { state.touch(address) }
         if moved != OK {
             state.revert(checkpoint)
             self.fault(moved)
@@ -276,7 +314,7 @@ impl Vm {
             tracer.leave(CallEnd { depth: depth + 1, status: result.status, gas: result.gas_remaining },
                          output: result.output.span())
             if result.status == OK { state.commit(checkpoint) } else { state.revert(checkpoint) }
-            self.accept_child(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address })
+            self.accept_child<F>(ChildResult { result, offset: out_offset, len: out_len, creates: false, address: code_address, refill })
             return Option::None
         }
         if !runs_code {
@@ -306,12 +344,15 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: child_gas, program, calldata, child_call, block: self.block, checkpoint,
-                          output_offset: out_offset, output_len: out_len, creates: false)
+        // EIP-8037: the child takes the whole reservoir.
+        let reservoir = self.state_gas.reservoir
+        self.state_gas.reservoir = 0
+        frame.get().start(gas: child_gas, reservoir, refill, program, calldata, child_call, block: self.block,
+                          checkpoint, output_offset: out_offset, output_len: out_len, creates: false)
         Option::Some(frame)
     }
 
-    pub(super) fn start_create<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
+    pub(super) fn start_create<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                                _ tracer: mut T) -> Option<Box<Frame>> {
         if !self.holds(if op == 0xf5 { 4 } else { 3 }) { return Option::None }
         let value = self.take()
@@ -324,8 +365,8 @@ impl Vm {
         }
         // A successful plan bounds a nonempty range below 2^42 bytes.
         let words: u128 = ((len + 31) / 32).downcast_unchecked()
-        // 32,000 gas, two per initcode word (EIP-3860), and six per word hashed by CREATE2.
-        let cost = 32000 + words * if op == 0xf5 { 8 } else { 2 }
+        // The base cost, two per initcode word (EIP-3860), and six per word hashed by CREATE2.
+        let cost = F::CREATE as u128 + words * if op == 0xf5 { 8 } else { 2 }
         if !self.charge(cost) || !self.expand_memory(plan.size) { return Option::None }
         if len > state.config().max_initcode_size as u256 {
             self.fault(ERR_OUT_OF_GAS)
@@ -342,20 +383,23 @@ impl Vm {
             hash.update(self.memory, offset: start, len: count)
             create2_address(sender, salt, code_hash: hash.finish_word())
         }
-        let create_gas = self.gas_remaining - self.gas_remaining / 64
-        self.gas_remaining -= create_gas
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return Option::None
         }
         self.return_data.clear()
         if account.balance < value || account.nonce == 0xffffffffffffffff || depth == CALL_DEPTH_LIMIT {
-            self.gas_remaining += create_gas
             self.push(0)
             return Option::None
         }
         self.fault(state.warm_account(address))
         if !self.ok() { return Option::None }
+        // EIP-8037: creating an account that is not alive costs state gas,
+        // which the creation's failure refills.
+        let refill = if F::STATE_GAS && state.is_empty(address) { NEW_ACCOUNT } else { 0 }
+        if refill != 0 && !self.charge_state(refill) { return Option::None }
+        let create_gas = self.gas_remaining - self.gas_remaining / 64
+        self.gas_remaining -= create_gas
         // A collision with existing code or nonce consumes the forwarded gas.
         if !state.deployable(address) {
             self.fault(state.increment_nonce(sender))
@@ -364,7 +408,7 @@ impl Vm {
         }
         self.fault(state.increment_nonce(sender))
         if !self.ok() { return Option::None }
-        let checkpoint = match begin_create(mut state, sender, address, value) {
+        let checkpoint = match begin_create<F>(mut state, sender, address, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => {
                 self.fault(status)
@@ -391,40 +435,46 @@ impl Vm {
                 return Option::None
             },
         }
-        frame.get().start(gas: create_gas, program, empty_bytes(), child_call, block: self.block, checkpoint,
-                          output_offset: 0, output_len: 0, creates: true)
+        let reservoir = self.state_gas.reservoir
+        self.state_gas.reservoir = 0
+        frame.get().start(gas: create_gas, reservoir, refill, program, empty_bytes(), child_call, block: self.block,
+                          checkpoint, output_offset: 0, output_len: 0, creates: true)
         Option::Some(frame)
     }
 
     // EIP-6780: the balance moves to the beneficiary; only an account created by
-    // this transaction is deleted, at settlement, and loses ether sent to itself.
-    pub(super) fn selfdestruct(mut self, _ state: mut Transaction) {
+    // this transaction is deleted, at settlement. Until EIP-8246 it also loses
+    // ether sent to itself.
+    pub(super) fn selfdestruct<F: Rules>(mut self, _ state: mut Transaction) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
         let me = address_word(self.call.address)
         let balance = state.balance(me)
         var gas: u128 = 5000
-        if !state.account_is_warm(beneficiary) { gas += 2600 }
-        if balance != 0 && state.is_empty(beneficiary) { gas += 25000 }
-        if !self.charge(gas) { return }
+        if !state.account_is_warm(beneficiary) { gas += F::COLD_ACCOUNT_ACCESS as u128 }
+        // A sweep to an empty account creates it: 25,000 gas, or from
+        // EIP-8037 an account write and state gas.
+        let creates_account = balance != 0 && state.is_empty(beneficiary)
+        if creates_account { gas += if F::STATE_GAS { ACCOUNT_WRITE as u128 } else { 25000 } }
+        if !self.charge(gas) || (F::STATE_GAS && creates_account && !self.charge_state(NEW_ACCOUNT)) { return }
         self.fault(state.warm_account(address: beneficiary))
         if !self.ok() { return }
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
         }
-        var status = transfer(mut state, from: me, to: beneficiary, value: balance)
+        var status = transfer<F>(mut state, from: me, to: beneficiary, value: balance)
         if status == OK && state.was_created(me) {
             // A balance the transfer kept, as one to itself, is burned. The
             // transfer touched the account already.
-            if balance != 0 { status = state.set_balance(address: me, value: 0) }
+            if F::SELFDESTRUCT_BURNS && balance != 0 { status = state.set_balance(address: me, value: 0) }
             if status == OK { status = state.doom(me) }
         }
         self.fault(status)
         if self.ok() { self.halted = true }
     }
 
-    pub(super) fn run_children<T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
+    pub(super) fn run_children<F: Rules, T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
                                _ state: mut Transaction, _ tracer: mut T) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
@@ -451,20 +501,20 @@ impl Vm {
                     let depth = frames.len()
                     if depth == 0 { break }
                     var frame = frames.pop().unwrap()
-                    let result = frame.get().finish(mut state)
+                    let result = frame.get().finish<F>(mut state)
                     tracer.leave(CallEnd { depth, status: result.result.status, gas: result.result.gas_remaining },
                                  output: result.result.output.span())
                     // A pool that cannot grow frees it.
                     let _ = state.buffers().frames.try_push(frame)
-                    if depth == 1 { self.accept_child(result) }
-                    else { frames[depth - 2].get().vm.accept_child(result) }
+                    if depth == 1 { self.accept_child<F>(result) }
+                    else { frames[depth - 2].get().vm.accept_child<F>(result) }
                 },
             }
             let depth = frames.len()
             next = if depth == 0 {
-                self.run_until_child(program, calldata, mut state, depth: 0, mut tracer)
+                self.run_until_child<F, T>(program, calldata, mut state, depth: 0, mut tracer)
             } else {
-                frames[depth - 1].get().resume(mut state, depth, mut tracer)
+                frames[depth - 1].get().resume<F, T>(mut state, depth, mut tracer)
             }
         }
     }

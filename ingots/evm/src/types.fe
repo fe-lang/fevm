@@ -1,5 +1,6 @@
 use core::{MemBuffer, MemSpan, Option}
 use keccak::ByteSource
+use ingot::fork::Fork
 use ingot::status::{ERR_HOST_ALLOCATION, OK}
 
 // Zero bytes after the code: execution that runs off the end reads STOP, and
@@ -175,10 +176,11 @@ pub struct CallEnv {
 
 impl Copy for CallEnv {}
 
-/// Host settings for transactions. `Config::osaka()` is mainnet's rules; a test
-/// harness may raise the limits or skip the checks that need a real signed and
-/// funded transaction.
+/// Host settings for transactions: the fork whose rules apply, and limits and
+/// checks. `Config::osaka()` is mainnet's; a test harness may raise the limits
+/// or skip the checks that need a real signed and funded transaction.
 pub struct Config {
+    pub fork: Fork,
     // EIP-170: the largest code a creation may deposit.
     pub max_code_size: u64,
     // EIP-3860: the largest initcode.
@@ -201,6 +203,7 @@ impl Copy for Config {}
 impl Config {
     pub fn osaka() -> Self {
         Config {
+            fork: Fork::Osaka,
             max_code_size: 24_576,
             max_initcode_size: 49_152,
             tx_gas_limit_cap: 16_777_216,
@@ -208,6 +211,23 @@ impl Config {
             check_nonce: true,
             check_base_fee: true,
             check_sender_code: true,
+        }
+    }
+
+    /// Amsterdam's settings, with EIP-7954's code size limits.
+    pub fn amsterdam() -> Self {
+        var config = Self::osaka()
+        config.fork = Fork::Amsterdam
+        config.max_code_size = 65_536
+        config.max_initcode_size = 131_072
+        config
+    }
+
+    /// Mainnet's settings for `fork`.
+    pub fn of(_ fork: Fork) -> Self {
+        match fork {
+            Fork::Osaka => Self::osaka(),
+            Fork::Amsterdam => Self::amsterdam(),
         }
     }
 }
@@ -221,6 +241,8 @@ pub struct BlockEnv {
     pub chainid: u256,
     pub basefee: u256,
     pub blobbasefee: u256,
+    // EIP-7843: the beacon chain slot, which SLOTNUM pushes.
+    pub slot_number: u256,
 }
 
 impl Copy for BlockEnv {}
@@ -233,6 +255,10 @@ pub struct ExecutionResult {
     pub output_valid: bool,
     pub stack_top: u256,
     pub stack_len: usize,
+    // EIP-8037: the state gas reservoir left, and the state gas the frame took
+    // from its execution gas and has not returned.
+    pub reservoir: u64,
+    pub spilled: u64,
 }
 
 pub fn empty_bytes() -> InputData {
@@ -253,6 +279,7 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
+        slot_number: 0,
     }
 }
 

@@ -36,6 +36,13 @@ encodes cases with the cap lifted (`BlockEnv.tx_gas_limit_cap`). FeVM executes
 Osaka rules and the revm and evmone runners Cancun rules; all 27 cases use the
 same gas under both.
 
+`--rules Amsterdam` runs FeVM and evmone by Amsterdam's rules instead, at
+mainnet's cap: gas past 2^24 is the EIP-8037 state gas reservoir, so a case
+that runs until its gas is gone does about 16.7 million gas of work. revm
+33.1 has no EIP-8037 and sits out. A case whose transaction moves ether logs
+the transfer (EIP-7708), which the London fixture's logs hash does not
+have.
+
 The timed work is transaction validation, execution and the result's state
 changes. evmone analyzes code for jump destinations on every call; FeVM and
 revm analyze it when the code enters their state, which the setup covers.

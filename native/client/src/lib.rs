@@ -49,9 +49,19 @@ impl From<u64> for Address {
     }
 }
 
-/// Host settings. `Config::osaka()` is mainnet's rules.
+/// A hard fork, whose rules a session applies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Fork {
+    #[default]
+    Osaka = 0,
+    Amsterdam = 1,
+}
+
+/// Host settings: the fork, limits and checks. `Config::osaka()` and
+/// `Config::amsterdam()` are mainnet's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Config {
+    pub fork: Fork,
     pub max_code_size: u64,
     pub max_initcode_size: u64,
     pub tx_gas_limit_cap: u64,
@@ -64,6 +74,7 @@ pub struct Config {
 impl Config {
     pub fn osaka() -> Self {
         Config {
+            fork: Fork::Osaka,
             max_code_size: 24_576,
             max_initcode_size: 49_152,
             tx_gas_limit_cap: 1 << 24,
@@ -71,6 +82,16 @@ impl Config {
             check_nonce: true,
             check_base_fee: true,
             check_sender_code: true,
+        }
+    }
+
+    /// Amsterdam, with EIP-7954's code size limits.
+    pub fn amsterdam() -> Self {
+        Config {
+            fork: Fork::Amsterdam,
+            max_code_size: 65_536,
+            max_initcode_size: 131_072,
+            ..Config::osaka()
         }
     }
 }
@@ -92,6 +113,8 @@ pub struct Block {
     pub base_fee: U256,
     pub blob_base_fee: U256,
     pub chain_id: U256,
+    /// EIP-7843's slot number, which SLOTNUM pushes.
+    pub slot_number: U256,
 }
 
 /// A transaction envelope's type.
@@ -152,6 +175,7 @@ pub enum Status {
     CodePrefix,
     PrecompileFailure,
     AddressCollision,
+    InvalidImmediate,
     HostAllocation,
     BalanceOverflow,
     Unknown(u8),
@@ -172,6 +196,7 @@ impl Status {
             24 => Status::CodePrefix,
             25 => Status::PrecompileFailure,
             27 => Status::AddressCollision,
+            28 => Status::InvalidImmediate,
             21 => Status::HostAllocation,
             26 => Status::BalanceOverflow,
             code => Status::Unknown(code),
@@ -291,6 +316,12 @@ pub struct Receipt {
     pub status: Status,
     pub gas_used: u64,
     pub gas_refunded: u64,
+    /// What the transaction adds to its block's gas used: `gas_used` before
+    /// Amsterdam; from Amsterdam, its gas before refunds less its state gas,
+    /// at least the calldata floor (EIP-7778).
+    pub execution_gas_used: u64,
+    /// What the transaction adds to its block's state gas used (EIP-8037).
+    pub state_gas_used: u64,
     pub created: Option<Address>,
     pub output: Vec<u8>,
     pub logs: Vec<Log>,
@@ -526,6 +557,7 @@ impl Session {
         .fold(0, |bits, (bit, &on)| bits | (u8::from(on) << bit));
         self.done(
             Encoder::new(CONFIGURE)
+                .byte(config.fork as u8)
                 .u64(config.max_code_size)
                 .u64(config.max_initcode_size)
                 .u64(config.tx_gas_limit_cap)
@@ -543,7 +575,8 @@ impl Session {
                 .word(block.gas_limit)
                 .word(block.base_fee)
                 .word(block.blob_base_fee)
-                .word(block.chain_id),
+                .word(block.chain_id)
+                .word(block.slot_number),
         )
     }
 
@@ -657,6 +690,8 @@ impl Session {
         let status = Status::from_code(decoder.byte()?);
         let gas_used = decoder.u64()?;
         let gas_refunded = decoder.u64()?;
+        let execution_gas_used = decoder.u64()?;
+        let state_gas_used = decoder.u64()?;
         let has_created = decoder.byte()? != 0;
         let created = decoder.address()?;
         let output = decoder.bytes()?;
@@ -708,6 +743,8 @@ impl Session {
             status,
             gas_used,
             gas_refunded,
+            execution_gas_used,
+            state_gas_used,
             created: has_created.then_some(created),
             output,
             logs,

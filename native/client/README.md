@@ -22,10 +22,11 @@ let contract = receipt.created.expect("deployed");
 
 `transact` keeps a transaction's changes and `call` keeps none, as eth_call
 does. `snapshot` copies the world and `revert` returns to a copy.
-`configure` sets the code size limits, the gas cap and the checks a test may
-skip (chain ID, nonce, base fee, EIP-3607). Receipts carry the status,
-validity, gas used and refunded, created address, output and logs, and the
-step and call traces that `set_tracing` asks for.
+`configure` sets the fork (Osaka or Amsterdam), the code size limits, the gas
+cap and the checks a test may skip (chain ID, nonce, base fee, EIP-3607).
+Receipts carry the status, validity, gas used and refunded, the gas added to
+the block's totals, created address, output and logs, and the step and call
+traces that `set_tracing` asks for.
 
 `fevm_tools client` builds fevm and runs the client's tests against it;
 acceptance runs it as the `session` stage.
@@ -48,8 +49,8 @@ Fields are big endian. `word` is 32 bytes, `address` 20, `u64` 8, `count` 4,
 
 | command | request fields | response fields |
 |---|---|---|
-| 1 configure | max_code_size u64, max_initcode_size u64, tx_gas_limit_cap u64, checks byte (bit 0 chain ID, 1 nonce, 2 base fee, 3 EIP-3607) | |
-| 2 set block | coinbase address, number word, timestamp word, prevrandao word, gas_limit word, base_fee word, blob_base_fee word, chain_id word | |
+| 1 configure | fork byte (0 Osaka, 1 Amsterdam), max_code_size u64, max_initcode_size u64, tx_gas_limit_cap u64, checks byte (bit 0 chain ID, 1 nonce, 2 base fee, 3 EIP-3607) | |
+| 2 set block | coinbase address, number word, timestamp word, prevrandao word, gas_limit word, base_fee word, blob_base_fee word, chain_id word, slot_number word | |
 | 3 set balance | address, value word | |
 | 4 set nonce | address, value word | |
 | 5 set code | address, code bytes | |
@@ -71,7 +72,8 @@ chain_id word, address, nonce word, y_parity word, r word and s word. The
 sender is recovered; fevm does not check signatures.
 
 A receipt is: invalid byte (0 for a valid transaction, else the validity
-code), status byte, gas_used u64, gas_refunded u64, created flag and address,
+code), status byte, gas_used u64, gas_refunded u64, execution_gas_used u64 and
+state_gas_used u64 (what it adds to the block's gas totals), created flag and address,
 output bytes, and a count of logs, each an address, a topic-count byte, the
 topic words and data bytes. Then the trace: a complete flag; a count of
 steps, each pc as a count, op byte, call depth u16, gas u64, stack length u16

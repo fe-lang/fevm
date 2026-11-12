@@ -12,11 +12,12 @@ use std::process::{Child, Command, Input, Output, Redirect, Spawn, Status}
 use std::text
 use std::time::{Clock, Duration, Instant}
 
-const FORK: String<5> = "Osaka"
+// The forks fevm runs. A fork's index is the driver's byte for it.
+pub const FORKS: usize = 2
 // BPO2's, for fixtures without a blob schedule.
 const BLOB_BASE_FEE_UPDATE_FRACTION: u256 = 11684671
 // EIP-7825's limit on a transaction's gas.
-const TX_GAS_LIMIT_CAP: u64 = 16777216
+pub const TX_GAS_LIMIT_CAP: u64 = 16777216
 // The most of a crashed driver's standard error to keep.
 const STDERR_TAIL: usize = 2000
 
@@ -45,6 +46,19 @@ fn outcome_name(_ outcome: usize) -> DynString {
     }
 }
 
+// A fork's name in fixtures.
+pub fn fork_name(_ fork: usize) -> String<9> {
+    if fork == 0 { "Osaka" } else { "Amsterdam" }
+}
+
+// The fork named `name`, if fevm runs it.
+pub fn fork_named(_ name: Arg) -> Option<usize> {
+    for fork in 0..FORKS {
+        if name == fork_name(fork) { return Option::Some(fork) }
+    }
+    Option::None
+}
+
 // The options that follow `conformance`.
 pub struct Options {
     fe: Option<Arg>,
@@ -55,10 +69,13 @@ pub struct Options {
     jobs: Option<u64>,
     timeout: u64,
     select: MemVec<Arg>,
+    // The forks to run, by index.
+    forks: [bool; 2],
 }
 
 impl Options {
     pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var forks = [false; 2]
         var fe: Option<Arg> = Option::None
         var executable: Option<Arg> = Option::None
         var fixtures: Option<Arg> = Option::None
@@ -74,6 +91,16 @@ impl Options {
             if name == "--select" {
                 while i < args.count() && !args.get(i).span().starts_with("--") {
                     select.push(args.get(i))
+                    i += 1
+                }
+                continue
+            }
+            if name == "--fork" {
+                while i < args.count() && !args.get(i).span().starts_with("--") {
+                    match fork_named(args.get(i)) {
+                        Option::Some(fork) => forks[fork] = true,
+                        Option::None => return Result::Err(format!("fevm does not run fork ", args.get(i))),
+                    }
                     i += 1
                 }
                 continue
@@ -110,9 +137,10 @@ impl Options {
         if fe.is_some() == executable.is_some() {
             return Result::Err(format!("fevm_tools conformance needs one of --fe and --executable"))
         }
+        if forks == [false; 2] { forks = [true; 2] }
         match (fixtures, out) {
             (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
-                Options { fe, executable, fixtures, out, level, jobs, timeout, select },
+                Options { fe, executable, fixtures, out, level, jobs, timeout, select, forks },
             ),
             _ => Result::Err(format!("fevm_tools conformance needs --fixtures and --out")),
         }
@@ -223,11 +251,11 @@ fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
     Result::Ok(output / fraction)
 }
 
-// The fixture's Osaka blob base fee update fraction, or BPO2's.
-fn update_fraction(_ test: Value) -> Result<MemBuffer, u256> {
+// The fixture's blob base fee update fraction for `fork`, or BPO2's.
+fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
     if let Option::Some(ref config) = test.get("config") {
         if let Option::Some(ref schedule) = config.get("blobSchedule") {
-            if let Option::Some(ref fork) = schedule.get(FORK) {
+            if let Option::Some(ref fork) = schedule.get(fork_name(fork)) {
                 return number_or(fork, "baseFeeUpdateFraction", BLOB_BASE_FEE_UPDATE_FRACTION)
             }
         }
@@ -272,12 +300,14 @@ impl Indexes {
     }
 }
 
-// The driver's binary case format; integers and lengths are big endian.
-pub fn encode(_ test: Value, _ indexes: Indexes, cap: u64) -> Result<MemBuffer, MemBuffer> {
+// The driver's binary case format for running `test` by the rules of `fork`;
+// integers and lengths are big endian.
+pub fn encode(_ test: Value, _ indexes: Indexes, fork: usize, cap: u64) -> Result<MemBuffer, MemBuffer> {
     let env = ref test["env"]
     let tx = ref test["transaction"]
     var out = MemBuffer::empty()
-    out.push(4)
+    out.push(5)
+    out.push(fork.downcast_truncate())
     put_number(mut out, env["currentCoinbase"], 20)?
     put_number(mut out, env["currentNumber"], 32)?
     put_number(mut out, env["currentTimestamp"], 32)?
@@ -290,8 +320,9 @@ pub fn encode(_ test: Value, _ indexes: Indexes, cap: u64) -> Result<MemBuffer, 
     put_number(mut out, env["currentGasLimit"], 32)?
     put(mut out, number_or(env, "currentBaseFee", 0)?, 32)?
     let excess = number_or(env, "currentExcessBlobGas", 0)?
-    put(mut out, blob_base_fee(excess, update_fraction(test)?)?, 32)?
+    put(mut out, blob_base_fee(excess, update_fraction(test, fork)?)?, 32)?
     put(mut out, chain_id(test)?, 32)?
+    put(mut out, number_or(env, "slotNumber", 0)?, 32)?
     put(mut out, cap as u256, 8)?
     let pre = ref test["pre"].members()
     put_len(mut out, pre.len())?
@@ -532,11 +563,21 @@ struct Expect {
     logs: MemBuffer,
     logs_hash: u256,
     state: HashMap<u256, Account>,
+    // The receipt's gas used and whether the transaction succeeded, which
+    // fixtures since v21.0.2 give for valid transactions.
+    gas_used: Option<u256>,
+    succeeded: Option<bool>,
 }
 
 impl Expect {
     fn of(_ post: Value) -> Result<MemBuffer, Self> {
         let logs = ref post["logs"]
+        var gas_used: Option<u256> = Option::None
+        var succeeded: Option<bool> = Option::None
+        if let Option::Some(ref receipt) = post.get("receipt") {
+            gas_used = Option::Some(number(receipt["cumulativeGasUsed"])?)
+            succeeded = receipt["status"].as_bool()
+        }
         Result::Ok(
             Expect {
                 exception: match post.get("expectException") {
@@ -549,6 +590,8 @@ impl Expect {
                 },
                 logs_hash: number(logs)?,
                 state: expected_state(post["state"])?,
+                gas_used,
+                succeeded,
             },
         )
     }
@@ -619,6 +662,12 @@ fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, 
     }
     if hex_number(result["logs_hash"].text())? != expect.logs_hash {
         verdict.problems.push(format!("logs hash ", result["logs_hash"].text(), " != ", expect.logs))
+    }
+    if let Option::Some(gas) = expect.gas_used && result["gas_used"].as_u64() != Option::Some(gas.downcast_truncate()) {
+        verdict.problems.push(format!("gas used ", result["gas_used"], " != ", gas))
+    }
+    if let Option::Some(succeeded) = expect.succeeded && (status == "success") != succeeded {
+        verdict.problems.push(format!("status ", status, ", expected ", if succeeded { "success" } else { "failure" }))
     }
     state_difference(expect.state, observed_state(result)?, mut verdict.problems)
     if verdict.problems.len() == 1 {
@@ -708,8 +757,8 @@ fn group_of(_ file: MemSpan) -> MemBuffer {
     MemBuffer::from_span(file)
 }
 
-// A case's place in its fixture file.
-struct Case { file: MemBuffer, name: MemBuffer, index: usize, indexes: Indexes }
+// A case's place in its fixture file, and the fork it runs by.
+struct Case { file: MemBuffer, name: MemBuffer, fork: usize, index: usize, indexes: Indexes }
 
 impl Case {
     // Its line of `cases.jsonl`.
@@ -717,6 +766,7 @@ impl Case {
         var row = Value::object()
         row.set("file", Value::string(self.file))
         row.set("name", Value::string(self.name))
+        row.set("fork", Value::string(fork_name(self.fork)))
         row.set("index", Value::number(self.index))
         var indexes = Value::object()
         indexes.set("data", Value::number(self.indexes.data))
@@ -740,12 +790,13 @@ impl Case {
 // A driver running a case, and the line of `cases.jsonl` it fills.
 struct Running { line: usize, case: Case, expect: Expect, started: Instant }
 
-// The outcomes counted overall and by group.
-struct Tally { totals: [u64; 6], groups: HashMap<MemBuffer, [u64; 6]> }
+// The outcomes counted overall, by fork and by group.
+struct Tally { totals: [u64; 6], forks: [[u64; 6]; 2], groups: HashMap<MemBuffer, [u64; 6]> }
 
 impl Tally {
-    fn count(mut self, _ file: MemSpan, _ outcome: usize) {
+    fn count(mut self, _ file: MemSpan, fork: usize, _ outcome: usize) {
         self.totals[outcome] += 1
+        self.forks[fork][outcome] += 1
         let group = mut self.groups.get_or_insert(group_of(file), [0; 6])
         group[outcome] += 1
     }
@@ -785,8 +836,8 @@ fn default_jobs() -> Result<MemBuffer, u64> uses (proc: mut Spawn) {
     Result::Ok(if count > 3 { count - 2 } else { 1 })
 }
 
-// Builds the driver unless given one, runs every Osaka case of the fixtures
-// through it, and reports in `results.json` and `cases.jsonl`.
+// Builds the driver unless given one, runs every case of the fixtures for the
+// selected forks through it, and reports in `results.json` and `cases.jsonl`.
 pub fn run(_ options: Options) -> Result<MemBuffer, ()>
 uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
 {
@@ -803,7 +854,11 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         .downcast_truncate()
     var report = Value::object()
     report.set("schema", Value::number(1 as u64))
-    report.set("fork", Value::string(FORK))
+    var forks = Value::array()
+    for fork in 0..FORKS {
+        if options.forks[fork] { forks.push(Value::string(fork_name(fork))) }
+    }
+    report.set("forks", forks)
     report.set("host", Value::string(host()?))
     report.set("fixtures", Value::string(fixtures))
     report.set("revision", Value::string(captured("git", Command::new("git").arg("rev-parse").arg("HEAD"))?))
@@ -853,25 +908,30 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     let files = fixture_files(fixtures.span(), options.select)?
     let started = clock.instant()
     var lines: MemVec<MemBuffer> = MemVec::new()
-    var tally = Tally { totals: [0; 6], groups: HashMap::new() }
+    var tally = Tally { totals: [0; 6], forks: [[0; 6]; 2], groups: HashMap::new() }
     var children: MemVec<Child> = MemVec::new()
     var running: MemVec<Running> = MemVec::new()
-    // The next case is post `post` of test `test` of `doc`, read from the
-    // file before `next_file`.
+    // The next case is post `post` for fork `fork` of test `test` of `doc`,
+    // read from the file before `next_file`.
     var doc = Value::object()
     var file = MemBuffer::empty()
     var next_file: usize = 0
     var test: usize = 0
+    var fork: usize = 0
     var post: usize = 0
     while true {
         var found = false
         while !found && children.len() < jobs {
             if test < doc.members().len() {
                 let posts = ref doc.members()[test].value["post"]
-                if posts.has(FORK) && post < posts[FORK].items().len() {
+                if fork == FORKS {
+                    test += 1
+                    fork = 0
+                } else if options.forks[fork] && posts.has(fork_name(fork))
+                    && post < posts[fork_name(fork)].items().len() {
                     found = true
                 } else {
-                    test += 1
+                    fork += 1
                     post = 0
                 }
             } else if next_file < files.len() {
@@ -881,6 +941,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 doc = named(path, parse(source.span()))?
                 next_file += 1
                 test = 0
+                fork = 0
                 post = 0
             } else {
                 break
@@ -888,10 +949,11 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         }
         if found {
             let member = ref doc.members()[test]
-            let entry = ref member.value["post"][FORK][post]
+            let entry = ref member.value["post"][fork_name(fork)][post]
             let case = Case {
                 file: MemBuffer::from_span(file.span()),
                 name: MemBuffer::from_span(member.key.span()),
+                fork,
                 index: post,
                 indexes: Indexes::of(entry),
             }
@@ -899,13 +961,13 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
             post += 1
             let line = lines.len()
             if expect.malformed_signature() {
-                tally.count(case.file.span(), SIGNATURE)
+                tally.count(case.file.span(), fork, SIGNATURE)
                 lines.push(case.row(Verdict::new(SIGNATURE), took: Duration::from_nanos(0)))
                 continue
             }
             let input = named(
                 path_case(file, member.key),
-                encode(member.value, case.indexes, cap: TX_GAS_LIMIT_CAP),
+                encode(member.value, case.indexes, fork, cap: TX_GAS_LIMIT_CAP),
             )?
             let child = named(
                 executable,
@@ -930,12 +992,17 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let done = running.swap_remove(index)
         let took = clock.instant().duration_since(done.started)
         let verdict = named(path_case(done.case.file, done.case.name), check(done.expect, output, timeout: options.timeout))?
-        tally.count(done.case.file.span(), verdict.outcome)
+        tally.count(done.case.file.span(), fork: done.case.fork, verdict.outcome)
         lines.set(done.line, done.case.row(verdict, took))
     }
     report.set("seconds", seconds(clock.instant().duration_since(started)))
     report.set("cases", Value::number(lines.len()))
     report.set("totals", counts_value(tally.totals))
+    var by_fork = Value::object()
+    for fork in 0..FORKS {
+        if options.forks[fork] { by_fork.set(fork_name(fork), counts_value(tally.forks[fork])) }
+    }
+    report.set("by_fork", by_fork)
     var names: MemVec<MemBuffer> = MemVec::new()
     for ref name in tally.groups.keys() {
         names.push(MemBuffer::from_span(name.span()))
@@ -957,7 +1024,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     text.push(b'\n')
     let results = format!(dir, "/results.json")
     named(results, fs.write(results, text.span()))?
-    println!(counts_value(tally.totals))
+    println!(report["by_fork"])
     let passing = tally.totals[PASSED] + tally.totals[SIGNATURE]
     let total: u64 = lines.len().downcast_truncate()
     if passing != total {
@@ -972,11 +1039,11 @@ fn path_case(_ file: MemBuffer, _ name: MemBuffer) -> MemBuffer {
 }
 
 #[test]
-fn encode_matches_the_python_encoder() {
+fn encode_writes_the_driver_format() {
     let source: DynString = "{\"env\":{\"currentCoinbase\":\"0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba\",\"currentNumber\":\"0x01\",\"currentTimestamp\":\"0x03e8\",\"currentRandom\":\"0x0000000000000000000000000000000000000000000000000000000000020000\",\"currentGasLimit\":\"0x016345785d8a0000\",\"currentBaseFee\":\"0x07\",\"currentExcessBlobGas\":\"0x0c0000\"},\"config\":{\"chainid\":\"0x01\",\"blobSchedule\":{\"Osaka\":{\"target\":\"0x06\",\"max\":\"0x09\",\"baseFeeUpdateFraction\":\"0x4c6964\"}}},\"pre\":{\"0x1000000000000000000000000000000000000000\":{\"nonce\":\"0x01\",\"balance\":\"0x00\",\"code\":\"0x600160005500\",\"storage\":{\"0x00\":\"0x00\",\"0x01\":\"0x02\"}},\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\":{\"nonce\":\"0x00\",\"balance\":\"0x3635c9adc5dea00000\",\"code\":\"0x\",\"storage\":{}}},\"transaction\":{\"nonce\":\"0x00\",\"maxFeePerGas\":\"0x0a\",\"maxPriorityFeePerGas\":\"0x01\",\"gasLimit\":[\"0x0186a0\",\"0x05f5e100\"],\"to\":\"0x1000000000000000000000000000000000000000\",\"value\":[\"0x00\",\"0x01\"],\"data\":[\"0x\",\"0xabcdef\"],\"accessLists\":[[],[{\"address\":\"0x1000000000000000000000000000000000000000\",\"storageKeys\":[\"0x01\",\"0x02\"]}]],\"sender\":\"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b\",\"chainId\":\"0x01\"}}"
     let test = parse(source.span()).unwrap()
-    let encoded = encode(test, Indexes { data: 1, gas: 0, value: 1 }, cap: TX_GAS_LIMIT_CAP).unwrap()
-    let expected: DynString = "0x042adc25665018aa1fe0e6bc666dac8fc2697ff9ba000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000100000000000002100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000066001600055000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002a94f5374fce5edbc8e2a8697c15331677e6ebf0b00000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000000000000000000000000000000000000000000000000000000000000002010000000000000000000000000000000000000000000000000000000000000001a94f5374fce5edbc8e2a8697c15331677e6ebf0b001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000186a0000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000003abcdef00000001100000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000"
+    let encoded = encode(test, Indexes { data: 1, gas: 0, value: 1 }, fork: 0, cap: TX_GAS_LIMIT_CAP).unwrap()
+    let expected: DynString = "0x05002adc25665018aa1fe0e6bc666dac8fc2697ff9ba000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000003e80000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000100000000000002100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000066001600055000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002a94f5374fce5edbc8e2a8697c15331677e6ebf0b00000000000000000000000000000000000000000000003635c9adc5dea000000000000000000000000000000000000000000000000000000000000000000000000000000000000002010000000000000000000000000000000000000000000000000000000000000001a94f5374fce5edbc8e2a8697c15331677e6ebf0b001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000186a0000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000003abcdef00000001100000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000"
     assert!(to_hex(encoded.span()).span() == expected.span())
 }
 
@@ -1044,6 +1111,16 @@ fn check_compares_the_post_state() {
     assert!(failing.problems[5].span() == format!(address, "[0x1]: expected 0x2, got 0x3").span())
     let stale: DynString = "0x0000000000000000000000000000000000000002: expected absent, got balance 0, nonce 0, code 0x, 1 storage slot"
     assert!(failing.problems[6].span() == stale.span())
+}
+
+#[test]
+fn check_compares_the_receipt() {
+    let source: DynString = "{\"state\":{},\"logs\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"receipt\":{\"cumulativeGasUsed\":\"0x5208\",\"status\":true}}"
+    let expect = Expect::of(parse(source.span()).unwrap()).unwrap()
+    let failing = check(expect, output("{\"invalid\":null,\"status\":\"revert\",\"host_failure\":false,\"gas_used\":21001,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[],\"storage\":[]}", Status::Exited(0)), timeout: 1).unwrap()
+    assert!(failing.outcome == FAILED && failing.problems.len() == 3)
+    assert!(failing.problems[1] == "gas used 21001 != 21000")
+    assert!(failing.problems[2] == "status revert, expected success")
 }
 
 #[test]

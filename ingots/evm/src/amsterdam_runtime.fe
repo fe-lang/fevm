@@ -1,0 +1,109 @@
+use core::Option
+use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+use ingot::processor::{Receipt, TX_LEGACY, TxEnv, TxRequest, transact}
+use ingot::status::{ERR_INVALID_IMMEDIATE, ERR_INVALID_OPCODE, ERR_STACK_UNDERFLOW}
+use ingot::types::{BlockEnv, Config, ExecutionResult}
+use ingot::vm::Buffers
+
+// Runs the first `len` bytes of `code` with 1,000,000 gas.
+fn run(_ code: [u8; 64], len: usize, config: Config, block: BlockEnv) -> ExecutionResult {
+    var tx = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0, config,
+                              buffers: Buffers::new())
+    let result = execute(Program::copy_from(code, len), empty_bytes(), default_call_env(), block, mut tx)
+    tx.finish(commit: true, gas_spent: 0)
+    result
+}
+
+// `count` PUSH1s of 1, 2 and so on, then `tail`.
+fn pushes(_ count: usize, tail: [u8; 3]) -> [u8; 64] {
+    var code: [u8; 64] = [0; 64]
+    for index in 0..count {
+        code[2 * index] = 0x60
+        code[2 * index + 1] = (index + 1).downcast_truncate()
+    }
+    for index in 0..3 { code[2 * count + index] = tail[index] }
+    code
+}
+
+#[test]
+fn slotnum_pushes_the_slot_number_from_amsterdam() {
+    var code: [u8; 64] = [0; 64]
+    code[0] = 0x4b
+    var block = default_block_env()
+    block.slot_number = 77
+    let amsterdam = run(code, len: 1, config: Config::amsterdam(), block)
+    core::assert(amsterdam.status == OK && amsterdam.stack_top == 77)
+    core::assert(amsterdam.gas_remaining == 1_000_000 - 2)
+    core::assert(run(code, len: 1, config: Config::osaka(), block).status == ERR_INVALID_OPCODE)
+}
+
+#[test]
+fn dupn_swapn_and_exchange_reach_past_sixteen_words() {
+    let block = default_block_env()
+    let amsterdam = Config::amsterdam()
+    // DUPN 0x80 copies the seventeenth word, the first push.
+    let dupn = run(pushes(17, tail: [0xe6, 0x80, 0x00]), len: 36, config: amsterdam, block)
+    core::assert(dupn.status == OK && dupn.stack_top == 1 && dupn.stack_len == 18)
+    core::assert(dupn.gas_remaining == 1_000_000 - 18 * 3)
+    // SWAPN 0x80 trades the top word with the eighteenth.
+    let swapn = run(pushes(18, tail: [0xe7, 0x80, 0x00]), len: 38, config: amsterdam, block)
+    core::assert(swapn.status == OK && swapn.stack_top == 1 && swapn.stack_len == 18)
+    // EXCHANGE 0x8e trades the second and third words; POP shows the third.
+    let exchange = run(pushes(3, tail: [0xe8, 0x8e, 0x50]), len: 9, config: amsterdam, block)
+    core::assert(exchange.status == OK && exchange.stack_top == 1 && exchange.stack_len == 2)
+    // DUPN 0 copies word 145.
+    core::assert(run(pushes(17, tail: [0xe6, 0x00, 0x00]), len: 36, config: amsterdam, block).status == ERR_STACK_UNDERFLOW)
+    core::assert(run(pushes(16, tail: [0xe6, 0x80, 0x00]), len: 34, config: amsterdam, block).status == ERR_STACK_UNDERFLOW)
+}
+
+#[test]
+fn stack_immediates_reject_jumpdest_and_push_bytes() {
+    let block = default_block_env()
+    let amsterdam = Config::amsterdam()
+    for ref tail in [[0xe6, 0x5b, 0x00], [0xe7, 0x7f, 0x00], [0xe8, 0x52, 0x00]] {
+        let result = run(pushes(17, tail), len: 36, config: amsterdam, block)
+        core::assert(result.status == ERR_INVALID_IMMEDIATE && result.gas_remaining == 0)
+    }
+    // 81 is EXCHANGE's last byte before the gap; it trades words 15 and 16.
+    core::assert(run(pushes(17, tail: [0xe8, 0x51, 0x00]), len: 36, config: amsterdam, block).status == OK)
+    core::assert(run(pushes(17, tail: [0xe6, 0x80, 0x00]), len: 36, config: Config::osaka(), block).status == ERR_INVALID_OPCODE)
+}
+
+const SENDER: u256 = 0x1000
+
+// Runs a call to 0xbb holding `code` with `gas_limit`.
+fn store(_ code: [u8; 7], len: usize, gas_limit: u64, config: Config) -> Receipt {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000_000))
+    core::assert(world.set_code(address: 0xbb, code: Program::copy_from(code, len).bytes()) == OK)
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: 0xbb, creates: false, nonce: 0,
+        gas_limit, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    block.chainid = 1
+    var buffers = Buffers::new()
+    var tracer = ()
+    transact(world, TxRequest::new(env, data: empty_bytes()), block, config, mut buffers, mut tracer).receipt
+}
+
+#[test]
+fn receipts_split_the_block_gas_from_amsterdam() {
+    // PUSH1 1; PUSH0; SSTORE: a slot set from zero.
+    let set: [u8; 7] = [0x60, 1, 0x5f, 0x55, 0, 0, 0]
+    // Past the 2^24 cap, gas is the reservoir, which pays the slot's 97,920.
+    let amsterdam = store(set, len: 4, gas_limit: 20_000_000, config: Config::amsterdam())
+    core::assert(amsterdam.status == OK && amsterdam.state_gas_used == 97_920)
+    // 15,000 intrinsic, 5 to push, and 2,100 cold plus 10,000 to write.
+    core::assert(amsterdam.execution_gas_used == 27_105 && amsterdam.gas_used == 27_105 + 97_920)
+    let osaka = store(set, len: 4, gas_limit: 100_000, config: Config::osaka())
+    core::assert(osaka.gas_used == 21_000 + 5 + 22_100)
+    core::assert(osaka.execution_gas_used == osaka.gas_used && osaka.state_gas_used == 0)
+    // Clearing the slot again refills its state gas and refunds the write.
+    // The block counts the gas before that refund (EIP-7778).
+    let cleared = store([0x60, 1, 0x5f, 0x55, 0x5f, 0x5f, 0x55], len: 7, gas_limit: 20_000_000,
+                        config: Config::amsterdam())
+    core::assert(cleared.status == OK && cleared.state_gas_used == 0)
+    core::assert(cleared.execution_gas_used == 27_209 && cleared.gas_used == 27_209 - 27_209 / 5)
+}

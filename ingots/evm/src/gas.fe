@@ -1,3 +1,5 @@
+use ingot::fork::Rules
+
 // Osaka static gas of each opcode. Memory, copy and exponent charges are added
 // by the instruction before it allocates or runs; state-access charges depend
 // on the transaction and are computed separately.
@@ -25,12 +27,119 @@ pub fn base_cost(_ op: i32) -> u64 {
     BASE_COSTS[index] as u64
 }
 
+/// The gas of accessing an account: a warm account's, or `F`'s first access.
+pub fn account_access<F: Rules>(warm: bool) -> u64 {
+    if warm { 100 } else { F::COLD_ACCOUNT_ACCESS }
+}
 
-pub struct StorageCharge { pub gas: u64, pub refund: i128 }
+/// EIP-8037's state gas of a frame: the reservoir, which state charges draw
+/// on before the frame's gas; the level a failure refills it to; the gas
+/// state charges took from the frame's gas once the reservoir ran dry, which
+/// failures and refunds return first; and of that, what `commit` kept through
+/// failures.
+pub struct StateGas { pub reservoir: u64, baseline: u64, pub spilled: u64, pub committed: u64 }
+
+impl Copy for StateGas {}
+
+impl StateGas {
+    /// A frame's state gas with `reservoir`.
+    pub fn new(_ reservoir: u64) -> Self { StateGas { reservoir, baseline: reservoir, spilled: 0, committed: 0 } }
+
+    /// Charges `amount`, from the reservoir and then `gas`; false, changing
+    /// nothing, if the two fall short.
+    pub fn charge(mut self, _ gas: mut u64, _ amount: u64) -> bool {
+        if amount <= self.reservoir {
+            self.reservoir -= amount
+            return true
+        }
+        let rest = amount - self.reservoir
+        if rest > gas { return false }
+        self.reservoir = 0
+        gas -= rest
+        self.spilled += rest
+        true
+    }
+
+    /// Credits back `amount` where charges took it from last: the spill to
+    /// `gas`, then the reservoir.
+    pub fn refund(mut self, _ gas: mut u64, _ amount: u64) {
+        let returned = if amount < self.spilled { amount } else { self.spilled }
+        gas += returned
+        self.spilled -= returned
+        self.reservoir += amount - returned
+    }
+
+    /// After a child succeeds, the reservoir it returned repays the spill to `gas`.
+    pub fn repay(mut self, _ gas: mut u64) {
+        let repaid = if self.reservoir < self.spilled { self.reservoir } else { self.spilled }
+        gas += repaid
+        self.reservoir -= repaid
+        self.spilled -= repaid
+    }
+
+    /// A failed frame's: the reservoir refills to its baseline, and the spill
+    /// returns to `gas` unless the frame `halted`, which forfeits its gas.
+    pub fn restore(mut self, _ gas: mut u64, halted: bool) {
+        if !halted { gas += self.spilled }
+        self.spilled = 0
+        self.reservoir = self.baseline
+    }
+
+    /// Keeps what was charged so far through a failure that keeps the state
+    /// it paid for: the top frame's, for delegations.
+    pub fn commit(mut self) {
+        self.baseline = self.reservoir
+        self.committed += self.spilled
+        self.spilled = 0
+    }
+}
+
+
+// EIP-8037's state gas, 1,530 per byte of state: a new account, a storage
+// slot set from zero, and a new EIP-7702 delegation.
+pub const STATE_BYTE: u64 = 1530
+pub const NEW_ACCOUNT: u64 = 120 * STATE_BYTE
+pub const STORAGE_SET: u64 = 64 * STATE_BYTE
+pub const AUTH_BASE: u64 = 23 * STATE_BYTE
+// EIP-8038: a write to an account that no value transfer pays for.
+pub const ACCOUNT_WRITE: u64 = 9000
+// EIP-8037: the most gas a transaction may have. Past the execution cap it is
+// the state gas reservoir.
+pub const TX_MAX_TOTAL_GAS: u64 = 4_294_967_295
+
+/// SSTORE's gas and refund, and from EIP-8037 the state gas it charges and
+/// the state gas it refills.
+pub struct StorageCharge { pub gas: u64, pub refund: i128, pub state: u64, pub refill: u64 }
+
+// The SSTORE stipend sentry is checked by the interpreter before this charge.
+pub fn storage_charge<F: Rules>(original: u256, current: u256, value: u256, cold: bool) -> StorageCharge {
+    if F::STATE_GAS { storage_state_charge(original, current, value, cold) } else { storage_net_charge(original, current, value, cold) }
+}
+
+// EIP-8038 with EIP-8037's state gas: the access, a write of 10,000 the first
+// time the slot leaves its value at the transaction's start, which restoring
+// it refunds, and state gas for a slot set from zero, which restoring it
+// refills. Clearing a slot nonzero at the start refunds 11,616.
+fn storage_state_charge(_ original: u256, _ current: u256, _ value: u256, _ cold: bool) -> StorageCharge {
+    var charge = StorageCharge { gas: if cold { 2100 } else { 100 }, refund: 0, state: 0, refill: 0 }
+    if current == value { return charge }
+    if original == current {
+        charge.gas += 10000
+        if original == 0 { charge.state = STORAGE_SET }
+    }
+    if original != 0 {
+        if current == 0 { charge.refund -= 11616 }
+        if value == 0 { charge.refund += 11616 }
+    }
+    if original == value {
+        charge.refund += 10000
+        if original == 0 { charge.refill = STORAGE_SET }
+    }
+    charge
+}
 
 // EIP-2200 net metering with EIP-2929 warm costs and EIP-3529 refunds.
-// The SSTORE stipend sentry is checked by the interpreter before this charge.
-pub fn storage_charge(original: u256, current: u256, value: u256, cold: bool) -> StorageCharge {
+fn storage_net_charge(_ original: u256, _ current: u256, _ value: u256, _ cold: bool) -> StorageCharge {
     var gas: u64 = if cold { 2100 } else { 0 }
     var refund: i128 = 0
     if current == value {
@@ -52,5 +161,5 @@ pub fn storage_charge(original: u256, current: u256, value: u256, cold: bool) ->
             refund += if original == 0 { 19900 } else { 2800 }
         }
     }
-    StorageCharge { gas, refund }
+    StorageCharge { gas, refund, state: 0, refill: 0 }
 }

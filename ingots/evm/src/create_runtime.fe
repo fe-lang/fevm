@@ -1,6 +1,7 @@
 use core::{MemBuffer, Option}
 use keccak::keccak256_word
 use ingot::address::{create_address, create2_address}
+use ingot::fork::Osaka
 use ingot::status::{ERR_PRECOMPILE, OK}
 use ingot::processor::{Applied, TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TxEnv, TxRequest, transact}
 use ingot::status::{INVALID_BLOB_COUNT, INVALID_CHAIN_ID, INVALID_GAS_LIMIT_CAP, INVALID_INTRINSIC_GAS, INVALID_NONCE, INVALID_TX_TYPE, VALID}
@@ -96,7 +97,7 @@ fn selfdestruct_moves_balance_and_deletes_only_new_accounts() {
     let created = create_address(sender: 0xaa, nonce: 0)
     core::assert(vm.status == OK && vm.stack[0] == created)
     core::assert(tx.balance(0xdd) == 7 && tx.balance(created) == 0 && tx.exists(created))
-    tx.settle()
+    tx.settle<Osaka>()
     core::assert(!tx.exists(created) && tx.code_size(0xbb) == 3 && tx.exists(0xbb))
     tx.finish(commit: true, gas_spent: 0)
 }

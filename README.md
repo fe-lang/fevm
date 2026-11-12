@@ -2,18 +2,19 @@
 
 `fevm` is an EVM written in [Fe](https://github.com/argotorg/fe) and compiled
 to native code by Fe's native backend (Sonatina and Cranelift). It implements
-Osaka, the current mainnet fork: every Osaka opcode and precompile, and the
-state transition of one transaction. It passes all 14,693 runnable Osaka state
-tests of execution-spec-tests `tests@v21.0.1`. It also drives Fe's native
-compiler, standard library and language development with a real systems
-program.
+Osaka, the current mainnet fork, and Amsterdam, the next: every opcode and
+precompile, and the state transition of one transaction, by the rules of the
+fork a host selects. It passes all 14,640 runnable Osaka and 16,883 runnable
+Amsterdam state tests of execution-spec-tests `tests@v21.0.2`. It also drives
+Fe's native compiler, standard library and language development with a real
+systems program.
 
 ## Layout
 
 The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and the `fevm` CLI
-- `ingots/precompiles`: the Osaka precompiled contracts
+- `ingots/precompiles`: the precompiled contracts, which Amsterdam keeps
 - `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state-test driver
 - `native/differential`: frame and state comparisons against revm
@@ -44,10 +45,11 @@ native/out/toolchain/bin/fe build . --backend native --ingot fevm -O 2 --out-dir
 
 ## CLI
 
-`fevm <hex-bytecode> [hex-calldata]` runs the code once in an empty world with
-default call and block values. It prints the returned bytes, or the top of the
-stack as a 32-byte word, or `empty`. On failure it prints the status name
-(`revert` with the revert data) and exits with the status code.
+`fevm [--fork osaka|amsterdam] <hex-bytecode> [hex-calldata]` runs the code
+once in an empty world with default call and block values, by the rules of
+the fork it names (Osaka without `--fork`). It prints the returned bytes, or
+the top of the stack as a 32-byte word, or `empty`. On failure it prints the
+status name (`revert` with the revert data) and exits with the status code.
 
 ```sh
 ./out/fevm 0x600260030100        # PUSH1 2; PUSH1 3; ADD; STOP
@@ -55,6 +57,7 @@ stack as a 32-byte word, or `empty`. On failure it prints the status name
 ./out/fevm 0x602a5f5260205ff3    # RETURN 32 bytes
 ./out/fevm 0x5f3500 0x1234       # CALLDATALOAD
 ./out/fevm 0x01                  # stack_underflow, exit 10
+./out/fevm --fork amsterdam 0x600160026003e88e50   # EXCHANGE, then POP: 1
 ```
 
 `fevm serve` keeps one world and answers binary requests on stdin: settings,
@@ -80,11 +83,14 @@ transaction and returns `Applied { state, receipt }`.
   authorizations. fevm takes the recovered sender; decoding and checking
   signed envelopes belongs to the host.
 - `BlockEnv` holds the block's values and the chain ID.
-- `Config` holds the host's settings. `Config::osaka()` is mainnet's rules: the
-  EIP-170 and EIP-3860 code size limits, EIP-7825's 2^24 gas cap, and the
-  chain ID, nonce, base fee and EIP-3607 sender checks. A test harness may
-  raise the limits or skip the checks; a transaction priced below the base fee
-  then pays its own price and no priority fee.
+- `Config` holds the host's settings: the fork, the EIP-170 and EIP-3860 code
+  size limits, EIP-7825's 2^24 gas cap, and the chain ID, nonce, base fee and
+  EIP-3607 sender checks. `Config::osaka()` and `Config::amsterdam()` are
+  mainnet's; Amsterdam raises the code size limits (EIP-7954), and from it
+  the cap bounds a transaction's execution gas, the gas past it being state
+  gas (EIP-8037). A test harness may raise the limits or skip the checks; a
+  transaction priced below the base fee then pays its own price and no
+  priority fee.
 - `Buffers` holds allocations that repeated transactions reuse: frame memory,
   stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
@@ -95,9 +101,36 @@ sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
 the EIP-7623 calldata floor, refunds unused gas and the capped refund, pays the
 priority fee, and deletes self-destructed new accounts and touched empty
-accounts. The receipt has the status, gas used and refunded, the created
-contract's address, the output and the logs. A host failure (allocation,
+accounts. The receipt has the status, gas used and refunded, the gas it adds
+to the block's totals (from Amsterdam, execution gas before refunds and state
+gas apart), the created contract's address, the output and the logs. A host failure (allocation,
 balance overflow) returns the pre-state with that status.
+
+### Forks
+
+The fork is a type. `Rules` gives a fork's rules as constants, each defined
+once from the fork it begins in, so a fork is one line:
+
+```fe
+pub trait Rules {
+    const FORK: Fork
+    // EIP-7843: SLOTNUM pushes the slot number.
+    const SLOTNUM: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-2929 and EIP-8038: the first access of an account in a transaction.
+    const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
+    // ...
+}
+
+pub struct Amsterdam {}
+impl Rules for Amsterdam { const FORK: Fork = Fork::Amsterdam }
+```
+
+`transact`, `simulate`, `validate` and `Vm::run` match `Config.fork` once and
+run code generic over its `Rules` type, as they are over the tracer. Each fork
+compiles to its own interpreter, with its rules folded into its code: Osaka's
+dispatch table sends SLOTNUM and DUPN to the invalid opcode path, and its code
+has no state gas in it. A host may switch forks between transactions; the
+world and `Buffers` are the same for every fork.
 
 ### Tracing
 
@@ -169,9 +202,9 @@ Acceptance runs nine stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
 a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 ([native/README.md](native/README.md)). The
-[state-test runner](native/conformance/README.md) is separate; the 23 Osaka
-state tests it does not count have malformed signatures, which fevm, given a
-recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
+[state-test runner](native/conformance/README.md) is separate; the 25 state
+tests of each fork it does not count have malformed signatures, which fevm,
+given a recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
 evm-benchmarks state tests against revm and evmone.
 
 ## License

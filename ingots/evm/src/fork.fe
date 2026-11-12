@@ -1,0 +1,63 @@
+// Hard forks: `Fork` names one for a host's `Config`, and `Rules` gives the
+// interpreter its rules as constants.
+
+/// A hard fork, which a host selects in `Config`.
+pub enum Fork {
+    Osaka,
+    // Glamsterdam's execution layer (EIP-7773).
+    Amsterdam,
+}
+
+impl Copy for Fork {}
+
+impl Fork {
+    // The forks in activation order.
+    const fn ordinal(self) -> u8 {
+        match self {
+            Fork::Osaka => 0,
+            Fork::Amsterdam => 1,
+        }
+    }
+
+    /// Whether this fork is `fork` or a later one.
+    pub const fn since(self, _ fork: Fork) -> bool { self.ordinal() >= fork.ordinal() }
+}
+
+/// A fork's rules, as constants. The public entry points select the `Rules`
+/// type of the fork in `Config` once, and every rule folds into the code
+/// compiled for that type, so no opcode checks the fork as it runs. Each rule
+/// is defined once, from `FORK`, so a fork is one line.
+pub trait Rules {
+    const FORK: Fork
+    // EIP-7843: SLOTNUM pushes the slot number.
+    const SLOTNUM: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-8024: DUPN, SWAPN and EXCHANGE reach stack words past the
+    // sixteenth through an immediate byte.
+    const STACK_IMMEDIATES: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-7708: moving ether between accounts logs a transfer.
+    const TRANSFER_LOGS: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-6780, until EIP-8246: an account created and self-destructed in
+    // one transaction loses ether sent to itself or after.
+    const SELFDESTRUCT_BURNS: bool = !Self::FORK.since(Fork::Amsterdam)
+    // EIP-8037 and EIP-8038: creating state costs state gas, which a
+    // reservoir of the transaction's gas past its execution cap pays first,
+    // and account and storage writes are repriced.
+    const STATE_GAS: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-2780, EIP-7976 and EIP-7981: a transaction pays for its recipient
+    // and value, and its calldata floor counts every byte and the access list.
+    const TX_REPRICING: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-2929 and EIP-8038: the first access of an account in a transaction.
+    const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
+    // EIP-8038: EXTCODESIZE and EXTCODECOPY read the code.
+    const CODE_READ: u64 = if Self::FORK.since(Fork::Amsterdam) { 100 } else { 0 }
+    // A call's value transfer; from EIP-8038, an account write and the stipend.
+    const CALL_VALUE: u64 = if Self::FORK.since(Fork::Amsterdam) { 11300 } else { 9000 }
+    // CREATE and CREATE2's base; from EIP-8038, an account write and access.
+    const CREATE: u64 = if Self::FORK.since(Fork::Amsterdam) { 12000 } else { 32000 }
+}
+
+pub struct Osaka {}
+impl Rules for Osaka { const FORK: Fork = Fork::Osaka }
+
+pub struct Amsterdam {}
+impl Rules for Amsterdam { const FORK: Fork = Fork::Amsterdam }

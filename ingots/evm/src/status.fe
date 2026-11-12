@@ -19,6 +19,8 @@ pub const ERR_PRECOMPILE: i32 = 25
 // EIP-684/EIP-7610: a creation transaction targets an account with code, a
 // nonce or storage.
 pub const ERR_ADDRESS_COLLISION: i32 = 27
+// EIP-8024: DUPN, SWAPN or EXCHANGE with an immediate byte outside its range.
+pub const ERR_INVALID_IMMEDIATE: i32 = 28
 
 // Host failures. They abort the transaction and leave the pre-state; EVM code
 // never sees them.
@@ -31,7 +33,7 @@ pub fn exceptional(_ status: i32) -> bool {
         || status == ERR_INVALID_JUMP || status == ERR_INVALID_OPCODE
         || status == ERR_RETURN_DATA_OOB || status == ERR_STATIC_WRITE
         || status == ERR_OUT_OF_GAS || status == ERR_CODE_PREFIX || status == ERR_PRECOMPILE
-        || status == ERR_ADDRESS_COLLISION
+        || status == ERR_ADDRESS_COLLISION || status == ERR_INVALID_IMMEDIATE
 }
 
 /// Outcomes defined by the EVM: success, revert and exceptional halts. Every
@@ -54,6 +56,7 @@ pub fn status_name(_ status: i32) -> String<20> {
         ERR_CODE_PREFIX => "code_prefix",
         ERR_PRECOMPILE => "precompile_failure",
         ERR_ADDRESS_COLLISION => "address_collision",
+        ERR_INVALID_IMMEDIATE => "invalid_immediate",
         ERR_HOST_ALLOCATION => "host_allocation",
         ERR_BALANCE_OVERFLOW => "balance_overflow",
         _ => "unknown",
