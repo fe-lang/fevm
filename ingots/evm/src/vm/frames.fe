@@ -58,7 +58,7 @@ impl Frame {
     }
 
     fn resume<F: Rules, T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
-        self.vm.run_until_child<F, T>(self.program, self.calldata, mut state, depth, mut tracer)
+        self.vm.run_until_child<F>(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
     fn finish<F: Rules>(mut self, _ state: mut Transaction) -> ChildResult {
@@ -512,9 +512,9 @@ impl Vm {
             }
             let depth = frames.len()
             next = if depth == 0 {
-                self.run_until_child<F, T>(program, calldata, mut state, depth: 0, mut tracer)
+                self.run_until_child<F>(program, calldata, mut state, depth: 0, mut tracer)
             } else {
-                frames[depth - 1].get().resume<F, T>(mut state, depth, mut tracer)
+                frames[depth - 1].get().resume<F>(mut state, depth, mut tracer)
             }
         }
     }

@@ -200,101 +200,101 @@ impl Vm {
         tracer.step(Step { pc: c.pc, op, gas: c.gas, stack_len: c.depth, memory_size: self.memory_size, depth: self.call_depth })
         match op as i32 {
             0x00 => self.op_stop(c, mut tracer),
-            0x04 => self.op_binary<0x04, F, T>(c, mut tracer),
-            0x05 => self.op_binary<0x05, F, T>(c, mut tracer),
-            0x06 => self.op_binary<0x06, F, T>(c, mut tracer),
-            0x07 => self.op_binary<0x07, F, T>(c, mut tracer),
-            0x08 => self.op_modular<0x08, F, T>(c, mut tracer),
-            0x09 => self.op_modular<0x09, F, T>(c, mut tracer),
+            0x04 => self.op_binary<0x04>(c, mut tracer),
+            0x05 => self.op_binary<0x05>(c, mut tracer),
+            0x06 => self.op_binary<0x06>(c, mut tracer),
+            0x07 => self.op_binary<0x07>(c, mut tracer),
+            0x08 => self.op_modular<0x08>(c, mut tracer),
+            0x09 => self.op_modular<0x09>(c, mut tracer),
             0x0a => self.op_exp(c, mut tracer),
             0x5f => self.op_push0(c, mut tracer),
-            0x60 => self.op_push<1, F, T>(c, mut tracer),
-            0x61 => self.op_push<2, F, T>(c, mut tracer),
-            0x62 => self.op_push<3, F, T>(c, mut tracer),
-            0x63 => self.op_push<4, F, T>(c, mut tracer),
-            0x64 => self.op_push<5, F, T>(c, mut tracer),
-            0x65 => self.op_push<6, F, T>(c, mut tracer),
-            0x66 => self.op_push<7, F, T>(c, mut tracer),
-            0x67 => self.op_push<8, F, T>(c, mut tracer),
-            0x68 => self.op_push<9, F, T>(c, mut tracer),
-            0x69 => self.op_push<10, F, T>(c, mut tracer),
-            0x6a => self.op_push<11, F, T>(c, mut tracer),
-            0x6b => self.op_push<12, F, T>(c, mut tracer),
-            0x6c => self.op_push<13, F, T>(c, mut tracer),
-            0x6d => self.op_push<14, F, T>(c, mut tracer),
-            0x6e => self.op_push<15, F, T>(c, mut tracer),
-            0x6f => self.op_push<16, F, T>(c, mut tracer),
-            0x70 => self.op_push<17, F, T>(c, mut tracer),
-            0x71 => self.op_push<18, F, T>(c, mut tracer),
-            0x72 => self.op_push<19, F, T>(c, mut tracer),
-            0x73 => self.op_push<20, F, T>(c, mut tracer),
-            0x74 => self.op_push<21, F, T>(c, mut tracer),
-            0x75 => self.op_push<22, F, T>(c, mut tracer),
-            0x76 => self.op_push<23, F, T>(c, mut tracer),
-            0x77 => self.op_push<24, F, T>(c, mut tracer),
-            0x78 => self.op_push<25, F, T>(c, mut tracer),
-            0x79 => self.op_push<26, F, T>(c, mut tracer),
-            0x7a => self.op_push<27, F, T>(c, mut tracer),
-            0x7b => self.op_push<28, F, T>(c, mut tracer),
-            0x7c => self.op_push<29, F, T>(c, mut tracer),
-            0x7d => self.op_push<30, F, T>(c, mut tracer),
-            0x7e => self.op_push<31, F, T>(c, mut tracer),
-            0x7f => self.op_push<32, F, T>(c, mut tracer),
+            0x60 => self.op_push<1>(c, mut tracer),
+            0x61 => self.op_push<2>(c, mut tracer),
+            0x62 => self.op_push<3>(c, mut tracer),
+            0x63 => self.op_push<4>(c, mut tracer),
+            0x64 => self.op_push<5>(c, mut tracer),
+            0x65 => self.op_push<6>(c, mut tracer),
+            0x66 => self.op_push<7>(c, mut tracer),
+            0x67 => self.op_push<8>(c, mut tracer),
+            0x68 => self.op_push<9>(c, mut tracer),
+            0x69 => self.op_push<10>(c, mut tracer),
+            0x6a => self.op_push<11>(c, mut tracer),
+            0x6b => self.op_push<12>(c, mut tracer),
+            0x6c => self.op_push<13>(c, mut tracer),
+            0x6d => self.op_push<14>(c, mut tracer),
+            0x6e => self.op_push<15>(c, mut tracer),
+            0x6f => self.op_push<16>(c, mut tracer),
+            0x70 => self.op_push<17>(c, mut tracer),
+            0x71 => self.op_push<18>(c, mut tracer),
+            0x72 => self.op_push<19>(c, mut tracer),
+            0x73 => self.op_push<20>(c, mut tracer),
+            0x74 => self.op_push<21>(c, mut tracer),
+            0x75 => self.op_push<22>(c, mut tracer),
+            0x76 => self.op_push<23>(c, mut tracer),
+            0x77 => self.op_push<24>(c, mut tracer),
+            0x78 => self.op_push<25>(c, mut tracer),
+            0x79 => self.op_push<26>(c, mut tracer),
+            0x7a => self.op_push<27>(c, mut tracer),
+            0x7b => self.op_push<28>(c, mut tracer),
+            0x7c => self.op_push<29>(c, mut tracer),
+            0x7d => self.op_push<30>(c, mut tracer),
+            0x7e => self.op_push<31>(c, mut tracer),
+            0x7f => self.op_push<32>(c, mut tracer),
             0x50 => self.op_pop(c, mut tracer),
-            0x80 => self.op_dup<1, F, T>(c, mut tracer),
-            0x81 => self.op_dup<2, F, T>(c, mut tracer),
-            0x82 => self.op_dup<3, F, T>(c, mut tracer),
-            0x83 => self.op_dup<4, F, T>(c, mut tracer),
-            0x84 => self.op_dup<5, F, T>(c, mut tracer),
-            0x85 => self.op_dup<6, F, T>(c, mut tracer),
-            0x86 => self.op_dup<7, F, T>(c, mut tracer),
-            0x87 => self.op_dup<8, F, T>(c, mut tracer),
-            0x88 => self.op_dup<9, F, T>(c, mut tracer),
-            0x89 => self.op_dup<10, F, T>(c, mut tracer),
-            0x8a => self.op_dup<11, F, T>(c, mut tracer),
-            0x8b => self.op_dup<12, F, T>(c, mut tracer),
-            0x8c => self.op_dup<13, F, T>(c, mut tracer),
-            0x8d => self.op_dup<14, F, T>(c, mut tracer),
-            0x8e => self.op_dup<15, F, T>(c, mut tracer),
-            0x8f => self.op_dup<16, F, T>(c, mut tracer),
-            0x90 => self.op_swap<1, F, T>(c, mut tracer),
-            0x91 => self.op_swap<2, F, T>(c, mut tracer),
-            0x92 => self.op_swap<3, F, T>(c, mut tracer),
-            0x93 => self.op_swap<4, F, T>(c, mut tracer),
-            0x94 => self.op_swap<5, F, T>(c, mut tracer),
-            0x95 => self.op_swap<6, F, T>(c, mut tracer),
-            0x96 => self.op_swap<7, F, T>(c, mut tracer),
-            0x97 => self.op_swap<8, F, T>(c, mut tracer),
-            0x98 => self.op_swap<9, F, T>(c, mut tracer),
-            0x99 => self.op_swap<10, F, T>(c, mut tracer),
-            0x9a => self.op_swap<11, F, T>(c, mut tracer),
-            0x9b => self.op_swap<12, F, T>(c, mut tracer),
-            0x9c => self.op_swap<13, F, T>(c, mut tracer),
-            0x9d => self.op_swap<14, F, T>(c, mut tracer),
-            0x9e => self.op_swap<15, F, T>(c, mut tracer),
-            0x9f => self.op_swap<16, F, T>(c, mut tracer),
+            0x80 => self.op_dup<1>(c, mut tracer),
+            0x81 => self.op_dup<2>(c, mut tracer),
+            0x82 => self.op_dup<3>(c, mut tracer),
+            0x83 => self.op_dup<4>(c, mut tracer),
+            0x84 => self.op_dup<5>(c, mut tracer),
+            0x85 => self.op_dup<6>(c, mut tracer),
+            0x86 => self.op_dup<7>(c, mut tracer),
+            0x87 => self.op_dup<8>(c, mut tracer),
+            0x88 => self.op_dup<9>(c, mut tracer),
+            0x89 => self.op_dup<10>(c, mut tracer),
+            0x8a => self.op_dup<11>(c, mut tracer),
+            0x8b => self.op_dup<12>(c, mut tracer),
+            0x8c => self.op_dup<13>(c, mut tracer),
+            0x8d => self.op_dup<14>(c, mut tracer),
+            0x8e => self.op_dup<15>(c, mut tracer),
+            0x8f => self.op_dup<16>(c, mut tracer),
+            0x90 => self.op_swap<1>(c, mut tracer),
+            0x91 => self.op_swap<2>(c, mut tracer),
+            0x92 => self.op_swap<3>(c, mut tracer),
+            0x93 => self.op_swap<4>(c, mut tracer),
+            0x94 => self.op_swap<5>(c, mut tracer),
+            0x95 => self.op_swap<6>(c, mut tracer),
+            0x96 => self.op_swap<7>(c, mut tracer),
+            0x97 => self.op_swap<8>(c, mut tracer),
+            0x98 => self.op_swap<9>(c, mut tracer),
+            0x99 => self.op_swap<10>(c, mut tracer),
+            0x9a => self.op_swap<11>(c, mut tracer),
+            0x9b => self.op_swap<12>(c, mut tracer),
+            0x9c => self.op_swap<13>(c, mut tracer),
+            0x9d => self.op_swap<14>(c, mut tracer),
+            0x9e => self.op_swap<15>(c, mut tracer),
+            0x9f => self.op_swap<16>(c, mut tracer),
             0xe6 => if F::STACK_IMMEDIATES { self.op_dupn(c, mut tracer) } else { self.op_other(c, mut tracer) },
             0xe7 => if F::STACK_IMMEDIATES { self.op_swapn(c, mut tracer) } else { self.op_other(c, mut tracer) },
             0xe8 => if F::STACK_IMMEDIATES { self.op_exchange(c, mut tracer) } else { self.op_other(c, mut tracer) },
-            0x01 => self.op_binary<0x01, F, T>(c, mut tracer),
-            0x02 => self.op_binary<0x02, F, T>(c, mut tracer),
-            0x03 => self.op_binary<0x03, F, T>(c, mut tracer),
-            0x0b => self.op_binary<0x0b, F, T>(c, mut tracer),
-            0x10 => self.op_binary<0x10, F, T>(c, mut tracer),
-            0x11 => self.op_binary<0x11, F, T>(c, mut tracer),
-            0x12 => self.op_binary<0x12, F, T>(c, mut tracer),
-            0x13 => self.op_binary<0x13, F, T>(c, mut tracer),
-            0x14 => self.op_binary<0x14, F, T>(c, mut tracer),
-            0x15 => self.op_unary<0x15, F, T>(c, mut tracer),
-            0x16 => self.op_binary<0x16, F, T>(c, mut tracer),
-            0x17 => self.op_binary<0x17, F, T>(c, mut tracer),
-            0x18 => self.op_binary<0x18, F, T>(c, mut tracer),
-            0x19 => self.op_unary<0x19, F, T>(c, mut tracer),
-            0x1e => self.op_unary<0x1e, F, T>(c, mut tracer),
+            0x01 => self.op_binary<0x01>(c, mut tracer),
+            0x02 => self.op_binary<0x02>(c, mut tracer),
+            0x03 => self.op_binary<0x03>(c, mut tracer),
+            0x0b => self.op_binary<0x0b>(c, mut tracer),
+            0x10 => self.op_binary<0x10>(c, mut tracer),
+            0x11 => self.op_binary<0x11>(c, mut tracer),
+            0x12 => self.op_binary<0x12>(c, mut tracer),
+            0x13 => self.op_binary<0x13>(c, mut tracer),
+            0x14 => self.op_binary<0x14>(c, mut tracer),
+            0x15 => self.op_unary<0x15>(c, mut tracer),
+            0x16 => self.op_binary<0x16>(c, mut tracer),
+            0x17 => self.op_binary<0x17>(c, mut tracer),
+            0x18 => self.op_binary<0x18>(c, mut tracer),
+            0x19 => self.op_unary<0x19>(c, mut tracer),
+            0x1e => self.op_unary<0x1e>(c, mut tracer),
             0x1a => self.op_byte(c, mut tracer),
-            0x1b => self.op_binary<0x1b, F, T>(c, mut tracer),
-            0x1c => self.op_binary<0x1c, F, T>(c, mut tracer),
-            0x1d => self.op_binary<0x1d, F, T>(c, mut tracer),
+            0x1b => self.op_binary<0x1b>(c, mut tracer),
+            0x1c => self.op_binary<0x1c>(c, mut tracer),
+            0x1d => self.op_binary<0x1d>(c, mut tracer),
             0x51 => self.op_mload(c, mut tracer),
             0x52 => self.op_mstore(c, mut tracer),
             0x53 => self.op_mstore8(c, mut tracer),
@@ -346,7 +346,7 @@ impl Vm {
     // Runs the handlers again after code that used `self`'s pc, gas and
     // stack, unless it failed.
     fn resume<F: Rules, T: Tracer>(mut self, _ code: *u8, _ tracer: mut T) {
-        if self.ok() { self.dispatch<F, T>(self.cursor(code, self.pc, self.gas_remaining), mut tracer) }
+        if self.ok() { self.dispatch<F>(self.cursor(code, self.pc, self.gas_remaining), mut tracer) }
     }
 
     // A handler's faults, exceptional halts, which leave the frame no gas.
@@ -422,7 +422,7 @@ impl Vm {
         let base = self.pop()
         let exponent = self.pop()
         if self.ok() { self.exp(base, exponent) }
-        self.resume<F, T>(c.code, mut tracer)
+        self.resume<F>(c.code, mut tracer)
     }
 
     // Pushes `value` and runs the opcode at the cursor, the one after the
@@ -588,7 +588,7 @@ impl Vm {
         c.advance(1)
         self.save(c)
         self.mload()
-        self.resume<F, T>(c.code, mut tracer)
+        self.resume<F>(c.code, mut tracer)
     }
 
     fn op_mstore<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
@@ -617,7 +617,7 @@ impl Vm {
         c.advance(1)
         self.save(c)
         self.mstore()
-        self.resume<F, T>(c.code, mut tracer)
+        self.resume<F>(c.code, mut tracer)
     }
 
     fn op_mstore8<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
@@ -647,7 +647,7 @@ impl Vm {
         c.advance(1)
         self.save(c)
         self.mstore8()
-        self.resume<F, T>(c.code, mut tracer)
+        self.resume<F>(c.code, mut tracer)
     }
 
     // The gas of a copy of `len` bytes into memory that holds them, which

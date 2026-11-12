@@ -707,7 +707,7 @@ impl Vm {
         if self.ok() {
             while true {
                 // Handlers run the common opcodes and stop at any other.
-                self.dispatch<F, T>(self.cursor(code.ptr(), pc, gas), mut tracer)
+                self.dispatch<F>(self.cursor(code.ptr(), pc, gas), mut tracer)
                 pc = self.pc
                 gas = self.gas_remaining
                 if self.halted || !self.ok() {
@@ -832,9 +832,9 @@ impl Vm {
                             self.pc = pc
                             self.gas_remaining = gas
                             let child = if op == 0xf0 || op == 0xf5 {
-                                self.start_create<F, T>(op, mut state, depth, mut tracer)
+                                self.start_create<F>(op, mut state, depth, mut tracer)
                             } else {
-                                self.start_call<F, T>(op, mut state, depth, mut tracer)
+                                self.start_call<F>(op, mut state, depth, mut tracer)
                             }
                             match child {
                                 Option::Some(frame) => return Option::Some(frame),
@@ -866,8 +866,8 @@ impl Vm {
                           _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
         self.reset(gas: call.gas_limit, state_gas: StateGas::new(0))
         match state.config().fork {
-            Fork::Osaka => self.run_root<Osaka, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
-            Fork::Amsterdam => self.run_root<Amsterdam, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
+            Fork::Osaka => self.run_root<Osaka>(program, calldata, call, block, mut state, mut tracer, creates: false),
+            Fork::Amsterdam => self.run_root<Amsterdam>(program, calldata, call, block, mut state, mut tracer, creates: false),
         }
     }
 
@@ -886,8 +886,8 @@ impl Vm {
         let checkpoint = state.checkpoint(is_static: call.is_static)
         self.call = call
         self.block = block
-        match self.run_until_child<F, T>(program, calldata, mut state, depth: 0, mut tracer) {
-            Option::Some(first) => self.run_children<F, T>(first, program, calldata, mut state, mut tracer),
+        match self.run_until_child<F>(program, calldata, mut state, depth: 0, mut tracer) {
+            Option::Some(first) => self.run_children<F>(first, program, calldata, mut state, mut tracer),
             Option::None => {},
         }
         if creates && self.status == OK { self.deposit_code<F>(address: call.address, mut state) }
