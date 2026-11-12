@@ -28,8 +28,68 @@ pub fn base_cost(_ op: i32) -> u64 {
 }
 
 /// The gas of accessing an account: a warm account's, or `F`'s first access.
-pub fn account_access<F: Rules>(warm: bool) -> u128 {
-    if warm { 100 } else { F::COLD_ACCOUNT_ACCESS as u128 }
+pub fn account_access<F: Rules>(warm: bool) -> u64 {
+    if warm { 100 } else { F::COLD_ACCOUNT_ACCESS }
+}
+
+/// EIP-8037's state gas of a frame: the reservoir, which state charges draw
+/// on before the frame's gas; the level a failure refills it to; and the gas
+/// state charges took from the frame's gas once the reservoir ran dry, which
+/// failures and refunds return first.
+pub struct StateGas { pub reservoir: u64, baseline: u64, pub spilled: u64 }
+
+impl Copy for StateGas {}
+
+impl StateGas {
+    /// A frame's state gas with `reservoir`.
+    pub fn new(_ reservoir: u64) -> Self { StateGas { reservoir, baseline: reservoir, spilled: 0 } }
+
+    /// Charges `amount`, from the reservoir and then `gas`; false, changing
+    /// nothing, if the two fall short.
+    pub fn charge(mut self, _ gas: mut u64, _ amount: u64) -> bool {
+        if amount <= self.reservoir {
+            self.reservoir -= amount
+            return true
+        }
+        let rest = amount - self.reservoir
+        if rest > gas { return false }
+        self.reservoir = 0
+        gas -= rest
+        self.spilled += rest
+        true
+    }
+
+    /// Credits back `amount` where charges took it from last: the spill to
+    /// `gas`, then the reservoir.
+    pub fn refund(mut self, _ gas: mut u64, _ amount: u64) {
+        let returned = if amount < self.spilled { amount } else { self.spilled }
+        gas += returned
+        self.spilled -= returned
+        self.reservoir += amount - returned
+    }
+
+    /// After a child succeeds, the reservoir it returned repays the spill to `gas`.
+    pub fn repay(mut self, _ gas: mut u64) {
+        let repaid = if self.reservoir < self.spilled { self.reservoir } else { self.spilled }
+        gas += repaid
+        self.reservoir -= repaid
+        self.spilled -= repaid
+    }
+
+    /// A failed frame's: the reservoir refills to its baseline, and the spill
+    /// returns to `gas` unless the frame `halted`, which forfeits its gas.
+    pub fn restore(mut self, _ gas: mut u64, halted: bool) {
+        if !halted { gas += self.spilled }
+        self.spilled = 0
+        self.reservoir = self.baseline
+    }
+
+    /// Keeps what was charged so far through a failure that keeps the state
+    /// it paid for: the top frame's, for delegations.
+    pub fn commit(mut self) {
+        self.baseline = self.reservoir
+        self.spilled = 0
+    }
 }
 
 

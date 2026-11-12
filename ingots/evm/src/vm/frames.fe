@@ -3,7 +3,7 @@
 use core::{Box, MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::fork::Rules
-use ingot::gas::{ACCOUNT_WRITE, NEW_ACCOUNT, STATE_BYTE, account_access}
+use ingot::gas::{ACCOUNT_WRITE, NEW_ACCOUNT, STATE_BYTE, StateGas, account_access}
 use ingot::state::{address_word, delegation}
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
@@ -45,7 +45,7 @@ impl Frame {
     fn start(mut self, gas: u64, reservoir: u64, refill: u64, _ program: own Program, _ calldata: own InputData,
              _ call: CallEnv, _ block: BlockEnv, _ checkpoint: own Checkpoint, output_offset: u64, output_len: u64,
              creates: bool) {
-        self.vm.reset(gas, reservoir)
+        self.vm.reset(gas, state_gas: StateGas::new(reservoir))
         self.refill = refill
         self.program = program
         self.calldata = calldata
@@ -173,9 +173,10 @@ impl Vm {
         if F::STATE_GAS {
             // A failed child has refilled its reservoir and returned its
             // spill already; either way the reservoir comes back.
-            self.reservoir += result.reservoir
-            self.spilled += result.spilled
-            if result.status == OK { self.repay_spill() } else { self.refund_state(child.refill) }
+            self.state_gas.reservoir += result.reservoir
+            self.state_gas.spilled += result.spilled
+            if result.status == OK { self.state_gas.repay(mut self.gas_remaining) }
+            else { self.state_gas.refund(mut self.gas_remaining, child.refill) }
         }
         if child.creates {
             // A successful creation leaves the return data empty; a failed one
@@ -258,7 +259,7 @@ impl Vm {
         }
         var delegate_access: u128 = 0
         if let Option::Some(delegate) = delegate {
-            delegate_access = account_access<F>(warm: state.account_is_warm(delegate))
+            delegate_access = account_access<F>(warm: state.account_is_warm(delegate)) as u128
             let warmed = state.warm_account(address: delegate)
             if warmed != OK {
                 self.fault(warmed)
@@ -281,7 +282,7 @@ impl Vm {
         // Target warming belongs to the caller checkpoint, including failures.
         if depth == CALL_DEPTH_LIMIT || (has_value && state.balance(sender) < value) {
             self.gas_remaining += child_gas
-            if refill != 0 { self.refund_state(refill) }
+            if refill != 0 { self.state_gas.refund(mut self.gas_remaining, refill) }
             self.push(0)
             return Option::None
         }
@@ -344,8 +345,8 @@ impl Vm {
             },
         }
         // EIP-8037: the child takes the whole reservoir.
-        let reservoir = self.reservoir
-        self.reservoir = 0
+        let reservoir = self.state_gas.reservoir
+        self.state_gas.reservoir = 0
         frame.get().start(gas: child_gas, reservoir, refill, program, calldata, child_call, block: self.block,
                           checkpoint, output_offset: out_offset, output_len: out_len, creates: false)
         Option::Some(frame)
@@ -434,8 +435,8 @@ impl Vm {
                 return Option::None
             },
         }
-        let reservoir = self.reservoir
-        self.reservoir = 0
+        let reservoir = self.state_gas.reservoir
+        self.state_gas.reservoir = 0
         frame.get().start(gas: create_gas, reservoir, refill, program, empty_bytes(), child_call, block: self.block,
                           checkpoint, output_offset: 0, output_len: 0, creates: true)
         Option::Some(frame)

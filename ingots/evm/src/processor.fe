@@ -2,14 +2,14 @@ use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::MAX_U256
-use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, TX_MAX_TOTAL_GAS, account_access}
+use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, StateGas, TX_MAX_TOTAL_GAS, account_access}
 use ingot::fork::{Amsterdam, Fork, Osaka, Rules}
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
 use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
-use ingot::vm::{Buffers, Vm, begin_create, run_precompile, status_result, transfer}
+use ingot::vm::{Buffers, Vm, begin_create, run_precompile, spend, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
 use swisstable::SwissTable
@@ -197,7 +197,7 @@ pub fn intrinsic_gas<F: Rules>(_ request: TxRequest) -> IntrinsicGas {
     let accounts: u128 = request.access_accounts.len().downcast_unchecked()
     let keys: u128 = request.access_keys.len().downcast_unchecked()
     let count: u128 = request.authorization_count().downcast_unchecked()
-    let env = request.env
+    let env = ref request.env
     if F::TX_REPRICING {
         // EIP-2780: the sender's 12,000, and the recipient's access and value,
         // which a transfer to oneself does not pay, or CREATE's base.
@@ -364,12 +364,14 @@ fn authority(_ authorization: Authorization, chain_id: u256) -> Option<u256> {
 // EIP-7702: apply the authorizations in order, skipping invalid ones. Each
 // recovered authority is warmed; a valid one gets the delegation and its next
 // nonce. Until Amsterdam it refunds part of the intrinsic charge if the
-// account existed; from Amsterdam the top frame `vm` pays for a new account,
-// the authority's first write and a new delegation (EIP-8037 and EIP-8038).
-// The changes precede the message's checkpoint, so they survive its failure.
-fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256, _ vm: mut Vm) -> i32 {
+// account existed; from Amsterdam the top frame's `gas` and `state_gas` pay
+// for a new account, the authority's first write and a new delegation
+// (EIP-8037 and EIP-8038). The changes precede the message's checkpoint, so
+// they survive its failure.
+fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256, gas: mut u64,
+                       state_gas: mut StateGas) -> i32 {
     var paid = SwissTable<u256, u8>::empty()
-    let env = request.env
+    let env = ref request.env
     for authorization in request.authorizations {
         let signer = authority(authorization, chain_id)
         if signer.is_none() { continue }
@@ -391,13 +393,13 @@ fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u2
                 }
                 if tx.delegate(authority).is_some() { flags |= DELEGATION_PAID }
             }
-            if !tx.exists(authority) && !vm.charge_state(NEW_ACCOUNT) { return ERR_OUT_OF_GAS }
+            if !tx.exists(authority) && !state_gas.charge(mut gas, NEW_ACCOUNT) { return ERR_OUT_OF_GAS }
             if flags & WRITE_PAID == 0 {
-                if !vm.charge(ACCOUNT_WRITE as u128) { return ERR_OUT_OF_GAS }
+                if !spend(mut gas, ACCOUNT_WRITE) { return ERR_OUT_OF_GAS }
                 flags |= WRITE_PAID
             }
             if delegate != 0 && flags & DELEGATION_PAID == 0 {
-                if !vm.charge_state(AUTH_BASE) { return ERR_OUT_OF_GAS }
+                if !state_gas.charge(mut gas, AUTH_BASE) { return ERR_OUT_OF_GAS }
                 flags |= DELEGATION_PAID
             }
         } else if tx.exists(authority) {
@@ -410,41 +412,63 @@ fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u2
     OK
 }
 
-// Prepares the top frame `vm` for the message to `target`: the EIP-7702
-// authorizations, then from EIP-8037 the state gas for the account the message
-// makes and the access of the target's delegate. A failure ends the message
-// as an exceptional halt before it starts.
+// From EIP-8037, charges the top frame's `gas` and `state_gas` for the
+// message to `target`: the EIP-7702 authorizations, the account the message
+// makes, and the access of the target's delegate. A failure undoes all of it
+// and ends the message as an exceptional halt before it starts.
 fn prepare_message<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, target: u256, chain_id: u256,
-                             _ vm: mut Vm) -> i32 {
-    let env = request.env
-    var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut vm) } else { OK }
-    if !F::STATE_GAS || status != OK { return status }
-    // The delegations survive the message's failure, and so does their state gas.
-    vm.commit_state_gas()
-    // A creation that collides makes no account.
-    let creates_account = if env.creates { tx.deployable(target) } else { env.value != 0 }
-    if creates_account && tx.is_empty(target) && !vm.charge_state(NEW_ACCOUNT) { return ERR_OUT_OF_GAS }
-    if !env.creates && let Option::Some(delegate) = tx.delegate(target) {
-        if !vm.charge(account_access<F>(warm: tx.account_is_warm(delegate))) { return ERR_OUT_OF_GAS }
-        status = tx.warm_account(address: delegate)
+                             gas: mut u64, state_gas: mut StateGas) -> i32 {
+    let env = ref request.env
+    let checkpoint = tx.checkpoint(is_static: false)
+    var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut gas, mut state_gas) } else { OK }
+    if status == OK {
+        // The delegations survive the message's failure, and so does their state gas.
+        state_gas.commit()
+        // A creation that collides makes no account.
+        let creates_account = if env.creates { tx.deployable(target) } else { env.value != 0 }
+        if creates_account && tx.is_empty(target) && !state_gas.charge(mut gas, NEW_ACCOUNT) {
+            status = ERR_OUT_OF_GAS
+        } else if !env.creates && let Option::Some(delegate) = tx.delegate(target) {
+            status = if spend(mut gas, account_access<F>(warm: tx.account_is_warm(delegate))) {
+                tx.warm_account(address: delegate)
+            } else {
+                ERR_OUT_OF_GAS
+            }
+        }
     }
+    if status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     status
 }
 
-// The top-level message, run by the prepared top frame `vm`: a creation or a
-// call, each under its own checkpoint.
+// From EIP-8037, gives `result`, a message that ran no code, its top frame's
+// `state_gas`: a failure refills what the message's preparation charged.
+fn without_code<F: Rules>(var _ state_gas: own StateGas, _ result: mut ExecutionResult) {
+    if !F::STATE_GAS { return }
+    if result.status != OK { state_gas.restore(mut result.gas_remaining, halted: exceptional(result.status)) }
+    result.reservoir = state_gas.reservoir
+    result.spilled = state_gas.spilled
+}
+
+// The top-level message, with the prepared top frame's `call.gas_limit` and
+// `state_gas`: a creation or a call, each under its own checkpoint.
 fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv,
-                                        var _ vm: own Vm, _ tracer: mut T) -> ExecutionResult {
+                                        state_gas: StateGas, _ tracer: mut T) -> ExecutionResult {
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
     if request.env.creates {
-        if !tx.deployable(target) { return vm.without_code<F>(status_result(ERR_ADDRESS_COLLISION)) }
+        if !tx.deployable(target) {
+            var result = status_result(ERR_ADDRESS_COLLISION)
+            without_code<F>(state_gas, mut result)
+            return result
+        }
         let checkpoint = match begin_create<F>(mut tx, sender, address: target, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => return status_result(status),
         }
         let program = Program::copy_from(request.data(), len: request.data().len() as usize)
+        var vm = Vm::new()
+        vm.reset(gas: call.gas_limit, state_gas)
         vm.run_root<F, T>(program, empty_bytes(), call, block, mut tx, mut tracer, creates: true)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return vm.into_result(mut tx.buffers())
@@ -458,9 +482,10 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     }
     // A delegated account runs its delegate's code, never a precompile (EIP-7702).
     if is_precompile(target) && tx.delegate(target).is_none() {
-        let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
+        var result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-        return vm.without_code<F>(result)
+        without_code<F>(state_gas, mut result)
+        return result
     }
     let code = tx.code(target)
     let delegate = delegation(code)
@@ -481,8 +506,11 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
         tx.commit(checkpoint)
         var result = status_result(OK)
         result.gas_remaining = call.gas_limit
-        return vm.without_code<F>(result)
+        without_code<F>(state_gas, mut result)
+        return result
     }
+    var vm = Vm::new()
+    vm.reset(gas: call.gas_limit, state_gas)
     vm.run_root<F, T>(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer,
                       creates: false)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
@@ -539,31 +567,35 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     // EIP-8037: gas past the execution cap is the top frame's state gas reservoir.
     let regular: u64 = intrinsic.regular.downcast_unchecked()
     let available = env.gas_limit - regular
-    let gas = if F::STATE_GAS && available > config.tx_gas_limit_cap - regular { config.tx_gas_limit_cap - regular }
+    var gas = if F::STATE_GAS && available > config.tx_gas_limit_cap - regular { config.tx_gas_limit_cap - regular }
         else { available }
-    var vm = Vm::new()
-    vm.reset(gas, reservoir: available - gas)
+    let reservoir = available - gas
+    var state_gas = StateGas::new(reservoir)
     if prepared == OK {
-        let checkpoint = tx.checkpoint(is_static: false)
-        prepared = prepare_message<F>(mut tx, request, target, chain_id: block.chainid, mut vm)
-        if prepared == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
+        prepared = if F::STATE_GAS {
+            prepare_message<F>(mut tx, request, target, chain_id: block.chainid, mut gas, mut state_gas)
+        } else if env.kind == TX_SET_CODE {
+            authorize<F>(mut tx, request, chain_id: block.chainid, mut gas, mut state_gas)
+        } else {
+            OK
+        }
     }
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
-        gasprice: price, gas_limit: vm.gas_remaining, is_static: false,
+        gasprice: price, gas_limit: gas, is_static: false,
     }
     let result = if prepared == OK {
         // The transaction's own message is a call or creation at depth zero.
         tracer.enter(CallStart { kind: if env.creates { 0xf0 } else { 0xf1 }, depth: 0, from: sender, to: target,
                                  value: env.value, gas: call.gas_limit }, input: request.data().bytes())
-        let result = execute_message<F, T>(mut tx, request, call, block, vm, mut tracer)
+        let result = execute_message<F, T>(mut tx, request, call, block, state_gas, mut tracer)
         tracer.leave(CallEnd { depth: 0, status: result.status, gas: result.gas_remaining },
                      output: result.output.span())
         result
     } else if exceptional(prepared) {
         // A failed preparation undoes its state, so its state gas refills.
         var result = status_result(prepared)
-        result.reservoir = available - gas
+        result.reservoir = reservoir
         result
     } else {
         status_result(prepared)
