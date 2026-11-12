@@ -135,12 +135,17 @@ impl TxRequest {
 /// outcome (OK, ERR_REVERT or an exceptional halt); any other status is a host
 /// failure, after which the pre-state is returned. `created` is the new
 /// contract's address when a creation succeeds. `gas_refunded` is the refund
-/// that reduced `gas_used`.
+/// that reduced `gas_used`. `execution_gas_used` and `state_gas_used` are what
+/// the transaction adds to its block's gas totals: before Amsterdam,
+/// `gas_used` and zero; from Amsterdam, its gas before refunds less its state
+/// gas, at least the calldata floor (EIP-7778), and its state gas (EIP-8037).
 pub struct Receipt {
     pub invalid: i32,
     pub status: i32,
     pub gas_used: u64,
     pub gas_refunded: u64,
+    pub execution_gas_used: u64,
+    pub state_gas_used: u64,
     pub created: Option<u256>,
     pub output: MemBuffer,
     pub logs: LogBuffer,
@@ -311,7 +316,8 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
 
 fn empty_receipt(invalid: i32, status: i32) -> Receipt {
     Receipt {
-        invalid, status, gas_used: 0, gas_refunded: 0, created: Option::None, output: MemBuffer::empty(),
+        invalid, status, gas_used: 0, gas_refunded: 0, execution_gas_used: 0, state_gas_used: 0,
+        created: Option::None, output: MemBuffer::empty(),
         logs: LogBuffer::new(),
     }
 }
@@ -593,6 +599,7 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
         result
     } else if exceptional(prepared) {
         // A failed preparation undoes its state, so its state gas refills.
+        state_gas = StateGas::new(reservoir)
         var result = status_result(prepared)
         result.reservoir = reservoir
         result
@@ -609,6 +616,18 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     let refunded = gas_spent - tx.capped_refund(gas_spent)
     let floor: u64 = intrinsic.floor.downcast_unchecked()
     let gas_used = if refunded > floor { refunded } else { floor }
+    // EIP-8037: the state gas the transaction used, which refunds can make
+    // negative and the block counts as zero.
+    let state_gas_used: u64 = if F::STATE_GAS {
+        let used = (reservoir + result.spilled + state_gas.committed) as i128 - result.reservoir as i128
+        if used > 0 { used.downcast_unchecked() } else { 0 }
+    } else {
+        0
+    }
+    // EIP-7778: from Amsterdam the block counts gas before refunds.
+    let execution_gas_used = if !F::STATE_GAS { gas_used }
+        else if gas_spent - state_gas_used > floor { gas_spent - state_gas_used }
+        else { floor }
     var paid = tx.credit(address: sender, amount: (env.gas_limit - gas_used) as u256 * price)
     if paid == OK {
         let tip = if price > block.basefee { price - block.basefee } else { 0 }
@@ -631,6 +650,7 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     Receipt {
         invalid: VALID, status: result.status, gas_used,
         gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
+        execution_gas_used, state_gas_used,
         created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
         output: result.output, logs,
     }

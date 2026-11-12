@@ -135,6 +135,8 @@ fn receipt_response(_ receipt: Receipt, _ trace: Trace) -> Writer {
     out.byte(receipt.status.downcast_unchecked())
     out.word(receipt.gas_used as u256, bytes: 8)
     out.word(receipt.gas_refunded as u256, bytes: 8)
+    out.word(receipt.execution_gas_used as u256, bytes: 8)
+    out.word(receipt.state_gas_used as u256, bytes: 8)
     match receipt.created {
         Option::Some(address) => {
             out.byte(1)

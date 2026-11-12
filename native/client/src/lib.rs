@@ -316,6 +316,12 @@ pub struct Receipt {
     pub status: Status,
     pub gas_used: u64,
     pub gas_refunded: u64,
+    /// What the transaction adds to its block's gas used: `gas_used` before
+    /// Amsterdam; from Amsterdam, its gas before refunds less its state gas,
+    /// at least the calldata floor (EIP-7778).
+    pub execution_gas_used: u64,
+    /// What the transaction adds to its block's state gas used (EIP-8037).
+    pub state_gas_used: u64,
     pub created: Option<Address>,
     pub output: Vec<u8>,
     pub logs: Vec<Log>,
@@ -684,6 +690,8 @@ impl Session {
         let status = Status::from_code(decoder.byte()?);
         let gas_used = decoder.u64()?;
         let gas_refunded = decoder.u64()?;
+        let execution_gas_used = decoder.u64()?;
+        let state_gas_used = decoder.u64()?;
         let has_created = decoder.byte()? != 0;
         let created = decoder.address()?;
         let output = decoder.bytes()?;
@@ -735,6 +743,8 @@ impl Session {
             status,
             gas_used,
             gas_refunded,
+            execution_gas_used,
+            state_gas_used,
             created: has_created.then_some(created),
             output,
             logs,

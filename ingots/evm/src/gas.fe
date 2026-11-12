@@ -33,16 +33,17 @@ pub fn account_access<F: Rules>(warm: bool) -> u64 {
 }
 
 /// EIP-8037's state gas of a frame: the reservoir, which state charges draw
-/// on before the frame's gas; the level a failure refills it to; and the gas
+/// on before the frame's gas; the level a failure refills it to; the gas
 /// state charges took from the frame's gas once the reservoir ran dry, which
-/// failures and refunds return first.
-pub struct StateGas { pub reservoir: u64, baseline: u64, pub spilled: u64 }
+/// failures and refunds return first; and of that, what `commit` kept through
+/// failures.
+pub struct StateGas { pub reservoir: u64, baseline: u64, pub spilled: u64, pub committed: u64 }
 
 impl Copy for StateGas {}
 
 impl StateGas {
     /// A frame's state gas with `reservoir`.
-    pub fn new(_ reservoir: u64) -> Self { StateGas { reservoir, baseline: reservoir, spilled: 0 } }
+    pub fn new(_ reservoir: u64) -> Self { StateGas { reservoir, baseline: reservoir, spilled: 0, committed: 0 } }
 
     /// Charges `amount`, from the reservoir and then `gas`; false, changing
     /// nothing, if the two fall short.
@@ -88,6 +89,7 @@ impl StateGas {
     /// it paid for: the top frame's, for delegations.
     pub fn commit(mut self) {
         self.baseline = self.reservoir
+        self.committed += self.spilled
         self.spilled = 0
     }
 }

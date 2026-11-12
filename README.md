@@ -99,8 +99,9 @@ sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
 the EIP-7623 calldata floor, refunds unused gas and the capped refund, pays the
 priority fee, and deletes self-destructed new accounts and touched empty
-accounts. The receipt has the status, gas used and refunded, the created
-contract's address, the output and the logs. A host failure (allocation,
+accounts. The receipt has the status, gas used and refunded, the gas it adds
+to the block's totals (from Amsterdam, execution gas before refunds and state
+gas apart), the created contract's address, the output and the logs. A host failure (allocation,
 balance overflow) returns the pre-state with that status.
 
 ### Forks

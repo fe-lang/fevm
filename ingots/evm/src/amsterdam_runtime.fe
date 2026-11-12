@@ -1,4 +1,6 @@
+use core::Option
 use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
+use ingot::processor::{Receipt, TX_LEGACY, TxEnv, TxRequest, transact}
 use ingot::status::{ERR_INVALID_IMMEDIATE, ERR_INVALID_OPCODE, ERR_STACK_UNDERFLOW}
 use ingot::types::{BlockEnv, Config, ExecutionResult}
 use ingot::vm::Buffers
@@ -65,4 +67,43 @@ fn stack_immediates_reject_jumpdest_and_push_bytes() {
     // 81 is EXCHANGE's last byte before the gap; it trades words 15 and 16.
     core::assert(run(pushes(17, tail: [0xe8, 0x51, 0x00]), len: 36, config: amsterdam, block).status == OK)
     core::assert(run(pushes(17, tail: [0xe6, 0x80, 0x00]), len: 36, config: Config::osaka(), block).status == ERR_INVALID_OPCODE)
+}
+
+const SENDER: u256 = 0x1000
+
+// Runs a call to 0xbb holding `code` with `gas_limit`.
+fn store(_ code: [u8; 7], len: usize, gas_limit: u64, config: Config) -> Receipt {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000_000))
+    core::assert(world.set_code(address: 0xbb, code: Program::copy_from(code, len).bytes()) == OK)
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: 0xbb, creates: false, nonce: 0,
+        gas_limit, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    block.chainid = 1
+    var buffers = Buffers::new()
+    var tracer = ()
+    transact(world, TxRequest::new(env, data: empty_bytes()), block, config, mut buffers, mut tracer).receipt
+}
+
+#[test]
+fn receipts_split_the_block_gas_from_amsterdam() {
+    // PUSH1 1; PUSH0; SSTORE: a slot set from zero.
+    let set: [u8; 7] = [0x60, 1, 0x5f, 0x55, 0, 0, 0]
+    // Past the 2^24 cap, gas is the reservoir, which pays the slot's 97,920.
+    let amsterdam = store(set, len: 4, gas_limit: 20_000_000, config: Config::amsterdam())
+    core::assert(amsterdam.status == OK && amsterdam.state_gas_used == 97_920)
+    // 15,000 intrinsic, 5 to push, and 2,100 cold plus 10,000 to write.
+    core::assert(amsterdam.execution_gas_used == 27_105 && amsterdam.gas_used == 27_105 + 97_920)
+    let osaka = store(set, len: 4, gas_limit: 100_000, config: Config::osaka())
+    core::assert(osaka.gas_used == 21_000 + 5 + 22_100)
+    core::assert(osaka.execution_gas_used == osaka.gas_used && osaka.state_gas_used == 0)
+    // Clearing the slot again refills its state gas and refunds the write.
+    // The block counts the gas before that refund (EIP-7778).
+    let cleared = store([0x60, 1, 0x5f, 0x55, 0x5f, 0x5f, 0x55], len: 7, gas_limit: 20_000_000,
+                        config: Config::amsterdam())
+    core::assert(cleared.status == OK && cleared.state_gas_used == 0)
+    core::assert(cleared.execution_gas_used == 27_209 && cleared.gas_used == 27_209 - 27_209 / 5)
 }
