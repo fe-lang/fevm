@@ -70,7 +70,9 @@ impl LogBuffer {
         self.record(address, topics, topic_count, start)
     }
     // Adds an entry whose data is `data` from `start` on, or drops those bytes
-    // if the entry or its topics do not fit.
+    // if the entry or its topics do not fit. Inline, so that LOG's topics stay
+    // in place.
+    #[inline(always)]
     fn record(mut self, _ address: u256, _ topics: [u256; 4], _ topic_count: u64, _ start: usize) -> bool {
         core::assert(topic_count <= 4)
         if !self.entries.try_reserve(1)
