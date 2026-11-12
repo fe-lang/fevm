@@ -1,3 +1,5 @@
+use ingot::fork::Rules
+
 // Osaka static gas of each opcode. Memory, copy and exponent charges are added
 // by the instruction before it allocates or runs; state-access charges depend
 // on the transaction and are computed separately.
@@ -23,6 +25,11 @@ const BASE_COSTS: [u8; 256] = [
 pub fn base_cost(_ op: i32) -> u64 {
     let index: usize = op.downcast_unchecked()
     BASE_COSTS[index] as u64
+}
+
+/// The gas of accessing an account: a warm account's, or `F`'s first access.
+pub fn account_access<F: Rules>(warm: bool) -> u128 {
+    if warm { 100 } else { F::COLD_ACCOUNT_ACCESS as u128 }
 }
 
 

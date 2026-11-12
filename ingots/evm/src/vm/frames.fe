@@ -2,6 +2,8 @@
 // them beneath the root.
 use core::{Box, MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
+use ingot::fork::Rules
+use ingot::gas::account_access
 use ingot::state::{address_word, delegation}
 use ingot::address::{create_address, create2_address}
 use ingot::transaction::{Checkpoint, Transaction}
@@ -50,14 +52,14 @@ impl Frame {
         self.creates = creates
     }
 
-    fn resume<T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
-        self.vm.run_until_child(self.program, self.calldata, mut state, depth, mut tracer)
+    fn resume<F: Rules, T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+        self.vm.run_until_child<F, T>(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
-    fn finish(mut self, _ state: mut Transaction) -> ChildResult {
+    fn finish<F: Rules>(mut self, _ state: mut Transaction) -> ChildResult {
         let creates = self.creates
         let address = self.vm.call.address
-        if creates && self.vm.status == OK { self.vm.deposit_code(address, mut state) }
+        if creates && self.vm.status == OK { self.vm.deposit_code<F>(address, mut state) }
         let checkpoint = self.checkpoint.take().unwrap()
         if self.vm.status == OK { state.commit(checkpoint) }
         else { state.revert(checkpoint) }
@@ -168,7 +170,7 @@ impl Vm {
 
     // Deposit successful initcode output: EIP-3541 prefix, 200 gas per byte and
     // the EIP-170 size limit. A rejected deposit is an exceptional halt.
-    pub(super) fn deposit_code(mut self, address: u256, _ state: mut Transaction) {
+    pub(super) fn deposit_code<F: Rules>(mut self, address: u256, _ state: mut Transaction) {
         let len: u64 = self.output.len().downcast_unchecked()
         if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
@@ -183,7 +185,7 @@ impl Vm {
         }
     }
 
-    pub(super) fn start_call<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
+    pub(super) fn start_call<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                              _ tracer: mut T) -> Option<Box<Frame>> {
         let requested = self.pop()
         let code_address = address_word(self.pop())
@@ -227,14 +229,14 @@ impl Vm {
         }
         var delegate_access: u128 = 0
         if let Option::Some(delegate) = delegate {
-            delegate_access = if state.account_is_warm(delegate) { 100 } else { 2600 }
+            delegate_access = account_access<F>(warm: state.account_is_warm(delegate))
             let warmed = state.warm_account(address: delegate)
             if warmed != OK {
                 self.fault(warmed)
                 return Option::None
             }
         }
-        let extra: u128 = (if cold { 2500 } else { 0 }) + delegate_access
+        let extra: u128 = (if cold { F::COLD_ACCOUNT_ACCESS as u128 - 100 } else { 0 }) + delegate_access
             + if op == 0xf1 && has_value && state.is_empty(code_address) { 25000 } else { 0 }
         if !self.charge(extra) { return Option::None }
         let cap = self.gas_remaining - self.gas_remaining / 64
@@ -311,7 +313,7 @@ impl Vm {
         Option::Some(frame)
     }
 
-    pub(super) fn start_create<T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
+    pub(super) fn start_create<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
                                _ tracer: mut T) -> Option<Box<Frame>> {
         if !self.holds(if op == 0xf5 { 4 } else { 3 }) { return Option::None }
         let value = self.take()
@@ -398,13 +400,13 @@ impl Vm {
 
     // EIP-6780: the balance moves to the beneficiary; only an account created by
     // this transaction is deleted, at settlement, and loses ether sent to itself.
-    pub(super) fn selfdestruct(mut self, _ state: mut Transaction) {
+    pub(super) fn selfdestruct<F: Rules>(mut self, _ state: mut Transaction) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
         let me = address_word(self.call.address)
         let balance = state.balance(me)
         var gas: u128 = 5000
-        if !state.account_is_warm(beneficiary) { gas += 2600 }
+        if !state.account_is_warm(beneficiary) { gas += F::COLD_ACCOUNT_ACCESS as u128 }
         if balance != 0 && state.is_empty(beneficiary) { gas += 25000 }
         if !self.charge(gas) { return }
         self.fault(state.warm_account(address: beneficiary))
@@ -424,7 +426,7 @@ impl Vm {
         if self.ok() { self.halted = true }
     }
 
-    pub(super) fn run_children<T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
+    pub(super) fn run_children<F: Rules, T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
                                _ state: mut Transaction, _ tracer: mut T) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
@@ -451,7 +453,7 @@ impl Vm {
                     let depth = frames.len()
                     if depth == 0 { break }
                     var frame = frames.pop().unwrap()
-                    let result = frame.get().finish(mut state)
+                    let result = frame.get().finish<F>(mut state)
                     tracer.leave(CallEnd { depth, status: result.result.status, gas: result.result.gas_remaining },
                                  output: result.result.output.span())
                     // A pool that cannot grow frees it.
@@ -462,9 +464,9 @@ impl Vm {
             }
             let depth = frames.len()
             next = if depth == 0 {
-                self.run_until_child(program, calldata, mut state, depth: 0, mut tracer)
+                self.run_until_child<F, T>(program, calldata, mut state, depth: 0, mut tracer)
             } else {
-                frames[depth - 1].get().resume(mut state, depth, mut tracer)
+                frames[depth - 1].get().resume<F, T>(mut state, depth, mut tracer)
             }
         }
     }

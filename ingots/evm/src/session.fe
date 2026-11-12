@@ -3,6 +3,7 @@
 // many bytes. native/client/README.md specifies the requests and responses.
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use std::io::{Stdin, Stdout}
+use ingot::fork::Fork
 use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
 use ingot::state::WorldState
 use ingot::status::OK
@@ -267,6 +268,7 @@ impl Session {
                 let checks = reader.byte()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 self.config = Config {
+                    fork: Fork::Osaka,
                     max_code_size,
                     max_initcode_size,
                     tx_gas_limit_cap,

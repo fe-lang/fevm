@@ -2,6 +2,7 @@ use std::env::Args
 use std::io::{Stdin, Stdout}
 pub use status::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
+pub use fork::{Fork, Osaka, Rules}
 pub use logs::{LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
