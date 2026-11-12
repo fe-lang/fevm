@@ -45,10 +45,11 @@ native/out/toolchain/bin/fe build . --backend native --ingot fevm -O 2 --out-dir
 
 ## CLI
 
-`fevm <hex-bytecode> [hex-calldata]` runs the code once in an empty world with
-default call and block values. It prints the returned bytes, or the top of the
-stack as a 32-byte word, or `empty`. On failure it prints the status name
-(`revert` with the revert data) and exits with the status code.
+`fevm [--fork osaka|amsterdam] <hex-bytecode> [hex-calldata]` runs the code
+once in an empty world with default call and block values, by the rules of
+the fork it names (Osaka without `--fork`). It prints the returned bytes, or
+the top of the stack as a 32-byte word, or `empty`. On failure it prints the
+status name (`revert` with the revert data) and exits with the status code.
 
 ```sh
 ./out/fevm 0x600260030100        # PUSH1 2; PUSH1 3; ADD; STOP
@@ -56,6 +57,7 @@ stack as a 32-byte word, or `empty`. On failure it prints the status name
 ./out/fevm 0x602a5f5260205ff3    # RETURN 32 bytes
 ./out/fevm 0x5f3500 0x1234       # CALLDATALOAD
 ./out/fevm 0x01                  # stack_underflow, exit 10
+./out/fevm --fork amsterdam 0x600160026003e88e50   # EXCHANGE, then POP: 1
 ```
 
 `fevm serve` keeps one world and answers binary requests on stdin: settings,

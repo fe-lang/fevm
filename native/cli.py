@@ -13,8 +13,9 @@ from arith.run import artifacts, command
 ROOT = Path(__file__).resolve().parent.parent
 # The bytes of a boxed child `Frame` (with the stack on the heap).
 FRAME_BOX_SIZE = 928
+USAGE = 'usage: fevm [--fork osaka|amsterdam] <hex-bytecode> [hex-calldata] | fevm serve\n'
 CASES = [
-    ('usage', [], 2, 'usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n'),
+    ('usage', [], 2, USAGE),
     ('empty', [''], 0, 'empty\n'),
     ('stop', ['00'], 0, 'empty\n'),
     ('keccak-empty', ['5f5f20'], 0, '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\n'),
@@ -33,6 +34,13 @@ CASES = [
     ('stack-underflow', ['01'], 10, 'stack_underflow\n'),
     ('invalid', ['fe'], 17, 'invalid_opcode\n'),
     ('revert', ['60006000fd'], 19, 'revert 0x\n'),
+    # PUSH1 1; PUSH1 2; PUSH1 3; EXCHANGE 0x8e trades the second and third
+    # words, so POP leaves 1 on top.
+    ('fork-amsterdam', ['--fork', 'amsterdam', '600160026003e88e50'], 0, f'0x{1:064x}\n'),
+    ('fork-osaka', ['--fork', 'osaka', '4b'], 17, 'invalid_opcode\n'),
+    ('fork-default', ['4b'], 17, 'invalid_opcode\n'),
+    ('fork-unknown', ['--fork', 'cancun', '00'], 2, USAGE),
+    ('fork-without-code', ['--fork', 'amsterdam'], 2, USAGE),
 ]
 
 

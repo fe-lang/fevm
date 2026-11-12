@@ -1,6 +1,7 @@
 use core::MemBuffer
 use std::env::{Arg, Args}
 use std::io::{Display, Stdin, Stdout}
+use ingot::fork::Fork
 use ingot::transaction::Transaction
 use ingot::session::serve
 use ingot::hex::{
@@ -67,26 +68,42 @@ pub fn run() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     status
 }
 
-// Runs the bytecode in the arguments and writes its result or error.
+fn usage() -> i32 uses (text: mut MemBuffer) {
+    "usage: fevm [--fork osaka|amsterdam] <hex-bytecode> [hex-calldata] | fevm serve\n".fmt(mut text)
+    ERR_USAGE
+}
+
+// Runs the bytecode in the arguments by the rules of the fork they name, or
+// Osaka's, and writes its result or error.
 fn execute() -> i32 uses (args: Args, text: mut MemBuffer) {
-    if args.count() != 2 && args.count() != 3 {
-        "usage: fevm <hex-bytecode> [hex-calldata] | fevm serve\n".fmt(mut text)
-        return ERR_USAGE
+    var fork = Fork::Osaka
+    var first: usize = 1
+    if args.count() > 1 && args.get(1) == "--fork" {
+        if args.count() > 2 && args.get(2) == "osaka" {
+            fork = Fork::Osaka
+        } else if args.count() > 2 && args.get(2) == "amsterdam" {
+            fork = Fork::Amsterdam
+        } else {
+            return usage()
+        }
+        first = 3
     }
-    let program = parse_hex_program(args.get(1))
+    let operands = args.count() - first
+    if operands != 1 && operands != 2 { return usage() }
+    let program = parse_hex_program(args.get(first))
     if program.status != OK {
         write_parse_error(program.status)
         return program.status
     }
 
-    let calldata = if args.count() == 3 { parse_hex_bytes(args.get(2)) } else { empty_bytes() }
+    let calldata = if operands == 2 { parse_hex_bytes(args.get(first + 1)) } else { empty_bytes() }
     if calldata.status != OK {
         write_parse_error(calldata.status)
         return calldata.status
     }
 
     var state = Transaction::new(WorldState::empty(), sender: 0, destination: 0, coinbase: 0,
-                                 config: Config::osaka(), buffers: Buffers::new())
+                                 config: Config::of(fork), buffers: Buffers::new())
     let vm = execute_vm(
         program,
         calldata,
