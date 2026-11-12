@@ -1,4 +1,4 @@
-# Ethereum state tests
+# Ethereum state and blockchain tests
 
 `fevm_tools conformance` ([`native/tools`](../tools/src/conformance.fe)) runs
 the Osaka and Amsterdam cases of an
@@ -60,3 +60,42 @@ All runnable cases of `tests@v21.0.2` pass: 14,640 Osaka and 16,883 Amsterdam;
 The driver prints one JSON object: `invalid` (null, or the validity code's
 name), `status` (the status name), `host_failure`, `gas_used`, `logs_hash`
 and the post-state accounts. Names come from `ingots/evm/src/status.fe`.
+
+## Blockchain tests
+
+Given a release's `blockchain_tests`, the same command runs each test's
+blocks through FeVM's `Block`, one driver process per test:
+
+```sh
+tar -xzf fixtures.tar.gz fixtures/blockchain_tests/for_osaka
+native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
+  --fixtures fixtures/blockchain_tests/for_osaka --out native/out/blocks-run
+```
+
+A test runs if its `network` is one of the selected forks. The driver begins
+each block on the world the last valid one left, runs its transactions,
+credits its withdrawals and finishes it, and judges it as a client that
+trusts the header's own validity would: a block is valid when every
+transaction is, its system calls succeed, and its gas used, blob gas used,
+logs bloom and requests hash are the header's. An invalid block leaves the
+world as it was. A test passes when each block's validity is the fixture's,
+each valid block's receipts match (success, cumulative gas used and logs,
+where the fixture has receipts), and the state after the last block equals
+`postState`.
+
+FeVM takes decoded transactions with recovered senders, and leaves a header's
+own validity (base fee, excess blob gas, gas limit, parent hash) and the
+Merkle roots (state, transactions, receipts, withdrawals) to its host. So the
+runner takes each block's transactions and senders from the fixture's decoded
+form, and leaves out the invalid blocks whose `expectException` is one of
+those: `results.json` counts them in `blocks_not_judged`. The blocks it
+judges invalid are those with an invalid transaction (other than a malformed
+signature), wrong requests, a malformed deposit event, a failed or missing
+request contract, or wrong blob gas used.
+
+All 17,441 Osaka tests of `tests@v21.0.2` pass, with 476 of their 19,875
+blocks not judged.
+
+The driver prints `blocks`, each with `valid` and its `receipts` (status,
+cumulative gas, logs) or the `reason` it is invalid, and the post-state
+accounts.

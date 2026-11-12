@@ -117,6 +117,37 @@ to the block's totals (from Amsterdam, execution gas before refunds and state
 gas apart), the created contract's address, the output and the logs. A host failure (allocation,
 balance overflow) undoes the transaction and reports that status.
 
+### Blocks
+
+A `Block` runs a block's transactions on an `Evm`'s world, which it holds
+from `begin` to `finish`:
+
+```fe
+var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
+let receipt = block.transact(request, mut tracer)
+let (evm, finished) = block.finish(withdrawals)
+```
+
+`begin` records the parent hash for BLOCKHASH and makes the system calls
+that store the parent beacon block root (EIP-4788) and the parent hash
+(EIP-2935). `transact` runs a transaction if the block has the gas and blob
+gas left for it (`Config` has the fork's blob limit), and its receipt has the
+cumulative gas used; `simulate` tries one without counting it. `finish`
+credits the withdrawals (EIP-4895), collects the block's requests (EIP-7685):
+the deposits its transactions logged (EIP-6110) and those the withdrawal and
+consolidation request contracts return to their system calls (EIP-7002,
+EIP-7251). It returns the `Evm`, and a `BlockOutput` with what the header
+commits to apart from its Merkle roots: gas used, blob gas used, the logs
+bloom, and the requests with their hash. A block whose request contract is
+missing or fails, or whose deposit contract logged a malformed deposit, gives
+a `BlockError` instead.
+
+fevm does not check a header against its parent, decode transactions or
+compute Merkle roots; a host that validates blocks compares the output with
+the header, and rejects a block with an invalid transaction. An invalid
+block's changes are not undone: a host that may need the world before it
+keeps a `try_clone` of it.
+
 ### Forks
 
 The fork is a type. `Rules` gives a fork's rules as constants, each defined
