@@ -17,7 +17,7 @@ pub const FORKS: usize = 2
 // BPO2's, for fixtures without a blob schedule.
 const BLOB_BASE_FEE_UPDATE_FRACTION: u256 = 11684671
 // EIP-7825's limit on a transaction's gas.
-const TX_GAS_LIMIT_CAP: u64 = 16777216
+pub const TX_GAS_LIMIT_CAP: u64 = 16777216
 // The most of a crashed driver's standard error to keep.
 const STDERR_TAIL: usize = 2000
 
@@ -52,7 +52,7 @@ pub fn fork_name(_ fork: usize) -> String<9> {
 }
 
 // The fork named `name`, if fevm runs it.
-fn fork_named(_ name: Arg) -> Option<usize> {
+pub fn fork_named(_ name: Arg) -> Option<usize> {
     for fork in 0..FORKS {
         if name == fork_name(fork) { return Option::Some(fork) }
     }

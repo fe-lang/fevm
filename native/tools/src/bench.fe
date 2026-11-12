@@ -2,7 +2,7 @@ use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::abi::DynString
 use core::fixed::{Fixed, SWad, UFixed, Wad}
 use ingot::{named, parse_u64, succeed}
-use ingot::conformance::{Indexes, encode, fixture_files}
+use ingot::conformance::{Indexes, TX_GAS_LIMIT_CAP, encode, fixture_files, fork_named}
 use json::{Number, Value, parse}
 use std::env::{Arg, Args}
 use std::fs::Fs
@@ -24,6 +24,8 @@ pub struct Options {
     out: MemBuffer,
     level: u8,
     fork: MemBuffer,
+    // The fork whose rules the engines run, by the conformance runner's index.
+    rules: usize,
     // CPU nanoseconds of transactions per timed run.
     target: i64,
     repeat: u64,
@@ -41,6 +43,7 @@ impl Options {
         var out = format!("native/out/bench")
         var level: u8 = 2
         var fork = format!("London")
+        var rules: usize = 0
         var target: i64 = 300000000
         var repeat: u64 = 3
         var select: MemVec<Arg> = MemVec::new()
@@ -78,6 +81,11 @@ impl Options {
                 out = format!(value)
             } else if name == "--fork" {
                 fork = format!(value)
+            } else if name == "--rules" {
+                match fork_named(value) {
+                    Option::Some(index) => rules = index,
+                    Option::None => return Result::Err(format!("bad option: ", name, " ", value)),
+                }
             } else if name == "--level" && (value == "0" || value == "1" || value == "2") {
                 level = value.span()[0] - b'0'
             } else if name == "--target" {
@@ -111,6 +119,7 @@ impl Options {
                     out,
                     level,
                     fork,
+                    rules,
                     target,
                     repeat,
                     select,
@@ -342,7 +351,8 @@ uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
         },
     }
     engines.push(Engine { name: "fevm", path: fevm })
-    if !options.fevm_only {
+    // revm 33.1 has no EIP-8037, so it runs no Amsterdam.
+    if !options.fevm_only && options.rules == 0 {
         let revm = match options.revm {
             Option::Some(ref path) => named(path, fs.canonicalize(path))?,
             Option::None => {
@@ -365,9 +375,9 @@ uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
             },
         }
         engines.push(Engine { name: "revm", path: revm })
-        if let Option::Some(ref path) = options.evmone {
-            engines.push(Engine { name: "evmone", path: named(path, fs.canonicalize(path))? })
-        }
+    }
+    if !options.fevm_only && let Option::Some(ref path) = options.evmone {
+        engines.push(Engine { name: "evmone", path: named(path, fs.canonicalize(path))? })
     }
     // The sums of the logarithms of FeVM's time over each other engine's, and
     // how many there are.
@@ -398,9 +408,11 @@ uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
                 if !selected {
                     continue
                 }
-                // Every engine runs Osaka's rules. Benchmarks exceed EIP-7825's
-                // cap, so the host lifts it.
-                let payload = named(case, encode(test, Indexes::of(post), fork: 0, cap: 18446744073709551615))?
+                // Benchmarks exceed EIP-7825's cap, so under Osaka the host
+                // lifts it. From Amsterdam gas past the cap is state gas, and
+                // every engine keeps it.
+                let cap = if options.rules == 0 { 18446744073709551615 } else { TX_GAS_LIMIT_CAP }
+                let payload = named(case, encode(test, Indexes::of(post), fork: options.rules, cap))?
                 var outcomes: MemVec<Outcome> = MemVec::new()
                 for ref engine in engines {
                     outcomes.push(outcome(engine.path.span(), payload, statuses: engine.name == "fevm")?)

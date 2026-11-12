@@ -61,6 +61,7 @@ struct Reader
 
 struct Case
 {
+    evmc_revision rev;
     state::BlockInfo block;
     test::TestState pre;
     state::Transaction tx;
@@ -71,9 +72,10 @@ Case decode(const bytes& data)
     Reader reader{data};
     if (reader.word(1) != 5)
         std::abort();
-    // The fork fevm runs; this runner executes Cancun.
-    reader.word(1);
+    // FeVM's Amsterdam, or else Cancun.
+    const auto fork = reader.word(1);
     Case result;
+    result.rev = fork == 1 ? EVMC_AMSTERDAM : EVMC_CANCUN;
     auto& block = result.block;
     block.coinbase = reader.addr();
     block.number = static_cast<int64_t>(reader.word(32));
@@ -83,9 +85,8 @@ Case decode(const bytes& data)
     block.base_fee = static_cast<uint64_t>(reader.word(32));
     block.blob_base_fee = reader.word(32);
     block.chain_id = static_cast<uint64_t>(reader.word(32));
-    // The slot number, which Cancun has no opcode for.
-    reader.word(32);
-    // evmone applies the EIP-7825 cap from Osaka, and this runner executes Cancun.
+    block.slot_number = static_cast<uint64_t>(reader.word(32));
+    // evmone applies EIP-7825's cap itself, from Osaka on.
     reader.word(8);
     for (auto accounts = reader.count(); accounts != 0; --accounts)
     {
@@ -160,10 +161,10 @@ int main(int argc, char* argv[])
     // An invalid transaction has no receipt.
     const auto apply = [&](const Case& c) -> std::optional<state::TransactionReceipt> {
         const auto props = state::validate_transaction(
-            c.pre, c.block, c.tx, EVMC_CANCUN, c.block.gas_limit, c.block.gas_limit, MAX_BLOB_GAS);
+            c.pre, c.block, c.tx, c.rev, c.block.gas_limit, c.block.gas_limit, MAX_BLOB_GAS);
         if (std::holds_alternative<std::error_code>(props))
             return std::nullopt;
-        return state::transition(c.pre, c.block, block_hashes, c.tx, EVMC_CANCUN, vm,
+        return state::transition(c.pre, c.block, block_hashes, c.tx, c.rev, vm,
             std::get<state::TransactionProperties>(props));
     };
     // Every repeated application must use the gas the reported one does.
