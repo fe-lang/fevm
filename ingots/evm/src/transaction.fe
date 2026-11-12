@@ -76,12 +76,6 @@ impl Transaction {
         self.blob_hashes.clear()
     }
 
-    /// Replaces the state, between transactions, dropping the old one.
-    pub fn load(mut self, _ state: own WorldState) {
-        core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
-        self.state = state
-    }
-
     /// The state, between transactions.
     pub fn world(self) -> ref WorldState { ref self.state }
 
