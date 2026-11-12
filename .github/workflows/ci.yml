@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  EEST_RELEASE: tests@v21.0.1
+  EEST_RELEASE: tests@v21.0.2
 
 jobs:
   check:

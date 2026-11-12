@@ -177,6 +177,42 @@ fn configure_raises_the_code_size_limit() {
 }
 
 #[test]
+fn configure_selects_amsterdam() {
+    let mut session = session();
+    let target = Address::from(0xbb);
+    // SLOTNUM; PUSH0; MSTORE; PUSH1 32; PUSH0; RETURN: returns the slot number.
+    session
+        .set_code(target, &[0x4b, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3])
+        .unwrap();
+    let osaka = session.call(&tx(Some(target), 0, &[])).unwrap();
+    assert_eq!(osaka.status, Status::InvalidOpcode);
+
+    session.configure(&Config::amsterdam()).unwrap();
+    session
+        .set_block(&Block {
+            coinbase: Address::from(0xc0),
+            gas_limit: U256::from(30_000_000u64),
+            chain_id: U256::from(1u64),
+            slot_number: U256::from(77u64),
+            ..Block::default()
+        })
+        .unwrap();
+    let mut transfer = tx(Some(target), 0, &[]);
+    transfer.value = U256::from(5u64);
+    let amsterdam = session.transact(&transfer).unwrap();
+    assert!(amsterdam.succeeded(), "{amsterdam:?}");
+    assert_eq!(amsterdam.output, U256::from(77u64).0);
+    // EIP-7708: the value logs a Transfer from 0xff..fe.
+    let mut system = [0xff; 20];
+    system[19] = 0xfe;
+    assert_eq!(amsterdam.logs.len(), 1);
+    let log = &amsterdam.logs[0];
+    assert_eq!(log.address, Address(system));
+    assert_eq!(log.topics[1..], [U256::from(SENDER), U256::from(0xbbu64)]);
+    assert_eq!(log.data, U256::from(5u64).0);
+}
+
+#[test]
 fn traces_steps_and_calls() {
     let mut session = session();
     let target = Address::from(0xbb);
