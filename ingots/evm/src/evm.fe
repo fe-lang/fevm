@@ -1,9 +1,10 @@
 use ingot::fork::{Amsterdam, Fork, Osaka}
-use ingot::processor::{Receipt, TxRequest, apply, checked}
+use core::MemVec
+use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal, apply, checked, system_call, withdraw}
 use ingot::state::WorldState
 use ingot::trace::Tracer
 use ingot::transaction::Transaction
-use ingot::types::{BlockEnv, Config}
+use ingot::types::{BlockEnv, Config, ExecutionResult, InputData}
 use ingot::vm::Buffers
 
 /// An EVM over a world, which it holds across transactions together with
@@ -32,9 +33,10 @@ impl Evm {
     /// The includability checks, in specification order: VALID, or the first
     /// that fails.
     pub fn validate(self, _ request: TxRequest, _ block: BlockEnv) -> i32 {
+        let available = Capacity::of(block, self.config)
         match self.config.fork {
-            Fork::Osaka => checked<Osaka>(self.tx.world(), request, block, self.config).invalid,
-            Fork::Amsterdam => checked<Amsterdam>(self.tx.world(), request, block, self.config).invalid,
+            Fork::Osaka => checked<Osaka>(self.tx.world(), request, block, self.config, available).invalid,
+            Fork::Amsterdam => checked<Amsterdam>(self.tx.world(), request, block, self.config, available).invalid,
         }
     }
 
@@ -44,19 +46,36 @@ impl Evm {
     /// opcode and each call and creation, the transaction's own message among
     /// them; pass `()` to trace nothing.
     pub fn transact<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T) -> Receipt {
-        self.run(request, block, mut tracer, commit: true)
+        self.apply(request, block, available: Capacity::of(block, self.config), mut tracer, commit: true)
     }
 
     /// Runs a transaction as `transact` does and keeps none of its changes.
     /// The receipt is the one `transact` would give.
     pub fn simulate<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T) -> Receipt {
-        self.run(request, block, mut tracer, commit: false)
+        self.apply(request, block, available: Capacity::of(block, self.config), mut tracer, commit: false)
     }
 
-    fn run<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T, commit: bool) -> Receipt {
+    /// As `transact`, or without `commit` as `simulate`, in a block with
+    /// `available` gas left.
+    pub(ingot) fn apply<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, available: Capacity,
+                                   _ tracer: mut T, commit: bool) -> Receipt {
         match self.config.fork {
-            Fork::Osaka => apply<Osaka>(mut self.tx, request, block, self.config, mut tracer, commit),
-            Fork::Amsterdam => apply<Amsterdam>(mut self.tx, request, block, self.config, mut tracer, commit),
+            Fork::Osaka => apply<Osaka>(mut self.tx, request, block, self.config, available, mut tracer, commit),
+            Fork::Amsterdam => apply<Amsterdam>(mut self.tx, request, block, self.config, available, mut tracer, commit),
+        }
+    }
+
+    pub(ingot) fn system_call(mut self, target: u256, _ data: own InputData, _ block: BlockEnv) -> ExecutionResult {
+        match self.config.fork {
+            Fork::Osaka => system_call<Osaka>(mut self.tx, target, data, block, self.config),
+            Fork::Amsterdam => system_call<Amsterdam>(mut self.tx, target, data, block, self.config),
+        }
+    }
+
+    pub(ingot) fn withdraw(mut self, _ withdrawals: MemVec<Withdrawal>) -> i32 {
+        match self.config.fork {
+            Fork::Osaka => withdraw<Osaka>(mut self.tx, withdrawals, self.config),
+            Fork::Amsterdam => withdraw<Amsterdam>(mut self.tx, withdrawals, self.config),
         }
     }
 }

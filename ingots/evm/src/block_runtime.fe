@@ -1,0 +1,118 @@
+use core::{MemVec, Option, Result}
+use ingot::block::{Block, BlockError}
+use ingot::evm::Evm
+use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
+use ingot::state::WorldState
+use ingot::status::{INVALID_GAS_LIMIT, OK, VALID}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+
+const SENDER: u256 = 0x1000
+const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
+const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
+const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
+const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
+
+// A funded sender, system contracts that store their input's first word in
+// slot 0, a withdrawal request contract that returns the byte 0xab and a
+// consolidation request contract that returns nothing.
+fn world() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    // PUSH0; CALLDATALOAD; PUSH0; SSTORE.
+    let store: [u8; 4] = [0x5f, 0x35, 0x5f, 0x55]
+    core::assert(world.set_code(address: BEACON_ROOTS, code: store) == OK)
+    core::assert(world.set_code(address: HISTORY_STORAGE, code: store) == OK)
+    // PUSH1 0xab; PUSH0; MSTORE8; PUSH1 1; PUSH0; RETURN.
+    let reply: [u8; 8] = [0x60, 0xab, 0x5f, 0x53, 0x60, 0x01, 0x5f, 0xf3]
+    core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: reply) == OK)
+    core::assert(world.set_code(address: CONSOLIDATION_REQUESTS, code: [0x00 as u8]) == OK)
+    world
+}
+
+fn env() -> BlockEnv {
+    var env = default_block_env()
+    env.number = 300
+    env.gaslimit = 100_000
+    env.chainid = 1
+    env
+}
+
+fn transfer(nonce: u256, gas_limit: u64) -> TxRequest {
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: 0xbb, creates: false, nonce,
+        gas_limit, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 1,
+    }
+    TxRequest::new(env, data: empty_bytes())
+}
+
+#[test]
+fn block_calls_the_system_contracts_and_counts_gas() {
+    var world = world()
+    core::assert(world.set_block_hash(43, 7))
+    var block = Block::begin(Evm::new(world, Config::osaka()), env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0x5678)
+    core::assert(block.world().storage_load(HISTORY_STORAGE, 0) == 0x1234)
+    // The parent's hash is the latest BLOCKHASH reaches, and block 43's is past the earliest.
+    core::assert(block.world().block_hash(299) == 0x1234 && block.world().block_hash(43) == 0)
+
+    var tracer = ()
+    let first = block.transact(transfer(nonce: 0, gas_limit: 50_000), mut tracer)
+    core::assert(first.invalid == VALID && first.gas_used == 21_000 && first.cumulative_gas_used == 21_000)
+    // A simulation is not counted.
+    let tried = block.simulate(transfer(nonce: 1, gas_limit: 50_000), mut tracer)
+    core::assert(tried.invalid == VALID && tried.cumulative_gas_used == 42_000 && block.world().nonce(SENDER) == 1)
+    // 79,000 gas is left, then 58,000.
+    core::assert(block.transact(transfer(nonce: 1, gas_limit: 79_001), mut tracer).invalid == INVALID_GAS_LIMIT)
+    let second = block.transact(transfer(nonce: 1, gas_limit: 79_000), mut tracer)
+    core::assert(second.invalid == VALID && second.cumulative_gas_used == 42_000)
+    core::assert(block.available().gas == 58_000)
+
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    withdrawals.push(Withdrawal { address: 0xee, amount: 0 })
+    let (evm, finished) = block.finish(withdrawals)
+    core::assert(evm.world().balance(0xdd) == 3_000_000_000 && !evm.world().exists(0xee))
+    core::assert(evm.world().balance(0xbb) == 2)
+    let Result::Ok(output) = finished else { return core::assert(false) }
+    core::assert(output.gas_used == 42_000 && output.blob_gas_used == 0)
+    core::assert(output.requests.len() == 1 && output.requests[0].len() == 2)
+    core::assert(output.requests[0][0] == 1 && output.requests[0][1] == 0xab)
+    // sha256(sha256(0x01ab)).
+    core::assert(output.requests_hash == 0xed9cc51c743ff9c6e05af21e3ec738ce754013738cca2a60ddc0a6a38bb84859)
+}
+
+#[test]
+fn block_without_requests_hashes_nothing() {
+    var world = world()
+    core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: [0x00 as u8]) == OK)
+    let block = Block::begin(Evm::new(world, Config::osaka()), env(), parent_hash: 1, parent_beacon_block_root: 2)
+    let (_, finished) = block.finish(MemVec::new())
+    let Result::Ok(output) = finished else { return core::assert(false) }
+    core::assert(output.gas_used == 0 && output.requests.len() == 0)
+    // sha256 of no bytes.
+    core::assert(output.requests_hash == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
+}
+
+fn finish_with(withdrawal_requests: [u8; 3], len: usize) -> Result<BlockError, ()> {
+    var world = world()
+    core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: InputData::copy_from(withdrawal_requests, offset: 0, len)) == OK)
+    let block = Block::begin(Evm::new(world, Config::osaka()), env(), parent_hash: 1, parent_beacon_block_root: 2)
+    match block.finish(MemVec::new()).1 {
+        Result::Ok(_) => Result::Ok(()),
+        Result::Err(error) => Result::Err(error),
+    }
+}
+
+#[test]
+fn block_needs_its_request_contracts() {
+    // PUSH0; PUSH0; REVERT, and no code.
+    let reverts: [u8; 3] = [0x5f, 0x5f, 0xfd]
+    core::assert(match finish_with(withdrawal_requests: reverts, len: 3) {
+        Result::Err(BlockError::RequestCallFailed) => true,
+        _ => false,
+    })
+    core::assert(match finish_with(withdrawal_requests: reverts, len: 0) {
+        Result::Err(BlockError::RequestContractMissing) => true,
+        _ => false,
+    })
+}

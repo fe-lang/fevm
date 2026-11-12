@@ -1,0 +1,257 @@
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
+use fevm_precompiles::sha256
+use ingot::evm::Evm
+use ingot::logs::{Bloom, LogBuffer}
+use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal}
+use ingot::state::WorldState
+use ingot::status::{ERR_HOST_ALLOCATION, OK, VALID, is_evm_outcome}
+use ingot::trace::Tracer
+use ingot::types::{BlockEnv, ExecutionResult, InputData}
+
+// The system contracts a block calls: EIP-4788's beacon roots and EIP-2935's
+// block hashes before its transactions, EIP-7002's withdrawal requests and
+// EIP-7251's consolidation requests after.
+const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
+const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
+const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
+const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
+
+// EIP-7685 request types.
+const DEPOSIT_REQUEST: u8 = 0
+const WITHDRAWAL_REQUEST: u8 = 1
+const CONSOLIDATION_REQUEST: u8 = 2
+
+// EIP-6110: the deposit contract's DepositEvent topic, and its data's length.
+const DEPOSIT_EVENT: u256 = 0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5
+const DEPOSIT_EVENT_LEN: usize = 576
+// A deposit event's fields, each a 32-byte length and its bytes: the offset
+// of each, which the event's first five words give, and its length.
+const DEPOSIT_FIELDS: [(usize, usize); 5] = [(160, 48), (256, 32), (320, 8), (384, 96), (512, 8)]
+
+// BLOCKHASH reaches this many blocks back.
+const BLOCK_HASHES: u256 = 256
+
+/// Why a block is invalid, apart from an invalid transaction, which its
+/// receipt reports.
+pub enum BlockError {
+    /// EIP-7002, EIP-7251: a request contract has no code.
+    RequestContractMissing,
+    /// EIP-7002, EIP-7251: a request contract's call failed.
+    RequestCallFailed,
+    /// EIP-6110: the deposit contract logged a malformed deposit event.
+    MalformedDeposit,
+    /// A host failure, with its status: an allocation, or a balance past
+    /// 2^256.
+    Host(i32),
+}
+
+impl Copy for BlockError {}
+
+/// What a block's header commits to, apart from its Merkle roots: its gas
+/// used, blob gas used, logs bloom, and its EIP-7685 requests, each a type
+/// byte and its data, with their hash.
+pub struct BlockOutput {
+    pub gas_used: u64,
+    pub blob_gas_used: u64,
+    pub logs_bloom: Bloom,
+    pub requests: MemVec<MemBuffer>,
+    pub requests_hash: u256,
+}
+
+/// A block being executed on an `Evm`'s world, which it holds from `begin`
+/// to `finish`. `begin` makes the system calls that precede the block's
+/// transactions; `transact` runs each transaction against the gas and blob
+/// gas the block has left; `finish` credits the withdrawals and collects the
+/// block's requests.
+pub struct Block {
+    evm: Evm,
+    env: BlockEnv,
+    // The gas of the whole block.
+    limit: Capacity,
+    // Execution gas and, from EIP-8037, state gas apart; the header's gas
+    // used is the larger (EIP-7778).
+    gas_used: u64,
+    state_gas_used: u64,
+    blob_gas_used: u64,
+    // What the transactions paid for, which their receipts accumulate.
+    cumulative_gas_used: u64,
+    bloom: Bloom,
+    // EIP-6110: the deposits the transactions made, back to back.
+    deposits: MemBuffer,
+    failure: Option<BlockError>,
+}
+
+// A system call's 32 bytes of input.
+fn word_input(_ word: u256) -> InputData {
+    match MemBuffer::try_new(32) {
+        Option::Some(var bytes) => {
+            bytes.write_word(offset: 0, value: word)
+            InputData::new(bytes, status: OK)
+        },
+        Option::None => InputData::new(MemBuffer::empty(), status: ERR_HOST_ALLOCATION),
+    }
+}
+
+// Whether `data` is a DepositEvent's: five dynamic fields at their fixed
+// offsets with their fixed lengths.
+fn well_formed_deposit(_ data: MemSpan) -> bool {
+    if data.len() != DEPOSIT_EVENT_LEN { return false }
+    var index: usize = 0
+    for (offset, len) in DEPOSIT_FIELDS {
+        if data.read_word(32 * index) != offset as u256 || data.read_word(offset) != len as u256 { return false }
+        index += 1
+    }
+    true
+}
+
+// EIP-7685: the SHA-256 hash of the requests' SHA-256 hashes; none if
+// allocation fails.
+fn requests_hash(_ requests: MemVec<MemBuffer>) -> Option<u256> {
+    var hashes = MemBuffer::empty()
+    if !hashes.try_reserve(32 * requests.len()) { return Option::None }
+    for ref request in requests {
+        hashes.extend_from_word(sha256(request.span(), offset: 0, len: request.len()), len: 32)
+    }
+    Option::Some(sha256(hashes.span(), offset: 0, len: hashes.len()))
+}
+
+impl Block {
+    /// Begins the block `env` describes on `evm`'s world. Records
+    /// `parent_hash` for BLOCKHASH, and makes the system calls that store
+    /// `parent_beacon_block_root` (EIP-4788) and `parent_hash` (EIP-2935).
+    pub fn begin(_ evm: own Evm, _ env: BlockEnv, parent_hash: u256, parent_beacon_block_root: u256) -> Self {
+        let limit = Capacity::of(env, evm.config())
+        var block = Block {
+            evm, env, limit, gas_used: 0, state_gas_used: 0, blob_gas_used: 0, cumulative_gas_used: 0,
+            bloom: Bloom::new(), deposits: MemBuffer::empty(), failure: Option::None,
+        }
+        if env.number != 0 {
+            if !block.evm.world_mut().set_block_hash(env.number - 1, parent_hash) {
+                block.fail(BlockError::Host(ERR_HOST_ALLOCATION))
+            }
+            // The hash this block is the first not to reach.
+            if env.number > BLOCK_HASHES { let _ = block.evm.world_mut().set_block_hash(env.number - BLOCK_HASHES - 1, 0) }
+        }
+        let _ = block.system_call(BEACON_ROOTS, word_input(parent_beacon_block_root))
+        let _ = block.system_call(HISTORY_STORAGE, word_input(parent_hash))
+        block
+    }
+
+    pub fn env(self) -> BlockEnv { self.env }
+    /// The world, between the block's transactions.
+    pub fn world(self) -> ref WorldState { self.evm.world() }
+    /// The gas and blob gas the block has left for its next transaction.
+    pub fn available(self) -> Capacity {
+        Capacity {
+            gas: self.limit.gas - self.gas_used,
+            state_gas: self.limit.state_gas - self.state_gas_used,
+            blob_gas: self.limit.blob_gas - self.blob_gas_used,
+        }
+    }
+
+    // Keeps the first reason the block is invalid.
+    fn fail(mut self, _ error: BlockError) {
+        if self.failure.is_none() { self.failure = Option::Some(error) }
+    }
+
+    fn system_call(mut self, _ target: u256, _ data: own InputData) -> ExecutionResult {
+        let result = self.evm.system_call(target, data, self.env)
+        if !is_evm_outcome(result.status) { self.fail(BlockError::Host(result.status)) }
+        result
+    }
+
+    /// Runs the block's next transaction, as `Evm::transact` does, if the
+    /// block has the gas and blob gas left for it. A block with an invalid
+    /// transaction is invalid; one that is being built leaves it out.
+    pub fn transact<T: Tracer>(mut self, _ request: TxRequest, _ tracer: mut T) -> Receipt {
+        var receipt = self.evm.apply(request, self.env, available: self.available(), mut tracer, commit: true)
+        if receipt.invalid != VALID || !is_evm_outcome(receipt.status) { return receipt }
+        self.gas_used += receipt.execution_gas_used
+        self.state_gas_used += receipt.state_gas_used
+        self.blob_gas_used += request.blob_gas()
+        self.cumulative_gas_used += receipt.gas_used
+        receipt.cumulative_gas_used = self.cumulative_gas_used
+        self.bloom.add_logs(receipt.logs)
+        self.collect_deposits(receipt.logs)
+        receipt
+    }
+
+    /// Runs a transaction as `transact` would run it next, and keeps none of
+    /// its changes, nor counts it in the block.
+    pub fn simulate<T: Tracer>(mut self, _ request: TxRequest, _ tracer: mut T) -> Receipt {
+        var receipt = self.evm.apply(request, self.env, available: self.available(), mut tracer, commit: false)
+        receipt.cumulative_gas_used += self.cumulative_gas_used
+        receipt
+    }
+
+    // EIP-6110: appends the deposits among `logs`.
+    fn collect_deposits(mut self, _ logs: LogBuffer) {
+        let source = self.evm.config().deposit_contract
+        var index: u64 = 0
+        while index < logs.len() {
+            let entry = logs.entry(index)
+            if entry.address == source && entry.topic_count != 0 && entry.topics[0] == DEPOSIT_EVENT {
+                let data = logs.payload(index)
+                if !well_formed_deposit(data) {
+                    self.fail(BlockError::MalformedDeposit)
+                } else if !self.deposits.try_reserve(192) {
+                    self.fail(BlockError::Host(ERR_HOST_ALLOCATION))
+                } else {
+                    for (offset, len) in DEPOSIT_FIELDS { self.deposits.extend_from(data.slice(offset: offset + 32, len)) }
+                }
+            }
+            index += 1
+        }
+    }
+
+    // Appends the request of `kind` with `data`, unless it is empty.
+    fn add_request(mut self, _ requests: mut MemVec<MemBuffer>, kind: u8, _ data: MemSpan) {
+        if data.len() == 0 { return }
+        var request = MemBuffer::empty()
+        if !request.try_reserve(1 + data.len()) || !requests.try_reserve(1) {
+            return self.fail(BlockError::Host(ERR_HOST_ALLOCATION))
+        }
+        request.push(kind)
+        request.extend_from(data)
+        requests.push(request)
+    }
+
+    // The requests a request contract's system call returns.
+    fn collect_requests(mut self, _ requests: mut MemVec<MemBuffer>, kind: u8, from: u256) {
+        if self.evm.world().code_size(from) == 0 { return self.fail(BlockError::RequestContractMissing) }
+        let result = self.system_call(from, InputData::new(MemBuffer::empty(), status: OK))
+        if result.status != OK { return self.fail(BlockError::RequestCallFailed) }
+        self.add_request(mut requests, kind, result.output.span())
+    }
+
+    /// Ends the block: credits `withdrawals` (EIP-4895) and collects its
+    /// requests, the transactions' deposits (EIP-6110) and those the request
+    /// contracts return to their system calls (EIP-7002, EIP-7251). Returns
+    /// the `Evm`, and the block's output unless the block is invalid. An
+    /// invalid block's changes to the world are not undone.
+    pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm, Result<BlockError, BlockOutput>) {
+        var block = self
+        let credited = block.evm.withdraw(withdrawals)
+        if credited != OK { block.fail(BlockError::Host(credited)) }
+        var requests: MemVec<MemBuffer> = MemVec::new()
+        let deposits = core::mem::replace(mut block.deposits, MemBuffer::empty())
+        block.add_request(mut requests, kind: DEPOSIT_REQUEST, deposits.span())
+        block.collect_requests(mut requests, kind: WITHDRAWAL_REQUEST, from: WITHDRAWAL_REQUESTS)
+        block.collect_requests(mut requests, kind: CONSOLIDATION_REQUEST, from: CONSOLIDATION_REQUESTS)
+        let hash = requests_hash(requests)
+        if hash.is_none() { block.fail(BlockError::Host(ERR_HOST_ALLOCATION)) }
+        let gas_used = if block.gas_used > block.state_gas_used { block.gas_used } else { block.state_gas_used }
+        let output = match block.failure {
+            Option::Some(error) => Result::Err(error),
+            Option::None => Result::Ok(BlockOutput {
+                gas_used, blob_gas_used: block.blob_gas_used, logs_bloom: block.bloom, requests,
+                requests_hash: hash.unwrap_or(default: 0),
+            }),
+        }
+        (block.evm, output)
+    }
+
+    /// Leaves the block unfinished and returns the `Evm`, with the world as
+    /// the block's transactions so far left it.
+    pub fn abandon(own self) -> Evm { self.evm }
+}

@@ -263,16 +263,15 @@ impl Session {
                 let tx_gas_limit_cap = reader.u64()
                 let checks = reader.byte()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                self.evm.set_config(Config {
-                    fork,
-                    max_code_size,
-                    max_initcode_size,
-                    tx_gas_limit_cap,
-                    check_chain_id: (checks & 1) != 0,
-                    check_nonce: (checks & 2) != 0,
-                    check_base_fee: (checks & 4) != 0,
-                    check_sender_code: (checks & 8) != 0,
-                })
+                var config = Config::of(fork)
+                config.max_code_size = max_code_size
+                config.max_initcode_size = max_initcode_size
+                config.tx_gas_limit_cap = tx_gas_limit_cap
+                config.check_chain_id = (checks & 1) != 0
+                config.check_nonce = (checks & 2) != 0
+                config.check_base_fee = (checks & 4) != 0
+                config.check_sender_code = (checks & 8) != 0
+                self.evm.set_config(config)
                 Writer::new(DONE)
             },
             SET_BLOCK => {

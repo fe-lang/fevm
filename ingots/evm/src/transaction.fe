@@ -9,9 +9,10 @@ use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
 
-// EIP-7708: an ether transfer's log comes from this address, with the topic
+// The caller of system calls (EIP-4788). From EIP-7708 an ether transfer's
+// log comes from it, with the topic
 // keccak256("Transfer(address,address,uint256)").
-const SYSTEM_ADDRESS: u256 = 0xfffffffffffffffffffffffffffffffffffffffe
+pub const SYSTEM_ADDRESS: u256 = 0xfffffffffffffffffffffffffffffffffffffffe
 const TRANSFER_TOPIC: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
