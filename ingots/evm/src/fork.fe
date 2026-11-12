@@ -29,6 +29,11 @@ impl Fork {
 /// is defined once, from `FORK`, so a fork is one line.
 pub trait Rules {
     const FORK: Fork
+    // EIP-7843: SLOTNUM pushes the slot number.
+    const SLOTNUM: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-8024: DUPN, SWAPN and EXCHANGE reach stack words past the
+    // sixteenth through an immediate byte.
+    const STACK_IMMEDIATES: bool = Self::FORK.since(Fork::Amsterdam)
     // EIP-2929: the first access of an account in a transaction.
     const COLD_ACCOUNT_ACCESS: u64 = 2600
 }

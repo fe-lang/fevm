@@ -10,7 +10,7 @@ use std::evm::crypto::{addmod, mulmod}
 use ingot::constants::{I256_MIN, STACK_LIMIT}
 use ingot::fork::Rules
 use ingot::trace::{Step, Tracer}
-use ingot::status::{ERR_INVALID_JUMP, ERR_OUT_OF_GAS, ERR_STACK_OVERFLOW, ERR_STACK_UNDERFLOW}
+use ingot::status::{ERR_INVALID_IMMEDIATE, ERR_INVALID_JUMP, ERR_OUT_OF_GAS, ERR_STACK_OVERFLOW, ERR_STACK_UNDERFLOW}
 use super::Vm
 
 /// The big-endian `T` at `offset` bytes into `code`, which holds all of it.
@@ -273,6 +273,9 @@ impl Vm {
             0x9d => self.op_swap<14, F, T>(c, mut tracer),
             0x9e => self.op_swap<15, F, T>(c, mut tracer),
             0x9f => self.op_swap<16, F, T>(c, mut tracer),
+            0xe6 => if F::STACK_IMMEDIATES { self.op_dupn(c, mut tracer) } else { self.op_other(c, mut tracer) },
+            0xe7 => if F::STACK_IMMEDIATES { self.op_swapn(c, mut tracer) } else { self.op_other(c, mut tracer) },
+            0xe8 => if F::STACK_IMMEDIATES { self.op_exchange(c, mut tracer) } else { self.op_other(c, mut tracer) },
             0x01 => self.op_binary<0x01, F, T>(c, mut tracer),
             0x02 => self.op_binary<0x02, F, T>(c, mut tracer),
             0x03 => self.op_binary<0x03, F, T>(c, mut tracer),
@@ -324,6 +327,7 @@ impl Vm {
             0x46 => self.op_chainid(c, mut tracer),
             0x48 => self.op_basefee(c, mut tracer),
             0x4a => self.op_blobbasefee(c, mut tracer),
+            0x4b => if F::SLOTNUM { self.op_slotnum(c, mut tracer) } else { self.op_other(c, mut tracer) },
             _ => self.op_other(c, mut tracer),
         }
     }
@@ -357,6 +361,8 @@ impl Vm {
     fn overflow<F: Rules>(mut self, _ c: Cursor<F>) { self.halt(ERR_STACK_OVERFLOW, c) }
     #[inline(never)]
     fn invalid_jump<F: Rules>(mut self, _ c: Cursor<F>) { self.halt(ERR_INVALID_JUMP, c) }
+    #[inline(never)]
+    fn invalid_immediate<F: Rules>(mut self, _ c: Cursor<F>) { self.halt(ERR_INVALID_IMMEDIATE, c) }
 
     fn halt<F: Rules>(mut self, _ status: i32, _ c: Cursor<F>) {
         self.save(c)
@@ -483,6 +489,56 @@ impl Vm {
         c.set(1, c.peek(N + 1))
         c.set(N + 1, top)
         c.advance(1)
+        self.next(c, mut tracer)
+    }
+
+    // EIP-8024's immediate bytes skip 91 to 127, so that none reads as a
+    // JUMPDEST or a PUSH. For DUPN and SWAPN, byte `x` names the word
+    // (x + 145) mod 256 from the top: 128 to 255 name 17 to 144, and 0 to 90
+    // name 145 to 235. For EXCHANGE, 0 to 81 and 128 to 255 name two words
+    // through the nibbles of `x ^ 143`.
+
+    // DUPN: a copy of the word the immediate names goes on top.
+    fn op_dupn<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        let immediate = c.read<u8>(1)
+        if immediate > 90 && immediate < 128 { return self.invalid_immediate(c) }
+        let n: usize = immediate.wrapping_add(145) as usize
+        if !c.holds(n) { return self.underflow(c) }
+        let value = c.peek(n)
+        c.advance(2)
+        self.push_next(c, mut tracer, value)
+    }
+
+    // SWAPN: the top word and the one below the word the immediate names
+    // trade places.
+    fn op_swapn<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        let immediate = c.read<u8>(1)
+        if immediate > 90 && immediate < 128 { return self.invalid_immediate(c) }
+        let n: usize = immediate.wrapping_add(145) as usize
+        if !c.holds(n + 1) { return self.underflow(c) }
+        let top = c.peek(1)
+        c.set(1, c.peek(n + 1))
+        c.set(n + 1, top)
+        c.advance(2)
+        self.next(c, mut tracer)
+    }
+
+    // EXCHANGE: the words below the two the immediate names trade places.
+    fn op_exchange<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
+        if !c.charge(3) { return self.out_of_gas(c) }
+        let immediate = c.read<u8>(1)
+        if immediate > 81 && immediate < 128 { return self.invalid_immediate(c) }
+        let k = immediate ^ 143
+        let high: usize = (k >> 4) as usize
+        let low: usize = (k & 15) as usize
+        let (n, m) = if high < low { (high + 1, low + 1) } else { (low + 1, 29 - high) }
+        if !c.holds(m + 1) { return self.underflow(c) }
+        let first = c.peek(n + 1)
+        c.set(n + 1, c.peek(m + 1))
+        c.set(m + 1, first)
+        c.advance(2)
         self.next(c, mut tracer)
     }
 
@@ -829,6 +885,7 @@ impl Vm {
     fn op_chainid<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.chainid) }
     fn op_basefee<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.basefee) }
     fn op_blobbasefee<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.blobbasefee) }
+    fn op_slotnum<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) { self.push_environment(c, mut tracer, self.block.slot_number) }
 
     fn op_jumpdest<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
         if !c.charge(1) { return self.out_of_gas(c) }
