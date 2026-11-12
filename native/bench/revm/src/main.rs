@@ -83,6 +83,8 @@ fn decode(data: &[u8]) -> Case {
             excess_blob_gas: 0,
             blob_gasprice,
         }),
+        // Cancun has no SLOTNUM.
+        slot_num: 0,
     };
     let accounts = (0..reader.count())
         .map(|_| {
@@ -257,7 +259,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut repeated_gas = None;
     for _ in 0..runs {
         if let Some(outcome) = run(&data, execute) {
-            let gas = outcome.map(|result| result.gas_used());
+            let gas = outcome.map(|result| result.tx_gas_used());
             assert!(repeated_gas.is_none_or(|repeated| repeated == gas));
             repeated_gas = Some(gas);
         }
@@ -267,7 +269,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{{\"invalid\":1}}");
         return Ok(());
     };
-    assert!(repeated_gas.is_none_or(|repeated| repeated == Some(result.gas_used())));
+    assert!(repeated_gas.is_none_or(|repeated| repeated == Some(result.tx_gas_used())));
     let status = match &result {
         ExecutionResult::Success { .. } => "success".to_string(),
         ExecutionResult::Revert { .. } => "revert".to_string(),
@@ -275,7 +277,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     println!(
         "{{\"invalid\":0,\"status\":\"{status}\",\"gas_used\":{},\"logs_hash\":\"{:#x}\"}}",
-        result.gas_used(),
+        result.tx_gas_used(),
         logs_hash(result.logs())
     );
     Ok(())

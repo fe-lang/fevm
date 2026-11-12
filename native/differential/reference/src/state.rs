@@ -4,9 +4,12 @@ use revm_bytecode::Bytecode;
 use revm_context::{BlockEnv, CfgEnv, Context, Host, JournalTr, TxEnv};
 use revm_database::{DatabaseCommit, InMemoryDB};
 use revm_interpreter::interpreter::{EthInterpreter, ExtBytecode};
-use revm_interpreter::{CallInput, InputsImpl, Interpreter, SharedMemory, instruction_table};
+use revm_interpreter::{
+    CallInput, InputsImpl, Interpreter, SharedMemory, instruction_table,
+    instructions::gas_table_spec,
+};
 use revm_primitives::{
-    Address, B256, Bytes, HashMap, HashSet, Log, TxKind, U256, hardfork::SpecId, hex,
+    Address, AddressMap, B256, Bytes, HashSet, Log, TxKind, U256, hardfork::SpecId, hex,
 };
 use serde::{Deserialize, Serialize};
 
@@ -204,11 +207,7 @@ impl Runner<'_> {
                 let original =
                     database_storage(&self.host.journaled_state.database, key.address, key.slot);
                 let current = slot.map_or(original, |slot| slot.present_value());
-                let transient = journal
-                    .transient_storage
-                    .get(&(key.address, key.slot))
-                    .copied()
-                    .unwrap_or_default();
+                let transient = journal.transient_storage.get_value(key.address, key.slot);
                 SlotObservation {
                     value: format!("0x{current:064x}"),
                     original: format!("0x{original:064x}"),
@@ -267,6 +266,7 @@ impl Runner<'_> {
                     let result = interpreter
                         .run_plain(
                             &instruction_table::<EthInterpreter, StateHost>(),
+                            &gas_table_spec(SpecId::OSAKA),
                             &mut self.host,
                         )
                         .into_result_return()
@@ -339,7 +339,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
         host.tx
             .derive_tx_type()
             .map_err(|error| format!("invalid reference transaction environment: {error:?}"))?;
-        let mut access_list: HashMap<Address, HashSet<U256>> = HashMap::default();
+        let mut access_list: AddressMap<HashSet<U256>> = AddressMap::default();
         for address in &transaction.access_accounts {
             access_list.entry(*address).or_default();
         }
@@ -353,7 +353,7 @@ pub fn execute(case: Case) -> Result<Vec<TransactionResult>, Box<dyn Error>> {
         host.journaled_state
             .warm_coinbase_account(transaction.coinbase);
         host.journaled_state.warm_precompiles(
-            (1_u64..=0x11)
+            &(1_u64..=0x11)
                 .chain([0x100])
                 .map(|value| Address::from_word(U256::from(value).into()))
                 .collect(),

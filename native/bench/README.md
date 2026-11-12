@@ -63,7 +63,7 @@ and the revm and evmone runners run Cancun.
 
 - FeVM: the conformance driver, built by `--fe` at `--level` (default O2), or
   `--executable`.
-- revm: `revm/`, revm 33.1.0 at the same `sbillig/revm` revision as the
+- revm: `revm/`, revm 43.0.3 at the same `sbillig/revm` revision as the
   differential reference, with fat LTO and `target-cpu=native`. `bench`
   builds it under `--out` (default `native/out/bench`) unless `--revm` names a
   binary.
