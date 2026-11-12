@@ -4,3 +4,4 @@ version = "0.1.0"
 
 [dependencies]
 fevm = { path = "../../ingots/evm", allow_unsafe = true }
+fevm_precompiles = { path = "../../ingots/precompiles", allow_unsafe = true }
