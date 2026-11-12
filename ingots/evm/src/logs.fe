@@ -54,19 +54,35 @@ impl LogBuffer {
         self.payload(entry)[index.downcast_truncate()]
     }
     pub fn append(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> bool {
+        let start = self.data.len()
+        // Empty data, as LOG0 of nothing, reserves and copies nothing.
+        if data.len() != 0 {
+            if !self.data.try_reserve(data.len()) { return false }
+            self.data.extend_from(data)
+        }
+        self.record(address, topics, topic_count, start)
+    }
+    /// As `append`, with the 32 big-endian bytes of `word` as the data.
+    pub fn append_word(mut self, address: u256, topics: [u256; 4], topic_count: u64, word: u256) -> bool {
+        let start = self.data.len()
+        if !self.data.try_resize(start + 32) { return false }
+        self.data.span().write_word(offset: start, value: word)
+        self.record(address, topics, topic_count, start)
+    }
+    // Adds an entry whose data is `data` from `start` on, or drops those bytes
+    // if the entry or its topics do not fit.
+    fn record(mut self, _ address: u256, _ topics: [u256; 4], _ topic_count: u64, _ start: usize) -> bool {
         core::assert(topic_count <= 4)
-        // Empty data and no topics, as LOG0 of nothing, reserve and copy nothing.
         if !self.entries.try_reserve(1)
-            || (topic_count != 0 && !self.topics.try_reserve(topic_count.downcast_truncate()))
-            || (data.len() != 0 && !self.data.try_reserve(data.len())) {
+            || (topic_count != 0 && !self.topics.try_reserve(topic_count.downcast_truncate())) {
+            self.data.truncate(start)
             return false
         }
-        let start: u64 = self.data.len().downcast_unchecked()
-        if data.len() != 0 { self.data.extend_from(data) }
         let topic_start: u64 = self.topics.len().downcast_unchecked()
         for topic in 0..topic_count.downcast_truncate() { self.topics.push(topics[topic]) }
         self.entries.push(Stored {
-            address: address_word(address), topic_start, topic_count, start, len: data.len().downcast_unchecked(),
+            address: address_word(address), topic_start, topic_count, start: start.downcast_unchecked(),
+            len: (self.data.len() - start).downcast_unchecked(),
         })
         true
     }

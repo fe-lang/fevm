@@ -83,30 +83,33 @@ fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
     }
 }
 
-/// Move ether as the specification's move_ether, touching both accounts. The
-/// sender must hold `value`. On failure the caller reverts its checkpoint.
-pub fn transfer(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
+/// Move ether as the specification's move_ether, touching both accounts, and
+/// log it if `F` logs transfers. The sender must hold `value`. On failure the
+/// caller reverts its checkpoint.
+pub fn transfer<F: Rules>(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
     // A self-transfer changes no balance, so static frames may perform it.
     if from == to {
         core::assert(state.balance(from) >= value)
         return state.touch(from)
     }
     // Crediting first finds an overflow before any balance changes.
-    let status = state.credit(address: to, amount: value)
-    if status != OK { return status }
-    state.debit(address: from, amount: value)
+    var status = state.credit(address: to, amount: value)
+    if status == OK { status = state.debit(address: from, amount: value) }
+    if status == OK && F::TRANSFER_LOGS && value != 0 { status = state.log_transfer(from, to, value) }
+    status
 }
 
 /// Open a contract creation's checkpoint and apply its prologue: the creation
 /// mark, the new account's first nonce and its endowment from the sender, which
 /// the address cannot be. Initcode failure or a rejected deposit reverts all of
 /// it.
-pub fn begin_create(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
+pub fn begin_create<F: Rules>(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
     let checkpoint = state.checkpoint(is_static: false)
     var status = state.mark_created(address)
     // Crediting first finds an overflow before any balance changes.
     if status == OK { status = state.endow(address, value) }
     if status == OK && value != 0 { status = state.debit(address: sender, amount: value) }
+    if status == OK && F::TRANSFER_LOGS && value != 0 { status = state.log_transfer(from: sender, to: address, value) }
     if status == OK { return Result::Ok(checkpoint) }
     state.revert(checkpoint)
     Result::Err(status)
@@ -254,7 +257,7 @@ impl Vm {
         let is_static = state.is_static() || op == 0xfa
         let checkpoint = state.checkpoint(is_static)
         // The call touches its target even without value; a failed call undoes the touch.
-        let moved = if has_value { transfer(mut state, from: sender, to: address, value) } else { state.touch(address) }
+        let moved = if has_value { transfer<F>(mut state, from: sender, to: address, value) } else { state.touch(address) }
         if moved != OK {
             state.revert(checkpoint)
             self.fault(moved)
@@ -366,7 +369,7 @@ impl Vm {
         }
         self.fault(state.increment_nonce(sender))
         if !self.ok() { return Option::None }
-        let checkpoint = match begin_create(mut state, sender, address, value) {
+        let checkpoint = match begin_create<F>(mut state, sender, address, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => {
                 self.fault(status)
@@ -399,7 +402,8 @@ impl Vm {
     }
 
     // EIP-6780: the balance moves to the beneficiary; only an account created by
-    // this transaction is deleted, at settlement, and loses ether sent to itself.
+    // this transaction is deleted, at settlement. Until EIP-8246 it also loses
+    // ether sent to itself.
     pub(super) fn selfdestruct<F: Rules>(mut self, _ state: mut Transaction) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
@@ -415,11 +419,11 @@ impl Vm {
             self.fault(ERR_STATIC_WRITE)
             return
         }
-        var status = transfer(mut state, from: me, to: beneficiary, value: balance)
+        var status = transfer<F>(mut state, from: me, to: beneficiary, value: balance)
         if status == OK && state.was_created(me) {
             // A balance the transfer kept, as one to itself, is burned. The
             // transfer touched the account already.
-            if balance != 0 { status = state.set_balance(address: me, value: 0) }
+            if F::SELFDESTRUCT_BURNS && balance != 0 { status = state.set_balance(address: me, value: 0) }
             if status == OK { status = state.doom(me) }
         }
         self.fault(status)

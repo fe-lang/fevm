@@ -1,5 +1,6 @@
 use core::MemBuffer
 use ingot::constants::MAX_U256
+use ingot::fork::Osaka
 use ingot::status::{
     ERR_BALANCE_OVERFLOW, ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_REVERT, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK,
 }
@@ -84,15 +85,15 @@ fn transfers_credit_and_debit_both_accounts_unless_the_credit_overflows() {
                               config: Config::osaka(), buffers: Buffers::new())
     // A new account gets a record for its credit.
     let paid = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 9, value: 3) == OK)
+    core::assert(transfer<Osaka>(mut tx, from: 7, to: 9, value: 3) == OK)
     core::assert(tx.balance(7) == 7 && tx.balance(9) == 3 && tx.exists(9))
     tx.commit(paid)
     let overflow = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 8, value: 5) == ERR_BALANCE_OVERFLOW)
+    core::assert(transfer<Osaka>(mut tx, from: 7, to: 8, value: 5) == ERR_BALANCE_OVERFLOW)
     core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)
     tx.revert(overflow)
     let filled = checkpoint(mut tx, is_static: false)
-    core::assert(transfer(mut tx, from: 7, to: 8, value: 4) == OK)
+    core::assert(transfer<Osaka>(mut tx, from: 7, to: 8, value: 4) == OK)
     core::assert(tx.balance(7) == 3 && tx.balance(8) == MAX_U256)
     tx.revert(filled)
     core::assert(tx.balance(7) == 7 && tx.balance(8) == MAX_U256 - 4)

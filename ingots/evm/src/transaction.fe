@@ -1,4 +1,5 @@
 use core::{MemSpan, MemVec, Option, Result}
+use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, ChangeKind, Mark}
@@ -7,6 +8,11 @@ use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
+
+// EIP-7708: an ether transfer's log comes from this address, with the topic
+// keccak256("Transfer(address,address,uint256)").
+const SYSTEM_ADDRESS: u256 = 0xfffffffffffffffffffffffffffffffffffffffe
+const TRANSFER_TOPIC: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
 // child retains its undo entries so a later parent revert still undoes it.
@@ -89,6 +95,13 @@ impl Transaction {
     pub fn emit_log(mut self, address: u256, topics: [u256; 4], topic_count: u64, data: MemSpan) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         if self.logs.append(address, topics, topic_count, data) { OK }
+        else { ERR_HOST_ALLOCATION }
+    }
+
+    /// EIP-7708: logs `value` moving from `from` to `to`.
+    pub fn log_transfer(mut self, from: u256, to: u256, value: u256) -> i32 {
+        let topics = [TRANSFER_TOPIC, address_word(from), address_word(to), 0]
+        if self.logs.append_word(address: SYSTEM_ADDRESS, topics, topic_count: 3, word: value) { OK }
         else { ERR_HOST_ALLOCATION }
     }
 
@@ -500,13 +513,17 @@ impl Transaction {
 
     // End-of-transaction deletions, after every frame has closed and fees are
     // paid: self-destructed accounts created by this transaction, and touched
-    // accounts left empty. Each loses its code and storage. These direct world
+    // accounts left empty. Each loses its code and storage; from EIP-8246 a
+    // self-destructed account keeps the ether it holds. These direct world
     // updates are not journaled.
-    pub fn settle(mut self) {
+    pub fn settle<F: Rules>(mut self) {
         core::assert(self.depth == 0)
         // The journal holds the changes and marks that survived their frames.
         for change in self.buffers.journal.changes() {
-            if let ChangeKind::Mark(Mark::Doomed) = change.kind { self.state.remove_account(change.address) }
+            if let ChangeKind::Mark(Mark::Doomed) = change.kind {
+                if F::SELFDESTRUCT_BURNS { self.state.remove_account(change.address) }
+                else { self.state.clear_keeping_balance(change.address) }
+            }
             if change.touches() { self.state.remove_if_empty(change.address) }
         }
     }

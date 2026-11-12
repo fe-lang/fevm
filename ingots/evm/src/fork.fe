@@ -34,6 +34,11 @@ pub trait Rules {
     // EIP-8024: DUPN, SWAPN and EXCHANGE reach stack words past the
     // sixteenth through an immediate byte.
     const STACK_IMMEDIATES: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-7708: moving ether between accounts logs a transfer.
+    const TRANSFER_LOGS: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-6780, until EIP-8246: an account created and self-destructed in
+    // one transaction loses ether sent to itself or after.
+    const SELFDESTRUCT_BURNS: bool = !Self::FORK.since(Fork::Amsterdam)
     // EIP-2929: the first access of an account in a transaction.
     const COLD_ACCOUNT_ACCESS: u64 = 2600
 }

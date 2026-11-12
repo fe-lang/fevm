@@ -238,13 +238,29 @@ impl WorldState {
     }
     // Delete an account record with its code and storage.
     pub fn remove_account(mut self, _ address: u256) {
+        self.clear(address, keep_balance: false)
+    }
+    /// EIP-8246: deletes the code, nonce and storage of `address` but keeps
+    /// its balance; an account without one is deleted.
+    pub fn clear_keeping_balance(mut self, _ address: u256) {
+        self.clear(address, keep_balance: true)
+    }
+    // Deletes the code and storage of `address` and its record, or with
+    // `keep_balance` and a balance, only the record's nonce.
+    fn clear(mut self, _ address: u256, keep_balance: bool) {
         let address = address_word(address)
         let empty: [u8; 0] = []
         core::assert(self.set_code(address, code: empty) == OK)
         let lookup = self.index.get(address)
         if !lookup.found { return }
-        var slots = self.accounts[lookup.value].storage_slots
-        let _ = self.remove_record(address)
+        let account = mut self.accounts[lookup.value]
+        var slots = account.storage_slots
+        if keep_balance && account.balance != 0 {
+            account.nonce = 0
+            account.storage_slots = 0
+        } else {
+            let _ = self.remove_record(address)
+        }
         var slot: usize = 0
         while slots > 0 && slot < self.storage.capacity() {
             let entry = self.storage.entry(slot)

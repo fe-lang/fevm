@@ -351,7 +351,7 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     let value = call.callvalue
     if request.env.creates {
         if !tx.deployable(target) { return status_result(ERR_ADDRESS_COLLISION) }
-        let checkpoint = match begin_create(mut tx, sender, address: target, value) {
+        let checkpoint = match begin_create<F>(mut tx, sender, address: target, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => return status_result(status),
         }
@@ -363,7 +363,7 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     }
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
-    let moved = if value == 0 { tx.touch_unmarked(target) } else { transfer(mut tx, from: sender, to: target, value) }
+    let moved = if value == 0 { tx.touch_unmarked(target) } else { transfer<F>(mut tx, from: sender, to: target, value) }
     if moved != OK {
         tx.revert(checkpoint)
         return status_result(moved)
@@ -486,7 +486,7 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     // Aborting discards the logs, which a simulation still reports.
     let simulated = if commit { Option::None } else { Option::Some(tx.take_logs()) }
     // Settlement's deletions bypass the journal, which undoes the rest.
-    if commit { tx.settle() }
+    if commit { tx.settle<F>() }
     tx.end(commit)
     Receipt {
         invalid: VALID, status: result.status, gas_used,
