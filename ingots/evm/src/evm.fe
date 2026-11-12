@@ -1,0 +1,62 @@
+use ingot::fork::{Amsterdam, Fork, Osaka}
+use ingot::processor::{Receipt, TxRequest, apply, checked}
+use ingot::state::WorldState
+use ingot::trace::Tracer
+use ingot::transaction::Transaction
+use ingot::types::{BlockEnv, Config}
+use ingot::vm::Buffers
+
+/// An EVM over a world, which it holds across transactions together with
+/// the allocations they reuse: the journal, a transaction's tables, and the
+/// memory, stacks and frames of finished calls. Each transaction runs by the
+/// rules of the fork `config` selects, in the block the host passes with it.
+/// Between transactions the host reads the world and writes it directly.
+pub struct Evm { tx: Transaction, config: Config }
+
+impl Evm {
+    pub fn new(_ world: own WorldState, _ config: Config) -> Self {
+        Self { tx: Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers: Buffers::new()), config }
+    }
+
+    pub fn config(self) -> Config { self.config }
+    pub fn set_config(mut self, _ config: Config) { self.config = config }
+
+    pub fn world(self) -> ref WorldState { self.tx.world() }
+    pub fn world_mut(mut self) -> mut WorldState { self.tx.world_mut() }
+    /// Replaces the world.
+    pub fn set_world(mut self, _ world: own WorldState) {
+        let _ = core::mem::replace(mut self.tx.world_mut(), world)
+    }
+    pub fn into_world(own self) -> WorldState { self.tx.release().0 }
+
+    /// The includability checks, in specification order: VALID, or the first
+    /// that fails.
+    pub fn validate(self, _ request: TxRequest, _ block: BlockEnv) -> i32 {
+        match self.config.fork {
+            Fork::Osaka => checked<Osaka>(self.tx.world(), request, block, self.config).invalid,
+            Fork::Amsterdam => checked<Amsterdam>(self.tx.world(), request, block, self.config).invalid,
+        }
+    }
+
+    /// Validates and executes one transaction. A valid one pays for gas, runs
+    /// its message, refunds unused and refunded gas to the sender, pays the
+    /// priority fee to the coinbase, and settles deletions. `tracer` sees each
+    /// opcode and each call and creation, the transaction's own message among
+    /// them; pass `()` to trace nothing.
+    pub fn transact<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T) -> Receipt {
+        self.run(request, block, mut tracer, commit: true)
+    }
+
+    /// Runs a transaction as `transact` does and keeps none of its changes.
+    /// The receipt is the one `transact` would give.
+    pub fn simulate<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T) -> Receipt {
+        self.run(request, block, mut tracer, commit: false)
+    }
+
+    fn run<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, _ tracer: mut T, commit: bool) -> Receipt {
+        match self.config.fork {
+            Fork::Osaka => apply<Osaka>(mut self.tx, request, block, self.config, mut tracer, commit),
+            Fork::Amsterdam => apply<Amsterdam>(mut self.tx, request, block, self.config, mut tracer, commit),
+        }
+    }
+}

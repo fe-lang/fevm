@@ -3,13 +3,13 @@ use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::MAX_U256
 use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, StateGas, TX_MAX_TOTAL_GAS, account_access}
-use ingot::fork::{Amsterdam, Fork, Osaka, Rules}
+use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::Transaction
 use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
-use ingot::vm::{Buffers, Vm, begin_create, run_precompile, spend, status_result, transfer}
+use ingot::vm::{Vm, begin_create, run_precompile, spend, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
 use swisstable::SwissTable
@@ -133,7 +133,7 @@ impl TxRequest {
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
 /// outcome (OK, ERR_REVERT or an exceptional halt); any other status is a host
-/// failure, after which the pre-state is returned. `created` is the new
+/// failure, which changes nothing. `created` is the new
 /// contract's address when a creation succeeds. `gas_refunded` is the refund
 /// that reduced `gas_used`. `execution_gas_used` and `state_gas_used` are what
 /// the transaction adds to its block's gas totals: before Amsterdam,
@@ -150,8 +150,6 @@ pub struct Receipt {
     pub output: MemBuffer,
     pub logs: LogBuffer,
 }
-
-pub struct Applied { pub state: WorldState, pub receipt: Receipt }
 
 // `a * b`, or none past 256 bits. With `b` split at bit 64, `a` times the
 // high part fits in 256 bits and times the low part in 128.
@@ -241,18 +239,11 @@ fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
     checked_mul(request.blob_count() * GAS_PER_BLOB, price)
 }
 
-/// The includability checks of the fork `config` selects, in specification order.
-pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> i32 {
-    match config.fork {
-        Fork::Osaka => checked<Osaka>(world, request, block, config).invalid,
-        Fork::Amsterdam => checked<Amsterdam>(world, request, block, config).invalid,
-    }
-}
+// Validation's verdict, from the includability checks in specification
+// order, and the intrinsic gas it computed.
+pub(ingot) struct Checked { pub invalid: i32, pub intrinsic: IntrinsicGas }
 
-// Validation's verdict and the intrinsic gas it computed.
-struct Checked { invalid: i32, intrinsic: IntrinsicGas }
-
-fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> Checked {
+pub(ingot) fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> Checked {
     let intrinsic = intrinsic_gas<F>(request)
     Checked { invalid: verdict<F>(world, request, block, config, intrinsic), intrinsic }
 }
@@ -523,40 +514,12 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     vm.into_result(mut tx.buffers())
 }
 
-/// Validate and execute one transaction against `world`, by the rules of the
-/// fork `config` selects. Valid
-/// transactions pay for gas, run their message, refund unused and refunded gas
-/// to the sender, pay the priority fee to the coinbase, and settle deletions.
-/// The journal and frames reuse the allocations in `buffers`, and leave theirs there.
-/// `tracer` sees each opcode and each call and creation, the transaction's own
-/// message among them; pass `()` to trace nothing.
-pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: true)
-}
-
-/// Runs a transaction as `transact` does but keeps none of its changes: the
-/// returned state is the pre-state. The receipt is the one `transact` would give.
-pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: false)
-}
-
-// Selects the fork's rules once the transaction holds the world and buffers,
-// so that they move once whatever the fork.
-fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                    _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
-    let receipt = match config.fork {
-        Fork::Osaka => apply_in<Osaka>(mut tx, request, block, config, mut tracer, commit),
-        Fork::Amsterdam => apply_in<Amsterdam>(mut tx, request, block, config, mut tracer, commit),
-    }
-    let (state, lent) = tx.release()
-    buffers = lent
-    Applied { state, receipt }
-}
-
-fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+// Validates and executes one transaction on `tx`'s world, between
+// transactions before and after. A valid transaction pays for gas, runs its
+// message, refunds unused and refunded gas to the sender, pays the priority
+// fee to the coinbase, and settles deletions; without `commit` it is then
+// undone, and its receipt is the one it would have had.
+pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                        _ tracer: mut T, commit: bool) -> Receipt {
     let env = request.env
     let checked = checked<F>(tx.world(), request, block, config)

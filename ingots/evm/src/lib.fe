@@ -19,7 +19,8 @@ pub use types::{
     empty_bytes,
 }
 pub use vm::{self, Buffers, execute}
-pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+pub use processor::{self, Authorization, Receipt, TxEnv, TxRequest}
+pub use evm::Evm
 
 #[cfg(target = "native")]
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {

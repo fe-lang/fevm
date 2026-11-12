@@ -2,7 +2,7 @@ use core::{MemBuffer, Option}
 use std::env::Args
 use std::io::{Display, Stdin, Stdout, read_to_end}
 use keccak::Keccak256
-use fevm::{Authorization, BlockEnv, Config, Buffers, Fork, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{Authorization, BlockEnv, Config, Evm, Fork, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState}
 use fevm::hex::{parse_decimal, write_hex_bytes, write_hex_word}
 use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
@@ -172,7 +172,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     var repeated_gas: u64 = 0
     var repeated = false
     // Repeated applications reuse the frames' memory and stacks.
-    var buffers = Buffers::new()
+    var evm = Evm::new(WorldState::empty(), Config::osaka())
     var tracer = ()
     while true {
         reader.position = 0
@@ -275,15 +275,18 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
         if runs > 0 {
             runs -= 1
             if execute {
-                let gas = transact(world, request, block, config, mut buffers, mut tracer).receipt.gas_used
+                evm.set_world(world)
+                evm.set_config(config)
+                let gas = evm.transact(request, block, mut tracer).gas_used
                 core::assert(!repeated || gas == repeated_gas)
                 repeated_gas = gas
                 repeated = true
             }
             continue
         }
-        let applied = transact(world, request, block, config, mut buffers, mut tracer)
-        let receipt = applied.receipt
+        evm.set_world(world)
+        evm.set_config(config)
+        let receipt = evm.transact(request, block, mut tracer)
         core::assert(!repeated || receipt.gas_used == repeated_gas)
         var text = MemBuffer::empty()
         with (mut text) {
@@ -304,7 +307,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
             ",\"logs_hash\":\"".fmt(mut text)
             write_hex_word(logs_hash(receipt.logs))
             "\"".fmt(mut text)
-            write_world(applied.state)
+            write_world(evm.world())
             "}\n".fmt(mut text)
         }
         print!(text)

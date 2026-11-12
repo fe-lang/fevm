@@ -1,10 +1,10 @@
 use core::Option
+use ingot::evm::Evm
 use ingot::status::{ERR_REVERT, OK}
-use ingot::processor::{Applied, Authorization, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest, transact}
+use ingot::processor::{Authorization, Receipt, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest}
 use ingot::status::{INVALID_CREATE, INVALID_NO_AUTHORIZATIONS, VALID}
 use ingot::state::{WorldState, designator}
 use ingot::types::{BlockEnv, Config, default_block_env, empty_bytes}
-use ingot::vm::Buffers
 
 // Execution-specs fixture authorizations for any chain, with their signers.
 const SIGNER: u256 = 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b
@@ -43,30 +43,29 @@ fn block() -> BlockEnv {
     block
 }
 
-fn set_code(_ world: own WorldState, to: u256, nonce: u256, authorizations: [Authorization; 2], count: usize) -> Applied {
+fn set_code(_ evm: mut Evm, to: u256, nonce: u256, authorizations: [Authorization; 2], count: usize) -> Receipt {
     let env = TxEnv {
         kind: TX_SET_CODE, chain_id: Option::Some(1), sender: 0x1000, to, creates: false, nonce,
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
     var request = TxRequest::new(env, data: empty_bytes())
     for index in 0..count { core::assert(request.add_authorization(authorizations[index])) }
-    var buffers = Buffers::new()
     var tracer = ()
-    transact(world, request, block(), Config::osaka(), mut buffers, mut tracer)
+    evm.transact(request, block(), mut tracer)
 }
 
 #[test]
 fn set_code_delegates_and_runs_the_delegate_in_the_authority() {
-    let applied = set_code(world(), to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), other_signed()], count: 2)
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
+    var evm = Evm::new(world(), Config::osaka())
+    let receipt = set_code(mut evm, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), other_signed()], count: 2)
+    core::assert(receipt.invalid == VALID && receipt.status == OK)
     // Two authorizations of 25,000, then PUSH1, PUSH0, a cold SSTORE, PUSH1, a
     // cold SLOAD, PUSH1, JUMPI and STOP; the delegate's access is free here.
-    core::assert(applied.receipt.gas_used == 21000 + 2 * 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10)
-    let state = applied.state
+    core::assert(receipt.gas_used == 21000 + 2 * 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10)
     for (authority, delegate) in [(SIGNER, DELEGATE), (OTHER_SIGNER, 0xd64d5b56749107eb98eabdc6174fc5dc95e32c91)] {
-        core::assert(state.delegate(authority) == Option::Some(delegate) && state.nonce(authority) == 1)
+        core::assert(evm.world().delegate(authority) == Option::Some(delegate) && evm.world().nonce(authority) == 1)
     }
-    core::assert(state.code_size(SIGNER) == 23 && state.storage_load(SIGNER, 0) == 1)
+    core::assert(evm.world().code_size(SIGNER) == 23 && evm.world().storage_load(SIGNER, 0) == 1)
 }
 
 #[test]
@@ -74,47 +73,48 @@ fn set_code_survives_a_reverted_call_and_refunds_existing_authorities() {
     var world = world()
     // The authority exists, and slot 1 makes the delegate revert.
     core::assert(world.set_balance(SIGNER, 1) && world.storage_store(SIGNER, 1, 1))
-    let applied = set_code(world, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == ERR_REVERT)
-    let state = applied.state
-    core::assert(state.delegate(SIGNER) == Option::Some(DELEGATE) && state.nonce(SIGNER) == 1)
-    core::assert(state.storage_load(SIGNER, 0) == 0)
+    var evm = Evm::new(world, Config::osaka())
+    let receipt = set_code(mut evm, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
+    core::assert(receipt.invalid == VALID && receipt.status == ERR_REVERT)
+    core::assert(evm.world().delegate(SIGNER) == Option::Some(DELEGATE) && evm.world().nonce(SIGNER) == 1)
+    core::assert(evm.world().storage_load(SIGNER, 0) == 0)
     // 12,500 of the authorization's 25,000 is refunded, within a fifth of the gas spent.
     let spent: u64 = 21000 + 25000 + 3 + 2 + 22100 + 3 + 2100 + 3 + 10 + 1 + 2 + 2
-    core::assert(applied.receipt.gas_used == spent - 12500)
+    core::assert(receipt.gas_used == spent - 12500)
 }
 
 #[test]
 fn set_code_skips_invalid_authorizations() {
     // An authorization altered after signing recovers some other account,
     // whose nonce does not match; the valid one applies.
-    let applied = set_code(world(), to: 0xdd, nonce: 0, authorizations: [signed(nonce: 1), signed(nonce: 0)], count: 2)
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-    core::assert(applied.state.delegate(SIGNER) == Option::Some(DELEGATE) && applied.state.nonce(SIGNER) == 1)
+    var evm = Evm::new(world(), Config::osaka())
+    let applied = set_code(mut evm, to: 0xdd, nonce: 0, authorizations: [signed(nonce: 1), signed(nonce: 0)], count: 2)
+    core::assert(applied.invalid == VALID && applied.status == OK)
+    core::assert(evm.world().delegate(SIGNER) == Option::Some(DELEGATE) && evm.world().nonce(SIGNER) == 1)
     // Replayed, it no longer matches the authority's nonce.
-    let repeated = set_code(applied.state, to: 0xdd, nonce: 1, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
-    core::assert(repeated.receipt.invalid == VALID && repeated.state.nonce(SIGNER) == 1)
+    let repeated = set_code(mut evm, to: 0xdd, nonce: 1, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 1)
+    core::assert(repeated.invalid == VALID && evm.world().nonce(SIGNER) == 1)
     // An authorization for another chain is ignored.
     var foreign = signed(nonce: 0)
     foreign.chain_id = 2
-    let ignored = set_code(world(), to: 0xdd, nonce: 0, authorizations: [foreign, foreign], count: 1)
-    core::assert(ignored.receipt.invalid == VALID && ignored.state.delegate(SIGNER).is_none())
+    evm = Evm::new(world(), Config::osaka())
+    let ignored = set_code(mut evm, to: 0xdd, nonce: 0, authorizations: [foreign, foreign], count: 1)
+    core::assert(ignored.invalid == VALID && evm.world().delegate(SIGNER).is_none())
 }
 
 #[test]
 fn set_code_transactions_need_authorizations_and_a_recipient() {
-    let empty = set_code(world(), to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 0)
-    core::assert(empty.receipt.invalid == INVALID_NO_AUTHORIZATIONS)
+    var evm = Evm::new(world(), Config::osaka())
+    let empty = set_code(mut evm, to: SIGNER, nonce: 0, authorizations: [signed(nonce: 0), signed(nonce: 0)], count: 0)
+    core::assert(empty.invalid == INVALID_NO_AUTHORIZATIONS)
     let env = TxEnv {
         kind: TX_SET_CODE, chain_id: Option::Some(1), sender: 0x1000, to: 0, creates: true, nonce: 0,
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
     var request = TxRequest::new(env, data: empty_bytes())
     core::assert(request.add_authorization(signed(nonce: 0)))
-    var buffers = Buffers::new()
     var tracer = ()
-    core::assert(transact(empty.state, request, block(), Config::osaka(), mut buffers,
-                          mut tracer).receipt.invalid == INVALID_CREATE)
+    core::assert(evm.transact(request, block(), mut tracer).invalid == INVALID_CREATE)
 }
 
 #[test]
@@ -136,14 +136,13 @@ fn delegated_accounts_send_and_calls_run_their_delegates() {
         kind: TX_FEE_MARKET, chain_id: Option::Some(1), sender: 0x1000, to: 0xaa, creates: false, nonce: 0,
         gas_limit: 200_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
     }
-    var buffers = Buffers::new()
+    var evm = Evm::new(world, Config::osaka())
     var tracer = ()
-    let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block(),
-                           Config::osaka(), mut buffers, mut tracer)
-    core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-    core::assert(applied.state.storage_load(SIGNER, 0) == 1 && applied.state.storage_load(DELEGATE, 0) == 0)
+    let receipt = evm.transact(TxRequest::new(env, data: empty_bytes()), block(), mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == OK)
+    core::assert(evm.world().storage_load(SIGNER, 0) == 1 && evm.world().storage_load(DELEGATE, 0) == 0)
     // Five PUSH0, PUSH20, GAS, CALL with a cold target and a cold delegate,
     // then the delegate's code and STOP.
     let delegate_gas: u64 = 3 + 2 + 22100 + 3 + 2100 + 3 + 10
-    core::assert(applied.receipt.gas_used == 21000 + 5 * 2 + 3 + 2 + 2600 + 2600 + delegate_gas)
+    core::assert(receipt.gas_used == 21000 + 5 * 2 + 3 + 2 + 2600 + 2600 + delegate_gas)
 }

@@ -24,12 +24,11 @@ pub(ingot) fn spend(_ gas: mut u64, _ cost: u64) -> bool {
     true
 }
 
-/// Allocations a host lends each transaction and gets back, so that a host
-/// that keeps them across transactions allocates them once: memory and
-/// stacks of finished frames, which later frames take over with the capacity
-/// they grew; the allocations of finished child frames, which later calls fill
-/// in place; and the journal. Frames nest, so each call depth tends to get
-/// back its last frame's buffers.
+/// Allocations a transaction uses and leaves for the next, so that an `Evm`
+/// allocates them once: memory and stacks of finished frames, which later
+/// frames take over with the capacity they grew; the allocations of finished
+/// child frames, which later calls fill in place; and the journal. Frames
+/// nest, so each call depth tends to get back its last frame's buffers.
 pub struct Buffers {
     memories: MemVec<MemBuffer>,
     stacks: MemVec<MemVec<u256>>,

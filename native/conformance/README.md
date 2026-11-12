@@ -3,7 +3,7 @@
 `fevm_tools conformance` ([`native/tools`](../tools/src/conformance.fe)) runs
 the Osaka and Amsterdam cases of an
 [execution-specs](https://github.com/ethereum/execution-specs) test fixture
-release through FeVM's `transact`, each by its fork's rules. Each case starts a fresh native
+release through FeVM's `Evm::transact`, each by its fork's rules. Each case starts a fresh native
 `fevm_conformance` process, which reads one binary-encoded case from stdin and
 prints the transaction outcome, the logs hash and the complete post-state. Run
 it from the repository's root:

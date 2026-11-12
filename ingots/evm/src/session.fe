@@ -4,12 +4,12 @@
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use std::io::{Stdin, Stdout}
 use ingot::fork::Fork
-use ingot::processor::{Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+use ingot::evm::Evm
+use ingot::processor::{Authorization, Receipt, TxEnv, TxRequest}
 use ingot::state::WorldState
 use ingot::status::OK
 use ingot::trace::{Trace, Tracer}
 use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
-use ingot::vm::Buffers
 
 // Requests.
 const CONFIGURE: u8 = 1
@@ -242,23 +242,12 @@ fn read_request(_ reader: mut Reader) -> Option<TxRequest> {
     if stored { Option::Some(request) } else { Option::None }
 }
 
-struct Session {
-    world: WorldState,
-    block: BlockEnv,
-    config: Config,
-    buffers: Buffers,
-    snapshots: MemVec<WorldState>,
-}
+struct Session { evm: Evm, block: BlockEnv, snapshots: MemVec<WorldState> }
 
 impl Session {
     fn apply<T: Tracer>(mut self, _ request: TxRequest, commit: bool, _ tracer: mut T) -> Receipt {
-        let applied = if commit {
-            transact(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
-        } else {
-            simulate(self.world, request, self.block, self.config, mut self.buffers, mut tracer)
-        }
-        self.world = applied.state
-        applied.receipt
+        if commit { self.evm.transact(request, self.block, mut tracer) }
+        else { self.evm.simulate(request, self.block, mut tracer) }
     }
 
     fn handle(mut self, _ reader: mut Reader) -> Writer {
@@ -274,7 +263,7 @@ impl Session {
                 let tx_gas_limit_cap = reader.u64()
                 let checks = reader.byte()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                self.config = Config {
+                self.evm.set_config(Config {
                     fork,
                     max_code_size,
                     max_initcode_size,
@@ -283,7 +272,7 @@ impl Session {
                     check_nonce: (checks & 2) != 0,
                     check_base_fee: (checks & 4) != 0,
                     check_sender_code: (checks & 8) != 0,
-                }
+                })
                 Writer::new(DONE)
             },
             SET_BLOCK => {
@@ -306,42 +295,42 @@ impl Session {
                 let address = reader.address()
                 let value = reader.word(bytes: 32)
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                status_response(ok: self.world.set_balance(address, value))
+                status_response(ok: self.evm.world_mut().set_balance(address, value))
             },
             SET_NONCE => {
                 let address = reader.address()
                 let value = reader.word(bytes: 32)
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                status_response(ok: self.world.set_nonce(address, value))
+                status_response(ok: self.evm.world_mut().set_nonce(address, value))
             },
             SET_CODE => {
                 let address = reader.address()
                 let code = reader.bytes()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                status_response(ok: code.status == OK && self.world.set_code(address, code) == OK)
+                status_response(ok: code.status == OK && self.evm.world_mut().set_code(address, code) == OK)
             },
             SET_STORAGE => {
                 let address = reader.address()
                 let slot = reader.word(bytes: 32)
                 let value = reader.word(bytes: 32)
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                status_response(ok: self.world.storage_store(address, slot, value))
+                status_response(ok: self.evm.world_mut().storage_store(address, slot, value))
             },
             SET_BLOCK_HASH => {
                 let number = reader.word(bytes: 32)
                 let hash = reader.word(bytes: 32)
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
-                status_response(ok: self.world.set_block_hash(number, hash))
+                status_response(ok: self.evm.world_mut().set_block_hash(number, hash))
             },
             ACCOUNT => {
                 let address = reader.address()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 var out = Writer::new(DONE)
-                out.byte(if self.world.exists(address) { 1 } else { 0 })
-                out.word(self.world.balance(address), bytes: 32)
-                out.word(self.world.nonce(address), bytes: 32)
-                out.word(self.world.code_hash(address), bytes: 32)
-                out.span(self.world.code(address))
+                out.byte(if self.evm.world().exists(address) { 1 } else { 0 })
+                out.word(self.evm.world().balance(address), bytes: 32)
+                out.word(self.evm.world().nonce(address), bytes: 32)
+                out.word(self.evm.world_mut().code_hash(address), bytes: 32)
+                out.span(self.evm.world().code(address))
                 out
             },
             STORAGE => {
@@ -349,7 +338,7 @@ impl Session {
                 let slot = reader.word(bytes: 32)
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 var out = Writer::new(DONE)
-                out.word(self.world.storage_load(address, slot), bytes: 32)
+                out.word(self.evm.world().storage_load(address, slot), bytes: 32)
                 out
             },
             TRANSACT => {
@@ -373,7 +362,7 @@ impl Session {
             SNAPSHOT => {
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 let id = self.snapshots.len()
-                let stored = match self.world.try_clone() {
+                let stored = match self.evm.world().try_clone() {
                     Option::Some(copy) => self.snapshots.try_push(copy).is_ok(),
                     Option::None => false,
                 }
@@ -389,7 +378,7 @@ impl Session {
                 // The snapshot stays, so a host can revert to it again.
                 match self.snapshots[id].try_clone() {
                     Option::Some(world) => {
-                        self.world = world
+                        self.evm.set_world(world)
                         self.snapshots.truncate(id + 1)
                         Writer::new(DONE)
                     },
@@ -404,11 +393,7 @@ impl Session {
 // Serves requests until stdin ends. Returns the exit status.
 pub fn serve() -> i32 uses (input: mut Stdin, out: mut Stdout) {
     var session = Session {
-        world: WorldState::empty(),
-        block: default_block_env(),
-        config: Config::osaka(),
-        buffers: Buffers::new(),
-        snapshots: MemVec::new(),
+        evm: Evm::new(WorldState::empty(), Config::osaka()), block: default_block_env(), snapshots: MemVec::new(),
     }
     var header = MemBuffer::new(4)
     while read_exact(header.span()) {

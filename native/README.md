@@ -73,7 +73,7 @@ hosts for every pull request and push to `main`.
 ## State tests
 
 The [state-test runner](conformance/README.md) runs execution-spec-tests
-Osaka and Amsterdam state tests through `transact`. It is not part of
+Osaka and Amsterdam state tests through `Evm::transact`. It is not part of
 acceptance.
 
 ## Resident memory

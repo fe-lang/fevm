@@ -85,6 +85,12 @@ impl Transaction {
     /// The state, between transactions.
     pub fn world(self) -> ref WorldState { ref self.state }
 
+    /// The state, for a host's own writes between transactions.
+    pub fn world_mut(mut self) -> mut WorldState {
+        core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
+        mut self.state
+    }
+
     pub fn config(self) -> Config { self.config }
 
     pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
