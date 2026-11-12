@@ -526,26 +526,25 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
 /// message among them; pass `()` to trace nothing.
 pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                            _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    match config.fork {
-        Fork::Osaka => apply<Osaka, T>(world, request, block, config, mut buffers, mut tracer, commit: true),
-        Fork::Amsterdam => apply<Amsterdam, T>(world, request, block, config, mut buffers, mut tracer, commit: true),
-    }
+    apply(world, request, block, config, mut buffers, mut tracer, commit: true)
 }
 
 /// Runs a transaction as `transact` does but keeps none of its changes: the
 /// returned state is the pre-state. The receipt is the one `transact` would give.
 pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                            _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    match config.fork {
-        Fork::Osaka => apply<Osaka, T>(world, request, block, config, mut buffers, mut tracer, commit: false),
-        Fork::Amsterdam => apply<Amsterdam, T>(world, request, block, config, mut buffers, mut tracer, commit: false),
-    }
+    apply(world, request, block, config, mut buffers, mut tracer, commit: false)
 }
 
-fn apply<F: Rules, T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+// Selects the fork's rules once the transaction holds the world and buffers,
+// so that they move once whatever the fork.
+fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
     var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
-    let receipt = apply_in<F, T>(mut tx, request, block, config, mut tracer, commit)
+    let receipt = match config.fork {
+        Fork::Osaka => apply_in<Osaka, T>(mut tx, request, block, config, mut tracer, commit),
+        Fork::Amsterdam => apply_in<Amsterdam, T>(mut tx, request, block, config, mut tracer, commit),
+    }
     let (state, lent) = tx.release()
     buffers = lent
     Applied { state, receipt }
@@ -618,15 +617,21 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     if paid != OK {
         return host_failure(mut tx, status: paid)
     }
-    // Aborting discards the logs, which a simulation still reports.
-    let simulated = if commit { Option::None } else { Option::Some(tx.take_logs()) }
     // Settlement's deletions bypass the journal, which undoes the rest.
-    if commit { tx.settle<F>() }
-    tx.end(commit)
+    // Aborting discards the logs, which a simulation still reports.
+    let logs = if commit {
+        tx.settle<F>()
+        tx.end(commit: true)
+        tx.take_logs()
+    } else {
+        let logs = tx.take_logs()
+        tx.end(commit: false)
+        logs
+    }
     Receipt {
         invalid: VALID, status: result.status, gas_used,
         gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
         created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
-        output: result.output, logs: simulated.unwrap_or(default: tx.take_logs()),
+        output: result.output, logs,
     }
 }
