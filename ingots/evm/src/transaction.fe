@@ -240,8 +240,9 @@ impl Transaction {
         if original.found { original.value } else { self.storage_load(address, slot) }
     }
 
-    pub fn storage_charge(self, address: u256, slot: u256, value: u256) -> StorageCharge {
-        storage_charge(
+    /// SSTORE's charge for writing `value`, by `F`'s rules.
+    pub fn storage_charge<F: Rules>(self, address: u256, slot: u256, value: u256) -> StorageCharge {
+        storage_charge<F>(
             original: self.original_storage(address, slot),
             current: self.storage_load(address, slot), value,
             cold: !self.storage_is_warm(address, slot),
@@ -475,7 +476,6 @@ impl Transaction {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
-        let charge = self.storage_charge(address, slot, value)
         let previous = self.storage_load(address, slot)
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
@@ -489,7 +489,6 @@ impl Transaction {
             let status = self.journal(address, ChangeKind::Storage { slot, previous, existed })
             if status != OK { return status }
         }
-        self.refund += charge.refund
         OK
     }
     // TSTORE's write (EIP-1153). The transient table holds no zeros: a zero

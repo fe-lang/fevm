@@ -39,8 +39,21 @@ pub trait Rules {
     // EIP-6780, until EIP-8246: an account created and self-destructed in
     // one transaction loses ether sent to itself or after.
     const SELFDESTRUCT_BURNS: bool = !Self::FORK.since(Fork::Amsterdam)
-    // EIP-2929: the first access of an account in a transaction.
-    const COLD_ACCOUNT_ACCESS: u64 = 2600
+    // EIP-8037 and EIP-8038: creating state costs state gas, which a
+    // reservoir of the transaction's gas past its execution cap pays first,
+    // and account and storage writes are repriced.
+    const STATE_GAS: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-2780, EIP-7976 and EIP-7981: a transaction pays for its recipient
+    // and value, and its calldata floor counts every byte and the access list.
+    const TX_REPRICING: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-2929 and EIP-8038: the first access of an account in a transaction.
+    const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
+    // EIP-8038: EXTCODESIZE and EXTCODECOPY read the code.
+    const CODE_READ: u64 = if Self::FORK.since(Fork::Amsterdam) { 100 } else { 0 }
+    // A call's value transfer; from EIP-8038, an account write and the stipend.
+    const CALL_VALUE: u64 = if Self::FORK.since(Fork::Amsterdam) { 11300 } else { 9000 }
+    // CREATE and CREATE2's base; from EIP-8038, an account write and access.
+    const CREATE: u64 = if Self::FORK.since(Fork::Amsterdam) { 12000 } else { 32000 }
 }
 
 pub struct Osaka {}

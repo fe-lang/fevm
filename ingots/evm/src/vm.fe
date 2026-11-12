@@ -73,6 +73,13 @@ pub struct Vm {
     pub output: MemBuffer,
     pub return_data: MemBuffer,
     pub gas_remaining: u64,
+    // EIP-8037: the state gas reservoir, which state charges draw on before
+    // `gas_remaining`; the level a failure refills it to; and the gas state
+    // charges took from `gas_remaining` once it ran dry, which failures and
+    // refunds return first.
+    pub reservoir: u64,
+    baseline: u64,
+    spilled: u64,
     pub refund_delta: i128,
     pub output_valid: bool,
     // On the heap, so moving a frame does not copy it.
@@ -105,6 +112,9 @@ impl Vm {
             output: MemBuffer::empty(),
             return_data: MemBuffer::empty(),
             gas_remaining: 0,
+            reservoir: 0,
+            baseline: 0,
+            spilled: 0,
             refund_delta: 0,
             output_valid: false,
             stack: MemVec::new(),
@@ -145,8 +155,9 @@ impl Vm {
         }
     }
 
-    // Start a frame with `gas` and empty memory, stack, output and return data.
-    fn reset(mut self, gas: u64) {
+    // Start a frame with `gas`, EIP-8037's state gas `reservoir`, and empty
+    // memory, stack, output and return data.
+    pub(ingot) fn reset(mut self, gas: u64, reservoir: u64) {
         self.memory.clear()
         self.memory_size = 0
         self.output.clear()
@@ -157,6 +168,9 @@ impl Vm {
         self.status = OK
         self.halted = false
         self.gas_remaining = gas
+        self.reservoir = reservoir
+        self.baseline = reservoir
+        self.spilled = 0
         self.refund_delta = 0
     }
 
@@ -219,13 +233,63 @@ impl Vm {
         if value { self.push(1) } else { self.push(0) }
     }
 
-    fn charge(mut self, _ amount: u128) -> bool {
+    pub(ingot) fn charge(mut self, _ amount: u128) -> bool {
         if amount > self.gas_remaining as u128 {
             self.fault(ERR_OUT_OF_GAS)
             return false
         }
         self.gas_remaining -= amount.downcast_unchecked()
         true
+    }
+
+    // EIP-8037: charges `amount` of state gas, from the reservoir and then
+    // `gas_remaining`.
+    pub(ingot) fn charge_state(mut self, _ amount: u64) -> bool {
+        if amount <= self.reservoir {
+            self.reservoir -= amount
+            return true
+        }
+        let rest = amount - self.reservoir
+        if rest > self.gas_remaining {
+            self.fault(ERR_OUT_OF_GAS)
+            return false
+        }
+        self.reservoir = 0
+        self.gas_remaining -= rest
+        self.spilled += rest
+        true
+    }
+
+    // Credits back `amount` of state gas to where it was charged from last:
+    // the spill to `gas_remaining`, then the reservoir.
+    fn refund_state(mut self, _ amount: u64) {
+        let returned = if amount < self.spilled { amount } else { self.spilled }
+        self.gas_remaining += returned
+        self.spilled -= returned
+        self.reservoir += amount - returned
+    }
+
+    // After a child succeeds, the reservoir it returned repays the spill.
+    fn repay_spill(mut self) {
+        let repaid = if self.reservoir < self.spilled { self.reservoir } else { self.spilled }
+        self.gas_remaining += repaid
+        self.reservoir -= repaid
+        self.spilled -= repaid
+    }
+
+    // A failed frame's state gas: the spill returns to its gas, which an
+    // exceptional halt forfeits, and the reservoir refills to its baseline.
+    fn restore_state_gas(mut self) {
+        if !exceptional(self.status) { self.gas_remaining += self.spilled }
+        self.spilled = 0
+        self.reservoir = self.baseline
+    }
+
+    // Keeps the state gas charged so far through a failure, which keeps the
+    // state it paid for: the top frame's, for delegations.
+    pub(ingot) fn commit_state_gas(mut self) {
+        self.baseline = self.reservoir
+        self.spilled = 0
     }
 
     // Plan and charge before converting EVM words or touching host allocation.
@@ -552,7 +616,7 @@ impl Vm {
         self.push(state.storage_load(address: self.call.address, slot))
     }
 
-    fn sstore(mut self, _ state: mut Transaction) {
+    fn sstore<F: Rules>(mut self, _ state: mut Transaction) {
         if state.is_static() {
             self.fault(ERR_STATIC_WRITE)
             return
@@ -564,11 +628,12 @@ impl Vm {
                 self.fault(ERR_OUT_OF_GAS)
                 return
             }
-            let charge = state.storage_charge(address: self.call.address, slot, value)
-            if self.charge(charge.gas as u128) {
-                self.fault(state.warm_slot(address: self.call.address, slot))
-                if self.ok() { self.fault(state.storage_store(address: self.call.address, slot, value)) }
-            }
+            let charge = state.storage_charge<F>(address: self.call.address, slot, value)
+            if !self.charge(charge.gas as u128) || (charge.state != 0 && !self.charge_state(charge.state)) { return }
+            if charge.refill != 0 { self.refund_state(charge.refill) }
+            self.fault(state.warm_slot(address: self.call.address, slot))
+            if self.ok() { self.fault(state.storage_store(address: self.call.address, slot, value)) }
+            if self.ok() { state.add_refund(charge.refund) }
         }
     }
 
@@ -598,7 +663,7 @@ impl Vm {
         let source = self.take()
         let len = self.take()
         let warm = state.account_is_warm(address)
-        if !self.charge(account_access<F>(warm)) { return }
+        if !self.charge(account_access<F>(warm) + F::CODE_READ as u128) { return }
         let plan = match self.plan_memory(offset: dest, len, copying: true) {
             Option::Some(plan) => plan,
             Option::None => return,
@@ -651,7 +716,7 @@ impl Vm {
         let address = address_word(self.pop())
         if self.ok() {
             let warm = state.account_is_warm(address)
-            if self.charge(account_access<F>(warm)) {
+            if self.charge(account_access<F>(warm) + if op == 0x3b { F::CODE_READ as u128 } else { 0 }) {
                 if !warm { self.fault(state.warm_account(address)) }
                 if self.ok() {
                     let value = if op == 0x31 { state.balance(address) }
@@ -768,7 +833,7 @@ impl Vm {
                         },
                         0x55 => {
                             self.gas_remaining = gas
-                            self.sstore(mut state)
+                            self.sstore<F>(mut state)
                             gas = self.gas_remaining
                             if !self.ok() { break }
                         },
@@ -846,20 +911,20 @@ impl Vm {
     /// the fork `state`'s configuration selects.
     pub fn run<T: Tracer>(mut self, _ program: Program, _ calldata: InputData,
                           _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
+        self.reset(gas: call.gas_limit, reservoir: 0)
         match state.config().fork {
             Fork::Osaka => self.run_root<Osaka, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
             Fork::Amsterdam => self.run_root<Amsterdam, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
         }
     }
 
-    /// Run `program` at depth zero under its own checkpoint by `F`'s rules.
-    /// When it `creates`, `program` is initcode whose output becomes the code
-    /// at `call.address`; callers open the creation with `begin_create`,
-    /// whose checkpoint encloses this one.
+    /// Run `program` at depth zero under its own checkpoint by `F`'s rules,
+    /// with the gas `reset` gave the frame. When it `creates`, `program` is
+    /// initcode whose output becomes the code at `call.address`; callers open
+    /// the creation with `begin_create`, whose checkpoint encloses this one.
     pub(ingot) fn run_root<F: Rules, T: Tracer>(mut self, _ program: Program, _ calldata: InputData, _ call: CallEnv,
                            _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T, creates: bool) {
         self.adopt(mut state.buffers())
-        self.reset(gas: call.gas_limit)
         if program.status != OK || calldata.status != OK {
             self.fault(if program.status != OK { program.status } else { calldata.status })
             return
@@ -878,8 +943,24 @@ impl Vm {
             self.refund_delta = state.refund() - refund_before
         } else {
             state.revert(checkpoint)
+            if F::STATE_GAS { self.restore_state_gas() }
         }
     }
+    /// The result of a top frame's message that ran no code: a precompile's,
+    /// a collision's, or a call to an account without code. A failure refills
+    /// the state gas the message's preparation charged (EIP-8037).
+    pub(ingot) fn without_code<F: Rules>(mut self, var _ result: own ExecutionResult) -> ExecutionResult {
+        if F::STATE_GAS {
+            if result.status != OK {
+                self.fault(result.status)
+                self.restore_state_gas()
+            }
+            result.reservoir = self.reservoir
+            result.spilled = self.spilled
+        }
+        result
+    }
+
     /// The frame's result. Its memory and stack, emptied, go to `buffers`.
     pub fn into_result(var own self, _ buffers: mut Buffers) -> ExecutionResult {
         self.take_result(mut buffers)
@@ -910,6 +991,8 @@ impl Vm {
             stack_len,
             gas_remaining: self.gas_remaining,
             refund_delta: self.refund_delta,
+            reservoir: self.reservoir,
+            spilled: self.spilled,
         }
     }
 }

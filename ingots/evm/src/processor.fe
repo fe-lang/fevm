@@ -2,6 +2,7 @@ use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::MAX_U256
+use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, TX_MAX_TOTAL_GAS, account_access}
 use ingot::fork::{Amsterdam, Fork, Osaka, Rules}
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
@@ -11,8 +12,10 @@ use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Progra
 use ingot::vm::{Buffers, Vm, begin_create, run_precompile, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
+use swisstable::SwissTable
 use ingot::status::{
     ERR_ADDRESS_COLLISION,
+    ERR_OUT_OF_GAS,
     ERR_HOST_ALLOCATION,
     ERR_REVERT,
     INVALID_BALANCE,
@@ -35,6 +38,7 @@ use ingot::status::{
     INVALID_TX_TYPE,
     OK,
     VALID,
+    exceptional,
     is_evm_outcome,
 }
 
@@ -49,9 +53,20 @@ const GAS_PER_BLOB: u64 = 131072
 // EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
 // blob gas used across a block is the host's to track, as is its gas used.
 const MAX_BLOBS_PER_TX: u64 = 6
-// EIP-7702 intrinsic gas per authorization, of which an existing authority refunds half.
+// EIP-7702 intrinsic gas per authorization, of which an existing authority
+// refunds half until Amsterdam.
 const AUTHORIZATION_GAS: u128 = 25000
 const EXISTING_AUTHORITY_REFUND: i128 = 12500
+// From Amsterdam (EIP-2780 and EIP-8037), an authorization's intrinsic gas:
+// its 101 bytes of floor tokens, an ecrecover, a cold access and two warm ones.
+const AUTHORIZATION_BASE: u128 = 7816
+
+// What an authority's authorizations paid for (EIP-8037 and EIP-8038): its
+// first write, and a delegation that is new state, which one it held before
+// the transaction also stands for.
+const SEEN: u8 = 1
+const WRITE_PAID: u8 = 2
+const DELEGATION_PAID: u8 = 4
 
 pub struct TxEnv {
     pub kind: u8,
@@ -154,7 +169,8 @@ fn words(_ len: usize) -> u128 {
 /// on the gas a transaction uses.
 pub struct IntrinsicGas { pub regular: u128, pub floor: u128 }
 
-/// Calldata, creation, and access-list charges, and the calldata floor.
+/// Calldata, creation, access-list and authorization charges, and the
+/// calldata floor.
 pub fn intrinsic_gas<F: Rules>(_ request: TxRequest) -> IntrinsicGas {
     let data = ref request.data()
     let bytes = data.bytes()
@@ -178,11 +194,29 @@ pub fn intrinsic_gas<F: Rules>(_ request: TxRequest) -> IntrinsicGas {
     // 10 for the floor.
     // Lengths are far below 2^62, so the token count fits a `usize`.
     let tokens: u128 = (len + 3 * nonzero).downcast_unchecked()
-    var gas: u128 = 21000 + 4 * tokens
-    if request.env.creates { gas += 32000 + 2 * words(data.len()) }
     let accounts: u128 = request.access_accounts.len().downcast_unchecked()
     let keys: u128 = request.access_keys.len().downcast_unchecked()
     let count: u128 = request.authorization_count().downcast_unchecked()
+    let env = request.env
+    if F::TX_REPRICING {
+        // EIP-2780: the sender's 12,000, and the recipient's access and value,
+        // which a transfer to oneself does not pay, or CREATE's base.
+        let recipient: u128 = if env.creates { F::CREATE as u128 }
+            else if address_word(env.to) == address_word(env.sender) { 0 }
+            else { F::COLD_ACCOUNT_ACCESS as u128 + if env.value != 0 { 6000 } else { 0 } }
+        let base = 12000 + recipient
+        // An access-list entry costs its cold access less a warm one, and
+        // from EIP-7981 its addresses and keys are 80 and 128 floor tokens,
+        // charged on both sides.
+        let listed = 16 * (80 * accounts + 128 * keys)
+        var gas = base + 4 * tokens + 2900 * accounts + 2000 * keys + listed + AUTHORIZATION_BASE * count
+        if env.creates { gas += 2 * words(len) }
+        // EIP-7976: every calldata byte is four floor tokens.
+        let bytes: u128 = len.downcast_unchecked()
+        return IntrinsicGas { regular: gas, floor: base + 64 * bytes + listed }
+    }
+    var gas: u128 = 21000 + 4 * tokens
+    if env.creates { gas += 32000 + 2 * words(data.len()) }
     let authorizations = AUTHORIZATION_GAS * count
     IntrinsicGas { regular: gas + 2400 * accounts + 1900 * keys + authorizations, floor: 21000 + 10 * tokens }
 }
@@ -215,10 +249,10 @@ struct Checked { invalid: i32, intrinsic: IntrinsicGas }
 
 fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> Checked {
     let intrinsic = intrinsic_gas<F>(request)
-    Checked { invalid: verdict(world, request, block, config, intrinsic), intrinsic }
+    Checked { invalid: verdict<F>(world, request, block, config, intrinsic), intrinsic }
 }
 
-fn verdict(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
            _ intrinsic: IntrinsicGas) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
@@ -230,7 +264,12 @@ fn verdict(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ confi
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
     if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > config.max_initcode_size.downcast_truncate() { return INVALID_INITCODE_SIZE }
-    if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
+    if F::STATE_GAS {
+        // EIP-8037: gas past the execution cap is state gas, so only the
+        // intrinsic gas and floor must fit the cap.
+        if env.gas_limit > TX_MAX_TOTAL_GAS { return INVALID_GAS_LIMIT_CAP }
+        if required > config.tx_gas_limit_cap as u128 { return INVALID_INTRINSIC_GAS }
+    } else if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
     if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
@@ -324,9 +363,13 @@ fn authority(_ authorization: Authorization, chain_id: u256) -> Option<u256> {
 
 // EIP-7702: apply the authorizations in order, skipping invalid ones. Each
 // recovered authority is warmed; a valid one gets the delegation and its next
-// nonce, and refunds part of the intrinsic charge if the account existed. The
-// changes precede the message's checkpoint, so they survive its failure.
-fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32 {
+// nonce. Until Amsterdam it refunds part of the intrinsic charge if the
+// account existed; from Amsterdam the top frame `vm` pays for a new account,
+// the authority's first write and a new delegation (EIP-8037 and EIP-8038).
+// The changes precede the message's checkpoint, so they survive its failure.
+fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256, _ vm: mut Vm) -> i32 {
+    var paid = SwissTable<u256, u8>::empty()
+    let env = request.env
     for authorization in request.authorizations {
         let signer = authority(authorization, chain_id)
         if signer.is_none() { continue }
@@ -335,28 +378,73 @@ fn authorize(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256) -> i32
         if status != OK { return status }
         let delegable = tx.code_size(authority) == 0 || tx.delegate(authority).is_some()
         if !delegable || tx.nonce(authority) != authorization.nonce { continue }
-        if tx.exists(authority) { tx.add_refund(EXISTING_AUTHORITY_REFUND) }
-        status = tx.delegate_code(address: authority, delegate: address_word(authorization.address))
+        let delegate = address_word(authorization.address)
+        if F::STATE_GAS {
+            let Option::Some(slot) = paid.try_find_or_insert(authority) else { return ERR_HOST_ALLOCATION }
+            let flags = mut paid.value_at(slot)
+            if flags == 0 {
+                // The transaction pays for writing its sender and a recipient
+                // of value already.
+                flags = SEEN
+                if authority == address_word(env.sender) || (env.value != 0 && authority == address_word(env.to)) {
+                    flags |= WRITE_PAID
+                }
+                if tx.delegate(authority).is_some() { flags |= DELEGATION_PAID }
+            }
+            if !tx.exists(authority) && !vm.charge_state(NEW_ACCOUNT) { return ERR_OUT_OF_GAS }
+            if flags & WRITE_PAID == 0 {
+                if !vm.charge(ACCOUNT_WRITE as u128) { return ERR_OUT_OF_GAS }
+                flags |= WRITE_PAID
+            }
+            if delegate != 0 && flags & DELEGATION_PAID == 0 {
+                if !vm.charge_state(AUTH_BASE) { return ERR_OUT_OF_GAS }
+                flags |= DELEGATION_PAID
+            }
+        } else if tx.exists(authority) {
+            tx.add_refund(EXISTING_AUTHORITY_REFUND)
+        }
+        status = tx.delegate_code(address: authority, delegate)
         if status == OK { status = tx.increment_nonce(authority) }
         if status != OK { return status }
     }
     OK
 }
 
-// The top-level message: a creation or a call, each under its own checkpoint.
+// Prepares the top frame `vm` for the message to `target`: the EIP-7702
+// authorizations, then from EIP-8037 the state gas for the account the message
+// makes and the access of the target's delegate. A failure ends the message
+// as an exceptional halt before it starts.
+fn prepare_message<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, target: u256, chain_id: u256,
+                             _ vm: mut Vm) -> i32 {
+    let env = request.env
+    var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut vm) } else { OK }
+    if !F::STATE_GAS || status != OK { return status }
+    // The delegations survive the message's failure, and so does their state gas.
+    vm.commit_state_gas()
+    // A creation that collides makes no account.
+    let creates_account = if env.creates { tx.deployable(target) } else { env.value != 0 }
+    if creates_account && tx.is_empty(target) && !vm.charge_state(NEW_ACCOUNT) { return ERR_OUT_OF_GAS }
+    if !env.creates && let Option::Some(delegate) = tx.delegate(target) {
+        if !vm.charge(account_access<F>(warm: tx.account_is_warm(delegate))) { return ERR_OUT_OF_GAS }
+        status = tx.warm_account(address: delegate)
+    }
+    status
+}
+
+// The top-level message, run by the prepared top frame `vm`: a creation or a
+// call, each under its own checkpoint.
 fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv,
-                              _ tracer: mut T) -> ExecutionResult {
+                                        var _ vm: own Vm, _ tracer: mut T) -> ExecutionResult {
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
     if request.env.creates {
-        if !tx.deployable(target) { return status_result(ERR_ADDRESS_COLLISION) }
+        if !tx.deployable(target) { return vm.without_code<F>(status_result(ERR_ADDRESS_COLLISION)) }
         let checkpoint = match begin_create<F>(mut tx, sender, address: target, value) {
             Result::Ok(checkpoint) => checkpoint,
             Result::Err(status) => return status_result(status),
         }
         let program = Program::copy_from(request.data(), len: request.data().len() as usize)
-        var vm = Vm::new()
         vm.run_root<F, T>(program, empty_bytes(), call, block, mut tx, mut tracer, creates: true)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return vm.into_result(mut tx.buffers())
@@ -372,7 +460,7 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     if is_precompile(target) && tx.delegate(target).is_none() {
         let result = run_precompile(address: target, input: request.data(), gas: call.gas_limit)
         if result.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-        return result
+        return vm.without_code<F>(result)
     }
     let code = tx.code(target)
     let delegate = delegation(code)
@@ -393,9 +481,8 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
         tx.commit(checkpoint)
         var result = status_result(OK)
         result.gas_remaining = call.gas_limit
-        return result
+        return vm.without_code<F>(result)
     }
-    var vm = Vm::new()
     vm.run_root<F, T>(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer,
                       creates: false)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
@@ -449,18 +536,34 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     let target = if env.creates { create_address(sender, nonce: tx.world().nonce(sender)) } else { address_word(env.to) }
     tx.begin(sender, destination: target, coinbase: block.coinbase, config)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
-    if prepared == OK && env.kind == TX_SET_CODE { prepared = authorize(mut tx, request, chain_id: block.chainid) }
+    // EIP-8037: gas past the execution cap is the top frame's state gas reservoir.
+    let regular: u64 = intrinsic.regular.downcast_unchecked()
+    let available = env.gas_limit - regular
+    let gas = if F::STATE_GAS && available > config.tx_gas_limit_cap - regular { config.tx_gas_limit_cap - regular }
+        else { available }
+    var vm = Vm::new()
+    vm.reset(gas, reservoir: available - gas)
+    if prepared == OK {
+        let checkpoint = tx.checkpoint(is_static: false)
+        prepared = prepare_message<F>(mut tx, request, target, chain_id: block.chainid, mut vm)
+        if prepared == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
+    }
     let call = CallEnv {
         address: target, caller: sender, origin: sender, callvalue: env.value,
-        gasprice: price, gas_limit: env.gas_limit - intrinsic.regular.downcast_unchecked(), is_static: false,
+        gasprice: price, gas_limit: vm.gas_remaining, is_static: false,
     }
     let result = if prepared == OK {
         // The transaction's own message is a call or creation at depth zero.
         tracer.enter(CallStart { kind: if env.creates { 0xf0 } else { 0xf1 }, depth: 0, from: sender, to: target,
                                  value: env.value, gas: call.gas_limit }, input: request.data().bytes())
-        let result = execute_message<F, T>(mut tx, request, call, block, mut tracer)
+        let result = execute_message<F, T>(mut tx, request, call, block, vm, mut tracer)
         tracer.leave(CallEnd { depth: 0, status: result.status, gas: result.gas_remaining },
                      output: result.output.span())
+        result
+    } else if exceptional(prepared) {
+        // A failed preparation undoes its state, so its state gas refills.
+        var result = status_result(prepared)
+        result.reservoir = available - gas
         result
     } else {
         status_result(prepared)
@@ -468,9 +571,9 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     if !is_evm_outcome(result.status) {
         return host_failure(mut tx, status: result.status)
     }
-    // Exceptional halts and collisions consume all gas.
+    // Exceptional halts and collisions consume all gas but the reservoir.
     let gas_left = if result.status == OK || result.status == ERR_REVERT { result.gas_remaining } else { 0 }
-    let gas_spent = env.gas_limit - gas_left
+    let gas_spent = env.gas_limit - gas_left - result.reservoir
     // EIP-7623: a transaction uses at least its calldata floor.
     let refunded = gas_spent - tx.capped_refund(gas_spent)
     let floor: u64 = intrinsic.floor.downcast_unchecked()
