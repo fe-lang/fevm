@@ -82,13 +82,38 @@ fn block_calls_the_system_contracts_and_counts_gas() {
 }
 
 #[test]
+fn amsterdam_block_lists_what_it_accessed() {
+    var world = world()
+    // EIP-8282's builder request contracts, which return nothing.
+    core::assert(world.set_code(address: 0x0000bff46984e3725691fa540a8c7589300d8282, code: [0x00 as u8]) == OK)
+    core::assert(world.set_code(address: 0x000064d678505ad48f8ccb093bc65613800e8282, code: [0x00 as u8]) == OK)
+    var block = Block::begin(Evm::new(world, Config::amsterdam()), env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    // A simulation is no part of the list.
+    var other = transfer(nonce: 0, gas_limit: 50_000)
+    other.env.to = 0xcc
+    core::assert(block.simulate(other, mut tracer).invalid == VALID)
+    core::assert(block.transact(transfer(nonce: 0, gas_limit: 50_000), mut tracer).invalid == VALID)
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    withdrawals.push(Withdrawal { address: 0xee, amount: 0 })
+    let (_, finished) = block.finish(withdrawals)
+    let Result::Ok(output) = finished else { return core::assert(false) }
+    core::assert(output.requests.len() == 1)
+    let Option::Some(list) = output.access_list else { return core::assert(false) }
+    // The six system contracts and the slot that two of them wrote, the
+    // sender, the recipient, the coinbase and both withdrawals' accounts.
+    core::assert(list.items == 13 && list.hash != 0)
+}
+
+#[test]
 fn block_without_requests_hashes_nothing() {
     var world = world()
     core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: [0x00 as u8]) == OK)
     let block = Block::begin(Evm::new(world, Config::osaka()), env(), parent_hash: 1, parent_beacon_block_root: 2)
     let (_, finished) = block.finish(MemVec::new())
     let Result::Ok(output) = finished else { return core::assert(false) }
-    core::assert(output.gas_used == 0 && output.requests.len() == 0)
+    core::assert(output.gas_used == 0 && output.requests.len() == 0 && output.access_list.is_none())
     // sha256 of no bytes.
     core::assert(output.requests_hash == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
 }

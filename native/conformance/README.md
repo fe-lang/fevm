@@ -67,9 +67,9 @@ Given a release's `blockchain_tests`, the same command runs each test's
 blocks through FeVM's `Block`, one driver process per test:
 
 ```sh
-tar -xzf fixtures.tar.gz fixtures/blockchain_tests/for_osaka
+tar -xzf fixtures.tar.gz fixtures/blockchain_tests/for_osaka fixtures/blockchain_tests/for_amsterdam
 native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
-  --fixtures fixtures/blockchain_tests/for_osaka --out native/out/blocks-run
+  --fixtures fixtures/blockchain_tests --out native/out/blocks-run
 ```
 
 A test runs if its `network` is one of the selected forks. The driver begins
@@ -77,7 +77,8 @@ each block on the world the last valid one left, runs its transactions,
 credits its withdrawals and finishes it, and judges it as a client that
 trusts the header's own validity would: a block is valid when every
 transaction is, its system calls succeed, and its gas used, blob gas used,
-logs bloom and requests hash are the header's. An invalid block leaves the
+logs bloom, requests hash and, from Amsterdam, access list hash (EIP-7928)
+are the header's, with the access list within the gas limit's bound. An invalid block leaves the
 world as it was. A test passes when each block's validity is the fixture's,
 each valid block's receipts match (success, cumulative gas used and logs,
 where the fixture has receipts), and the state after the last block equals
@@ -91,11 +92,13 @@ form, and leaves out the invalid blocks whose `expectException` is one of
 those: `results.json` counts them in `blocks_not_judged`. The blocks it
 judges invalid are those with an invalid transaction (other than a malformed
 signature), wrong requests, a malformed deposit event, a failed or missing
-request contract, or wrong blob gas used.
+request contract, wrong gas used or blob gas used, or a wrong or oversized
+access list.
 
-All 17,441 Osaka tests of `tests@v21.0.2` pass, with 476 of their 19,875
-blocks not judged.
+All tests of `tests@v21.0.2` pass: 17,441 for Osaka, with 476 of their
+19,875 blocks not judged, and 26,349 for Amsterdam, with 3,798 not judged
+(3,759 of them for the header's excess blob gas).
 
 The driver prints `blocks`, each with `valid` and its `receipts` (status,
 cumulative gas, logs) or the `reason` it is invalid, and the post-state
-accounts.
+accounts. A wrong access list hash comes with the list's RLP.

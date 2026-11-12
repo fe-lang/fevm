@@ -42,6 +42,8 @@ fn judges(_ exception: MemSpan) -> bool {
         || exception == "BlockException.SYSTEM_CONTRACT_CALL_FAILED" || exception == "BlockException.SYSTEM_CONTRACT_EMPTY"
         || exception == "BlockException.INCORRECT_BLOB_GAS_USED" || exception == "BlockException.BLOB_GAS_USED_ABOVE_LIMIT"
         || exception == "BlockException.INVALID_GAS_USED" || exception == "BlockException.GAS_USED_OVERFLOW"
+        || exception == "BlockException.INVALID_BLOCK_ACCESS_LIST"
+        || exception == "BlockException.BLOCK_ACCESS_LIST_GAS_LIMIT_EXCEEDED"
 }
 
 // The offset and length of each alternative of `exceptions`, which `|`
@@ -197,6 +199,7 @@ pub fn encode(_ test: Value, fork: usize) -> Result<MemBuffer, MemBuffer> {
         if bloom.len() != 256 { return Result::Err(format!("a bloom of ", bloom.len(), " bytes")) }
         out.extend_from(bloom.span())
         put_number(mut out, header["requestsHash"], 32)?
+        put(mut out, number_or(header, "blockAccessListHash", 0)?, 32)?
         let transactions = ref body["transactions"].items()
         put_len(mut out, transactions.len())?
         for ref tx in transactions { put_transaction(mut out, tx)? }

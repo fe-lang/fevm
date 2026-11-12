@@ -68,12 +68,12 @@ machines, which skips timing measurements. Run it on each host: an unexecuted
 platform is not a passing result.
 
 [CI](../.github/workflows/ci.yml) runs acceptance, the state tests and the
-Osaka blockchain tests on both hosts for every pull request and push to `main`.
+blockchain tests on both hosts for every pull request and push to `main`.
 
 ## State and blockchain tests
 
 The [conformance runner](conformance/README.md) runs execution-spec-tests
-Osaka and Amsterdam state tests through `Evm::transact`, and Osaka
+Osaka and Amsterdam state tests through `Evm::transact`, and their
 blockchain tests through `Block`. It is not part of acceptance.
 
 ## Resident memory

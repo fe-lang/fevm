@@ -136,11 +136,21 @@ cumulative gas used; `simulate` tries one without counting it. `finish`
 credits the withdrawals (EIP-4895), collects the block's requests (EIP-7685):
 the deposits its transactions logged (EIP-6110) and those the withdrawal and
 consolidation request contracts return to their system calls (EIP-7002,
-EIP-7251). It returns the `Evm`, and a `BlockOutput` with what the header
-commits to apart from its Merkle roots: gas used, blob gas used, the logs
-bloom, and the requests with their hash. A block whose request contract is
-missing or fails, or whose deposit contract logged a malformed deposit, gives
-a `BlockError` instead.
+EIP-7251; from Amsterdam the builder request contracts too, EIP-8282). It
+returns the `Evm`, and a `BlockOutput` with what the header commits to apart
+from its Merkle roots: gas used (from Amsterdam the larger of execution and
+state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
+hash, and from Amsterdam the block's access list (EIP-7928) with its hash. A
+block whose request contract is missing or fails, whose deposit contract
+logged a malformed deposit, or whose access list is too large for its gas
+limit gives a `BlockError` instead.
+
+The access list is built as the block runs. A read is noted where its gas has
+been paid, the point at which an account or slot is warmed, and stays through
+reverts. Changes are not tracked as they are written: when a transaction
+ends, the journal's surviving entries name what it changed with the values it
+began with, so a write that restored a value counts as a read. Outside a
+block, and in a simulation, nothing is recorded.
 
 fevm does not check a header against its parent, decode transactions or
 compute Merkle roots; a host that validates blocks compares the output with

@@ -92,8 +92,8 @@ jobs:
         with:
           path: |
             ~/eest/fixtures/state_tests
-            ~/eest/fixtures/blockchain_tests/for_osaka
-          key: eest-blocks-${{ env.EEST_RELEASE }}
+            ~/eest/fixtures/blockchain_tests
+          key: eest-blocks-amsterdam-${{ env.EEST_RELEASE }}
 
       - name: Download the fixtures
         id: download
@@ -105,7 +105,7 @@ jobs:
             -D "$RUNNER_TEMP"
           mkdir -p ~/eest
           tar -xzf "$RUNNER_TEMP/fixtures.tar.gz" -C ~/eest fixtures/state_tests \
-            fixtures/blockchain_tests/for_osaka
+            fixtures/blockchain_tests/for_osaka fixtures/blockchain_tests/for_amsterdam
 
       - name: Save the fixtures
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
@@ -113,7 +113,7 @@ jobs:
         with:
           path: |
             ~/eest/fixtures/state_tests
-            ~/eest/fixtures/blockchain_tests/for_osaka
+            ~/eest/fixtures/blockchain_tests
           key: ${{ steps.fixtures.outputs.cache-primary-key }}
 
       - name: State tests
@@ -126,7 +126,7 @@ jobs:
         if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
         run: |
           native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe \
-            --fixtures ~/eest/fixtures/blockchain_tests/for_osaka --out native/out/blocks
+            --fixtures ~/eest/fixtures/blockchain_tests --out native/out/blocks
 
       - name: Upload logs
         if: failure()

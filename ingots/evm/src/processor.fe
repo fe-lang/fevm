@@ -447,6 +447,10 @@ fn prepare_message<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, target
     let env = ref request.env
     let checkpoint = tx.checkpoint(is_static: false)
     var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut gas, mut state_gas) } else { OK }
+    // Once its authorizations are paid for, the message reads its target,
+    // which is warm; a block's access list has the read even if the
+    // message then fails.
+    if status == OK && F::BLOCK_ACCESS_LIST { status = tx.access_account(target, warm: true) }
     if status == OK {
         // The delegations survive the message's failure, and so does their state gas.
         state_gas.commit()
@@ -633,6 +637,7 @@ pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxReq
     // Aborting discards the logs, which a simulation still reports.
     let logs = if commit {
         tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
         tx.end(commit: true)
         tx.take_logs()
     } else {
@@ -662,6 +667,11 @@ pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data:
         address: target, caller: SYSTEM_ADDRESS, origin: SYSTEM_ADDRESS, callvalue: 0,
         gasprice: block.basefee, gas_limit: SYSTEM_CALL_GAS, is_static: false,
     }
+    let noted = if F::BLOCK_ACCESS_LIST { tx.access_account(target, warm: true) } else { OK }
+    if noted != OK {
+        tx.end(commit: false)
+        return status_result(noted)
+    }
     let checkpoint = tx.checkpoint(is_static: false)
     var vm = Vm::new()
     vm.reset(gas: SYSTEM_CALL_GAS, state_gas: StateGas::new(if F::STATE_GAS { SYSTEM_CALL_SLOTS * STORAGE_SET } else { 0 }))
@@ -670,7 +680,10 @@ pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data:
     vm.run_root<F>(tx.program(code), data, call, block, mut tx, mut tracer, creates: false)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     let result = vm.into_result(mut tx.buffers())
-    if is_evm_outcome(result.status) { tx.settle<F>() }
+    if is_evm_outcome(result.status) {
+        tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
+    }
     tx.end(commit: is_evm_outcome(result.status))
     let _ = tx.take_logs()
     result
@@ -689,7 +702,10 @@ pub(ingot) fn withdraw<F: Rules>(_ tx: mut Transaction, _ withdrawals: MemVec<Wi
     for withdrawal in withdrawals {
         if status == OK { status = tx.credit(address: withdrawal.address, amount: withdrawal.amount as u256 * 1_000_000_000) }
     }
-    if status == OK { tx.settle<F>() }
+    if status == OK {
+        tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
+    }
     tx.end(commit: status == OK)
     status
 }

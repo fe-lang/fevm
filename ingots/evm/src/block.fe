@@ -1,5 +1,6 @@
 use core::{MemBuffer, MemSpan, MemVec, Option, Result}
 use fevm_precompiles::sha256
+use ingot::access::BlockAccessList
 use ingot::evm::Evm
 use ingot::fork::Fork
 use ingot::logs::{Bloom, LogBuffer}
@@ -46,6 +47,9 @@ pub enum BlockError {
     RequestCallFailed,
     /// EIP-6110: the deposit contract logged a malformed deposit event.
     MalformedDeposit,
+    /// EIP-7928: the block's access list has more accounts and storage keys
+    /// than its gas limit allows.
+    AccessListTooLarge,
     /// A host failure, with its status: an allocation, or a balance past
     /// 2^256.
     Host(i32),
@@ -54,14 +58,16 @@ pub enum BlockError {
 impl Copy for BlockError {}
 
 /// What a block's header commits to, apart from its Merkle roots: its gas
-/// used, blob gas used, logs bloom, and its EIP-7685 requests, each a type
-/// byte and its data, with their hash.
+/// used, blob gas used, logs bloom, its EIP-7685 requests, each a type byte
+/// and its data, with their hash, and from Amsterdam its access list
+/// (EIP-7928) with its hash.
 pub struct BlockOutput {
     pub gas_used: u64,
     pub blob_gas_used: u64,
     pub logs_bloom: Bloom,
     pub requests: MemVec<MemBuffer>,
     pub requests_hash: u256,
+    pub access_list: Option<BlockAccessList>,
 }
 
 /// A block being executed on an `Evm`'s world, which it holds from `begin`
@@ -81,6 +87,8 @@ pub struct Block {
     blob_gas_used: u64,
     // What the transactions paid for, which their receipts accumulate.
     cumulative_gas_used: u64,
+    // The transactions run, which place the next in the block's access list.
+    transactions: u32,
     bloom: Bloom,
     // EIP-6110: the deposits the transactions made, back to back.
     deposits: MemBuffer,
@@ -129,8 +137,12 @@ impl Block {
         let limit = Capacity::of(env, evm.config())
         var block = Block {
             evm, env, limit, gas_used: 0, state_gas_used: 0, blob_gas_used: 0, cumulative_gas_used: 0,
-            bloom: Bloom::new(), deposits: MemBuffer::empty(), failure: Option::None,
+            transactions: 0, bloom: Bloom::new(), deposits: MemBuffer::empty(), failure: Option::None,
         }
+        // EIP-7928: the list has the system calls before the transactions
+        // at index 0, each transaction at its place and one, and what
+        // follows them at one more.
+        if block.evm.config().fork.since(Fork::Amsterdam) { block.evm.access().start() }
         if env.number != 0 {
             if !block.evm.world_mut().set_block_hash(env.number - 1, parent_hash) {
                 block.fail(BlockError::Host(ERR_HOST_ALLOCATION))
@@ -170,8 +182,10 @@ impl Block {
     /// block has the gas and blob gas left for it. A block with an invalid
     /// transaction is invalid; one that is being built leaves it out.
     pub fn transact<T: Tracer>(mut self, _ request: TxRequest, _ tracer: mut T) -> Receipt {
+        self.evm.access().set_index(self.transactions + 1)
         var receipt = self.evm.apply(request, self.env, available: self.available(), mut tracer, commit: true)
         if receipt.invalid != VALID || !is_evm_outcome(receipt.status) { return receipt }
+        self.transactions += 1
         self.gas_used += receipt.execution_gas_used
         self.state_gas_used += receipt.state_gas_used
         self.blob_gas_used += request.blob_gas()
@@ -238,6 +252,7 @@ impl Block {
     /// invalid block's changes to the world are not undone.
     pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm, Result<BlockError, BlockOutput>) {
         var block = self
+        block.evm.access().set_index(block.transactions + 1)
         let credited = block.evm.withdraw(withdrawals)
         if credited != OK { block.fail(BlockError::Host(credited)) }
         var requests: MemVec<MemBuffer> = MemVec::new()
@@ -251,12 +266,21 @@ impl Block {
         }
         let hash = requests_hash(requests)
         if hash.is_none() { block.fail(BlockError::Host(ERR_HOST_ALLOCATION)) }
+        var access_list: Option<BlockAccessList> = Option::None
+        if block.evm.access().recording() {
+            access_list = block.evm.access().build()
+            block.evm.access().stop()
+            match access_list {
+                Option::Some(ref list) => if !list.fits(gas_limit: block.limit.gas) { block.fail(BlockError::AccessListTooLarge) },
+                Option::None => block.fail(BlockError::Host(ERR_HOST_ALLOCATION)),
+            }
+        }
         let gas_used = if block.gas_used > block.state_gas_used { block.gas_used } else { block.state_gas_used }
         let output = match block.failure {
             Option::Some(error) => Result::Err(error),
             Option::None => Result::Ok(BlockOutput {
                 gas_used, blob_gas_used: block.blob_gas_used, logs_bloom: block.bloom, requests,
-                requests_hash: hash.unwrap_or(default: 0),
+                requests_hash: hash.unwrap_or(default: 0), access_list,
             }),
         }
         (block.evm, output)
@@ -264,5 +288,9 @@ impl Block {
 
     /// Leaves the block unfinished and returns the `Evm`, with the world as
     /// the block's transactions so far left it.
-    pub fn abandon(own self) -> Evm { self.evm }
+    pub fn abandon(own self) -> Evm {
+        var evm = self.evm
+        evm.access().stop()
+        evm
+    }
 }

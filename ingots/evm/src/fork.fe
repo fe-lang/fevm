@@ -46,6 +46,9 @@ pub trait Rules {
     // EIP-2780, EIP-7976 and EIP-7981: a transaction pays for its recipient
     // and value, and its calldata floor counts every byte and the access list.
     const TX_REPRICING: bool = Self::FORK.since(Fork::Amsterdam)
+    // EIP-7928: a block lists the accounts and storage its execution reads
+    // and changes.
+    const BLOCK_ACCESS_LIST: bool = Self::FORK.since(Fork::Amsterdam)
     // EIP-2929 and EIP-8038: the first access of an account in a transaction.
     const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
     // EIP-8038: EXTCODESIZE and EXTCODECOPY read the code.

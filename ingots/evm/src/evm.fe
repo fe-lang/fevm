@@ -1,5 +1,6 @@
 use ingot::fork::{Amsterdam, Fork, Osaka}
 use core::MemVec
+use ingot::access::AccessRecorder
 use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal, apply, checked, system_call, withdraw}
 use ingot::state::WorldState
 use ingot::trace::Tracer
@@ -59,11 +60,19 @@ impl Evm {
     /// `available` gas left.
     pub(ingot) fn apply<T: Tracer>(mut self, _ request: TxRequest, _ block: BlockEnv, available: Capacity,
                                    _ tracer: mut T, commit: bool) -> Receipt {
-        match self.config.fork {
+        // A simulation is no part of a block's access list.
+        let recording = self.tx.access().recording()
+        if !commit { self.tx.access().set_recording(false) }
+        let receipt = match self.config.fork {
             Fork::Osaka => apply<Osaka>(mut self.tx, request, block, self.config, available, mut tracer, commit),
             Fork::Amsterdam => apply<Amsterdam>(mut self.tx, request, block, self.config, available, mut tracer, commit),
         }
+        self.tx.access().set_recording(recording)
+        receipt
     }
+
+    /// The recorder of the block's access list (EIP-7928).
+    pub(ingot) fn access(mut self) -> mut AccessRecorder { self.tx.access() }
 
     pub(ingot) fn system_call(mut self, target: u256, _ data: own InputData, _ block: BlockEnv) -> ExecutionResult {
         match self.config.fork {
