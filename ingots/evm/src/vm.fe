@@ -6,11 +6,11 @@ use ingot::state::{StorageKey, address_word}
 use swisstable::SwissTable
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
 use ingot::constants::STACK_LIMIT
-use ingot::fork::{Fork, Osaka, Rules}
+use ingot::fork::{Amsterdam, Fork, Osaka, Rules}
 use ingot::journal::Journal
 use ingot::transaction::Transaction
 use ingot::trace::Tracer
-use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_call_env}
+use ingot::types::{BlockEnv, InputData, CallEnv, ExecutionResult, Program, default_block_env, default_call_env}
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_INVALID_OPCODE, ERR_OUT_OF_GAS, ERR_RETURN_DATA_OOB, ERR_REVERT, ERR_STACK_OVERFLOW, ERR_STACK_UNDERFLOW, ERR_STATIC_WRITE, OK, exceptional}
 use frames::Frame
 pub use frames::{CALL_DEPTH_LIMIT, begin_create, run_precompile, status_result, transfer}
@@ -118,9 +118,7 @@ impl Vm {
             calldata: (0 as usize) as *u8,
             calldata_len: 0,
             call: default_call_env(),
-            block: BlockEnv {
-                coinbase: 0, timestamp: 0, number: 0, prevrandao: 0, gaslimit: 0, chainid: 0, basefee: 0, blobbasefee: 0,
-            },
+            block: default_block_env(),
             blob_hashes: (0 as usize) as *u256,
             blob_count: 0,
         }
@@ -850,6 +848,7 @@ impl Vm {
                           _ call: CallEnv, _ block: BlockEnv, _ state: mut Transaction, _ tracer: mut T) {
         match state.config().fork {
             Fork::Osaka => self.run_root<Osaka, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
+            Fork::Amsterdam => self.run_root<Amsterdam, T>(program, calldata, call, block, mut state, mut tracer, creates: false),
         }
     }
 

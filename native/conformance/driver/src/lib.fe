@@ -2,12 +2,13 @@ use core::{MemBuffer, Option}
 use std::env::Args
 use std::io::{Display, Stdin, Stdout, read_to_end}
 use keccak::Keccak256
-use fevm::{Authorization, BlockEnv, Config, Buffers, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
+use fevm::{Authorization, BlockEnv, Config, Buffers, Fork, InputData, LogBuffer, OK, TxEnv, TxRequest, WorldState, transact}
 use fevm::hex::{parse_decimal, write_hex_bytes, write_hex_word}
 use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
-// Reads one case: a version byte, the block, the pre-state accounts and the
-// transaction. Integers and lengths are big endian; see native/conformance/run.py.
+// Reads one case: a version byte, the fork, the block, the pre-state accounts
+// and the transaction. Integers and lengths are big endian; see `encode` in
+// native/tools/src/conformance.fe.
 struct Reader { data: MemBuffer, position: usize }
 
 impl Reader {
@@ -175,7 +176,12 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     var tracer = ()
     while true {
         reader.position = 0
-        core::assert(reader.word(bytes: 1) == 4)
+        core::assert(reader.word(bytes: 1) == 5)
+        let fork = match reader.word(bytes: 1) {
+            0 => Fork::Osaka,
+            1 => Fork::Amsterdam,
+            _ => return 2,
+        }
         let block = BlockEnv {
             coinbase: reader.word(bytes: 20),
             number: reader.word(bytes: 32),
@@ -185,8 +191,9 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
             basefee: reader.word(bytes: 32),
             blobbasefee: reader.word(bytes: 32),
             chainid: reader.word(bytes: 32),
+            slot_number: reader.word(bytes: 32),
         }
-        var config = Config::osaka()
+        var config = Config::of(fork)
         config.tx_gas_limit_cap = reader.word(bytes: 8).downcast_unchecked()
         var world = WorldState::empty()
         var number = if block.number > 256 { block.number - 256 } else { 0 }

@@ -262,13 +262,18 @@ impl Session {
     fn handle(mut self, _ reader: mut Reader) -> Writer {
         match reader.byte() {
             CONFIGURE => {
+                let fork = match reader.byte() {
+                    0 => Fork::Osaka,
+                    1 => Fork::Amsterdam,
+                    _ => return Writer::new(BAD_REQUEST),
+                }
                 let max_code_size = reader.u64()
                 let max_initcode_size = reader.u64()
                 let tx_gas_limit_cap = reader.u64()
                 let checks = reader.byte()
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 self.config = Config {
-                    fork: Fork::Osaka,
+                    fork,
                     max_code_size,
                     max_initcode_size,
                     tx_gas_limit_cap,
@@ -289,6 +294,7 @@ impl Session {
                     basefee: reader.word(bytes: 32),
                     blobbasefee: reader.word(bytes: 32),
                     chainid: reader.word(bytes: 32),
+                    slot_number: reader.word(bytes: 32),
                 }
                 if !reader.complete() { return Writer::new(BAD_REQUEST) }
                 self.block = block

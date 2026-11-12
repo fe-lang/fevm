@@ -398,8 +398,9 @@ uses (fs: mut Fs, proc: mut Spawn, out: mut Stdout)
                 if !selected {
                     continue
                 }
-                // Benchmarks exceed EIP-7825's cap, so the host lifts it.
-                let payload = named(case, encode(test, Indexes::of(post), cap: 18446744073709551615))?
+                // Every engine runs Osaka's rules. Benchmarks exceed EIP-7825's
+                // cap, so the host lifts it.
+                let payload = named(case, encode(test, Indexes::of(post), fork: 0, cap: 18446744073709551615))?
                 var outcomes: MemVec<Outcome> = MemVec::new()
                 for ref engine in engines {
                     outcomes.push(outcome(engine.path.span(), payload, statuses: engine.name == "fevm")?)

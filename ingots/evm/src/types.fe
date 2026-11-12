@@ -213,6 +213,23 @@ impl Config {
             check_sender_code: true,
         }
     }
+
+    /// Amsterdam's settings, with EIP-7954's code size limits.
+    pub fn amsterdam() -> Self {
+        var config = Self::osaka()
+        config.fork = Fork::Amsterdam
+        config.max_code_size = 65_536
+        config.max_initcode_size = 131_072
+        config
+    }
+
+    /// Mainnet's settings for `fork`.
+    pub fn of(_ fork: Fork) -> Self {
+        match fork {
+            Fork::Osaka => Self::osaka(),
+            Fork::Amsterdam => Self::amsterdam(),
+        }
+    }
 }
 
 pub struct BlockEnv {
@@ -224,6 +241,8 @@ pub struct BlockEnv {
     pub chainid: u256,
     pub basefee: u256,
     pub blobbasefee: u256,
+    // EIP-7843: the beacon chain slot, which SLOTNUM pushes.
+    pub slot_number: u256,
 }
 
 impl Copy for BlockEnv {}
@@ -256,6 +275,7 @@ pub fn default_block_env() -> BlockEnv {
         chainid: 0,
         basefee: 0,
         blobbasefee: 0,
+        slot_number: 0,
     }
 }
 

@@ -61,7 +61,9 @@ struct Case {
 
 fn decode(data: &[u8]) -> Case {
     let mut reader = Reader { data, position: 0 };
-    assert_eq!(reader.word(1), U256::from(4));
+    assert_eq!(reader.word(1), U256::from(5));
+    // The fork fevm runs; this runner executes Cancun.
+    reader.word(1);
     let beneficiary = reader.address();
     let number = reader.word(32);
     let timestamp = reader.word(32);
@@ -70,6 +72,8 @@ fn decode(data: &[u8]) -> Case {
     let basefee = reader.word(32).to();
     let blob_gasprice = reader.word(32).to();
     let chain_id = reader.word(32).to();
+    // The slot number, which Cancun has no opcode for.
+    reader.word(32);
     let tx_gas_limit_cap = reader.word(8).to();
     let block = BlockEnv {
         number,

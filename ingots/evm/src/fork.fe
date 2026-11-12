@@ -4,6 +4,8 @@
 /// A hard fork, which a host selects in `Config`.
 pub enum Fork {
     Osaka,
+    // Glamsterdam's execution layer (EIP-7773).
+    Amsterdam,
 }
 
 impl Copy for Fork {}
@@ -13,6 +15,7 @@ impl Fork {
     const fn ordinal(self) -> u8 {
         match self {
             Fork::Osaka => 0,
+            Fork::Amsterdam => 1,
         }
     }
 
@@ -32,3 +35,6 @@ pub trait Rules {
 
 pub struct Osaka {}
 impl Rules for Osaka { const FORK: Fork = Fork::Osaka }
+
+pub struct Amsterdam {}
+impl Rules for Amsterdam { const FORK: Fork = Fork::Amsterdam }
