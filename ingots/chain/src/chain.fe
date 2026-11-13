@@ -155,10 +155,9 @@ impl Chain {
             while fault.is_none() && !transactions.is_empty() {
                 // A legacy transaction is a list, a typed one a string of its
                 // type and payload. A string that holds a list, a legacy
-                // transaction wrapped as a typed one, is malformed: EELS's
-                // Amsterdam `decode_transaction` takes it, but then one
-                // transaction has two encodings in a block, and clients
-                // reject it.
+                // transaction wrapped as a typed one, is malformed in every
+                // fork: EELS's Amsterdam `decode_transaction` takes it, but it
+                // makes block bodies malleable, and clients reject it.
                 let typed = !transactions.is_list()
                 let item = transactions.raw()
                 // A string's header: none for a byte below 0x80, its length
