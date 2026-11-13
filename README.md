@@ -15,7 +15,7 @@ The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the precompiled contracts, which Amsterdam keeps
-- `ingots/rlp`: RLP encoding
+- `ingots/rlp`: RLP encoding and strict decoding
 - `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state-test driver
 - `native/differential`: frame and state comparisons against revm
