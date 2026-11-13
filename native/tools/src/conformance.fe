@@ -69,13 +69,13 @@ pub struct Options {
     jobs: Option<u64>,
     timeout: u64,
     select: MemVec<Arg>,
-    // The forks to run, by index.
-    forks: [bool; 2],
+    // The forks and networks to run; all that fevm runs if none.
+    forks: MemVec<Arg>,
 }
 
 impl Options {
     pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
-        var forks = [false; 2]
+        var forks: MemVec<Arg> = MemVec::new()
         var fe: Option<Arg> = Option::None
         var executable: Option<Arg> = Option::None
         var fixtures: Option<Arg> = Option::None
@@ -97,10 +97,10 @@ impl Options {
             }
             if name == "--fork" {
                 while i < args.count() && !args.get(i).span().starts_with("--") {
-                    match fork_named(args.get(i)) {
-                        Option::Some(fork) => forks[fork] = true,
-                        Option::None => return Result::Err(format!("fevm does not run fork ", args.get(i))),
+                    if blocks::forks(args.get(i).span()).is_none() {
+                        return Result::Err(format!("fevm does not run fork ", args.get(i)))
                     }
+                    forks.push(args.get(i))
                     i += 1
                 }
                 continue
@@ -137,7 +137,6 @@ impl Options {
         if fe.is_some() == executable.is_some() {
             return Result::Err(format!("fevm_tools conformance needs one of --fe and --executable"))
         }
-        if forks == [false; 2] { forks = [true; 2] }
         match (fixtures, out) {
             (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
                 Options { fe, executable, fixtures, out, level, jobs, timeout, select, forks },
@@ -148,7 +147,7 @@ impl Options {
 }
 
 // The integer in hex digits, such as `0x0a`.
-pub fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
+fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
     match text::parse_hex_uint(digits) {
         Option::Some(number) => Result::Ok(number),
         Option::None => Result::Err(format!("not a hex integer: ", digits)),
@@ -167,7 +166,7 @@ pub fn number(_ value: Value) -> Result<MemBuffer, u256> {
 }
 
 // `object[key]` as a number, or `default` without one.
-pub fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBuffer, u256> {
+fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBuffer, u256> {
     match object.get(key) {
         Option::Some(ref value) => number(value),
         Option::None => Result::Ok(default),
@@ -193,7 +192,7 @@ pub fn to_hex(_ bytes: MemSpan) -> MemBuffer {
 }
 
 // `0x` and the value's hex digits, without leading zeros.
-pub fn short_hex(_ value: u256) -> MemBuffer {
+fn short_hex(_ value: u256) -> MemBuffer {
     var digits: usize = 1
     while digits < 64 && (value >> (digits * 4) as u256) != 0 {
         digits += 1
@@ -211,7 +210,7 @@ pub fn put(_ out: mut MemBuffer, _ value: u256, _ width: usize) -> Result<MemBuf
     Result::Ok(())
 }
 
-pub fn put_number(_ out: mut MemBuffer, _ value: Value, _ width: usize) -> Result<MemBuffer, ()> {
+fn put_number(_ out: mut MemBuffer, _ value: Value, _ width: usize) -> Result<MemBuffer, ()> {
     put(mut out, number(value)?, width)
 }
 
@@ -222,7 +221,7 @@ pub fn put_len(_ out: mut MemBuffer, _ len: usize) -> Result<MemBuffer, ()> {
 
 // The count, then each 32-byte word, of the list `object[key]`, which may be
 // missing.
-pub fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result<MemBuffer, ()> {
+fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result<MemBuffer, ()> {
     match object.get(key) {
         Option::Some(ref words) => {
             put_len(mut out, words.items().len())?
@@ -236,7 +235,7 @@ pub fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Re
 }
 
 // EIP-4844's `fake_exponential(MIN_BLOB_GASPRICE, excess, fraction)`.
-pub fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
+fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
     var output: u256 = 0
     var accumulator = fraction
     var i: u256 = 1
@@ -252,7 +251,7 @@ pub fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256
 }
 
 // The fixture's blob base fee update fraction for `fork`, or BPO2's.
-pub fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
+fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
     if let Option::Some(ref config) = test.get("config") {
         if let Option::Some(ref schedule) = config.get("blobSchedule") {
             if let Option::Some(ref fork) = schedule.get(fork_name(fork)) {
@@ -773,9 +772,10 @@ fn group_of(_ file: MemSpan) -> MemBuffer {
     MemBuffer::from_span(file)
 }
 
-// A case's place in its fixture file, and the fork it runs by. A state test's
-// case has the indexes of its transaction's data, gas limit and value.
-struct Case { file: MemBuffer, name: MemBuffer, fork: usize, index: usize, indexes: Option<Indexes> }
+// A case's place in its fixture file, and the network it runs on: a state
+// test's fork, or a blockchain test's network. A state test's case has the
+// indexes of its transaction's data, gas limit and value.
+struct Case { file: MemBuffer, name: MemBuffer, network: MemBuffer, index: usize, indexes: Option<Indexes> }
 
 impl Case {
     // Its line of `cases.jsonl`.
@@ -783,7 +783,7 @@ impl Case {
         var row = Value::object()
         row.set("file", Value::string(self.file))
         row.set("name", Value::string(self.name))
-        row.set("fork", Value::string(fork_name(self.fork)))
+        row.set("network", Value::string(self.network))
         row.set("index", Value::number(self.index))
         if let Option::Some(selected) = self.indexes {
             var indexes = Value::object()
@@ -813,29 +813,55 @@ enum Expected {
     Chain(blocks::ChainExpect),
 }
 
-// The cases of `test` for `fork`: a state test's post entries for it, or a
-// blockchain test of that network.
-fn case_count(_ test: Value, fork: usize) -> usize {
+// Whether `forks` selects `network`: if it names it, or names none.
+fn selected(_ forks: MemVec<Arg>, _ network: MemSpan) -> bool {
+    for ref fork in forks {
+        if fork.span() == network { return true }
+    }
+    forks.is_empty()
+}
+
+// The cases of `test` for `fork` among those `forks` selects: a state test's
+// post entries for it, or for fork 0, a blockchain test if fevm runs its
+// network.
+fn case_count(_ test: Value, fork: usize, _ forks: MemVec<Arg>) -> usize {
     if test.has("blocks") {
-        return if test["network"].text() == fork_name(fork) { 1 } else { 0 }
+        let network = test["network"].text()
+        return if fork == 0 && selected(forks, network) && blocks::forks(network).is_some() { 1 } else { 0 }
     }
     let posts = ref test["post"]
-    if posts.has(fork_name(fork)) { posts[fork_name(fork)].items().len() } else { 0 }
+    let name = fork_name(fork)
+    if selected(forks, format!(name).span()) && posts.has(name) { posts[name].items().len() } else { 0 }
 }
 
 // A driver running a case, and the line of `cases.jsonl` it fills.
 struct Running { line: usize, case: Case, expect: Expected, started: Instant }
 
-// The outcomes counted overall, by fork and by group.
-struct Tally { totals: [u64; 6], forks: [[u64; 6]; 2], groups: HashMap<MemBuffer, [u64; 6]> }
+// The outcomes counted overall, by network and by group.
+struct Tally { totals: [u64; 6], networks: HashMap<MemBuffer, [u64; 6]>, groups: HashMap<MemBuffer, [u64; 6]> }
 
 impl Tally {
-    fn count(mut self, _ file: MemSpan, fork: usize, _ outcome: usize) {
+    fn count(mut self, _ file: MemSpan, _ network: MemSpan, _ outcome: usize) {
         self.totals[outcome] += 1
-        self.forks[fork][outcome] += 1
+        let counts = mut self.networks.get_or_insert(MemBuffer::from_span(network), [0; 6])
+        counts[outcome] += 1
         let group = mut self.groups.get_or_insert(group_of(file), [0; 6])
         group[outcome] += 1
     }
+}
+
+// The counts of each key, in the keys' order.
+fn sorted_counts(_ counts: HashMap<MemBuffer, [u64; 6]>) -> Value {
+    var names: MemVec<MemBuffer> = MemVec::new()
+    for ref name in counts.keys() {
+        names.push(MemBuffer::from_span(name.span()))
+    }
+    names.sort()
+    var value = Value::object()
+    for ref name in names {
+        value.set(name, counts_value(counts[name]))
+    }
+    value
 }
 
 // The nonzero counts, by outcome name.
@@ -891,8 +917,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     var report = Value::object()
     report.set("schema", Value::number(1 as u64))
     var forks = Value::array()
-    for fork in 0..FORKS {
-        if options.forks[fork] { forks.push(Value::string(fork_name(fork))) }
+    for ref fork in options.forks {
+        forks.push(Value::string(fork))
     }
     report.set("forks", forks)
     report.set("host", Value::string(host()?))
@@ -944,7 +970,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     let files = fixture_files(fixtures.span(), options.select)?
     let started = clock.instant()
     var lines: MemVec<MemBuffer> = MemVec::new()
-    var tally = Tally { totals: [0; 6], forks: [[0; 6]; 2], groups: HashMap::new() }
+    var tally = Tally { totals: [0; 6], networks: HashMap::new(), groups: HashMap::new() }
     var children: MemVec<Child> = MemVec::new()
     var running: MemVec<Running> = MemVec::new()
     // The next case is post `post` for fork `fork` of test `test` of `doc`,
@@ -955,8 +981,6 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     var test: usize = 0
     var fork: usize = 0
     var post: usize = 0
-    // The invalid blocks of blockchain tests that fevm does not judge.
-    var unjudged: usize = 0
     while true {
         var found = false
         while !found && children.len() < jobs {
@@ -964,7 +988,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 if fork == FORKS {
                     test += 1
                     fork = 0
-                } else if options.forks[fork] && post < case_count(doc.members()[test].value, fork) {
+                } else if post < case_count(doc.members()[test].value, fork, options.forks) {
                     found = true
                 } else {
                     fork += 1
@@ -986,10 +1010,12 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         if found {
             let member = ref doc.members()[test]
             let line = lines.len()
+            let network = if member.value.has("blocks") { MemBuffer::from_span(member.value["network"].text()) }
+                else { format!(fork_name(fork)) }
             var case = Case {
                 file: MemBuffer::from_span(file.span()),
                 name: MemBuffer::from_span(member.key.span()),
-                fork,
+                network,
                 index: post,
                 indexes: Option::None,
             }
@@ -997,14 +1023,14 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
             let what = path_case(file, member.key)
             let (expect, input) = if member.value.has("blocks") {
                 let expect = named(what, blocks::ChainExpect::of(member.value))?
-                unjudged += expect.unjudged
-                (Expected::Chain(expect), named(what, blocks::encode(member.value, fork))?)
+                let forks = blocks::forks(case.network.span()).unwrap()
+                (Expected::Chain(expect), named(what, blocks::encode(member.value, forks))?)
             } else {
                 let entry = ref member.value["post"][fork_name(fork)][case.index]
                 case.indexes = Option::Some(Indexes::of(entry))
                 let expect = named(what, Expect::of(entry))?
                 if expect.malformed_signature() {
-                    tally.count(case.file.span(), fork, SIGNATURE)
+                    tally.count(case.file.span(), case.network.span(), SIGNATURE)
                     lines.push(case.row(Verdict::new(SIGNATURE), took: Duration::from_nanos(0)))
                     continue
                 }
@@ -1039,28 +1065,14 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 Expected::Chain(ref expect) => blocks::check(expect, output, timeout: options.timeout),
             },
         )?
-        tally.count(done.case.file.span(), fork: done.case.fork, verdict.outcome)
+        tally.count(done.case.file.span(), done.case.network.span(), verdict.outcome)
         lines.set(done.line, done.case.row(verdict, took))
     }
     report.set("seconds", seconds(clock.instant().duration_since(started)))
     report.set("cases", Value::number(lines.len()))
     report.set("totals", counts_value(tally.totals))
-    var by_fork = Value::object()
-    for fork in 0..FORKS {
-        if options.forks[fork] { by_fork.set(fork_name(fork), counts_value(tally.forks[fork])) }
-    }
-    report.set("by_fork", by_fork)
-    if unjudged != 0 { report.set("blocks_not_judged", Value::number(unjudged)) }
-    var names: MemVec<MemBuffer> = MemVec::new()
-    for ref name in tally.groups.keys() {
-        names.push(MemBuffer::from_span(name.span()))
-    }
-    names.sort()
-    var groups = Value::object()
-    for ref name in names {
-        groups.set(name, counts_value(tally.groups[name]))
-    }
-    report.set("groups", groups)
+    report.set("by_network", sorted_counts(tally.networks))
+    report.set("groups", sorted_counts(tally.groups))
     var rows = MemBuffer::empty()
     for ref line in lines {
         rows.extend_from(line.span())
@@ -1072,7 +1084,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     text.push(b'\n')
     let results = format!(dir, "/results.json")
     named(results, fs.write(results, text.span()))?
-    println!(report["by_fork"])
+    println!(report["by_network"])
     let passing = tally.totals[PASSED] + tally.totals[SIGNATURE]
     let total: u64 = lines.len().downcast_truncate()
     if passing != total {

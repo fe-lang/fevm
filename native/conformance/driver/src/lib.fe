@@ -8,9 +8,9 @@ use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
 // Reads one case. Integers and lengths are big endian. A state test (version
 // 5) is the fork, the block, the pre-state accounts and the transaction; see
-// `encode` in native/tools/src/conformance.fe. A blockchain test (version 6)
-// is the fork, the chain, the pre-state accounts and the blocks; see
-// native/tools/src/blocks.fe.
+// `encode` in native/tools/src/conformance.fe. A blockchain test (version 7)
+// is the chain ID, the fork schedule, the pre-state accounts, the genesis
+// header and the blocks' RLP; see native/tools/src/blocks.fe.
 struct Reader { data: MemBuffer, position: usize }
 
 impl Reader {
@@ -151,21 +151,6 @@ fn read_fork(_ reader: mut Reader) -> Option<Fork> {
     }
 }
 
-// A block's values, but for the chain ID.
-fn read_block(_ reader: mut Reader) -> BlockEnv {
-    BlockEnv {
-        coinbase: reader.word(bytes: 20),
-        number: reader.word(bytes: 32),
-        timestamp: reader.word(bytes: 32),
-        prevrandao: reader.word(bytes: 32),
-        gaslimit: reader.word(bytes: 32),
-        basefee: reader.word(bytes: 32),
-        blobbasefee: reader.word(bytes: 32),
-        chainid: 0,
-        slot_number: 0,
-    }
-}
-
 // The pre-state accounts; false if the world cannot hold them.
 fn read_accounts(_ reader: mut Reader, _ world: mut WorldState) -> bool {
     var accounts = reader.count()
@@ -187,58 +172,6 @@ fn read_accounts(_ reader: mut Reader, _ world: mut WorldState) -> bool {
         accounts -= 1
     }
     true
-}
-
-fn read_request(_ reader: mut Reader) -> TxRequest {
-    let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
-    let signed_chain = reader.word(bytes: 1) == 1
-    let chain_id = reader.word(bytes: 32)
-    let sender = reader.word(bytes: 20)
-    let creates = reader.word(bytes: 1) == 1
-    let env = TxEnv {
-        kind,
-        chain_id: if signed_chain { Option::Some(chain_id) } else { Option::None },
-        sender,
-        creates,
-        to: reader.word(bytes: 20),
-        nonce: reader.word(bytes: 32),
-        gas_limit: reader.u64(),
-        gas_price: reader.word(bytes: 32),
-        max_priority_fee_per_gas: reader.word(bytes: 32),
-        max_fee_per_blob_gas: reader.word(bytes: 32),
-        value: reader.word(bytes: 32),
-    }
-    var request = TxRequest::new(env, data: reader.input(len: reader.count()))
-    var entries = reader.count()
-    while entries > 0 {
-        let address = reader.word(bytes: 20)
-        core::assert(request.add_access_account(address))
-        var keys = reader.count()
-        while keys > 0 {
-            core::assert(request.add_access_key(address, slot: reader.word(bytes: 32)))
-            keys -= 1
-        }
-        entries -= 1
-    }
-    var blobs = reader.count()
-    while blobs > 0 {
-        core::assert(request.add_blob_hash(reader.word(bytes: 32)))
-        blobs -= 1
-    }
-    var authorizations = reader.count()
-    while authorizations > 0 {
-        let authorization = Authorization {
-            chain_id: reader.word(bytes: 32),
-            address: reader.word(bytes: 20),
-            nonce: reader.word(bytes: 32),
-            y_parity: reader.word(bytes: 32),
-            r: reader.word(bytes: 32),
-            s: reader.word(bytes: 32),
-        }
-        core::assert(request.add_authorization(authorization))
-        authorizations -= 1
-    }
-    request
 }
 
 // With arguments `RUNS [TRANSACT]`, the driver first decodes a state test and
@@ -270,7 +203,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
     var data = MemBuffer::empty()
     read_to_end(mut data)
     var reader = Reader { data, position: 0 }
-    if reader.data.len() != 0 && reader.data[0] == 6 {
+    if reader.data.len() != 0 && reader.data[0] == 7 {
         return if runs == 0 { blocks::run(mut reader) } else { 2 }
     }
     // Every repeated application must use the gas the reported one does.
@@ -283,9 +216,17 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
         reader.position = 0
         core::assert(reader.word(bytes: 1) == 5)
         let Option::Some(fork) = read_fork(mut reader) else { return 2 }
-        var block = read_block(mut reader)
-        block.chainid = reader.word(bytes: 32)
-        block.slot_number = reader.word(bytes: 32)
+        let block = BlockEnv {
+            coinbase: reader.word(bytes: 20),
+            number: reader.word(bytes: 32),
+            timestamp: reader.word(bytes: 32),
+            prevrandao: reader.word(bytes: 32),
+            gaslimit: reader.word(bytes: 32),
+            basefee: reader.word(bytes: 32),
+            blobbasefee: reader.word(bytes: 32),
+            chainid: reader.word(bytes: 32),
+            slot_number: reader.word(bytes: 32),
+        }
         var config = Config::of(fork)
         config.tx_gas_limit_cap = reader.u64()
         var world = WorldState::empty()
@@ -295,7 +236,54 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
             number += 1
         }
         if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
-        let request = read_request(mut reader)
+        let kind: u8 = reader.word(bytes: 1).downcast_unchecked()
+        let signed_chain = reader.word(bytes: 1) == 1
+        let chain_id = reader.word(bytes: 32)
+        let sender = reader.word(bytes: 20)
+        let creates = reader.word(bytes: 1) == 1
+        let env = TxEnv {
+            kind,
+            chain_id: if signed_chain { Option::Some(chain_id) } else { Option::None },
+            sender,
+            creates,
+            to: reader.word(bytes: 20),
+            nonce: reader.word(bytes: 32),
+            gas_limit: reader.u64(),
+            gas_price: reader.word(bytes: 32),
+            max_priority_fee_per_gas: reader.word(bytes: 32),
+            max_fee_per_blob_gas: reader.word(bytes: 32),
+            value: reader.word(bytes: 32),
+        }
+        var request = TxRequest::new(env, data: reader.input(len: reader.count()))
+        var entries = reader.count()
+        while entries > 0 {
+            let address = reader.word(bytes: 20)
+            core::assert(request.add_access_account(address))
+            var keys = reader.count()
+            while keys > 0 {
+                core::assert(request.add_access_key(address, slot: reader.word(bytes: 32)))
+                keys -= 1
+            }
+            entries -= 1
+        }
+        var blobs = reader.count()
+        while blobs > 0 {
+            core::assert(request.add_blob_hash(reader.word(bytes: 32)))
+            blobs -= 1
+        }
+        var authorizations = reader.count()
+        while authorizations > 0 {
+            let authorization = Authorization {
+                chain_id: reader.word(bytes: 32),
+                address: reader.word(bytes: 20),
+                nonce: reader.word(bytes: 32),
+                y_parity: reader.word(bytes: 32),
+                r: reader.word(bytes: 32),
+                s: reader.word(bytes: 32),
+            }
+            core::assert(request.add_authorization(authorization))
+            authorizations -= 1
+        }
         core::assert(reader.position == reader.data.len())
         evm.set_world(world)
         evm.set_config(config)
