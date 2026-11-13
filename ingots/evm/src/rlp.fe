@@ -14,8 +14,12 @@ pub struct Encoder { bytes: MemBuffer, failed: bool }
 impl Encoder {
     pub fn new() -> Self { Encoder { bytes: MemBuffer::empty(), failed: false } }
 
+    // Makes room for the at most `additional` bytes an item appends, and 32
+    // more: `extend_from_word` stores a whole word wherever it writes, and
+    // past the room reserved its own `reserve` would grow the buffer where an
+    // allocation cannot fail.
     fn reserve(mut self, _ additional: usize) -> bool {
-        if !self.failed && !self.bytes.try_reserve(additional) { self.failed = true }
+        if !self.failed && !self.bytes.try_reserve(additional + 32) { self.failed = true }
         !self.failed
     }
 
