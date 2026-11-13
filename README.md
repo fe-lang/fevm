@@ -16,10 +16,10 @@ The repo is a Fe workspace:
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the precompiled contracts, which Amsterdam keeps
 - `ingots/rlp`: RLP encoding and strict decoding
-- `ingots/chain`: the chain layer, which will decode, validate and import
-  blocks; empty so far
+- `ingots/chain`: the chain layer, which decodes, validates and imports
+  blocks
 - `native/client`: a Rust client for `fevm serve`, the session mode
-- `native/conformance`: the Ethereum state-test driver
+- `native/conformance`: the Ethereum state and blockchain test driver
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
@@ -156,11 +156,49 @@ ends, the journal's surviving entries name what it changed with the values it
 began with, so a write that restored a value counts as a read. Outside a
 block, and in a simulation, nothing is recorded.
 
-fevm does not check a header against its parent, decode transactions or
-compute Merkle roots; a host that validates blocks compares the output with
-the header, and rejects a block with an invalid transaction. An invalid
-block's changes are not undone: a host that may need the world before it
-keeps a `try_clone` of it.
+`Block` does not check a header against its parent, decode transactions or
+compute Merkle roots, and does not undo an invalid block's changes; a `Chain`
+does all of these.
+
+### Chain
+
+`ingots/chain` (`fevm_chain`) imports blocks as a client does, from their
+RLP. A `Chain` holds an `Evm` on the world after its head block, the forks
+by activation time (`Schedule`, each fork a `Config` with its blob
+schedule) and the chain ID:
+
+```fe
+var schedule = Schedule::new(Config::osaka())
+schedule.add(timestamp: 15_000, bpo1)
+var chain = Chain::new(world, schedule, chain_id: 1, genesis: Header::decode(genesis_rlp).unwrap())
+match chain.import(block_rlp, mut tracer) {
+    Import::Valid(imported) => {},   // imported.receipts, imported.output
+    Import::Invalid(reason) => {},   // the rule the block breaks
+    Import::Failed(failure) => {},   // a host failure: no verdict
+}
+let head = chain.head().hash
+```
+
+`import` follows the specification's `execute_block`: it rejects a block
+whose RLP is longer than EIP-7934's limit, decodes the block, checks its
+header against the head's by the rules in force at its timestamp and that it
+has no ommers, then runs its transactions through `Block`, decoding each and
+recovering its sender as it comes to it (`tracer` sees them run), credits
+its withdrawals, and
+compares the gas used, the transactions, state, receipts and withdrawals
+roots, the logs bloom, the blob gas used, the requests hash and, from
+Amsterdam, the access list hash with the header's. A valid block becomes the
+head, and `Imported` has its receipts and `BlockOutput`. `InvalidBlock` names
+the first rule an invalid block breaks; a host failure (an allocation, a
+balance past 2^256, a blob base fee too large to compute) is no verdict on
+the block.
+Either leaves the world and the head as they were: the chain keeps a copy of
+the world while a block runs.
+
+The chain has one head: a block whose parent is not the head fails header
+validation, so side branches and reorganizations are left to a host. Forks
+before Osaka are not implemented, and the state root is computed from the
+whole world for each block, with no stored trie.
 
 ### Forks
 
@@ -258,9 +296,9 @@ Acceptance runs nine stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
 a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 ([native/README.md](native/README.md)). The
-[state-test runner](native/conformance/README.md) is separate; the 25 state
-tests of each fork it does not count have malformed signatures, which fevm,
-given a recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
+[state and blockchain test runner](native/conformance/README.md) is
+separate; the 25 state tests of each fork it does not count have malformed
+signatures, which fevm, given a recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
 evm-benchmarks state tests against revm and evmone.
 
 ## License
