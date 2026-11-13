@@ -1,0 +1,3 @@
+// A chain of blocks over fevm: decoding blocks and their transactions,
+// validating headers against their parents, computing Merkle roots, and
+// importing blocks through `fevm::Block`.
