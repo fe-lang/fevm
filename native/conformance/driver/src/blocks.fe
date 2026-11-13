@@ -158,7 +158,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
                     return host_error(format!("block ", number, ": host ", status_name(status)))
                 },
                 Import::Failed(HostFailure::BlobBaseFee) => {
-                    return host_error(format!("block ", number, ": blob base fee past 2^256"))
+                    return host_error(format!("block ", number, ": blob base fee too large to compute"))
                 },
             }
         }
