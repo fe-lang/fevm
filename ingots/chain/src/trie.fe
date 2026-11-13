@@ -5,7 +5,7 @@ use core::num::leading_zeros
 use core::ops::Ord
 use fevm::{OK, WorldState}
 use fevm::state::EMPTY_CODE_HASH
-use fevm_rlp::Encoder
+use fevm_rlp::{Decoder, Encoder}
 use keccak::{Keccak256, keccak256_word}
 
 /// The root of the empty trie: keccak256 of the empty string's RLP.
@@ -271,6 +271,38 @@ fn trie_roots_withdrawals_of_fixtures() {
         }
         core::assert(trie.root().unwrap() == roots[test])
     }
+}
+
+#[test]
+fn trie_roots_transactions_as_a_decoder_gives_them() {
+    // test_authorization_reusing_nonce's block's transactions: a legacy one,
+    // a list, and a set-code one, a string of its type and payload.
+    let words: [u256; 10] = [
+        0xf90126f85f800a82520894c0f6dc9e5836f54caadbf59cc69346c508e1992b01,
+        0x8025a0376463c2f2d089182fe67d9e06194738c4c91935bbdfe54ef92aac5d31,
+        0xb74179a0788a21b03caf79419aef35c860fe171c7f3b36d91ae73ba22013be76,
+        0xe3eb21b1b8c304f8c00180800782b3b094c0f6dc9e5836f54caadbf59cc69346,
+        0xc508e1992b8080c0f85cf85a8094000000000000000000000000000000000000,
+        0x00018001a0bd85b1e84a4bb5d161e65c31b216c77d686ac97deebbbd79a8ee78,
+        0x0a79693759a019f911b87741efb3140f3b107036d44724d392b779fe9e56ae8c,
+        0x903580e2560e80a033060926eb763553f1f1719ca3187430816d1008a3d78651,
+        0x2f131deee8b65857a03aca7c948312ef372388c2458f76c1a019869f4633886e,
+        0x411cede8bf692171c30000000000000000000000000000000000000000000000,
+    ]
+    var list = MemBuffer::new(320)
+    for index in 0..10 { list.write_word(offset: index * 32, value: words[index]) }
+    list.truncate(297)
+    var transactions = Trie::new()
+    let rlp = list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let txs = mut items.list()
+        while !txs.is_empty() {
+            if txs.is_list() { transactions.item().raw(txs.raw()) } else { transactions.item().raw(txs.bytes()) }
+        }
+        core::assert(items.finish())
+    }
+    core::assert(transactions.root().unwrap() == 0xf7c7535ff047580016698c9425ef65cc4cb9f4a98a81b3495141b3402b74217a)
 }
 
 #[test]
