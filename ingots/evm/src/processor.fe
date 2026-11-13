@@ -258,7 +258,7 @@ impl Capacity {
     /// The capacity of an empty block.
     pub fn of(_ block: BlockEnv, _ config: Config) -> Self {
         let gas: u64 = if block.gaslimit >> 64 != 0 { 0xffffffffffffffff } else { block.gaslimit.downcast_unchecked() }
-        Capacity { gas, state_gas: gas, blob_gas: config.max_blobs_per_block * GAS_PER_BLOB }
+        Capacity { gas, state_gas: gas, blob_gas: config.blob_schedule.max * GAS_PER_BLOB }
     }
 }
 

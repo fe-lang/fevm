@@ -90,7 +90,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
     let Option::Some(fork) = read_fork(mut reader) else { return 2 }
     let chain_id = reader.word(bytes: 32)
     var config = Config::of(fork)
-    config.max_blobs_per_block = reader.u64()
+    config.blob_schedule.max = reader.u64()
     var world = WorldState::empty()
     if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
     var evm = Evm::new(world, config)

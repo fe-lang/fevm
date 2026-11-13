@@ -8,6 +8,7 @@ pub use state::{StorageKey, WorldState}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
 pub use trace::{CallEvent, Step, Trace}
 pub use types::{
+    BlobSchedule,
     BlockEnv,
     InputData,
     CallEnv,
