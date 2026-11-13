@@ -272,6 +272,41 @@ pub(ingot) fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ blo
     Checked { invalid: verdict<F>(world, request, block, config, available, intrinsic), intrinsic }
 }
 
+// A transaction signed for another chain than the block's.
+#[inline(always)]
+fn wrong_chain(_ env: TxEnv, _ block: BlockEnv, _ config: Config) -> bool {
+    match env.chain_id {
+        Option::Some(chain_id) => config.check_chain_id && chain_id != block.chainid,
+        Option::None => false,
+    }
+}
+
+// A blob transaction's blobs: at least one, at most six (EIP-7594), each
+// hash of version 1.
+#[inline(always)]
+fn blobs_invalid(_ request: TxRequest) -> i32 {
+    if request.env.kind != TX_BLOB { return VALID }
+    if request.blob_count() == 0 { return INVALID_NO_BLOBS }
+    if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
+    for hash in request.blob_hashes {
+        if hash >> 248 != 0x01 { return INVALID_BLOB_VERSION }
+    }
+    VALID
+}
+
+// Blob and set-code transactions call an account, and a set-code one has
+// authorizations.
+#[inline(always)]
+fn envelope_invalid(_ request: TxRequest) -> i32 {
+    let env = request.env
+    if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
+    if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
+    VALID
+}
+
+// The includability checks in EELS's order for the fork, which
+// `F::FIELDS_FIRST` selects: a rule whose place differs is written once and
+// checked at the fork's place.
 fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
                      _ available: Capacity, _ intrinsic: IntrinsicGas) -> i32 {
     let env = request.env
@@ -281,42 +316,51 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
     // envelope authorizations.
     if env.kind != TX_BLOB && request.blob_count() != 0 { return INVALID_TX_TYPE }
     if env.kind != TX_SET_CODE && request.authorization_count() != 0 { return INVALID_TX_TYPE }
+    let at_nonce_limit = env.nonce >= 0xffffffffffffffff
+    // EIP-8037: gas past the execution cap is state gas, so a transaction's
+    // gas is capped only by the total, and its intrinsic gas and floor must
+    // fit the execution cap.
+    let cap = if F::STATE_GAS { TX_MAX_TOTAL_GAS } else { config.tx_gas_limit_cap }
     let required = if intrinsic.regular > intrinsic.floor { intrinsic.regular } else { intrinsic.floor }
-    if required > env.gas_limit as u128 { return INVALID_INTRINSIC_GAS }
+    let short = required > env.gas_limit as u128 || (F::STATE_GAS && required > config.tx_gas_limit_cap as u128)
+    if F::FIELDS_FIRST && wrong_chain(env, block, config) { return INVALID_CHAIN_ID }
+    if F::FIELDS_FIRST && at_nonce_limit { return INVALID_NONCE_LIMIT }
+    if !F::FIELDS_FIRST && short { return INVALID_INTRINSIC_GAS }
     if env.creates && request.data().len() > config.max_initcode_size.downcast_truncate() { return INVALID_INITCODE_SIZE }
-    if F::STATE_GAS {
-        // EIP-8037: gas past the execution cap is state gas, so only the
-        // intrinsic gas and floor must fit the cap.
-        if env.gas_limit > TX_MAX_TOTAL_GAS { return INVALID_GAS_LIMIT_CAP }
-        if required > config.tx_gas_limit_cap as u128 { return INVALID_INTRINSIC_GAS }
-    } else if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
-    if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
+    if env.gas_limit > cap { return INVALID_GAS_LIMIT_CAP }
+    if !F::FIELDS_FIRST && at_nonce_limit { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
+    if F::FIELDS_FIRST {
+        let blobs = blobs_invalid(request)
+        if blobs != VALID { return blobs }
+        let envelope = envelope_invalid(request)
+        if envelope != VALID { return envelope }
+        if short { return INVALID_INTRINSIC_GAS }
+    }
     // EIP-8037: the block counts at most the execution cap of a
     // transaction's gas as execution gas, and all of it as state gas.
     let execution = if F::STATE_GAS && env.gas_limit > config.tx_gas_limit_cap { config.tx_gas_limit_cap }
         else { env.gas_limit }
     if execution > available.gas || (F::STATE_GAS && env.gas_limit > available.state_gas) { return INVALID_GAS_LIMIT }
     if request.blob_gas() > available.blob_gas { return INVALID_BLOB_GAS }
-    if config.check_chain_id && let Option::Some(chain_id) = env.chain_id && chain_id != block.chainid {
-        return INVALID_CHAIN_ID
-    }
+    if !F::FIELDS_FIRST && wrong_chain(env, block, config) { return INVALID_CHAIN_ID }
     if config.check_base_fee && env.gas_price < block.basefee { return INVALID_FEE_CAP }
+    if !F::FIELDS_FIRST {
+        let blobs = blobs_invalid(request)
+        if blobs != VALID { return blobs }
+    }
     var max_fee = checked_mul(env.gas_limit, env.gas_price)
     if env.kind == TX_BLOB {
-        if request.blob_count() == 0 { return INVALID_NO_BLOBS }
-        if request.blob_count() > MAX_BLOBS_PER_TX { return INVALID_BLOB_COUNT }
-        for hash in request.blob_hashes {
-            if hash >> 248 != 0x01 { return INVALID_BLOB_VERSION }
-        }
         if env.max_fee_per_blob_gas < block.blobbasefee { return INVALID_BLOB_FEE_CAP }
         max_fee = match (max_fee, blob_fee(request, price: env.max_fee_per_blob_gas)) {
             (Option::Some(gas), Option::Some(blobs)) => checked_add(gas, blobs),
             _ => Option::None,
         }
     }
-    if (env.kind == TX_BLOB || env.kind == TX_SET_CODE) && env.creates { return INVALID_CREATE }
-    if env.kind == TX_SET_CODE && request.authorization_count() == 0 { return INVALID_NO_AUTHORIZATIONS }
+    if !F::FIELDS_FIRST {
+        let envelope = envelope_invalid(request)
+        if envelope != VALID { return envelope }
+    }
     let account = world.sender(sender)
     if config.check_nonce && account.nonce != env.nonce { return INVALID_NONCE }
     let required = match max_fee {

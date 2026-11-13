@@ -101,21 +101,16 @@ and a block access list is no part of the block, so a wrong, misordered or
 repeated one shows only as a wrong hash (`INVALID_BAL_HASH`,
 `INVALID_BLOCK_ACCESS_LIST`, `INCORRECT_BLOCK_FORMAT`).
 
-Of `tests@v21.0.2`'s 44,842 tests, 44,841 pass, every block judged:
+All 44,842 tests of `tests@v21.0.2` pass, every block judged:
 
 | network | tests |
 |---|---|
 | `Osaka` | 17,441 |
-| `Amsterdam` | 26,348 of 26,349 |
+| `Amsterdam` | 26,349 |
 | `BPO1`, `BPO2`, `AmsterdamBPOIncrease`, `AmsterdamBPODecrease` | 190 each |
 | `OsakaToBPO1AtTime15k`, `BPO1ToBPO2AtTime15k` | 25, 24 |
 | `BPO2ToAmsterdamAtTime15k` | 193 |
 | `AmsterdamToBPOIncreaseAtTime15k`, `AmsterdamToBPODecreaseAtTime15k` | 26, 24 |
-
-The one that fails, `test_legacy_chain_id_over_64_bits[fork_Amsterdam-...-case_largest_64_bit_chain_id]`,
-has a transaction with both a wrong chain ID and too little gas. From
-Amsterdam the specification checks the chain ID first, and fevm checks the
-intrinsic gas first, as Osaka does.
 
 The driver prints `blocks`, each `valid` or with the `reason` it is invalid
 (and the index of the `transaction` it concerns), the `head` block's hash and
