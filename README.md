@@ -70,8 +70,20 @@ the protocol.
 
 ### Transactions
 
-`transact(world, request, block, config, buffers, tracer)` runs one
-transaction and returns `Applied { state, receipt }`.
+An `Evm` holds a world across transactions, with the allocations they
+reuse (frame memory, stacks and child frames, the journal and a transaction's
+tables):
+
+```fe
+var evm = Evm::new(world, Config::osaka())
+let receipt = evm.transact(request, block, mut tracer)
+let balance = evm.world().balance(address)
+```
+
+`transact` runs one transaction and keeps its changes; `simulate` runs it the
+same way and keeps none; `validate` only checks that it could be included.
+Between transactions a host reads the world with `world()` and writes it with
+`world_mut()`; `set_world` and `into_world` replace it and take it back.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -83,7 +95,8 @@ transaction and returns `Applied { state, receipt }`.
   authorizations. fevm takes the recovered sender; decoding and checking
   signed envelopes belongs to the host.
 - `BlockEnv` holds the block's values and the chain ID.
-- `Config` holds the host's settings: the fork, the EIP-170 and EIP-3860 code
+- `Config` holds the host's settings, which `set_config` changes between
+  transactions: the fork, the EIP-170 and EIP-3860 code
   size limits, EIP-7825's 2^24 gas cap, and the chain ID, nonce, base fee and
   EIP-3607 sender checks. `Config::osaka()` and `Config::amsterdam()` are
   mainnet's; Amsterdam raises the code size limits (EIP-7954), and from it
@@ -91,11 +104,9 @@ transaction and returns `Applied { state, receipt }`.
   gas (EIP-8037). A test harness may raise the limits or skip the checks; a
   transaction priced below the base fee then pays its own price and no
   priority fee.
-- `Buffers` holds allocations that repeated transactions reuse: frame memory,
-  stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
 
-An invalid transaction returns the untouched state and a receipt whose
+An invalid transaction changes nothing and returns a receipt whose
 `invalid` field names the reason. A valid one buys its gas, increments the
 sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
@@ -104,7 +115,49 @@ priority fee, and deletes self-destructed new accounts and touched empty
 accounts. The receipt has the status, gas used and refunded, the gas it adds
 to the block's totals (from Amsterdam, execution gas before refunds and state
 gas apart), the created contract's address, the output and the logs. A host failure (allocation,
-balance overflow) returns the pre-state with that status.
+balance overflow) undoes the transaction and reports that status.
+
+### Blocks
+
+A `Block` runs a block's transactions on an `Evm`'s world, which it holds
+from `begin` to `finish`:
+
+```fe
+var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
+let receipt = block.transact(request, mut tracer)
+let (evm, finished) = block.finish(withdrawals)
+```
+
+`begin` records the parent hash for BLOCKHASH and makes the system calls
+that store the parent beacon block root (EIP-4788) and the parent hash
+(EIP-2935), except for the genesis block, which has no parent. `transact`
+runs a transaction if the block has the gas and blob gas left for it
+(`Config` has the fork's blob limit), and its receipt has the cumulative gas
+used; `simulate` tries one without counting it. `finish`
+credits the withdrawals (EIP-4895), collects the block's requests (EIP-7685):
+the deposits its transactions logged (EIP-6110) and those the withdrawal and
+consolidation request contracts return to their system calls (EIP-7002,
+EIP-7251; from Amsterdam the builder request contracts too, EIP-8282). It
+returns the `Evm`, and a `BlockOutput` with what the header commits to apart
+from its Merkle roots: gas used (from Amsterdam the larger of execution and
+state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
+hash, and from Amsterdam the block's access list (EIP-7928) with its hash. A
+block whose request contract is missing or fails, whose deposit contract
+logged a malformed deposit, or whose access list is too large for its gas
+limit gives a `BlockError` instead.
+
+The access list is built as the block runs. A read is noted where its gas has
+been paid, the point at which an account or slot is warmed, and stays through
+reverts. Changes are not tracked as they are written: when a transaction
+ends, the journal's surviving entries name what it changed with the values it
+began with, so a write that restored a value counts as a read. Outside a
+block, and in a simulation, nothing is recorded.
+
+fevm does not check a header against its parent, decode transactions or
+compute Merkle roots; a host that validates blocks compares the output with
+the header, and rejects a block with an invalid transaction. An invalid
+block's changes are not undone: a host that may need the world before it
+keeps a `try_clone` of it.
 
 ### Forks
 
@@ -125,12 +178,12 @@ pub struct Amsterdam {}
 impl Rules for Amsterdam { const FORK: Fork = Fork::Amsterdam }
 ```
 
-`transact`, `simulate`, `validate` and `Vm::run` match `Config.fork` once and
+`Evm`'s `transact`, `simulate` and `validate`, and `Vm::run`, match `Config.fork` once and
 run code generic over its `Rules` type, as they are over the tracer. Each fork
 compiles to its own interpreter, with its rules folded into its code: Osaka's
 dispatch table sends SLOTNUM and DUPN to the invalid opcode path, and its code
 has no state gas in it. A host may switch forks between transactions; the
-world and `Buffers` are the same for every fork.
+world and the `Evm`'s allocations are the same for every fork.
 
 ### Tracing
 

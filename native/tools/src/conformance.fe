@@ -1,7 +1,7 @@
 use core::{HashMap, MemBuffer, MemSlice, MemSpan, MemVec, Option}
 use core::hash::sha256_word
 use core::num::IntDowncast
-use ingot::{host, named, parse_u64, seconds, succeed}
+use ingot::{blocks, host, named, parse_u64, seconds, succeed}
 use json::{Key, Value, parse}
 use std::abi::DynString
 use std::env::Arg
@@ -22,10 +22,10 @@ pub const TX_GAS_LIMIT_CAP: u64 = 16777216
 const STDERR_TAIL: usize = 2000
 
 // The outcomes, as indexes into a count of each.
-const PASSED: usize = 0
+pub const PASSED: usize = 0
 const SIGNATURE: usize = 1
-const FAILED: usize = 2
-const HOST_ERROR: usize = 3
+pub const FAILED: usize = 2
+pub const HOST_ERROR: usize = 3
 const CRASH: usize = 4
 const TIMEOUT: usize = 5
 const OUTCOMES: usize = 6
@@ -148,7 +148,7 @@ impl Options {
 }
 
 // The integer in hex digits, such as `0x0a`.
-fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
+pub fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
     match text::parse_hex_uint(digits) {
         Option::Some(number) => Result::Ok(number),
         Option::None => Result::Err(format!("not a hex integer: ", digits)),
@@ -156,7 +156,7 @@ fn hex_number(_ digits: MemSpan) -> Result<MemBuffer, u256> {
 }
 
 // The integer a fixture writes as a hex string or a JSON number.
-fn number(_ value: Value) -> Result<MemBuffer, u256> {
+pub fn number(_ value: Value) -> Result<MemBuffer, u256> {
     if let Option::Some(ref digits) = value.as_string() {
         return hex_number(digits)
     }
@@ -167,7 +167,7 @@ fn number(_ value: Value) -> Result<MemBuffer, u256> {
 }
 
 // `object[key]` as a number, or `default` without one.
-fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBuffer, u256> {
+pub fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBuffer, u256> {
     match object.get(key) {
         Option::Some(ref value) => number(value),
         Option::None => Result::Ok(default),
@@ -175,7 +175,7 @@ fn number_or<K: Key>(_ object: Value, _ key: K, _ default: u256) -> Result<MemBu
 }
 
 // The bytes of hex digits such as `0x6000`.
-fn hex_bytes(_ digits: MemSpan) -> Result<MemBuffer, MemBuffer> {
+pub fn hex_bytes(_ digits: MemSpan) -> Result<MemBuffer, MemBuffer> {
     match text::decode_hex(digits) {
         Option::Some(decoded) => Result::Ok(MemBuffer::from_span(decoded.span())),
         Option::None => Result::Err(format!("not hex bytes: ", digits)),
@@ -193,7 +193,7 @@ pub fn to_hex(_ bytes: MemSpan) -> MemBuffer {
 }
 
 // `0x` and the value's hex digits, without leading zeros.
-fn short_hex(_ value: u256) -> MemBuffer {
+pub fn short_hex(_ value: u256) -> MemBuffer {
     var digits: usize = 1
     while digits < 64 && (value >> (digits * 4) as u256) != 0 {
         digits += 1
@@ -203,7 +203,7 @@ fn short_hex(_ value: u256) -> MemBuffer {
 }
 
 // Appends `value` as `width` big-endian bytes, which must hold it.
-fn put(_ out: mut MemBuffer, _ value: u256, _ width: usize) -> Result<MemBuffer, ()> {
+pub fn put(_ out: mut MemBuffer, _ value: u256, _ width: usize) -> Result<MemBuffer, ()> {
     if width < 32 && (value >> (width * 8) as u256) != 0 {
         return Result::Err(format!(value, " does not fit in ", width, " bytes"))
     }
@@ -211,18 +211,18 @@ fn put(_ out: mut MemBuffer, _ value: u256, _ width: usize) -> Result<MemBuffer,
     Result::Ok(())
 }
 
-fn put_number(_ out: mut MemBuffer, _ value: Value, _ width: usize) -> Result<MemBuffer, ()> {
+pub fn put_number(_ out: mut MemBuffer, _ value: Value, _ width: usize) -> Result<MemBuffer, ()> {
     put(mut out, number(value)?, width)
 }
 
 // A count or length, as four bytes.
-fn put_len(_ out: mut MemBuffer, _ len: usize) -> Result<MemBuffer, ()> {
+pub fn put_len(_ out: mut MemBuffer, _ len: usize) -> Result<MemBuffer, ()> {
     put(mut out, len as u256, 4)
 }
 
 // The count, then each 32-byte word, of the list `object[key]`, which may be
 // missing.
-fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result<MemBuffer, ()> {
+pub fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result<MemBuffer, ()> {
     match object.get(key) {
         Option::Some(ref words) => {
             put_len(mut out, words.items().len())?
@@ -236,7 +236,7 @@ fn put_words(_ out: mut MemBuffer, _ object: Value, _ key: String<19>) -> Result
 }
 
 // EIP-4844's `fake_exponential(MIN_BLOB_GASPRICE, excess, fraction)`.
-fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
+pub fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
     var output: u256 = 0
     var accumulator = fraction
     var i: u256 = 1
@@ -252,7 +252,7 @@ fn blob_base_fee(_ excess: u256, _ fraction: u256) -> Result<MemBuffer, u256> {
 }
 
 // The fixture's blob base fee update fraction for `fork`, or BPO2's.
-fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
+pub fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
     if let Option::Some(ref config) = test.get("config") {
         if let Option::Some(ref schedule) = config.get("blobSchedule") {
             if let Option::Some(ref fork) = schedule.get(fork_name(fork)) {
@@ -263,7 +263,7 @@ fn update_fraction(_ test: Value, _ fork: usize) -> Result<MemBuffer, u256> {
     Result::Ok(BLOB_BASE_FEE_UPDATE_FRACTION)
 }
 
-fn chain_id(_ test: Value) -> Result<MemBuffer, u256> {
+pub fn chain_id(_ test: Value) -> Result<MemBuffer, u256> {
     match test.get("config") {
         Option::Some(ref config) => number_or(config, "chainid", 1),
         Option::None => Result::Ok(1),
@@ -300,31 +300,10 @@ impl Indexes {
     }
 }
 
-// The driver's binary case format for running `test` by the rules of `fork`;
-// integers and lengths are big endian.
-pub fn encode(_ test: Value, _ indexes: Indexes, fork: usize, cap: u64) -> Result<MemBuffer, MemBuffer> {
-    let env = ref test["env"]
-    let tx = ref test["transaction"]
-    var out = MemBuffer::empty()
-    out.push(5)
-    out.push(fork.downcast_truncate())
-    put_number(mut out, env["currentCoinbase"], 20)?
-    put_number(mut out, env["currentNumber"], 32)?
-    put_number(mut out, env["currentTimestamp"], 32)?
-    let random = if env.has("currentRandom") {
-        number(env["currentRandom"])?
-    } else {
-        number_or(env, "currentDifficulty", 0)?
-    }
-    put(mut out, random, 32)?
-    put_number(mut out, env["currentGasLimit"], 32)?
-    put(mut out, number_or(env, "currentBaseFee", 0)?, 32)?
-    let excess = number_or(env, "currentExcessBlobGas", 0)?
-    put(mut out, blob_base_fee(excess, update_fraction(test, fork)?)?, 32)?
-    put(mut out, chain_id(test)?, 32)?
-    put(mut out, number_or(env, "slotNumber", 0)?, 32)?
-    put(mut out, cap as u256, 8)?
-    let pre = ref test["pre"].members()
+// The count, then each account: its address, balance, nonce, code and
+// nonzero storage.
+pub fn put_pre(_ out: mut MemBuffer, _ alloc: Value) -> Result<MemBuffer, ()> {
+    let pre = ref alloc.members()
     put_len(mut out, pre.len())?
     for ref member in pre {
         let account = ref member.value
@@ -352,6 +331,34 @@ pub fn encode(_ test: Value, _ indexes: Indexes, fork: usize, cap: u64) -> Resul
             put(mut out, value, 32)?
         }
     }
+    Result::Ok(())
+}
+
+// The driver's binary case format for running `test` by the rules of `fork`;
+// integers and lengths are big endian.
+pub fn encode(_ test: Value, _ indexes: Indexes, fork: usize, cap: u64) -> Result<MemBuffer, MemBuffer> {
+    let env = ref test["env"]
+    let tx = ref test["transaction"]
+    var out = MemBuffer::empty()
+    out.push(5)
+    out.push(fork.downcast_truncate())
+    put_number(mut out, env["currentCoinbase"], 20)?
+    put_number(mut out, env["currentNumber"], 32)?
+    put_number(mut out, env["currentTimestamp"], 32)?
+    let random = if env.has("currentRandom") {
+        number(env["currentRandom"])?
+    } else {
+        number_or(env, "currentDifficulty", 0)?
+    }
+    put(mut out, random, 32)?
+    put_number(mut out, env["currentGasLimit"], 32)?
+    put(mut out, number_or(env, "currentBaseFee", 0)?, 32)?
+    let excess = number_or(env, "currentExcessBlobGas", 0)?
+    put(mut out, blob_base_fee(excess, update_fraction(test, fork)?)?, 32)?
+    put(mut out, chain_id(test)?, 32)?
+    put(mut out, number_or(env, "slotNumber", 0)?, 32)?
+    put(mut out, cap as u256, 8)?
+    put_pre(mut out, test["pre"])?
     let kind = tx_kind(tx)
     out.push(kind)
     out.push(tx.has("chainId") as u8)
@@ -417,7 +424,7 @@ pub fn encode(_ test: Value, _ indexes: Indexes, fork: usize, cap: u64) -> Resul
 }
 
 // An account's balance, nonce, code and nonzero storage.
-struct Account { balance: u256, nonce: u256, code: MemBuffer, storage: HashMap<u256, u256> }
+pub struct Account { balance: u256, nonce: u256, code: MemBuffer, storage: HashMap<u256, u256> }
 
 impl Account {
     fn empty() -> Self {
@@ -440,7 +447,7 @@ impl Account {
 }
 
 // The post-state a fixture expects.
-fn expected_state(_ alloc: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
+pub fn expected_state(_ alloc: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
     var accounts: HashMap<u256, Account> = HashMap::new()
     for ref member in alloc.members() {
         let entry = ref member.value
@@ -468,7 +475,7 @@ fn expected_state(_ alloc: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
 
 // The post-state the driver reports. Storage of an address without an
 // account record is stale, and shows up as a difference.
-fn observed_state(_ result: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
+pub fn observed_state(_ result: Value) -> Result<MemBuffer, HashMap<u256, Account>> {
     var accounts: HashMap<u256, Account> = HashMap::new()
     for ref entry in result["accounts"].items() {
         let account = Account {
@@ -518,7 +525,7 @@ fn slot_value(_ storage: HashMap<u256, u256>, _ slot: u256) -> u256 {
 }
 
 // Each difference between the expected and the observed post-state.
-fn state_difference(
+pub fn state_difference(
     _ expected: HashMap<u256, Account>,
     _ observed: HashMap<u256, Account>,
     _ problems: mut MemVec<MemBuffer>,
@@ -608,14 +615,14 @@ impl Expect {
 }
 
 // A case's outcome and the problems found.
-struct Verdict { outcome: usize, problems: MemVec<MemBuffer> }
+pub struct Verdict { pub outcome: usize, pub problems: MemVec<MemBuffer> }
 
 impl Verdict {
-    fn new(_ outcome: usize) -> Self {
+    pub fn new(_ outcome: usize) -> Self {
         Verdict { outcome, problems: MemVec::new() }
     }
 
-    fn with<T: std::io::Display>(var own self, _ problem: T) -> Self {
+    pub fn with<T: std::io::Display>(var own self, _ problem: T) -> Self {
         self.problems.push(format!(problem))
         self
     }
@@ -628,22 +635,31 @@ fn tail(_ bytes: MemBuffer) -> MemBuffer {
     MemBuffer::from_span(bytes.span().slice(offset: from, len: len - from))
 }
 
-// Judges the driver's output for a case.
-fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+// The driver's result for a case, or the verdict on a driver that gave none.
+pub fn driver_result(_ output: Output, timeout: u64) -> Result<Verdict, Value> {
     if let Status::TimedOut = output.status {
-        return Result::Ok(Verdict::new(TIMEOUT).with(format!("exceeded ", timeout, " seconds")))
+        return Result::Err(Verdict::new(TIMEOUT).with(format!("exceeded ", timeout, " seconds")))
     }
     let result = match parse(output.stdout.span()) {
         Result::Ok(result) => result,
         Result::Err(_) => {
-            return Result::Ok(Verdict::new(CRASH).with(output.status).with(tail(output.stderr)))
+            return Result::Err(Verdict::new(CRASH).with(output.status).with(tail(output.stderr)))
         },
     }
     if let Option::Some(ref error) = result.get("host_error") {
-        return Result::Ok(Verdict::new(HOST_ERROR).with(error.text()))
+        return Result::Err(Verdict::new(HOST_ERROR).with(error.text()))
     }
     if !output.status.success() {
-        return Result::Ok(Verdict::new(CRASH).with(output.status))
+        return Result::Err(Verdict::new(CRASH).with(output.status))
+    }
+    Result::Ok(result)
+}
+
+// Judges the driver's output for a state test's case.
+fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+    let result = match driver_result(output, timeout) {
+        Result::Ok(result) => result,
+        Result::Err(verdict) => return Result::Ok(verdict),
     }
     let status = result["status"].text()
     if result["host_failure"].as_bool() == Option::Some(true) {
@@ -757,8 +773,9 @@ fn group_of(_ file: MemSpan) -> MemBuffer {
     MemBuffer::from_span(file)
 }
 
-// A case's place in its fixture file, and the fork it runs by.
-struct Case { file: MemBuffer, name: MemBuffer, fork: usize, index: usize, indexes: Indexes }
+// A case's place in its fixture file, and the fork it runs by. A state test's
+// case has the indexes of its transaction's data, gas limit and value.
+struct Case { file: MemBuffer, name: MemBuffer, fork: usize, index: usize, indexes: Option<Indexes> }
 
 impl Case {
     // Its line of `cases.jsonl`.
@@ -768,11 +785,13 @@ impl Case {
         row.set("name", Value::string(self.name))
         row.set("fork", Value::string(fork_name(self.fork)))
         row.set("index", Value::number(self.index))
-        var indexes = Value::object()
-        indexes.set("data", Value::number(self.indexes.data))
-        indexes.set("gas", Value::number(self.indexes.gas))
-        indexes.set("value", Value::number(self.indexes.value))
-        row.set("indexes", indexes)
+        if let Option::Some(selected) = self.indexes {
+            var indexes = Value::object()
+            indexes.set("data", Value::number(selected.data))
+            indexes.set("gas", Value::number(selected.gas))
+            indexes.set("value", Value::number(selected.value))
+            row.set("indexes", indexes)
+        }
         row.set("outcome", Value::string(outcome_name(verdict.outcome)))
         row.set("seconds", seconds(took))
         var problems = Value::array()
@@ -787,8 +806,25 @@ impl Case {
     }
 }
 
+// What a case expects: a state test's post entry, or a blockchain test's
+// blocks and post-state.
+enum Expected {
+    Post(Expect),
+    Chain(blocks::ChainExpect),
+}
+
+// The cases of `test` for `fork`: a state test's post entries for it, or a
+// blockchain test of that network.
+fn case_count(_ test: Value, fork: usize) -> usize {
+    if test.has("blocks") {
+        return if test["network"].text() == fork_name(fork) { 1 } else { 0 }
+    }
+    let posts = ref test["post"]
+    if posts.has(fork_name(fork)) { posts[fork_name(fork)].items().len() } else { 0 }
+}
+
 // A driver running a case, and the line of `cases.jsonl` it fills.
-struct Running { line: usize, case: Case, expect: Expect, started: Instant }
+struct Running { line: usize, case: Case, expect: Expected, started: Instant }
 
 // The outcomes counted overall, by fork and by group.
 struct Tally { totals: [u64; 6], forks: [[u64; 6]; 2], groups: HashMap<MemBuffer, [u64; 6]> }
@@ -919,16 +955,16 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     var test: usize = 0
     var fork: usize = 0
     var post: usize = 0
+    // The invalid blocks of blockchain tests that fevm does not judge.
+    var unjudged: usize = 0
     while true {
         var found = false
         while !found && children.len() < jobs {
             if test < doc.members().len() {
-                let posts = ref doc.members()[test].value["post"]
                 if fork == FORKS {
                     test += 1
                     fork = 0
-                } else if options.forks[fork] && posts.has(fork_name(fork))
-                    && post < posts[fork_name(fork)].items().len() {
+                } else if options.forks[fork] && post < case_count(doc.members()[test].value, fork) {
                     found = true
                 } else {
                     fork += 1
@@ -949,26 +985,31 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         }
         if found {
             let member = ref doc.members()[test]
-            let entry = ref member.value["post"][fork_name(fork)][post]
-            let case = Case {
+            let line = lines.len()
+            var case = Case {
                 file: MemBuffer::from_span(file.span()),
                 name: MemBuffer::from_span(member.key.span()),
                 fork,
                 index: post,
-                indexes: Indexes::of(entry),
+                indexes: Option::None,
             }
-            let expect = named(path_case(file, member.key), Expect::of(entry))?
             post += 1
-            let line = lines.len()
-            if expect.malformed_signature() {
-                tally.count(case.file.span(), fork, SIGNATURE)
-                lines.push(case.row(Verdict::new(SIGNATURE), took: Duration::from_nanos(0)))
-                continue
+            let what = path_case(file, member.key)
+            let (expect, input) = if member.value.has("blocks") {
+                let expect = named(what, blocks::ChainExpect::of(member.value))?
+                unjudged += expect.unjudged
+                (Expected::Chain(expect), named(what, blocks::encode(member.value, fork))?)
+            } else {
+                let entry = ref member.value["post"][fork_name(fork)][case.index]
+                case.indexes = Option::Some(Indexes::of(entry))
+                let expect = named(what, Expect::of(entry))?
+                if expect.malformed_signature() {
+                    tally.count(case.file.span(), fork, SIGNATURE)
+                    lines.push(case.row(Verdict::new(SIGNATURE), took: Duration::from_nanos(0)))
+                    continue
+                }
+                (Expected::Post(expect), named(what, encode(member.value, Indexes::of(entry), fork, cap: TX_GAS_LIMIT_CAP))?)
             }
-            let input = named(
-                path_case(file, member.key),
-                encode(member.value, case.indexes, fork, cap: TX_GAS_LIMIT_CAP),
-            )?
             let child = named(
                 executable,
                 proc.spawn(
@@ -991,7 +1032,13 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let output = named(executable, proc.wait(children.swap_remove(index)))?
         let done = running.swap_remove(index)
         let took = clock.instant().duration_since(done.started)
-        let verdict = named(path_case(done.case.file, done.case.name), check(done.expect, output, timeout: options.timeout))?
+        let verdict = named(
+            path_case(done.case.file, done.case.name),
+            match done.expect {
+                Expected::Post(ref expect) => check(expect, output, timeout: options.timeout),
+                Expected::Chain(ref expect) => blocks::check(expect, output, timeout: options.timeout),
+            },
+        )?
         tally.count(done.case.file.span(), fork: done.case.fork, verdict.outcome)
         lines.set(done.line, done.case.row(verdict, took))
     }
@@ -1003,6 +1050,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         if options.forks[fork] { by_fork.set(fork_name(fork), counts_value(tally.forks[fork])) }
     }
     report.set("by_fork", by_fork)
+    if unjudged != 0 { report.set("blocks_not_judged", Value::number(unjudged)) }
     var names: MemVec<MemBuffer> = MemVec::new()
     for ref name in tally.groups.keys() {
         names.push(MemBuffer::from_span(name.span()))
@@ -1078,7 +1126,7 @@ fn post_entry() -> Value {
     parse(source.span()).unwrap()
 }
 
-fn output(_ stdout: DynString, _ status: Status) -> Output {
+pub fn output(_ stdout: DynString, _ status: Status) -> Output {
     Output {
         status,
         stdout: MemBuffer::from_span(stdout.span()),

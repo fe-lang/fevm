@@ -1,0 +1,409 @@
+// Blockchain tests for `fevm_tools conformance`: the driver's case for a
+// test's blocks, what the test expects of them, and the driver's verdict.
+use core::{HashMap, MemBuffer, MemSpan, MemVec, Option}
+use json::{Value, parse}
+use std::abi::DynString
+use std::process::{Output, Status}
+use ingot::conformance::{
+    Account,
+    FAILED,
+    HOST_ERROR,
+    PASSED,
+    Verdict,
+    blob_base_fee,
+    chain_id,
+    driver_result,
+    expected_state,
+    fork_name,
+    hex_bytes,
+    number,
+    number_or,
+    observed_state,
+    output,
+    put,
+    put_len,
+    put_number,
+    put_pre,
+    put_words,
+    short_hex,
+    state_difference,
+    to_hex,
+    update_fraction,
+}
+
+// Whether fevm judges a block invalid for `exception`, one of a fixture's
+// alternatives. It takes decoded transactions with recovered senders, and
+// leaves the header's own validity and the Merkle roots to its host.
+fn judges(_ exception: MemSpan) -> bool {
+    if exception.starts_with("TransactionException.") {
+        return exception != "TransactionException.INVALID_SIGNATURE_VRS"
+            && exception != "TransactionException.TYPE_3_TX_WITH_FULL_BLOBS"
+    }
+    exception == "BlockException.INVALID_REQUESTS" || exception == "BlockException.INVALID_DEPOSIT_EVENT_LAYOUT"
+        || exception == "BlockException.SYSTEM_CONTRACT_CALL_FAILED" || exception == "BlockException.SYSTEM_CONTRACT_EMPTY"
+        || exception == "BlockException.INCORRECT_BLOB_GAS_USED" || exception == "BlockException.BLOB_GAS_USED_ABOVE_LIMIT"
+        || exception == "BlockException.INVALID_GAS_USED" || exception == "BlockException.GAS_USED_OVERFLOW"
+        || exception == "BlockException.INVALID_BLOCK_ACCESS_LIST"
+        || exception == "BlockException.BLOCK_ACCESS_LIST_GAS_LIMIT_EXCEEDED"
+}
+
+// The offset and length of each alternative of `exceptions`, which `|`
+// separates.
+fn alternatives(_ exceptions: MemSpan) -> MemVec<(usize, usize)> {
+    var parts: MemVec<(usize, usize)> = MemVec::new()
+    var start: usize = 0
+    for index in 0..exceptions.len() + 1 {
+        if index == exceptions.len() || exceptions[index] == b'|' {
+            parts.push((start, index - start))
+            start = index + 1
+        }
+    }
+    parts
+}
+
+// Whether fevm judges a block invalid for each of `exceptions`.
+fn judges_all(_ exceptions: MemSpan) -> bool {
+    for (offset, len) in alternatives(exceptions) {
+        if !judges(exceptions.slice(offset, len)) { return false }
+    }
+    true
+}
+
+// Whether each of `exceptions` is the block's own, with every transaction valid.
+fn of_block(_ exceptions: MemSpan) -> bool {
+    for (offset, len) in alternatives(exceptions) {
+        if exceptions.slice(offset, len).starts_with("TransactionException.") { return false }
+    }
+    true
+}
+
+// The block's header, transactions and withdrawals, if fevm judges the
+// block: a valid block's own, or those an invalid block's bytes decode to.
+fn judged(_ block: Value) -> Option<ref Value> {
+    match block.get("expectException") {
+        Option::Some(ref exception) => {
+            if block.has("rlp_decoded") && judges_all(exception.text()) { Option::Some(ref block["rlp_decoded"]) }
+            else { Option::None }
+        },
+        Option::None => Option::Some(ref block),
+    }
+}
+
+// The most blobs in a block of `fork`: the fixture's blob schedule's, or
+// mainnet's.
+fn max_blobs(_ test: Value, fork: usize) -> Result<MemBuffer, u256> {
+    let default: u256 = if fork == 0 { 9 } else { 21 }
+    if let Option::Some(ref config) = test.get("config") {
+        if let Option::Some(ref schedule) = config.get("blobSchedule") {
+            if let Option::Some(ref fork) = schedule.get(fork_name(fork)) {
+                return number_or(fork, "max", default)
+            }
+        }
+    }
+    Result::Ok(default)
+}
+
+fn put_transaction(_ out: mut MemBuffer, _ tx: Value) -> Result<MemBuffer, ()> {
+    let kind = number(tx["type"])?
+    put(mut out, kind, 1)?
+    // A legacy transaction signed before EIP-155 has no chain ID.
+    let chain = number_or(tx, "chainId", 0)?
+    out.push((kind != 0 || chain != 0) as u8)
+    put(mut out, chain, 32)?
+    put_number(mut out, tx["sender"], 20)?
+    let to = tx["to"].text()
+    if to == "" || to == "0x" {
+        out.push(1)
+        put(mut out, 0, 20)?
+    } else {
+        out.push(0)
+        put_number(mut out, tx["to"], 20)?
+    }
+    put_number(mut out, tx["nonce"], 32)?
+    put_number(mut out, tx["gasLimit"], 8)?
+    if kind >= 2 {
+        put_number(mut out, tx["maxFeePerGas"], 32)?
+    } else {
+        put_number(mut out, tx["gasPrice"], 32)?
+    }
+    put(mut out, number_or(tx, "maxPriorityFeePerGas", 0)?, 32)?
+    put(mut out, number_or(tx, "maxFeePerBlobGas", 0)?, 32)?
+    put_number(mut out, tx["value"], 32)?
+    let data = hex_bytes(tx["data"].text())?
+    put_len(mut out, data.len())?
+    out.extend_from(data.span())
+    match tx.get("accessList") {
+        Option::Some(ref entries) => {
+            put_len(mut out, entries.items().len())?
+            for ref entry in entries.items() {
+                put_number(mut out, entry["address"], 20)?
+                put_words(mut out, entry, "storageKeys")?
+            }
+        },
+        Option::None => put_len(mut out, 0)?,
+    }
+    put_words(mut out, tx, "blobVersionedHashes")?
+    match tx.get("authorizationList") {
+        Option::Some(ref list) => {
+            put_len(mut out, list.items().len())?
+            for ref entry in list.items() {
+                put_number(mut out, entry["chainId"], 32)?
+                put_number(mut out, entry["address"], 20)?
+                put_number(mut out, entry["nonce"], 32)?
+                if entry.has("yParity") {
+                    put_number(mut out, entry["yParity"], 32)?
+                } else {
+                    put_number(mut out, entry["v"], 32)?
+                }
+                put_number(mut out, entry["r"], 32)?
+                put_number(mut out, entry["s"], 32)?
+            }
+        },
+        Option::None => put_len(mut out, 0)?,
+    }
+    Result::Ok(())
+}
+
+// The driver's binary case format for running the blocks of `test` that
+// fevm judges, by the rules of `fork`: the chain, the pre-state, and each
+// block's values, what its header says of its execution, its transactions
+// and its withdrawals. Integers and lengths are big endian.
+pub fn encode(_ test: Value, fork: usize) -> Result<MemBuffer, MemBuffer> {
+    var out = MemBuffer::empty()
+    out.push(6)
+    out.push(fork.downcast_truncate())
+    put(mut out, chain_id(test)?, 32)?
+    put(mut out, max_blobs(test, fork)?, 8)?
+    put_pre(mut out, test["pre"])?
+    let fraction = update_fraction(test, fork)?
+    var count: usize = 0
+    for ref block in test["blocks"].items() {
+        if judged(block).is_some() { count += 1 }
+    }
+    put_len(mut out, count)?
+    for ref block in test["blocks"].items() {
+        let Option::Some(ref body) = judged(block) else { continue }
+        let header = ref body["blockHeader"]
+        put_number(mut out, header["coinbase"], 20)?
+        put_number(mut out, header["number"], 32)?
+        put_number(mut out, header["timestamp"], 32)?
+        put_number(mut out, header["mixHash"], 32)?
+        put_number(mut out, header["gasLimit"], 32)?
+        put_number(mut out, header["baseFeePerGas"], 32)?
+        put(mut out, blob_base_fee(number(header["excessBlobGas"])?, fraction)?, 32)?
+        put(mut out, number_or(header, "slotNumber", 0)?, 32)?
+        put_number(mut out, header["parentHash"], 32)?
+        put_number(mut out, header["parentBeaconBlockRoot"], 32)?
+        put_number(mut out, header["gasUsed"], 8)?
+        put_number(mut out, header["blobGasUsed"], 8)?
+        let bloom = hex_bytes(header["bloom"].text())?
+        if bloom.len() != 256 { return Result::Err(format!("a bloom of ", bloom.len(), " bytes")) }
+        out.extend_from(bloom.span())
+        put_number(mut out, header["requestsHash"], 32)?
+        put(mut out, number_or(header, "blockAccessListHash", 0)?, 32)?
+        let transactions = ref body["transactions"].items()
+        put_len(mut out, transactions.len())?
+        for ref tx in transactions { put_transaction(mut out, tx)? }
+        let withdrawals = ref body["withdrawals"].items()
+        put_len(mut out, withdrawals.len())?
+        for ref withdrawal in withdrawals {
+            put_number(mut out, withdrawal["address"], 20)?
+            put_number(mut out, withdrawal["amount"], 8)?
+        }
+    }
+    Result::Ok(out)
+}
+
+// A log's address, topics and data, as the same text from a fixture and
+// from the driver.
+fn log_text(_ address: Value, _ topics: Value, _ data: Value) -> Result<MemBuffer, MemBuffer> {
+    var text = format!(short_hex(number(address)?), " [")
+    for ref topic in topics.items() {
+        text = format!(text, " ", short_hex(number(topic)?))
+    }
+    Result::Ok(format!(text, " ] ", to_hex(hex_bytes(data.text())?.span())))
+}
+
+// What a fixture's receipt says: whether the transaction succeeded, the
+// cumulative gas used and the logs.
+struct ReceiptExpect { succeeded: bool, gas: u256, logs: MemVec<MemBuffer> }
+
+// What a test expects of a block that fevm judges, by its place among the
+// test's blocks: the exception if it is invalid, and its receipts if it is
+// valid and the fixture has them.
+struct BlockExpect { number: usize, exception: Option<MemBuffer>, receipts: Option<MemVec<ReceiptExpect>> }
+
+/// What a blockchain test expects: of each block that fevm judges, and of
+/// the state after the last valid one, if the fixture has it. `unjudged`
+/// counts the invalid blocks left out.
+pub struct ChainExpect { blocks: MemVec<BlockExpect>, state: Option<HashMap<u256, Account>>, pub unjudged: usize }
+
+impl ChainExpect {
+    pub fn of(_ test: Value) -> Result<MemBuffer, Self> {
+        var blocks: MemVec<BlockExpect> = MemVec::new()
+        var unjudged: usize = 0
+        var position: usize = 0
+        for ref block in test["blocks"].items() {
+            position += 1
+            if judged(block).is_none() {
+                unjudged += 1
+                continue
+            }
+            var receipts: Option<MemVec<ReceiptExpect>> = Option::None
+            if let Option::Some(ref list) = block.get("receipts") {
+                var expected: MemVec<ReceiptExpect> = MemVec::new()
+                for ref receipt in list.items() {
+                    var logs: MemVec<MemBuffer> = MemVec::new()
+                    for ref log in receipt["logs"].items() {
+                        logs.push(log_text(log["address"], log["topics"], log["data"])?)
+                    }
+                    expected.push(ReceiptExpect {
+                        succeeded: receipt["status"].as_bool() == Option::Some(true),
+                        gas: number(receipt["cumulativeGasUsed"])?,
+                        logs,
+                    })
+                }
+                receipts = Option::Some(expected)
+            }
+            blocks.push(BlockExpect {
+                number: position - 1,
+                exception: match block.get("expectException") {
+                    Option::Some(ref exception) => Option::Some(MemBuffer::from_span(exception.text())),
+                    Option::None => Option::None,
+                },
+                receipts,
+            })
+        }
+        let state = match test.get("postState") {
+            Option::Some(ref alloc) => Option::Some(expected_state(alloc)?),
+            Option::None => Option::None,
+        }
+        Result::Ok(ChainExpect { blocks, state, unjudged })
+    }
+}
+
+// The differences between a valid block's receipts and those expected.
+fn receipt_difference(_ block: usize, _ expected: MemVec<ReceiptExpect>, _ receipts: Value,
+                      _ problems: mut MemVec<MemBuffer>) -> Result<MemBuffer, ()> {
+    let got = ref receipts.items()
+    if got.len() != expected.len() {
+        problems.push(format!("block ", block, ": ", got.len(), " receipts, expected ", expected.len()))
+        return Result::Ok(())
+    }
+    for index in 0..got.len() {
+        let want = ref expected[index]
+        let receipt = ref got[index]
+        let name = format!("block ", block, " receipt ", index)
+        let status = receipt["status"].text()
+        if (status == "success") != want.succeeded {
+            problems.push(format!(name, ": status ", status, ", expected ", if want.succeeded { "success" } else { "failure" }))
+        }
+        if receipt["gas"].as_u256() != Option::Some(want.gas) {
+            problems.push(format!(name, ": cumulative gas ", receipt["gas"], " != ", want.gas))
+        }
+        let logs = ref receipt["logs"].items()
+        if logs.len() != want.logs.len() {
+            problems.push(format!(name, ": ", logs.len(), " logs, expected ", want.logs.len()))
+            continue
+        }
+        for log in 0..logs.len() {
+            let text = log_text(logs[log][0], logs[log][1], logs[log][2])?
+            if text != want.logs[log] {
+                problems.push(format!(name, " log ", log, ": ", text, ", expected ", want.logs[log]))
+            }
+        }
+    }
+    Result::Ok(())
+}
+
+/// Judges the driver's output for a blockchain test.
+pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+    let result = match driver_result(output, timeout) {
+        Result::Ok(result) => result,
+        Result::Err(verdict) => return Result::Ok(verdict),
+    }
+    var verdict = Verdict::new(FAILED)
+    let blocks = ref result["blocks"].items()
+    if blocks.len() != expect.blocks.len() {
+        return Result::Ok(verdict.with(format!(blocks.len(), " blocks, expected ", expect.blocks.len())))
+    }
+    for index in 0..blocks.len() {
+        let want = ref expect.blocks[index]
+        let block = ref blocks[index]
+        let valid = block["valid"].as_bool() == Option::Some(true)
+        match want.exception {
+            Option::Some(ref exception) => {
+                if valid {
+                    verdict.problems.push(format!("block ", want.number, ": valid, expected ", exception))
+                } else if of_block(exception.span()) && block["reason"].text().starts_with("transaction") {
+                    // A block that is invalid in itself has only valid transactions.
+                    verdict.problems.push(format!("block ", want.number, ": ", block["reason"].text(), ", expected ", exception))
+                }
+            },
+            Option::None => {
+                if !valid {
+                    verdict.problems.push(format!("block ", want.number, ": invalid, ", block["reason"].text()))
+                } else if let Option::Some(ref receipts) = want.receipts {
+                    receipt_difference(want.number, receipts, block["receipts"], mut verdict.problems)?
+                }
+            },
+        }
+    }
+    if let Option::Some(ref state) = expect.state {
+        state_difference(state, observed_state(result)?, mut verdict.problems)
+    }
+    if verdict.problems.is_empty() {
+        return Result::Ok(Verdict::new(PASSED))
+    }
+    Result::Ok(verdict)
+}
+
+#[test]
+fn judges_the_blocks_fevm_can() {
+    let invalid: DynString = "{\"expectException\":\"TransactionException.NONCE_MISMATCH_TOO_LOW\",\"rlp_decoded\":{}}"
+    assert!(judged(parse(invalid.span()).unwrap()).is_some())
+    // Not without the decoded block, and not if any alternative is the host's to judge.
+    let undecoded: DynString = "{\"expectException\":\"TransactionException.NONCE_MISMATCH_TOO_LOW\"}"
+    assert!(judged(parse(undecoded.span()).unwrap()).is_none())
+    let header: DynString = "{\"expectException\":\"BlockException.INVALID_REQUESTS|BlockException.INVALID_BLOCK_HASH\",\"rlp_decoded\":{}}"
+    assert!(judged(parse(header.span()).unwrap()).is_none())
+    let valid: DynString = "{}"
+    assert!(judged(parse(valid.span()).unwrap()).is_some())
+    let block: DynString = "BlockException.INVALID_REQUESTS"
+    let either: DynString = "BlockException.INCORRECT_BLOB_GAS_USED|TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED"
+    assert!(of_block(block.span()) && !of_block(either.span()))
+}
+
+// Two judged blocks around one left out: a valid block with a receipt, and
+// one invalid in itself.
+fn chain() -> ChainExpect {
+    let source: DynString = "{\"blocks\":[{\"receipts\":[{\"status\":true,\"cumulativeGasUsed\":\"0x5208\",\"logs\":[{\"address\":\"0x00aa\",\"topics\":[\"0x01\"],\"data\":\"0x02\"}]}]},{\"expectException\":\"BlockException.INVALID_GASLIMIT\"},{\"expectException\":\"BlockException.INVALID_REQUESTS\",\"rlp_decoded\":{}}],\"postState\":{\"0x01\":{\"balance\":\"0x01\"}}}"
+    ChainExpect::of(parse(source.span()).unwrap()).unwrap()
+}
+
+fn chain_verdict(_ stdout: DynString) -> Verdict {
+    check(chain(), output(stdout, Status::Exited(0)), timeout: 1).unwrap()
+}
+
+#[test]
+fn check_compares_blocks_receipts_and_the_post_state() {
+    assert!(chain().unjudged == 1)
+    let passing = chain_verdict(
+        "{\"blocks\":[{\"valid\":true,\"receipts\":[{\"status\":\"success\",\"gas\":21000,\"logs\":[[\"0xaa\",[\"0x1\"],\"0x02\"]]}]},{\"valid\":false,\"reason\":\"requests hash\"}],\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}",
+    )
+    assert!(passing.outcome == PASSED && passing.problems.is_empty())
+    let failing = chain_verdict(
+        "{\"blocks\":[{\"valid\":true,\"receipts\":[{\"status\":\"revert\",\"gas\":21001,\"logs\":[[\"0xaa\",[\"0x1\"],\"0x03\"]]}]},{\"valid\":false,\"reason\":\"transaction 0: nonce\"}],\"accounts\":[[\"0x01\",\"0x2\",\"0x0\",\"0x\"]],\"storage\":[]}",
+    )
+    assert!(failing.outcome == FAILED && failing.problems.len() == 5)
+    assert!(failing.problems[0] == "block 0 receipt 0: status revert, expected success")
+    assert!(failing.problems[1] == "block 0 receipt 0: cumulative gas 21001 != 21000")
+    assert!(failing.problems[2] == "block 0 receipt 0 log 0: 0xaa [ 0x1 ] 0x03, expected 0xaa [ 0x1 ] 0x02")
+    assert!(failing.problems[3] == "block 2: transaction 0: nonce, expected BlockException.INVALID_REQUESTS")
+    let valid = chain_verdict("{\"blocks\":[{\"valid\":false,\"reason\":\"gas used 1 != 2\"},{\"valid\":true,\"receipts\":[]}],\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}")
+    assert!(valid.problems.len() == 2 && valid.problems[0] == "block 0: invalid, gas used 1 != 2")
+    assert!(valid.problems[1] == "block 2: valid, expected BlockException.INVALID_REQUESTS")
+    // A host failure is no verdict on a block, even one expected to be invalid.
+    let host = check(chain(), output("{\"host_error\":\"host host_allocation\"}", Status::Exited(3)), timeout: 1).unwrap()
+    assert!(host.outcome == HOST_ERROR && host.problems[0] == "host host_allocation")
+}

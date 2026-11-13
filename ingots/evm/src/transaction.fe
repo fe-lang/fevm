@@ -1,4 +1,5 @@
 use core::{MemSpan, MemVec, Option, Result}
+use ingot::access::AccessRecorder
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
@@ -8,10 +9,18 @@ use ingot::types::{Config, Program}
 use ingot::gas::{StorageCharge, storage_charge}
 use ingot::vm::Buffers
 use fevm_precompiles::is_precompile
+use swisstable::Lookup
 
-// EIP-7708: an ether transfer's log comes from this address, with the topic
+// The caller of system calls (EIP-4788). From EIP-7708 an ether transfer's
+// log comes from it, with the topic
 // keccak256("Transfer(address,address,uint256)").
-const SYSTEM_ADDRESS: u256 = 0xfffffffffffffffffffffffffffffffffffffffe
+pub const SYSTEM_ADDRESS: u256 = 0xfffffffffffffffffffffffffffffffffffffffe
+
+// Bits of an address's marks that `record_changes` sets as it notes the
+// account's balance, nonce and code, each once.
+const NOTED_BALANCE: u8 = 32
+const NOTED_NONCE: u8 = 64
+const NOTED_CODE: u8 = 128
 const TRANSFER_TOPIC: u256 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
 
 // A checkpoint must be closed once, in reverse opening order. Committing a
@@ -37,16 +46,19 @@ pub struct Transaction {
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
     // The sender, destination and coinbase, warm from the start (EIP-2929,
-    // EIP-3651).
+    // EIP-3651) with the precompiles, unless the run has no `warm_set`.
     endpoints: [u256; 3],
+    warm_set: bool,
     refund: i128,
     started: bool,
     depth: usize,
     is_static: bool,
     config: Config,
-    // Lent by the caller for the journal, the transaction's frames and its
-    // tables (see `Buffers`).
+    // The journal, the transaction's frames and its tables (see `Buffers`).
     buffers: Buffers,
+    // What the block's transactions read and change (EIP-7928), while a
+    // block records it.
+    access: AccessRecorder,
 }
 
 impl Transaction {
@@ -61,12 +73,14 @@ impl Transaction {
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
             endpoints: [address_word(sender), address_word(destination), address_word(coinbase)],
+            warm_set: true,
             refund: 0,
             started: false,
             depth: 0,
             is_static: false,
             config,
             buffers,
+            access: AccessRecorder::new(),
         }
     }
 
@@ -75,6 +89,7 @@ impl Transaction {
     pub fn begin(mut self, sender: u256, destination: u256, coinbase: u256, config: Config) {
         core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
         self.endpoints = [address_word(sender), address_word(destination), address_word(coinbase)]
+        self.warm_set = true
         self.refund = 0
         self.started = false
         self.is_static = false
@@ -82,10 +97,27 @@ impl Transaction {
         self.blob_hashes.clear()
     }
 
+    /// Starts the next run as `begin` does, with no account warm from the
+    /// start, not even a precompile: a system call before Amsterdam, or the
+    /// withdrawals. Such a run reads no endpoints.
+    pub fn begin_cold(mut self, _ config: Config) {
+        self.begin(sender: 0, destination: 0, coinbase: 0, config)
+        self.warm_set = false
+    }
+
     /// The state, between transactions.
     pub fn world(self) -> ref WorldState { ref self.state }
 
+    /// The state, for a host's own writes between transactions.
+    pub fn world_mut(mut self) -> mut WorldState {
+        core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
+        mut self.state
+    }
+
     pub fn config(self) -> Config { self.config }
+
+    /// The block's access list recorder.
+    pub fn access(mut self) -> mut AccessRecorder { mut self.access }
 
     pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
 
@@ -138,7 +170,8 @@ impl Transaction {
         let address = address_word(address)
         let was_warm = self.marked(address, Mark::Warm)
         if !self.add_mark(address, Mark::Warm) { return false }
-        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) {
+        // Warm, and not yet read.
+        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, false) {
             if !was_warm { core::assert(self.unmark(address, Mark::Warm)) }
             return false
         }
@@ -150,11 +183,12 @@ impl Transaction {
         self.always_warm(address) || self.marked(address, Mark::Warm)
     }
 
-    // Whether `address`, an address word, is warm without a mark: a
-    // precompile, or the sender, destination or coinbase.
+    // Whether `address`, an address word, is warm without a mark: in a run
+    // with the warm set, a precompile, or the sender, destination or
+    // coinbase.
     fn always_warm(self, _ address: u256) -> bool {
-        is_precompile(address) || address == self.endpoints[0] || address == self.endpoints[1]
-            || address == self.endpoints[2]
+        self.warm_set && (is_precompile(address) || address == self.endpoints[0] || address == self.endpoints[1]
+            || address == self.endpoints[2])
     }
 
     // Whether `address`, an address word, has `mark`.
@@ -184,6 +218,13 @@ impl Transaction {
         self.buffers.warm_storage.contains(StorageKey { address: address_word(address), slot })
     }
 
+    /// Whether the slot is warm (`found`) and has been read or written since
+    /// it was (`value`): an access-list slot is warm from the start, and
+    /// `warm_slot` marks its first access.
+    pub fn slot_access(self, address: u256, slot: u256) -> Lookup<bool> {
+        self.buffers.warm_storage.get(StorageKey { address: address_word(address), slot })
+    }
+
     // Adds `mark` to `address`, journaled if new. A new address gets an
     // entry without marks first.
     fn mark(mut self, _ mark: Mark, _ address: u256) -> i32 {
@@ -196,18 +237,48 @@ impl Transaction {
         self.journal(address, ChangeKind::Mark(mark))
     }
 
+    // Notes in the block's access list that `address`, an address word, was
+    // read, once in a transaction. The note stays through reverts.
+    fn note_read(mut self, _ address: u256) -> i32 {
+        let Option::Some(slot) = self.buffers.marks.try_find_or_insert(address) else { return ERR_HOST_ALLOCATION }
+        let marks = mut self.buffers.marks.value_at(slot)
+        if marks & Mark::Read.bit() == 0 {
+            marks |= Mark::Read.bit()
+            self.access.account(address)
+        }
+        OK
+    }
+
+    /// Warms an account that an access reads, once the access's gas is paid.
     pub fn warm_account(mut self, address: u256) -> i32 {
+        self.access_account(address, warm: false)
+    }
+
+    /// An access of an account, once its gas is paid: warms it unless it is
+    /// `warm`, and notes the read while a block records its access list.
+    pub fn access_account(mut self, _ address: u256, warm: bool) -> i32 {
         self.started = true
-        if self.always_warm(address_word(address)) { return OK }
+        let address = address_word(address)
+        if self.access.recording() {
+            let noted = self.note_read(address)
+            if noted != OK { return noted }
+        }
+        if warm || self.always_warm(address) { return OK }
         self.mark(Mark::Warm, address)
     }
 
+    /// The first access of a slot (see `slot_access`), once its gas is known
+    /// to be affordable: warms it, and notes the read while a block records
+    /// its access list.
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
         self.started = true
         let address = address_word(address)
-        if self.storage_is_warm(address, slot) { return OK }
-        if !self.buffers.warm_storage.try_insert(StorageKey { address, slot }, true) { return ERR_HOST_ALLOCATION }
-        self.journal(address, ChangeKind::WarmSlot { slot })
+        let key = StorageKey { address, slot }
+        let known = self.buffers.warm_storage.get(key)
+        if known.found && known.value { return OK }
+        if !self.buffers.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
+        if self.access.recording() { self.access.slot(address, slot) }
+        if known.found { OK } else { self.journal(address, ChangeKind::WarmSlot { slot }) }
     }
 
     pub fn touch(mut self, _ address: u256) -> i32 {
@@ -525,6 +596,75 @@ impl Transaction {
             }
             if change.touches() { self.state.remove_if_empty(change.address) }
         }
+    }
+
+    // Whether `bit` of `address`'s marks was clear; sets it.
+    fn first_note(mut self, _ address: u256, _ bit: u8) -> bool {
+        let Option::Some(slot) = self.buffers.marks.find(address) else { return false }
+        let marks = mut self.buffers.marks.value_at(slot)
+        let first = marks & bit == 0
+        marks |= bit
+        first
+    }
+
+    /// Notes in the block's access list what the transaction, system call
+    /// or withdrawals left changed, after `settle`: each account that a
+    /// surviving journal entry names, and its balance, nonce, code and
+    /// slots where they differ from what they were at the start. The first
+    /// entry for each holds what it was then, since a reverted frame put
+    /// back what it changed.
+    pub fn record_changes(mut self) {
+        if !self.access.recording() { return }
+        self.access.begin_changes()
+        var position: usize = 0
+        while position < self.buffers.journal.len() {
+            let change = self.buffers.journal.changes()[position]
+            position += 1
+            let address = change.address
+            if self.note_read(address) != OK {
+                self.access.fail()
+                continue
+            }
+            match change.kind {
+                ChangeKind::Account { field, previous, .. } => match field {
+                    Field::Balance => self.note_balance(address, previous),
+                    Field::Nonce => self.note_nonce(address, previous),
+                },
+                ChangeKind::Sender { nonce, balance, .. } => {
+                    self.note_nonce(address, previous: nonce)
+                    self.note_balance(address, previous: balance)
+                },
+                ChangeKind::Contract { balance, .. } => {
+                    self.note_nonce(address, previous: 0)
+                    self.note_balance(address, previous: balance)
+                },
+                ChangeKind::Storage { slot, .. } => {
+                    // The slot's first write kept what it held at the start.
+                    if let Option::Some(original) = self.buffers.originals.take(StorageKey { address, slot }) {
+                        self.access.storage(address, slot, pre: original, post: self.state.storage_load(address, slot))
+                    }
+                },
+                ChangeKind::Code { .. } => self.note_code(address, previous: Option::None),
+                ChangeKind::Delegation { previous, .. } => self.note_code(address, previous),
+                _ => {},
+            }
+        }
+    }
+
+    fn note_balance(mut self, _ address: u256, previous: u256) {
+        if self.first_note(address, NOTED_BALANCE) {
+            self.access.balance(address, pre: previous, post: self.state.balance(address))
+        }
+    }
+
+    fn note_nonce(mut self, _ address: u256, previous: u256) {
+        if self.first_note(address, NOTED_NONCE) {
+            self.access.nonce(address, pre: previous, post: self.state.nonce(address))
+        }
+    }
+
+    fn note_code(mut self, _ address: u256, previous: Option<u256>) {
+        if self.first_note(address, NOTED_CODE) { self.access.code(address, pre: previous, post: self.state.code(address)) }
     }
 
     // Commit/abort the transaction only after every frame has been closed.

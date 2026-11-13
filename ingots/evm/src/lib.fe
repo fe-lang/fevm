@@ -3,7 +3,7 @@ use std::io::{Stdin, Stdout}
 pub use status::{ERR_REVERT, OK}
 pub use hex::{self, parse_hex_program}
 pub use fork::{Amsterdam, Fork, Osaka, Rules}
-pub use logs::{LogBuffer, LogEntry}
+pub use logs::{Bloom, LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
 pub use trace::{CallEvent, Step, Trace}
@@ -19,7 +19,10 @@ pub use types::{
     empty_bytes,
 }
 pub use vm::{self, Buffers, execute}
-pub use processor::{self, Applied, Authorization, Receipt, TxEnv, TxRequest, simulate, transact}
+pub use processor::{self, Authorization, Capacity, Receipt, TxEnv, TxRequest, Withdrawal}
+pub use evm::Evm
+pub use block::{Block, BlockError, BlockOutput}
+pub use access::BlockAccessList
 
 #[cfg(target = "native")]
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {

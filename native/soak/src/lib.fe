@@ -1,8 +1,8 @@
 use core::Option
 use std::env::Args
 use std::text
-use fevm::{Config, Buffers, OK, WorldState, default_block_env, empty_bytes}
-use fevm::processor::{TX_LEGACY, TxEnv, TxRequest, transact}
+use fevm::{Config, Evm, OK, WorldState, default_block_env, empty_bytes}
+use fevm::processor::{TX_LEGACY, TxEnv, TxRequest}
 use fevm::status::VALID
 
 // Runs the given number of transactions against one world in one process.
@@ -25,18 +25,16 @@ pub fn main() -> i32 uses (args: Args) {
     var block = default_block_env()
     block.gaslimit = 30_000_000
     var nonce: u256 = 0
-    var buffers = Buffers::new()
+    var evm = Evm::new(world, Config::osaka())
     var tracer = ()
     while nonce < count {
         let env = TxEnv {
             kind: TX_LEGACY, chain_id: Option::None, sender: 0x1000, to: 0xaa, creates: false, nonce,
             gas_limit: 1_000_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
         }
-        let applied = transact(world, TxRequest::new(env, data: empty_bytes()), block,
-                               Config::osaka(), mut buffers, mut tracer)
-        core::assert(applied.receipt.invalid == VALID && applied.receipt.status == OK)
-        core::assert(applied.receipt.logs.len() == 1)
-        world = applied.state
+        let receipt = evm.transact(TxRequest::new(env, data: empty_bytes()), block, mut tracer)
+        core::assert(receipt.invalid == VALID && receipt.status == OK)
+        core::assert(receipt.logs.len() == 1)
         nonce += 1
     }
     0

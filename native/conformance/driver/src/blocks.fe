@@ -1,0 +1,173 @@
+use core::{MemBuffer, MemVec, Option, Result}
+use std::io::{Display, Stdout}
+use fevm::{Block, BlockError, BlockOutput, Config, Evm, LogBuffer, Receipt, Withdrawal, WorldState}
+use fevm::hex::{write_hex_bytes, write_hex_word}
+use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
+use ingot::{Reader, host_error, read_accounts, read_block, read_fork, read_request, write_world}
+
+// What a block's header says its execution gives.
+struct Header { gas_used: u64, blob_gas_used: u64, bloom: [u256; 8], requests_hash: u256, access_list_hash: u256 }
+
+fn read_header(_ reader: mut Reader) -> Header {
+    let gas_used = reader.u64()
+    let blob_gas_used = reader.u64()
+    var bloom: [u256; 8] = [0; 8]
+    for word in 0..8 { bloom[word] = reader.word(bytes: 32) }
+    let requests_hash = reader.word(bytes: 32)
+    Header { gas_used, blob_gas_used, bloom, requests_hash, access_list_hash: reader.word(bytes: 32) }
+}
+
+fn write_logs(_ logs: LogBuffer) uses (text: mut MemBuffer) {
+    var index: u64 = 0
+    while index < logs.len() {
+        let entry = logs.entry(index)
+        if index != 0 { ",".fmt(mut text) }
+        "[\"".fmt(mut text)
+        write_hex_word(entry.address)
+        "\",[".fmt(mut text)
+        for topic in 0..entry.topic_count.downcast_truncate() {
+            if topic != 0 { ",".fmt(mut text) }
+            "\"".fmt(mut text)
+            write_hex_word(entry.topics[topic])
+            "\"".fmt(mut text)
+        }
+        "],\"".fmt(mut text)
+        write_hex_bytes(logs.payload(index))
+        "\"]".fmt(mut text)
+        index += 1
+    }
+}
+
+fn write_receipt(_ receipt: Receipt) uses (text: mut MemBuffer) {
+    "{\"status\":\"".fmt(mut text)
+    status_name(receipt.status).fmt(mut text)
+    "\",\"gas\":".fmt(mut text)
+    receipt.cumulative_gas_used.fmt(mut text)
+    ",\"logs\":[".fmt(mut text)
+    write_logs(receipt.logs)
+    "]}".fmt(mut text)
+}
+
+fn error_name(_ error: BlockError) -> MemBuffer {
+    match error {
+        BlockError::RequestContractMissing => format!("request contract missing"),
+        BlockError::RequestCallFailed => format!("request call failed"),
+        BlockError::MalformedDeposit => format!("malformed deposit"),
+        BlockError::AccessListTooLarge => format!("access list too large"),
+        BlockError::Host(status) => format!("host ", status_name(status)),
+    }
+}
+
+// How `output` differs from what the header says, if it does.
+fn mismatch(_ output: BlockOutput, _ header: Header) -> Option<MemBuffer> {
+    if output.gas_used != header.gas_used {
+        return Option::Some(format!("gas used ", output.gas_used, " != ", header.gas_used))
+    }
+    if output.blob_gas_used != header.blob_gas_used {
+        return Option::Some(format!("blob gas used ", output.blob_gas_used, " != ", header.blob_gas_used))
+    }
+    if output.logs_bloom.words != header.bloom { return Option::Some(format!("logs bloom")) }
+    if output.requests_hash != header.requests_hash { return Option::Some(format!("requests hash")) }
+    match output.access_list {
+        Option::Some(ref list) => if list.hash != header.access_list_hash {
+            // With the list, to tell where it differs.
+            var text = format!("access list hash, of ")
+            with (mut text) { write_hex_bytes(list.rlp.span()) }
+            return Option::Some(text)
+        },
+        Option::None => if header.access_list_hash != 0 { return Option::Some(format!("no access list")) },
+    }
+    Option::None
+}
+
+// Runs a blockchain test: each block on the world the last valid one left,
+// as a client that checks what the header says of its execution would. Prints
+// each block's validity, with a valid block's receipts or the reason it is
+// invalid, and the final world; or, after a host failure, which is no verdict
+// on a block, only that.
+pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
+    core::assert(reader.word(bytes: 1) == 6)
+    let Option::Some(fork) = read_fork(mut reader) else { return 2 }
+    let chain_id = reader.word(bytes: 32)
+    var config = Config::of(fork)
+    config.max_blobs_per_block = reader.u64()
+    var world = WorldState::empty()
+    if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
+    var evm = Evm::new(world, config)
+    var tracer = ()
+    var text = MemBuffer::empty()
+    with (mut text) {
+        "{\"blocks\":[".fmt(mut text)
+        let blocks: usize = reader.count().downcast_truncate()
+        for number in 0..blocks {
+            var env = read_block(mut reader)
+            env.chainid = chain_id
+            env.slot_number = reader.word(bytes: 32)
+            let parent_hash = reader.word(bytes: 32)
+            let parent_beacon_block_root = reader.word(bytes: 32)
+            let header = read_header(mut reader)
+            // An invalid block leaves the world as it was.
+            let Option::Some(snapshot) = evm.world().try_clone() else { return host_error("snapshot allocation failed") }
+            var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
+            var receipts = MemBuffer::empty()
+            var reason: Option<MemBuffer> = Option::None
+            let transactions: usize = reader.count().downcast_truncate()
+            for index in 0..transactions {
+                let request = read_request(mut reader)
+                if reason.is_some() { continue }
+                let receipt = block.transact(request, mut tracer)
+                if receipt.invalid != VALID {
+                    reason = Option::Some(format!("transaction ", index, ": ", invalid_name(receipt.invalid)))
+                } else if !is_evm_outcome(receipt.status) {
+                    return host_error(format!("transaction ", index, ": host ", status_name(receipt.status)))
+                } else {
+                    with (mut receipts) {
+                        if index != 0 { ",".fmt(mut receipts) }
+                        write_receipt(receipt)
+                    }
+                }
+            }
+            var withdrawals: MemVec<Withdrawal> = MemVec::new()
+            let count: usize = reader.count().downcast_truncate()
+            for _ in 0..count {
+                let address = reader.word(bytes: 20)
+                withdrawals.push(Withdrawal { address, amount: reader.u64() })
+            }
+            if reason.is_some() {
+                // A host failure before the invalid transaction: as the block began, or in its deposits.
+                if let Option::Some(BlockError::Host(status)) = block.failure() {
+                    return host_error(error_name(BlockError::Host(status)))
+                }
+                evm = block.abandon()
+            } else {
+                let (returned, finished) = block.finish(withdrawals)
+                evm = returned
+                reason = match finished {
+                    Result::Ok(output) => mismatch(output, header),
+                    Result::Err(BlockError::Host(status)) => return host_error(error_name(BlockError::Host(status))),
+                    Result::Err(error) => Option::Some(error_name(error)),
+                }
+            }
+            if number != 0 { ",".fmt(mut text) }
+            match reason {
+                Option::Some(reason) => {
+                    evm.set_world(snapshot)
+                    "{\"valid\":false,\"reason\":\"".fmt(mut text)
+                    reason.fmt(mut text)
+                    "\"}".fmt(mut text)
+                },
+                Option::None => {
+                    "{\"valid\":true,\"receipts\":[".fmt(mut text)
+                    receipts.fmt(mut text)
+                    "]}".fmt(mut text)
+                },
+            }
+        }
+        core::assert(reader.position == reader.data.len())
+        "]".fmt(mut text)
+        write_world(evm.world())
+        "}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}

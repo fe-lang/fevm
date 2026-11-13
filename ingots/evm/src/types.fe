@@ -176,8 +176,8 @@ pub struct CallEnv {
 
 impl Copy for CallEnv {}
 
-/// Host settings for transactions: the fork whose rules apply, and limits and
-/// checks. `Config::osaka()` is mainnet's; a test harness may raise the limits
+/// Host settings for transactions and blocks: the fork whose rules apply, and
+/// limits and checks. `Config::osaka()` is mainnet's; a test harness may raise the limits
 /// or skip the checks that need a real signed and funded transaction.
 pub struct Config {
     pub fork: Fork,
@@ -187,6 +187,11 @@ pub struct Config {
     pub max_initcode_size: u64,
     // EIP-7825: the largest transaction gas limit.
     pub tx_gas_limit_cap: u64,
+    // EIP-7892: the most blobs in a block, from the fork's blob schedule.
+    pub max_blobs_per_block: u64,
+    // EIP-6110: the deposit contract, whose deposit logs a block turns into
+    // requests.
+    pub deposit_contract: u256,
     // A transaction's signed chain ID must be the block's.
     pub check_chain_id: bool,
     // A transaction's nonce must be its sender's.
@@ -207,6 +212,8 @@ impl Config {
             max_code_size: 24_576,
             max_initcode_size: 49_152,
             tx_gas_limit_cap: 16_777_216,
+            max_blobs_per_block: 9,
+            deposit_contract: 0x00000000219ab540356cbb839cbe05303d7705fa,
             check_chain_id: true,
             check_nonce: true,
             check_base_fee: true,
@@ -214,12 +221,14 @@ impl Config {
         }
     }
 
-    /// Amsterdam's settings, with EIP-7954's code size limits.
+    /// Amsterdam's settings, with EIP-7954's code size limits and BPO2's
+    /// blob limit.
     pub fn amsterdam() -> Self {
         var config = Self::osaka()
         config.fork = Fork::Amsterdam
         config.max_code_size = 65_536
         config.max_initcode_size = 131_072
+        config.max_blobs_per_block = 21
         config
     }
 

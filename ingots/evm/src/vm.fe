@@ -24,12 +24,11 @@ pub(ingot) fn spend(_ gas: mut u64, _ cost: u64) -> bool {
     true
 }
 
-/// Allocations a host lends each transaction and gets back, so that a host
-/// that keeps them across transactions allocates them once: memory and
-/// stacks of finished frames, which later frames take over with the capacity
-/// they grew; the allocations of finished child frames, which later calls fill
-/// in place; and the journal. Frames nest, so each call depth tends to get
-/// back its last frame's buffers.
+/// Allocations a transaction uses and leaves for the next, so that an `Evm`
+/// allocates them once: memory and stacks of finished frames, which later
+/// frames take over with the capacity they grew; the allocations of finished
+/// child frames, which later calls fill in place; and the journal. Frames
+/// nest, so each call depth tends to get back its last frame's buffers.
 pub struct Buffers {
     memories: MemVec<MemBuffer>,
     stacks: MemVec<MemVec<u256>>,
@@ -559,10 +558,10 @@ impl Vm {
     fn sload(mut self, _ state: mut Transaction) {
         let slot = self.pop()
         if !self.ok() { return }
-        // A warm slot needs no journal entry.
-        let warm = state.storage_is_warm(address: self.call.address, slot)
-        if !self.charge(if warm { 100 } else { 2100 }) { return }
-        if !warm {
+        // A slot read before needs no journal entry.
+        let access = state.slot_access(address: self.call.address, slot)
+        if !self.charge(if access.found { 100 } else { 2100 }) { return }
+        if !access.value {
             self.fault(state.warm_slot(address: self.call.address, slot))
             if !self.ok() { return }
         }
@@ -582,10 +581,14 @@ impl Vm {
                 return
             }
             let charge = state.storage_charge<F>(address: self.call.address, slot, value)
-            if !self.charge(charge.gas as u128) || (charge.state != 0 && !self.charge_state(charge.state)) { return }
-            if charge.refill != 0 { self.state_gas.refund(mut self.gas_remaining, charge.refill) }
+            // The charge read the slot, which a block's access list notes
+            // even if the gas for it runs out.
             self.fault(state.warm_slot(address: self.call.address, slot))
-            if self.ok() { self.fault(state.storage_store(address: self.call.address, slot, value)) }
+            if !self.ok() || !self.charge(charge.gas as u128) || (charge.state != 0 && !self.charge_state(charge.state)) {
+                return
+            }
+            if charge.refill != 0 { self.state_gas.refund(mut self.gas_remaining, charge.refill) }
+            self.fault(state.storage_store(address: self.call.address, slot, value))
             if self.ok() { state.add_refund(charge.refund) }
         }
     }
@@ -621,7 +624,7 @@ impl Vm {
             Option::Some(plan) => plan,
             Option::None => return,
         }
-        if !warm { self.fault(state.warm_account(address)) }
+        self.fault(state.access_account(address, warm))
         if !self.ok() || !self.expand_memory(plan.size) || len == 0 { return }
         let code = state.code(address)
         let size = code.len() as u256
@@ -670,7 +673,7 @@ impl Vm {
         if self.ok() {
             let warm = state.account_is_warm(address)
             if self.charge((account_access<F>(warm) + if op == 0x3b { F::CODE_READ } else { 0 }) as u128) {
-                if !warm { self.fault(state.warm_account(address)) }
+                self.fault(state.access_account(address, warm))
                 if self.ok() {
                     let value = if op == 0x31 { state.balance(address) }
                         else if op == 0x3b { state.code_size(address) as u256 }

@@ -1,0 +1,409 @@
+// EIP-7928: a block's access list, built as the block runs.
+use core::{MemBuffer, MemSpan, MemVec, Option}
+use core::ops::Ord
+use keccak::Keccak256
+use swisstable::SwissTable
+use ingot::rlp::Encoder
+use ingot::state::{StorageKey, delegation}
+
+// EIP-7928: the gas of a block's gas limit that each of the list's accounts
+// and storage keys takes.
+const ITEM_GAS: u64 = 2000
+
+// A balance or nonce after the transaction, system call or withdrawals at
+// `index`, which changed it from `start`. A later change at the same index
+// that restores `start` drops it.
+struct WordChange { address: u256, index: u32, value: u256, start: u256, dropped: bool }
+impl Copy for WordChange {}
+
+struct SlotChange { address: u256, slot: u256, index: u32, value: u256, start: u256, dropped: bool }
+impl Copy for SlotChange {}
+
+// Code after `index`: `len` bytes at `offset` of the recorder's code. Before
+// it the account had the delegation `start`, or no code.
+struct CodeChange { address: u256, index: u32, offset: usize, len: usize, start: Option<u256>, dropped: bool }
+impl Copy for CodeChange {}
+
+impl Ord for WordChange {
+    fn lt(self, _ other: WordChange) -> bool {
+        self.address < other.address || (self.address == other.address && self.index < other.index)
+    }
+    fn le(self, _ other: WordChange) -> bool { !other.lt(self) }
+    fn gt(self, _ other: WordChange) -> bool { other.lt(self) }
+    fn ge(self, _ other: WordChange) -> bool { !self.lt(other) }
+}
+
+impl Ord for SlotChange {
+    fn lt(self, _ other: SlotChange) -> bool {
+        if self.address != other.address { return self.address < other.address }
+        self.slot < other.slot || (self.slot == other.slot && self.index < other.index)
+    }
+    fn le(self, _ other: SlotChange) -> bool { !other.lt(self) }
+    fn gt(self, _ other: SlotChange) -> bool { other.lt(self) }
+    fn ge(self, _ other: SlotChange) -> bool { !self.lt(other) }
+}
+
+impl Ord for CodeChange {
+    fn lt(self, _ other: CodeChange) -> bool {
+        self.address < other.address || (self.address == other.address && self.index < other.index)
+    }
+    fn le(self, _ other: CodeChange) -> bool { !other.lt(self) }
+    fn gt(self, _ other: CodeChange) -> bool { other.lt(self) }
+    fn ge(self, _ other: CodeChange) -> bool { !self.lt(other) }
+}
+
+impl Ord for StorageKey {
+    fn lt(self, _ other: StorageKey) -> bool {
+        self.address < other.address || (self.address == other.address && self.slot < other.slot)
+    }
+    fn le(self, _ other: StorageKey) -> bool { !other.lt(self) }
+    fn gt(self, _ other: StorageKey) -> bool { other.lt(self) }
+    fn ge(self, _ other: StorageKey) -> bool { !self.lt(other) }
+}
+
+// The lengths of the recorder's lists of changes.
+struct Lengths { balances: usize, nonces: usize, slots: usize, codes: usize }
+impl Copy for Lengths {}
+
+/// A block's access list (EIP-7928): its RLP encoding, with the accounts in
+/// address order, the hash of that, which the header commits to, and the
+/// number of its accounts and storage keys.
+pub struct BlockAccessList { pub rlp: MemBuffer, pub hash: u256, pub items: u64 }
+
+impl BlockAccessList {
+    /// Whether the list is within what a block of `gas_limit` may hold.
+    pub fn fits(self, gas_limit: u64) -> bool { self.items <= gas_limit / ITEM_GAS }
+}
+
+/// Records what a block reads and changes, for its access list. Reads are
+/// noted as they happen and stay through reverts. Changes are noted once for
+/// each transaction, system call or the withdrawals, from what it left
+/// changed: a write that restored a value is a read.
+pub struct AccessRecorder {
+    recording: bool,
+    // An allocation failed, and the list is incomplete.
+    failed: bool,
+    // The block access index of what runs now: 0 for the system calls before
+    // the transactions, a transaction's place and one, and one more after
+    // them all.
+    index: u32,
+    accounts: SwissTable<u256, bool>,
+    // Every slot read or written.
+    reads: SwissTable<StorageKey, bool>,
+    balances: MemVec<WordChange>,
+    nonces: MemVec<WordChange>,
+    slots: MemVec<SlotChange>,
+    codes: MemVec<CodeChange>,
+    code: MemBuffer,
+    // Where the changes at `index` begin, and those of what runs now: a
+    // change between the two was made earlier at the same index.
+    at_index: Lengths,
+    scope: Lengths,
+}
+
+// Notes that a word of `address` went from `pre` to `post`. `earlier` are the
+// changes made before at the same index, of which `address`'s is updated.
+fn note_word(_ changes: mut MemVec<WordChange>, earlier: (usize, usize), address: u256, index: u32,
+             pre: u256, post: u256) -> bool {
+    for position in earlier.0..earlier.1 {
+        let change = mut changes[position]
+        if change.address == address && !change.dropped {
+            change.value = post
+            change.dropped = post == change.start
+            return true
+        }
+    }
+    pre == post || changes.try_push(WordChange { address, index, value: post, start: pre, dropped: false }).is_ok()
+}
+
+impl AccessRecorder {
+    pub fn new() -> Self {
+        let none = Lengths { balances: 0, nonces: 0, slots: 0, codes: 0 }
+        AccessRecorder {
+            recording: false, failed: false, index: 0,
+            accounts: SwissTable<u256, bool>::empty(), reads: SwissTable<StorageKey, bool>::empty(),
+            balances: MemVec::new(), nonces: MemVec::new(), slots: MemVec::new(), codes: MemVec::new(),
+            code: MemBuffer::empty(), at_index: none, scope: none,
+        }
+    }
+
+    pub fn recording(self) -> bool { self.recording }
+    /// Stops or resumes recording, as around a simulation.
+    pub fn set_recording(mut self, _ recording: bool) { self.recording = recording }
+
+    /// Starts a block's list.
+    pub fn start(mut self) {
+        self.stop()
+        self.recording = true
+    }
+
+    /// Stops recording and forgets the list.
+    pub fn stop(mut self) {
+        self.recording = false
+        self.failed = false
+        self.index = 0
+        self.accounts.clear()
+        self.reads.clear()
+        self.balances.clear()
+        self.nonces.clear()
+        self.slots.clear()
+        self.codes.clear()
+        self.code.truncate(0)
+        self.at_index = Lengths { balances: 0, nonces: 0, slots: 0, codes: 0 }
+        self.scope = self.at_index
+    }
+
+    fn lengths(self) -> Lengths {
+        Lengths { balances: self.balances.len(), nonces: self.nonces.len(), slots: self.slots.len(), codes: self.codes.len() }
+    }
+
+    /// Sets the block access index of what runs next.
+    pub fn set_index(mut self, _ index: u32) {
+        if index != self.index {
+            self.index = index
+            self.at_index = self.lengths()
+        }
+    }
+
+    /// Begins the changes of one transaction, system call or the withdrawals.
+    pub fn begin_changes(mut self) { self.scope = self.lengths() }
+
+    /// Marks the list incomplete, after an allocation for it failed.
+    pub fn fail(mut self) { self.failed = true }
+
+    /// Notes that `address`, an address word, was read.
+    pub fn account(mut self, _ address: u256) {
+        if !self.accounts.try_insert(address, true) { self.failed = true }
+    }
+
+    /// Notes that a slot of `address`, an address word, was read.
+    pub fn slot(mut self, _ address: u256, _ slot: u256) {
+        if !self.reads.try_insert(StorageKey { address, slot }, true) { self.failed = true }
+    }
+
+    pub fn balance(mut self, _ address: u256, pre: u256, post: u256) {
+        let earlier = (self.at_index.balances, self.scope.balances)
+        if !note_word(mut self.balances, earlier, address, index: self.index, pre, post) { self.failed = true }
+    }
+
+    pub fn nonce(mut self, _ address: u256, pre: u256, post: u256) {
+        let earlier = (self.at_index.nonces, self.scope.nonces)
+        if !note_word(mut self.nonces, earlier, address, index: self.index, pre, post) { self.failed = true }
+    }
+
+    pub fn storage(mut self, _ address: u256, _ slot: u256, pre: u256, post: u256) {
+        for position in self.at_index.slots..self.scope.slots {
+            let change = mut self.slots[position]
+            if change.address == address && change.slot == slot && !change.dropped {
+                change.value = post
+                change.dropped = post == change.start
+                return
+            }
+        }
+        let change = SlotChange { address, slot, index: self.index, value: post, start: pre, dropped: false }
+        if pre != post && self.slots.try_push(change).is_err() { self.failed = true }
+    }
+
+    // Appends `code` to the recorder's.
+    fn keep_code(mut self, _ code: MemSpan) -> Option<usize> {
+        let offset = self.code.len()
+        if !self.code.try_reserve(code.len()) {
+            self.failed = true
+            return Option::None
+        }
+        self.code.extend_from(code)
+        Option::Some(offset)
+    }
+
+    /// Notes the code `post` of an account that had the delegation `pre`, or
+    /// no code.
+    pub fn code(mut self, _ address: u256, pre: Option<u256>, post: MemSpan) {
+        for position in self.at_index.codes..self.scope.codes {
+            let change = self.codes[position]
+            if change.address == address && !change.dropped {
+                let restored = if post.len() == 0 { change.start.is_none() } else { delegation(post) == change.start && change.start.is_some() }
+                let Option::Some(offset) = self.keep_code(post) else { return }
+                self.codes[position] = CodeChange { address, index: change.index, offset, len: post.len(), start: change.start, dropped: restored }
+                return
+            }
+        }
+        let same = if post.len() == 0 { pre.is_none() } else { pre.is_some() && delegation(post) == pre }
+        if same { return }
+        let Option::Some(offset) = self.keep_code(post) else { return }
+        let change = CodeChange { address, index: self.index, offset, len: post.len(), start: pre, dropped: false }
+        if self.codes.try_push(change).is_err() { self.failed = true }
+    }
+
+    /// The list of what was recorded; none if an allocation failed.
+    pub fn build(mut self) -> Option<BlockAccessList> {
+        if self.failed { return Option::None }
+        var addresses: MemVec<u256> = MemVec::new()
+        var reads: MemVec<StorageKey> = MemVec::new()
+        if !addresses.try_reserve(self.accounts.len()) || !reads.try_reserve(self.reads.len()) { return Option::None }
+        for position in 0..self.accounts.capacity() {
+            let entry = self.accounts.entry(position)
+            if entry.occupied { addresses.push(entry.key) }
+        }
+        for position in 0..self.reads.capacity() {
+            let entry = self.reads.entry(position)
+            if entry.occupied { reads.push(entry.key) }
+        }
+        addresses.sort()
+        reads.sort()
+        self.balances.sort()
+        self.nonces.sort()
+        self.slots.sort()
+        self.codes.sort()
+        var rlp = Encoder::new()
+        var items: u64 = 0
+        // Each list is in address order: the place in each of the next account's.
+        var read: usize = 0
+        var slot: usize = 0
+        var balance: usize = 0
+        var nonce: usize = 0
+        var code: usize = 0
+        let list = rlp.begin()
+        for address in addresses {
+            items += 1
+            let account = rlp.begin()
+            rlp.fixed(address, len: 20)
+            // Storage changes, by slot, and the first of this account's for the reads.
+            let changed = slot
+            let changes = rlp.begin()
+            while slot < self.slots.len() && self.slots[slot].address == address {
+                let key = self.slots[slot].slot
+                var entry = Option::None
+                while slot < self.slots.len() && self.slots[slot].address == address && self.slots[slot].slot == key {
+                    let change = self.slots[slot]
+                    slot += 1
+                    if change.dropped { continue }
+                    if entry.is_none() {
+                        items += 1
+                        let slot_changes = rlp.begin()
+                        rlp.uint(key)
+                        entry = Option::Some((slot_changes, rlp.begin()))
+                    }
+                    let item = rlp.begin()
+                    rlp.uint(change.index as u256)
+                    rlp.uint(change.value)
+                    rlp.end(item)
+                }
+                if let Option::Some((slot_changes, values)) = entry {
+                    rlp.end(values)
+                    rlp.end(slot_changes)
+                }
+            }
+            rlp.end(changes)
+            // Storage reads: the slots read or written that did not change.
+            let read_slots = rlp.begin()
+            var written = changed
+            while read < reads.len() && reads[read].address == address {
+                let key = reads[read].slot
+                read += 1
+                while written < slot && (self.slots[written].slot < key || self.slots[written].dropped) { written += 1 }
+                if written < slot && self.slots[written].slot == key { continue }
+                items += 1
+                rlp.uint(key)
+            }
+            rlp.end(read_slots)
+            let balances = rlp.begin()
+            while balance < self.balances.len() && self.balances[balance].address == address {
+                let change = self.balances[balance]
+                balance += 1
+                if change.dropped { continue }
+                let item = rlp.begin()
+                rlp.uint(change.index as u256)
+                rlp.uint(change.value)
+                rlp.end(item)
+            }
+            rlp.end(balances)
+            let nonces = rlp.begin()
+            while nonce < self.nonces.len() && self.nonces[nonce].address == address {
+                let change = self.nonces[nonce]
+                nonce += 1
+                if change.dropped { continue }
+                let item = rlp.begin()
+                rlp.uint(change.index as u256)
+                rlp.uint(change.value)
+                rlp.end(item)
+            }
+            rlp.end(nonces)
+            let codes = rlp.begin()
+            while code < self.codes.len() && self.codes[code].address == address {
+                let change = self.codes[code]
+                code += 1
+                if change.dropped { continue }
+                let item = rlp.begin()
+                rlp.uint(change.index as u256)
+                rlp.bytes(self.code.slice(offset: change.offset, len: change.len))
+                rlp.end(item)
+            }
+            rlp.end(codes)
+            rlp.end(account)
+        }
+        rlp.end(list)
+        let rlp = rlp.finish()?
+        var hash = Keccak256::new()
+        hash.update(rlp.span(), offset: 0, len: rlp.len())
+        Option::Some(BlockAccessList { rlp, hash: hash.finish_word(), items })
+    }
+}
+
+#[test]
+fn access_list_orders_and_encodes_what_was_recorded() {
+    var recorder = AccessRecorder::new()
+    recorder.start()
+    recorder.set_index(1)
+    recorder.account(0xbb)
+    recorder.account(0xaa)
+    recorder.slot(0xaa, 2)
+    recorder.slot(0xaa, 1)
+    recorder.begin_changes()
+    recorder.storage(0xaa, 1, pre: 0, post: 5)
+    recorder.balance(0xaa, pre: 10, post: 7)
+    recorder.nonce(0xaa, pre: 0, post: 1)
+    var code = MemBuffer::empty()
+    code.push(0x60)
+    code.push(0x00)
+    recorder.code(0xaa, pre: Option::None, post: code.span())
+    // A write that leaves the value is no change.
+    recorder.balance(0xbb, pre: 3, post: 3)
+    let list = recorder.build().unwrap()
+    // [[0xaa, [[1, [[1, 5]]]], [2], [[1, 7]], [[1, 1]], [[1, 0x6000]]], [0xbb, [], [], [], [], []]].
+    let account: [u8; 23] = [
+        0xc6, 0xc5, 0x01, 0xc3, 0xc2, 0x01, 0x05, 0xc1, 0x02, 0xc3, 0xc2, 0x01, 0x07, 0xc3, 0xc2, 0x01, 0x01, 0xc5, 0xc4,
+        0x01, 0x82, 0x60, 0x00,
+    ]
+    core::assert(list.rlp.len() == 74 && list.rlp[0] == 0xf8 && list.rlp[1] == 0x48)
+    core::assert(list.rlp[2] == 0xec && list.rlp[3] == 0x94 && list.rlp[23] == 0xaa)
+    for index in 0..23 { core::assert(list.rlp[24 + index] == account[index]) }
+    core::assert(list.rlp[47] == 0xda && list.rlp[48] == 0x94 && list.rlp[68] == 0xbb)
+    for index in 69..74 { core::assert(list.rlp[index] == 0xc0) }
+    // Two accounts and two slots, each 2,000 of the block's gas limit.
+    core::assert(list.items == 4 && list.fits(gas_limit: 8_000) && !list.fits(gas_limit: 7_999))
+}
+
+#[test]
+fn access_list_keeps_one_change_for_each_index() {
+    var recorder = AccessRecorder::new()
+    recorder.start()
+    // The withdrawals and a system call after them share an index.
+    recorder.set_index(3)
+    recorder.account(0xaa)
+    recorder.slot(0xaa, 1)
+    recorder.begin_changes()
+    recorder.storage(0xaa, 1, pre: 0, post: 5)
+    recorder.balance(0xaa, pre: 4, post: 6)
+    recorder.nonce(0xaa, pre: 0, post: 1)
+    recorder.begin_changes()
+    // The slot and nonce are back where the index began; the balance moved on.
+    recorder.storage(0xaa, 1, pre: 5, post: 0)
+    recorder.balance(0xaa, pre: 6, post: 9)
+    recorder.nonce(0xaa, pre: 1, post: 0)
+    let list = recorder.build().unwrap()
+    // [[0xaa, [], [1], [[3, 9]], [], []]]: the slot is a read.
+    let rest: [u8; 9] = [0xc0, 0xc1, 0x01, 0xc3, 0xc2, 0x03, 0x09, 0xc0, 0xc0]
+    core::assert(list.rlp.len() == 32 && list.rlp[0] == 0xdf && list.rlp[1] == 0xde && list.rlp[22] == 0xaa)
+    for index in 0..9 { core::assert(list.rlp[23 + index] == rest[index]) }
+    core::assert(list.items == 2)
+}

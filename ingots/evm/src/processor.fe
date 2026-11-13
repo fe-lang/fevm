@@ -2,14 +2,14 @@ use core::{MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::address::{create_address, rlp_integer_len, update_rlp_integer}
 use ingot::constants::MAX_U256
-use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, StateGas, TX_MAX_TOTAL_GAS, account_access}
-use ingot::fork::{Amsterdam, Fork, Osaka, Rules}
+use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, STORAGE_SET, StateGas, TX_MAX_TOTAL_GAS, account_access}
+use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
-use ingot::transaction::Transaction
+use ingot::transaction::{SYSTEM_ADDRESS, Transaction}
 use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
-use ingot::vm::{Buffers, Vm, begin_create, run_precompile, spend, status_result, transfer}
+use ingot::vm::{Vm, begin_create, run_precompile, spend, status_result, transfer}
 use fevm_precompiles::{is_precompile, recover_signer}
 use fevm_precompiles::secp256k1::N as SECP256K1_N
 use swisstable::SwissTable
@@ -20,6 +20,7 @@ use ingot::status::{
     ERR_REVERT,
     INVALID_BALANCE,
     INVALID_BLOB_COUNT,
+    INVALID_BLOB_GAS,
     INVALID_BLOB_FEE_CAP,
     INVALID_BLOB_VERSION,
     INVALID_CHAIN_ID,
@@ -49,10 +50,13 @@ pub const TX_FEE_MARKET: u8 = 2
 pub const TX_BLOB: u8 = 3
 pub const TX_SET_CODE: u8 = 4
 
-const GAS_PER_BLOB: u64 = 131072
-// EIP-7594. Every blob schedule since Prague fits six blobs in a block, and
-// blob gas used across a block is the host's to track, as is its gas used.
+pub const GAS_PER_BLOB: u64 = 131072
+// EIP-7594. Every blob schedule since Prague fits six blobs in a block.
 const MAX_BLOBS_PER_TX: u64 = 6
+// EIP-4788: a system call's gas, which is no part of its block's.
+const SYSTEM_CALL_GAS: u64 = 30_000_000
+// EIP-8037: the storage slots a system call's state gas reservoir pays for.
+const SYSTEM_CALL_SLOTS: u64 = 16
 // EIP-7702 intrinsic gas per authorization, of which an existing authority
 // refunds half until Amsterdam.
 const AUTHORIZATION_GAS: u128 = 25000
@@ -128,21 +132,26 @@ impl TxRequest {
     pub fn add_blob_hash(mut self, _ hash: u256) -> bool { self.blob_hashes.try_push(hash).is_ok() }
     pub fn data(self) -> ref InputData { ref self.data }
     fn blob_count(self) -> u64 { self.blob_hashes.len().downcast_unchecked() }
+    /// The blob gas the transaction uses (EIP-4844).
+    pub fn blob_gas(self) -> u64 { self.blob_count() * GAS_PER_BLOB }
     fn authorization_count(self) -> usize { self.authorizations.len() }
 }
 
 /// `invalid` is VALID for an executed transaction. `status` is the message's
 /// outcome (OK, ERR_REVERT or an exceptional halt); any other status is a host
-/// failure, after which the pre-state is returned. `created` is the new
+/// failure, which changes nothing. `created` is the new
 /// contract's address when a creation succeeds. `gas_refunded` is the refund
 /// that reduced `gas_used`. `execution_gas_used` and `state_gas_used` are what
 /// the transaction adds to its block's gas totals: before Amsterdam,
 /// `gas_used` and zero; from Amsterdam, its gas before refunds less its state
 /// gas, at least the calldata floor (EIP-7778), and its state gas (EIP-8037).
+/// `cumulative_gas_used` is the `gas_used` of its block's transactions
+/// through this one; outside a block, its own.
 pub struct Receipt {
     pub invalid: i32,
     pub status: i32,
     pub gas_used: u64,
+    pub cumulative_gas_used: u64,
     pub gas_refunded: u64,
     pub execution_gas_used: u64,
     pub state_gas_used: u64,
@@ -150,8 +159,6 @@ pub struct Receipt {
     pub output: MemBuffer,
     pub logs: LogBuffer,
 }
-
-pub struct Applied { pub state: WorldState, pub receipt: Receipt }
 
 // `a * b`, or none past 256 bits. With `b` split at bit 64, `a` times the
 // high part fits in 256 bits and times the low part in 128.
@@ -238,27 +245,35 @@ fn effective_gas_price(_ env: TxEnv, base_fee: u256) -> u256 {
 }
 
 fn blob_fee(_ request: TxRequest, price: u256) -> Option<u256> {
-    checked_mul(request.blob_count() * GAS_PER_BLOB, price)
+    checked_mul(request.blob_gas(), price)
 }
 
-/// The includability checks of the fork `config` selects, in specification order.
-pub fn validate(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> i32 {
-    match config.fork {
-        Fork::Osaka => checked<Osaka>(world, request, block, config).invalid,
-        Fork::Amsterdam => checked<Amsterdam>(world, request, block, config).invalid,
+/// The gas a block has left for a transaction: for its execution, from
+/// EIP-8037 for its state gas apart, and for its blobs.
+pub struct Capacity { pub gas: u64, pub state_gas: u64, pub blob_gas: u64 }
+
+impl Copy for Capacity {}
+
+impl Capacity {
+    /// The capacity of an empty block.
+    pub fn of(_ block: BlockEnv, _ config: Config) -> Self {
+        let gas: u64 = if block.gaslimit >> 64 != 0 { 0xffffffffffffffff } else { block.gaslimit.downcast_unchecked() }
+        Capacity { gas, state_gas: gas, blob_gas: config.max_blobs_per_block * GAS_PER_BLOB }
     }
 }
 
-// Validation's verdict and the intrinsic gas it computed.
-struct Checked { invalid: i32, intrinsic: IntrinsicGas }
+// Validation's verdict, from the includability checks in specification
+// order, and the intrinsic gas it computed.
+pub(ingot) struct Checked { pub invalid: i32, pub intrinsic: IntrinsicGas }
 
-fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config) -> Checked {
+pub(ingot) fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                                _ available: Capacity) -> Checked {
     let intrinsic = intrinsic_gas<F>(request)
-    Checked { invalid: verdict<F>(world, request, block, config, intrinsic), intrinsic }
+    Checked { invalid: verdict<F>(world, request, block, config, available, intrinsic), intrinsic }
 }
 
 fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-           _ intrinsic: IntrinsicGas) -> i32 {
+                     _ available: Capacity, _ intrinsic: IntrinsicGas) -> i32 {
     let env = request.env
     let sender = address_word(env.sender)
     if env.kind > TX_SET_CODE { return INVALID_TX_TYPE }
@@ -277,7 +292,12 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
     } else if env.gas_limit > config.tx_gas_limit_cap { return INVALID_GAS_LIMIT_CAP }
     if env.nonce >= 0xffffffffffffffff { return INVALID_NONCE_LIMIT }
     if fee_market(env) && env.gas_price < env.max_priority_fee_per_gas { return INVALID_PRIORITY_FEE }
-    if env.gas_limit as u256 > block.gaslimit { return INVALID_GAS_LIMIT }
+    // EIP-8037: the block counts at most the execution cap of a
+    // transaction's gas as execution gas, and all of it as state gas.
+    let execution = if F::STATE_GAS && env.gas_limit > config.tx_gas_limit_cap { config.tx_gas_limit_cap }
+        else { env.gas_limit }
+    if execution > available.gas || (F::STATE_GAS && env.gas_limit > available.state_gas) { return INVALID_GAS_LIMIT }
+    if request.blob_gas() > available.blob_gas { return INVALID_BLOB_GAS }
     if config.check_chain_id && let Option::Some(chain_id) = env.chain_id && chain_id != block.chainid {
         return INVALID_CHAIN_ID
     }
@@ -316,7 +336,7 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
 
 fn empty_receipt(invalid: i32, status: i32) -> Receipt {
     Receipt {
-        invalid, status, gas_used: 0, gas_refunded: 0, execution_gas_used: 0, state_gas_used: 0,
+        invalid, status, gas_used: 0, cumulative_gas_used: 0, gas_refunded: 0, execution_gas_used: 0, state_gas_used: 0,
         created: Option::None, output: MemBuffer::empty(),
         logs: LogBuffer::new(),
     }
@@ -340,7 +360,7 @@ fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price:
         if !tx.add_blob_hash(hash) { return ERR_HOST_ALLOCATION }
     }
     let sender = address_word(request.env.sender)
-    let fee = request.env.gas_limit as u256 * price + (request.blob_count() * GAS_PER_BLOB) as u256 * blob_price
+    let fee = request.env.gas_limit as u256 * price + request.blob_gas() as u256 * blob_price
     tx.charge(sender, fee)
 }
 
@@ -427,6 +447,10 @@ fn prepare_message<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, target
     let env = ref request.env
     let checkpoint = tx.checkpoint(is_static: false)
     var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut gas, mut state_gas) } else { OK }
+    // Once its authorizations are paid for, the message reads its target,
+    // which is warm; a block's access list has the read even if the
+    // message then fails.
+    if status == OK && F::BLOCK_ACCESS_LIST { status = tx.access_account(target, warm: true) }
     if status == OK {
         // The delegations survive the message's failure, and so does their state gas.
         state_gas.commit()
@@ -523,43 +547,16 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     vm.into_result(mut tx.buffers())
 }
 
-/// Validate and execute one transaction against `world`, by the rules of the
-/// fork `config` selects. Valid
-/// transactions pay for gas, run their message, refund unused and refunded gas
-/// to the sender, pay the priority fee to the coinbase, and settle deletions.
-/// The journal and frames reuse the allocations in `buffers`, and leave theirs there.
-/// `tracer` sees each opcode and each call and creation, the transaction's own
-/// message among them; pass `()` to trace nothing.
-pub fn transact<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: true)
-}
-
-/// Runs a transaction as `transact` does but keeps none of its changes: the
-/// returned state is the pre-state. The receipt is the one `transact` would give.
-pub fn simulate<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                           _ buffers: mut Buffers, _ tracer: mut T) -> Applied {
-    apply(world, request, block, config, mut buffers, mut tracer, commit: false)
-}
-
-// Selects the fork's rules once the transaction holds the world and buffers,
-// so that they move once whatever the fork.
-fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                    _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
-    var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
-    let receipt = match config.fork {
-        Fork::Osaka => apply_in<Osaka>(mut tx, request, block, config, mut tracer, commit),
-        Fork::Amsterdam => apply_in<Amsterdam>(mut tx, request, block, config, mut tracer, commit),
-    }
-    let (state, lent) = tx.release()
-    buffers = lent
-    Applied { state, receipt }
-}
-
-fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                       _ tracer: mut T, commit: bool) -> Receipt {
+// Validates and executes one transaction on `tx`'s world, between
+// transactions before and after, in a block with `available` gas left. A
+// valid transaction pays for gas, runs its message, refunds unused and
+// refunded gas to the sender, pays the priority fee to the coinbase, and
+// settles deletions; without `commit` it is then undone, and its receipt is
+// the one it would have had.
+pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
+                                         _ available: Capacity, _ tracer: mut T, commit: bool) -> Receipt {
     let env = request.env
-    let checked = checked<F>(tx.world(), request, block, config)
+    let checked = checked<F>(tx.world(), request, block, config, available)
     if checked.invalid != VALID {
         return empty_receipt(invalid: checked.invalid, status: OK)
     }
@@ -640,6 +637,7 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
     // Aborting discards the logs, which a simulation still reports.
     let logs = if commit {
         tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
         tx.end(commit: true)
         tx.take_logs()
     } else {
@@ -648,10 +646,75 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
         logs
     }
     Receipt {
-        invalid: VALID, status: result.status, gas_used,
+        invalid: VALID, status: result.status, gas_used, cumulative_gas_used: gas_used,
         gas_refunded: if gas_spent > gas_used { gas_spent - gas_used } else { 0 },
         execution_gas_used, state_gas_used,
         created: if env.creates && result.status == OK { Option::Some(target) } else { Option::None },
         output: result.output, logs,
     }
+}
+
+/// A system call (EIP-4788): `data` to `target` from the system address,
+/// run as a transaction's message is, with 30,000,000 gas that no one pays
+/// for and, from EIP-8037, a state gas reservoir for 16 storage slots. It
+/// starts with no account warm, or from Amsterdam with a transaction's
+/// (`Rules::WARM_SYSTEM_CALLS`). A call that succeeds keeps its state
+/// changes; its logs and refund are dropped. A target without code does
+/// nothing and succeeds.
+pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data: own InputData, _ block: BlockEnv,
+                                    _ config: Config) -> ExecutionResult {
+    let target = address_word(target)
+    if F::WARM_SYSTEM_CALLS {
+        tx.begin(sender: SYSTEM_ADDRESS, destination: target, coinbase: block.coinbase, config)
+    } else {
+        tx.begin_cold(config)
+    }
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::None, sender: SYSTEM_ADDRESS, to: target, creates: false, nonce: 0,
+        gas_limit: SYSTEM_CALL_GAS, gas_price: block.basefee, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0,
+        value: 0,
+    }
+    let request = TxRequest::new(env, data)
+    var gas = SYSTEM_CALL_GAS
+    var state_gas = StateGas::new(if F::STATE_GAS { SYSTEM_CALL_SLOTS * STORAGE_SET } else { 0 })
+    let prepared = if F::STATE_GAS {
+        prepare_message<F>(mut tx, request, target, chain_id: block.chainid, mut gas, mut state_gas)
+    } else {
+        OK
+    }
+    let call = CallEnv {
+        address: target, caller: SYSTEM_ADDRESS, origin: SYSTEM_ADDRESS, callvalue: 0,
+        gasprice: block.basefee, gas_limit: gas, is_static: false,
+    }
+    var tracer = ()
+    let result = if prepared == OK { execute_message<F>(mut tx, request, call, block, state_gas, mut tracer) }
+        else { status_result(prepared) }
+    if is_evm_outcome(result.status) {
+        tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
+    }
+    tx.end(commit: is_evm_outcome(result.status))
+    let _ = tx.take_logs()
+    result
+}
+
+/// A withdrawal (EIP-4895): `amount` gwei for `address`.
+pub struct Withdrawal { pub address: u256, pub amount: u64 }
+
+impl Copy for Withdrawal {}
+
+/// Credits a block's withdrawals, together and outside any transaction. A
+/// balance that would pass 2^256 is ERR_BALANCE_OVERFLOW and credits none.
+pub(ingot) fn withdraw<F: Rules>(_ tx: mut Transaction, _ withdrawals: MemVec<Withdrawal>, _ config: Config) -> i32 {
+    tx.begin_cold(config)
+    var status = OK
+    for withdrawal in withdrawals {
+        if status == OK { status = tx.credit(address: withdrawal.address, amount: withdrawal.amount as u256 * 1_000_000_000) }
+    }
+    if status == OK {
+        tx.settle<F>()
+        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
+    }
+    tx.end(commit: status == OK)
+    status
 }

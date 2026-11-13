@@ -225,6 +225,7 @@ pub enum Invalid {
     GasLimitCap,
     ChainId,
     NoAuthorizations,
+    BlobGas,
     Unknown(u8),
 }
 
@@ -250,6 +251,7 @@ impl Invalid {
             16 => Invalid::GasLimitCap,
             17 => Invalid::ChainId,
             18 => Invalid::NoAuthorizations,
+            19 => Invalid::BlobGas,
             code => Invalid::Unknown(code),
         })
     }
