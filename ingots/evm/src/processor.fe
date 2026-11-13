@@ -656,13 +656,20 @@ pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxReq
 
 /// A system call (EIP-4788): `data` to `target`'s code from the system
 /// address, with 30,000,000 gas that no one pays for and, from EIP-8037, a
-/// state gas reservoir for 16 storage slots. A call that succeeds keeps its
-/// state changes; its logs and refund are dropped. A target without code
-/// does nothing and succeeds.
+/// state gas reservoir for 16 storage slots. It starts with no account warm,
+/// or from Amsterdam with a transaction's (`Rules::WARM_SYSTEM_CALLS`). A
+/// call that succeeds keeps its state changes; its logs and refund are
+/// dropped. A target without code does nothing and succeeds; a delegated
+/// target runs its delegate's code, without charging for or warming the
+/// delegate.
 pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data: own InputData, _ block: BlockEnv,
                                     _ config: Config) -> ExecutionResult {
     let target = address_word(target)
-    tx.begin(sender: SYSTEM_ADDRESS, destination: target, coinbase: SYSTEM_ADDRESS, config)
+    if F::WARM_SYSTEM_CALLS {
+        tx.begin(sender: SYSTEM_ADDRESS, destination: target, coinbase: block.coinbase, config)
+    } else {
+        tx.begin_cold(config)
+    }
     let call = CallEnv {
         address: target, caller: SYSTEM_ADDRESS, origin: SYSTEM_ADDRESS, callvalue: 0,
         gasprice: block.basefee, gas_limit: SYSTEM_CALL_GAS, is_static: false,
@@ -697,7 +704,7 @@ impl Copy for Withdrawal {}
 /// Credits a block's withdrawals, together and outside any transaction. A
 /// balance that would pass 2^256 is ERR_BALANCE_OVERFLOW and credits none.
 pub(ingot) fn withdraw<F: Rules>(_ tx: mut Transaction, _ withdrawals: MemVec<Withdrawal>, _ config: Config) -> i32 {
-    tx.begin(sender: SYSTEM_ADDRESS, destination: SYSTEM_ADDRESS, coinbase: SYSTEM_ADDRESS, config)
+    tx.begin_cold(config)
     var status = OK
     for withdrawal in withdrawals {
         if status == OK { status = tx.credit(address: withdrawal.address, amount: withdrawal.amount as u256 * 1_000_000_000) }

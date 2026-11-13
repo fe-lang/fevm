@@ -1,4 +1,4 @@
-use core::{MemVec, Option, Result}
+use core::{MemBuffer, MemVec, Option, Result}
 use ingot::block::{Block, BlockError}
 use ingot::evm::Evm
 use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
@@ -127,6 +127,55 @@ fn genesis_block_makes_no_system_calls() {
     let Option::Some(list) = output.access_list else { return core::assert(false) }
     // The four request contracts, and neither system contract called before the transactions.
     core::assert(list.items == 4)
+}
+
+// The gas left when `code`, run by a system call to the beacon roots
+// contract in a block with coinbase 0xc0ffee, pushes GAS and stores it in
+// slot 0.
+fn system_call_gas(_ config: Config, _ code: [u8; 10]) -> u256 {
+    var world = WorldState::empty()
+    core::assert(world.set_code(address: BEACON_ROOTS, code) == OK)
+    var evm = Evm::new(world, config)
+    var block = env()
+    block.coinbase = 0xc0ffee
+    core::assert(evm.system_call(target: BEACON_ROOTS, InputData::new(MemBuffer::empty(), status: OK), block).status == OK)
+    evm.world().storage_load(BEACON_ROOTS, 0)
+}
+
+// BALANCE of ADDRESS, CALLER, precompile 1 and COINBASE, then GAS; PUSH0; SSTORE.
+const OWN_BALANCE: [u8; 10] = [0x30, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0, 0, 0]
+const CALLER_BALANCE: [u8; 10] = [0x33, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0, 0, 0]
+const PRECOMPILE_BALANCE: [u8; 10] = [0x60, 0x01, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0, 0]
+const COINBASE_BALANCE: [u8; 10] = [0x41, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0, 0, 0]
+
+#[test]
+fn osaka_system_call_starts_with_nothing_warm() {
+    // 30,000,000 gas, less ADDRESS, CALLER or COINBASE (2), the cold BALANCE
+    // (2,600) and GAS (2).
+    core::assert(system_call_gas(Config::osaka(), OWN_BALANCE) == 29_997_396)
+    core::assert(system_call_gas(Config::osaka(), CALLER_BALANCE) == 29_997_396)
+    core::assert(system_call_gas(Config::osaka(), COINBASE_BALANCE) == 29_997_396)
+    // PUSH1 is 3.
+    core::assert(system_call_gas(Config::osaka(), PRECOMPILE_BALANCE) == 29_997_395)
+    // ADDRESS; BALANCE; POP; ADDRESS; BALANCE; GAS; PUSH0; SSTORE: the second
+    // BALANCE is warm. 30,000,000 - 2 - 2,600 - 2 (POP) - 2 - 100 - 2.
+    let twice: [u8; 10] = [0x30, 0x31, 0x50, 0x30, 0x31, 0x5a, 0x5f, 0x55, 0, 0]
+    core::assert(system_call_gas(Config::osaka(), twice) == 29_997_292)
+}
+
+#[test]
+fn amsterdam_system_call_starts_with_a_transactions_warm_accounts() {
+    // 30,000,000 gas, less ADDRESS, CALLER or COINBASE (2), the warm BALANCE
+    // (100) and GAS (2).
+    core::assert(system_call_gas(Config::amsterdam(), OWN_BALANCE) == 29_999_896)
+    core::assert(system_call_gas(Config::amsterdam(), CALLER_BALANCE) == 29_999_896)
+    core::assert(system_call_gas(Config::amsterdam(), COINBASE_BALANCE) == 29_999_896)
+    // PUSH1 is 3.
+    core::assert(system_call_gas(Config::amsterdam(), PRECOMPILE_BALANCE) == 29_999_895)
+    // PUSH2 0xbeef; BALANCE; GAS; PUSH0; SSTORE: another account is cold, at
+    // Amsterdam's 3,000. 30,000,000 - 3 - 3,000 - 2.
+    let other: [u8; 10] = [0x61, 0xbe, 0xef, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0]
+    core::assert(system_call_gas(Config::amsterdam(), other) == 29_996_995)
 }
 
 #[test]

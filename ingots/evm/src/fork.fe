@@ -49,6 +49,10 @@ pub trait Rules {
     // EIP-7928: a block lists the accounts and storage its execution reads
     // and changes.
     const BLOCK_ACCESS_LIST: bool = Self::FORK.since(Fork::Amsterdam)
+    // A system call starts with a transaction's warm accounts: its caller
+    // and target, the block's coinbase and the precompiles. Before
+    // Amsterdam it starts with none.
+    const WARM_SYSTEM_CALLS: bool = Self::FORK.since(Fork::Amsterdam)
     // EIP-2929 and EIP-8038: the first access of an account in a transaction.
     const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
     // EIP-8038: EXTCODESIZE and EXTCODECOPY read the code.
