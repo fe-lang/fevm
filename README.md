@@ -130,9 +130,10 @@ let (evm, finished) = block.finish(withdrawals)
 
 `begin` records the parent hash for BLOCKHASH and makes the system calls
 that store the parent beacon block root (EIP-4788) and the parent hash
-(EIP-2935). `transact` runs a transaction if the block has the gas and blob
-gas left for it (`Config` has the fork's blob limit), and its receipt has the
-cumulative gas used; `simulate` tries one without counting it. `finish`
+(EIP-2935), except for the genesis block, which has no parent. `transact`
+runs a transaction if the block has the gas and blob gas left for it
+(`Config` has the fork's blob limit), and its receipt has the cumulative gas
+used; `simulate` tries one without counting it. `finish`
 credits the withdrawals (EIP-4895), collects the block's requests (EIP-7685):
 the deposits its transactions logged (EIP-6110) and those the withdrawal and
 consolidation request contracts return to their system calls (EIP-7002,

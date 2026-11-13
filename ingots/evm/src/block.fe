@@ -130,8 +130,9 @@ fn requests_hash(_ requests: MemVec<MemBuffer>) -> Option<u256> {
 }
 
 impl Block {
-    /// Begins the block `env` describes on `evm`'s world. Records
-    /// `parent_hash` for BLOCKHASH, and makes the system calls that store
+    /// Begins the block `env` describes on `evm`'s world. Unless it is the
+    /// genesis block, which has no parent, records `parent_hash` for
+    /// BLOCKHASH and makes the system calls that store
     /// `parent_beacon_block_root` (EIP-4788) and `parent_hash` (EIP-2935).
     pub fn begin(_ evm: own Evm, _ env: BlockEnv, parent_hash: u256, parent_beacon_block_root: u256) -> Self {
         let limit = Capacity::of(env, evm.config())
@@ -149,9 +150,9 @@ impl Block {
             }
             // The hash this block is the first not to reach.
             if env.number > BLOCK_HASHES { let _ = block.evm.world_mut().set_block_hash(env.number - BLOCK_HASHES - 1, 0) }
+            let _ = block.system_call(BEACON_ROOTS, word_input(parent_beacon_block_root))
+            let _ = block.system_call(HISTORY_STORAGE, word_input(parent_hash))
         }
-        let _ = block.system_call(BEACON_ROOTS, word_input(parent_beacon_block_root))
-        let _ = block.system_call(HISTORY_STORAGE, word_input(parent_hash))
         block
     }
 

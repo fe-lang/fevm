@@ -11,6 +11,8 @@ const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
 const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
 const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
 const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
+const BUILDER_DEPOSIT_REQUESTS: u256 = 0x0000bff46984e3725691fa540a8c7589300d8282
+const BUILDER_EXIT_REQUESTS: u256 = 0x000064d678505ad48f8ccb093bc65613800e8282
 
 // A funded sender, system contracts that store their input's first word in
 // slot 0, a withdrawal request contract that returns the byte 0xab and a
@@ -26,6 +28,14 @@ fn world() -> WorldState {
     let reply: [u8; 8] = [0x60, 0xab, 0x5f, 0x53, 0x60, 0x01, 0x5f, 0xf3]
     core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: reply) == OK)
     core::assert(world.set_code(address: CONSOLIDATION_REQUESTS, code: [0x00 as u8]) == OK)
+    world
+}
+
+// `world`, with EIP-8282's builder request contracts, which return nothing.
+fn amsterdam_world() -> WorldState {
+    var world = world()
+    core::assert(world.set_code(address: BUILDER_DEPOSIT_REQUESTS, code: [0x00 as u8]) == OK)
+    core::assert(world.set_code(address: BUILDER_EXIT_REQUESTS, code: [0x00 as u8]) == OK)
     world
 }
 
@@ -83,11 +93,8 @@ fn block_calls_the_system_contracts_and_counts_gas() {
 
 #[test]
 fn amsterdam_block_lists_what_it_accessed() {
-    var world = world()
-    // EIP-8282's builder request contracts, which return nothing.
-    core::assert(world.set_code(address: 0x0000bff46984e3725691fa540a8c7589300d8282, code: [0x00 as u8]) == OK)
-    core::assert(world.set_code(address: 0x000064d678505ad48f8ccb093bc65613800e8282, code: [0x00 as u8]) == OK)
-    var block = Block::begin(Evm::new(world, Config::amsterdam()), env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var block = Block::begin(Evm::new(amsterdam_world(), Config::amsterdam()), env(), parent_hash: 0x1234,
+                             parent_beacon_block_root: 0x5678)
     var tracer = ()
     // A simulation is no part of the list.
     var other = transfer(nonce: 0, gas_limit: 50_000)
@@ -104,6 +111,22 @@ fn amsterdam_block_lists_what_it_accessed() {
     // The six system contracts and the slot that two of them wrote, the
     // sender, the recipient, the coinbase and both withdrawals' accounts.
     core::assert(list.items == 13 && list.hash != 0)
+}
+
+#[test]
+fn genesis_block_makes_no_system_calls() {
+    var genesis = env()
+    genesis.number = 0
+    let block = Block::begin(Evm::new(world(), Config::osaka()), genesis, parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0 && block.world().storage_load(HISTORY_STORAGE, 0) == 0)
+    let block = Block::begin(Evm::new(amsterdam_world(), Config::amsterdam()), genesis, parent_hash: 0x1234,
+                             parent_beacon_block_root: 0x5678)
+    let (evm, finished) = block.finish(MemVec::new())
+    core::assert(evm.world().storage_load(BEACON_ROOTS, 0) == 0 && evm.world().storage_load(HISTORY_STORAGE, 0) == 0)
+    let Result::Ok(output) = finished else { return core::assert(false) }
+    let Option::Some(list) = output.access_list else { return core::assert(false) }
+    // The four request contracts, and neither system contract called before the transactions.
+    core::assert(list.items == 4)
 }
 
 #[test]
