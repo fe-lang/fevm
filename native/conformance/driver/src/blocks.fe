@@ -3,7 +3,7 @@ use std::io::{Display, Stdout}
 use fevm::{Block, BlockError, BlockOutput, Config, Evm, LogBuffer, Receipt, Withdrawal, WorldState}
 use fevm::hex::{write_hex_bytes, write_hex_word}
 use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
-use ingot::{Reader, allocation_failure, read_accounts, read_block, read_fork, read_request, write_world}
+use ingot::{Reader, host_error, read_accounts, read_block, read_fork, read_request, write_world}
 
 // What a block's header says its execution gives.
 struct Header { gas_used: u64, blob_gas_used: u64, bloom: [u256; 8], requests_hash: u256, access_list_hash: u256 }
@@ -83,7 +83,8 @@ fn mismatch(_ output: BlockOutput, _ header: Header) -> Option<MemBuffer> {
 // Runs a blockchain test: each block on the world the last valid one left,
 // as a client that checks what the header says of its execution would. Prints
 // each block's validity, with a valid block's receipts or the reason it is
-// invalid, and the final world.
+// invalid, and the final world; or, after a host failure, which is no verdict
+// on a block, only that.
 pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
     core::assert(reader.word(bytes: 1) == 6)
     let Option::Some(fork) = read_fork(mut reader) else { return 2 }
@@ -91,7 +92,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
     var config = Config::of(fork)
     config.max_blobs_per_block = reader.u64()
     var world = WorldState::empty()
-    if !read_accounts(mut reader, mut world) { return allocation_failure() }
+    if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
     var evm = Evm::new(world, config)
     var tracer = ()
     var text = MemBuffer::empty()
@@ -106,7 +107,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
             let parent_beacon_block_root = reader.word(bytes: 32)
             let header = read_header(mut reader)
             // An invalid block leaves the world as it was.
-            let Option::Some(snapshot) = evm.world().try_clone() else { return allocation_failure() }
+            let Option::Some(snapshot) = evm.world().try_clone() else { return host_error("snapshot allocation failed") }
             var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
             var receipts = MemBuffer::empty()
             var reason: Option<MemBuffer> = Option::None
@@ -118,7 +119,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
                 if receipt.invalid != VALID {
                     reason = Option::Some(format!("transaction ", index, ": ", invalid_name(receipt.invalid)))
                 } else if !is_evm_outcome(receipt.status) {
-                    reason = Option::Some(format!("transaction ", index, ": host ", status_name(receipt.status)))
+                    return host_error(format!("transaction ", index, ": host ", status_name(receipt.status)))
                 } else {
                     with (mut receipts) {
                         if index != 0 { ",".fmt(mut receipts) }
@@ -133,12 +134,17 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
                 withdrawals.push(Withdrawal { address, amount: reader.u64() })
             }
             if reason.is_some() {
+                // A host failure before the invalid transaction: as the block began, or in its deposits.
+                if let Option::Some(BlockError::Host(status)) = block.failure() {
+                    return host_error(error_name(BlockError::Host(status)))
+                }
                 evm = block.abandon()
             } else {
                 let (returned, finished) = block.finish(withdrawals)
                 evm = returned
                 reason = match finished {
                     Result::Ok(output) => mismatch(output, header),
+                    Result::Err(BlockError::Host(status)) => return host_error(error_name(BlockError::Host(status))),
                     Result::Err(error) => Option::Some(error_name(error)),
                 }
             }

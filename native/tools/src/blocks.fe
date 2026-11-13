@@ -7,6 +7,7 @@ use std::process::{Output, Status}
 use ingot::conformance::{
     Account,
     FAILED,
+    HOST_ERROR,
     PASSED,
     Verdict,
     blob_base_fee,
@@ -402,4 +403,7 @@ fn check_compares_blocks_receipts_and_the_post_state() {
     let valid = chain_verdict("{\"blocks\":[{\"valid\":false,\"reason\":\"gas used 1 != 2\"},{\"valid\":true,\"receipts\":[]}],\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}")
     assert!(valid.problems.len() == 2 && valid.problems[0] == "block 0: invalid, gas used 1 != 2")
     assert!(valid.problems[1] == "block 2: valid, expected BlockException.INVALID_REQUESTS")
+    // A host failure is no verdict on a block, even one expected to be invalid.
+    let host = check(chain(), output("{\"host_error\":\"host host_allocation\"}", Status::Exited(3)), timeout: 1).unwrap()
+    assert!(host.outcome == HOST_ERROR && host.problems[0] == "host host_allocation")
 }

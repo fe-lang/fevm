@@ -101,4 +101,6 @@ All tests of `tests@v21.0.2` pass: 17,441 for Osaka, with 476 of their
 
 The driver prints `blocks`, each with `valid` and its `receipts` (status,
 cumulative gas, logs) or the `reason` it is invalid, and the post-state
-accounts. A wrong access list hash comes with the list's RLP.
+accounts. A wrong access list hash comes with the list's RLP. A host failure
+(allocation failure, balance overflow) is no verdict on a block: the driver
+prints only `host_error`, and the test's outcome is `host_error`.

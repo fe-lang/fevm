@@ -137,8 +137,9 @@ fn write_world(_ world: WorldState) uses (text: mut MemBuffer) {
     "]".fmt(mut text)
 }
 
-fn allocation_failure() -> i32 uses (out: mut Stdout) {
-    println!("{\"host_error\":\"pre-state allocation failed\"}")
+// Reports a host failure, which is no verdict on the case.
+fn host_error<D: Display>(_ reason: D) -> i32 uses (out: mut Stdout) {
+    println!("{\"host_error\":\"", reason, "\"}")
     3
 }
 
@@ -293,7 +294,7 @@ pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {
             core::assert(world.set_block_hash(number, test_block_hash(number)))
             number += 1
         }
-        if !read_accounts(mut reader, mut world) { return allocation_failure() }
+        if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
         let request = read_request(mut reader)
         core::assert(reader.position == reader.data.len())
         evm.set_world(world)

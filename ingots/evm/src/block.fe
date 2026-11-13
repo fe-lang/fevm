@@ -168,6 +168,10 @@ impl Block {
         }
     }
 
+    /// The first reason the block is invalid so far, but for an invalid
+    /// transaction: a host failure, or a malformed deposit.
+    pub fn failure(self) -> Option<BlockError> { self.failure }
+
     // Keeps the first reason the block is invalid.
     fn fail(mut self, _ error: BlockError) {
         if self.failure.is_none() { self.failure = Option::Some(error) }
