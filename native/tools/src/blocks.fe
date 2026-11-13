@@ -256,7 +256,8 @@ impl ChainExpect {
                 Option::None => Option::None,
             })
         }
-        Result::Ok(ChainExpect { blocks, head: number(test["lastblockhash"])?, state: expected_state(test["postState"])? })
+        let head = number(test["lastblockhash"])?
+        Result::Ok(ChainExpect { blocks, head, state: expected_state(test["postState"])? })
     }
 }
 
@@ -282,20 +283,21 @@ pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<Me
         if let Option::Some(ref transaction) = block.get("transaction") {
             reason = format!(reason, " (transaction ", transaction, ")")
         }
+        let at = format!("block ", index, ": ")
         match expect.blocks[index] {
             Option::Some(ref exception) => if valid {
-                verdict.problems.push(format!("block ", index, ": valid, expected ", exception))
+                verdict.problems.push(format!(at, "valid, expected ", exception))
             } else {
                 match exceptions(name.span()) {
                     Option::Some(names) => if !shares_a_name(exception.span(), names.span()) {
-                        verdict.problems.push(format!("block ", index, ": ", reason, ", which is ", names, "; expected ", exception))
+                        verdict.problems.push(format!(at, reason, ", which is ", names, "; expected ", exception))
                     },
                     Option::None => {
-                        verdict.problems.push(format!("block ", index, ": ", reason, ", which names no exception; expected ", exception))
+                        verdict.problems.push(format!(at, reason, ", which names no exception; expected ", exception))
                     },
                 }
             },
-            Option::None => if !valid { verdict.problems.push(format!("block ", index, ": invalid, ", reason)) },
+            Option::None => if !valid { verdict.problems.push(format!(at, "invalid, ", reason)) },
         }
     }
     let head = number(result["head"])?
@@ -314,7 +316,8 @@ fn forks_follow_the_network_names() {
     let osaka = blocks_forks("Osaka")
     assert!(osaka.len() == 1 && osaka[0].0 == 0 && osaka[0].1 == "Osaka")
     let transition = blocks_forks("OsakaToBPO1AtTime15k")
-    assert!(transition.len() == 2 && transition[0].1 == "Osaka" && transition[1].0 == 15000 && transition[1].1 == "BPO1")
+    assert!(transition.len() == 2 && transition[0].1 == "Osaka")
+    assert!(transition[1].0 == 15000 && transition[1].1 == "BPO1")
     let amsterdam = blocks_forks("BPO2ToAmsterdamAtTime15k")
     assert!(amsterdam[0].1 == "BPO2" && amsterdam[1].1 == "Amsterdam")
     let increase = blocks_forks("AmsterdamToBPOIncreaseAtTime15k")
@@ -373,11 +376,14 @@ fn check_compares_blocks_the_head_and_the_post_state() {
     let unnamed = chain_verdict(
         "{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.unknown\"},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}",
     )
-    assert!(unnamed.problems.len() == 1 && unnamed.problems[0].span().starts_with("block 1: transaction.unknown, which names no exception"))
+    let unknown: DynString = "block 1: transaction.unknown, which names no exception"
+    assert!(unnamed.problems.len() == 1 && unnamed.problems[0].span().starts_with(unknown))
     let genesis = chain_verdict("{\"genesis\":\"the pre-state's root is 0x01, not the header's\"}")
-    assert!(genesis.outcome == FAILED && genesis.problems[0] == "genesis: the pre-state's root is 0x01, not the header's")
+    let root: DynString = "genesis: the pre-state's root is 0x01, not the header's"
+    assert!(genesis.outcome == FAILED && genesis.problems[0].span() == root.span())
     // A host failure is no verdict on a block, even one expected to be invalid.
-    let host = check(chain(), output("{\"host_error\":\"block 1: host host_allocation\"}", Status::Exited(3)), timeout: 1).unwrap()
+    let failed = output("{\"host_error\":\"block 1: host host_allocation\"}", Status::Exited(3))
+    let host = check(chain(), failed, timeout: 1).unwrap()
     assert!(host.outcome == HOST_ERROR && host.problems[0] == "block 1: host host_allocation")
 }
 

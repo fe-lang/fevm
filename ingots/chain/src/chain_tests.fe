@@ -41,7 +41,8 @@ fn genesis_world() -> WorldState {
     ]
     let codes = [history, consolidations, withdrawals, deposits, beacon_roots]
     for index in 0..5 {
-        core::assert(world.set_nonce(contracts[index], 1) && world.set_code(address: contracts[index], code: codes[index].span()) == OK)
+        core::assert(world.set_nonce(contracts[index], 1))
+        core::assert(world.set_code(address: contracts[index], code: codes[index].span()) == OK)
     }
     // The deposit contract's slots 0x22 to 0x40.
     let slots: [u256; 31] = [
@@ -71,7 +72,8 @@ fn genesis_world() -> WorldState {
 fn genesis(chain_id: u256) -> Chain {
     // The first item of the fixture's `genesisRLP`.
     let header = decode_hex("0xf90257a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a02ebebbe1694cc72a21e11e3de347718483bc8a5a869c56b64b60dd20465f190aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080808407270e00808000a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b4218080a00000000000000000000000000000000000000000000000000000000000000000a0e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap()
-    Chain::new(genesis_world(), Schedule::new(Config::osaka()), chain_id, genesis: Header::decode(header.span()).unwrap())
+    let genesis = Header::decode(header.span()).unwrap()
+    Chain::new(genesis_world(), Schedule::new(Config::osaka()), chain_id, genesis)
 }
 
 // The fixture's block, with the byte at `at` set to `byte` unless `at` is
@@ -99,10 +101,12 @@ fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
     let rejected = match (chain.import(rlp.span(), mut tracer), reason) {
         (Import::Invalid(InvalidBlock::StateRoot), InvalidBlock::StateRoot) => true,
         (Import::Invalid(InvalidBlock::ReceiptsRoot), InvalidBlock::ReceiptsRoot) => true,
-        (Import::Invalid(InvalidBlock::Header(HeaderError::Difficulty)), InvalidBlock::Header(HeaderError::Difficulty)) => true,
+        (Import::Invalid(InvalidBlock::Header(HeaderError::Difficulty)),
+         InvalidBlock::Header(HeaderError::Difficulty)) => true,
         (Import::Invalid(InvalidBlock::Undecodable(0, TxError::InvalidSignature)),
          InvalidBlock::Undecodable(0, TxError::InvalidSignature)) => true,
-        (Import::Invalid(InvalidBlock::Undecodable(0, TxError::Malformed)), InvalidBlock::Undecodable(0, TxError::Malformed)) => true,
+        (Import::Invalid(InvalidBlock::Undecodable(0, TxError::Malformed)),
+         InvalidBlock::Undecodable(0, TxError::Malformed)) => true,
         _ => false,
     }
     if !rejected || !at_genesis(chain) { return false }
@@ -120,7 +124,8 @@ fn chain_imports_a_valid_block() {
     match chain.import(valid().span(), mut tracer) {
         Import::Valid(imported) => {
             core::assert(imported.output.gas_used == BLOCK_GAS_USED && imported.receipts.len() == 1)
-            core::assert(imported.receipts[0].status == OK && imported.receipts[0].cumulative_gas_used == BLOCK_GAS_USED)
+            let receipt = ref imported.receipts[0]
+            core::assert(receipt.status == OK && receipt.cumulative_gas_used == BLOCK_GAS_USED)
             core::assert(imported.receipts[0].logs.len() == 1)
         },
         _ => core::assert(false),
@@ -155,7 +160,8 @@ fn chain_rejects_a_header_fault() {
 #[test]
 fn chain_rejects_an_undecodable_transaction() {
     // An s above half the curve order (EIP-2).
-    core::assert(rejects(block(at: SIGNATURE_S_AT, byte: 0xff), InvalidBlock::Undecodable(0, TxError::InvalidSignature)))
+    let high_s = block(at: SIGNATURE_S_AT, byte: 0xff)
+    core::assert(rejects(high_s, InvalidBlock::Undecodable(0, TxError::InvalidSignature)))
 }
 
 #[test]

@@ -1,6 +1,6 @@
 // A chain of blocks on one world: importing a block from its RLP.
 use core::{MemSpan, MemVec, Option, Result}
-use fevm::{Block, BlockError, BlockOutput, Evm, Receipt, Withdrawal, WorldState}
+use fevm::{Block, BlockEnv, BlockError, BlockOutput, Evm, Receipt, Withdrawal, WorldState}
 use fevm::status::{ERR_HOST_ALLOCATION, VALID, is_evm_outcome}
 use fevm::trace::Tracer
 use fevm_rlp::Decoder
@@ -12,6 +12,8 @@ use ingot::trie::{Trie, state_root}
 
 // EIP-7934: the longest block RLP, 10 MiB less a 2 MiB margin.
 const MAX_RLP_BLOCK_SIZE: usize = 8_388_608
+
+const ALLOCATION: HostFailure = HostFailure::Status(ERR_HOST_ALLOCATION)
 
 /// Why a block is invalid: the first rule it breaks, in the order the
 /// specification checks them (`execute_block`).
@@ -70,6 +72,33 @@ pub enum Import {
 /// valid child of the head replaces. It keeps one head and no side branches.
 pub struct Chain { evm: Evm, schedule: Schedule, chain_id: u256, head: Header }
 
+// The next transaction as a block carries it: a legacy one's list, or a
+// typed one's string, without its header, of its type and payload.
+fn next_transaction(_ transactions: mut Decoder) -> ref MemSpan uses (rlp: MemSpan) {
+    if transactions.is_list() { return transactions.raw() }
+    transactions.bytes()
+}
+
+// The first value the header commits to that is not what the block gives, in
+// the specification's order (`execute_block`); none if all are.
+fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, state_root: u256, receipts_root: u256,
+            withdrawals_root: u256) -> Option<InvalidBlock> {
+    let access_list_hash = match output.access_list {
+        Option::Some(ref list) => Option::Some(list.hash),
+        Option::None => Option::None,
+    }
+    if output.gas_used != header.gas_used { return Option::Some(InvalidBlock::GasUsed) }
+    if transactions_root != header.transactions_root { return Option::Some(InvalidBlock::TransactionsRoot) }
+    if state_root != header.state_root { return Option::Some(InvalidBlock::StateRoot) }
+    if receipts_root != header.receipt_root { return Option::Some(InvalidBlock::ReceiptsRoot) }
+    if output.logs_bloom.words != header.bloom.words { return Option::Some(InvalidBlock::LogsBloom) }
+    if withdrawals_root != header.withdrawals_root { return Option::Some(InvalidBlock::WithdrawalsRoot) }
+    if output.blob_gas_used != header.blob_gas_used { return Option::Some(InvalidBlock::BlobGasUsed) }
+    if output.requests_hash != header.requests_hash { return Option::Some(InvalidBlock::RequestsHash) }
+    if access_list_hash != header.block_access_list_hash { return Option::Some(InvalidBlock::AccessListHash) }
+    Option::None
+}
+
 impl Chain {
     /// A chain at `genesis`, whose state is `world`, with the forks of
     /// `schedule`.
@@ -122,10 +151,10 @@ impl Chain {
             if !items.finish() || malformed { return Import::Invalid(InvalidBlock::Malformed) }
             let header = match decoded {
                 Result::Ok(header) => header,
-                Result::Err(HeaderError::Allocation) => return Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION)),
+                Result::Err(HeaderError::Allocation) => return Import::Failed(ALLOCATION),
                 Result::Err(_) => return Import::Invalid(InvalidBlock::Malformed),
             }
-            if !allocated { return Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION)) }
+            if !allocated { return Import::Failed(ALLOCATION) }
             let config = self.schedule.config_at(header.timestamp)
             if let Result::Err(error) = header.validate(self.head, config) {
                 return Import::Invalid(InvalidBlock::Header(error))
@@ -134,109 +163,86 @@ impl Chain {
             let Option::Some(env) = header.block_env(chain_id: self.chain_id, config) else {
                 return Import::Failed(HostFailure::BlobBaseFee)
             }
-            let Option::Some(snapshot) = self.evm.world().try_clone() else {
-                return Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION))
-            }
-            // The block holds the `Evm` until finishing or abandoning it
-            // gives it back; `self.evm` is a hole until then, which every
-            // path must fill.
+            let Option::Some(snapshot) = self.evm.world().try_clone() else { return Import::Failed(ALLOCATION) }
             self.evm.set_config(config)
-            var block = Block::begin(self.evm, env, parent_hash: header.parent_hash,
-                                     parent_beacon_block_root: header.parent_beacon_block_root)
-            var transactions_trie = Trie::new()
-            var receipts_trie = Trie::new()
-            var receipts: MemVec<Receipt> = MemVec::new()
-            var fault: Option<Import> = Option::None
-            var items = Decoder::new()
-            let body = mut items.list()
-            let _ = body.raw()
-            let transactions = mut body.list()
-            var index: usize = 0
-            while fault.is_none() && !transactions.is_empty() {
-                // A legacy transaction is a list, a typed one a string of its
-                // type and payload. A string that holds a list, a legacy
-                // transaction wrapped as a typed one, is malformed in every
-                // fork: EELS's Amsterdam `decode_transaction` takes it, but it
-                // makes block bodies malleable, and clients reject it.
-                let typed = !transactions.is_list()
-                let item = transactions.raw()
-                // A string's header: none for a byte below 0x80, its length
-                // and the length's bytes from 0xb8.
-                let header_len: usize = if !typed || item[0] < 0x80 { 0 } else if item[0] < 0xb8 { 1 }
-                    else { 1 + (item[0] - 0xb7) as usize }
-                let tx = item.slice(offset: header_len, len: item.len() - header_len)
-                transactions_trie.item().raw(tx)
-                let decoded = if typed && tx.len() != 0 && tx[0] >= 0xc0 { Result::Err(TxError::Malformed) }
-                    else { decode_transaction(tx) }
-                match decoded {
-                    Result::Err(TxError::Allocation) => fault = Option::Some(Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION))),
-                    Result::Err(error) => fault = Option::Some(Import::Invalid(InvalidBlock::Undecodable(index, error))),
-                    Result::Ok((request, _)) => {
-                        let receipt = block.transact(request, mut tracer)
-                        if receipt.invalid != VALID {
-                            fault = Option::Some(Import::Invalid(InvalidBlock::Transaction(index, receipt.invalid)))
-                        } else if !is_evm_outcome(receipt.status) {
-                            fault = Option::Some(Import::Failed(HostFailure::Status(receipt.status)))
-                        } else {
-                            encode_receipt(mut receipts_trie.item(), receipt, kind: request.env.kind)
-                            if receipts.try_push(receipt).is_err() {
-                                fault = Option::Some(Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION)))
-                            }
-                        }
-                    },
-                }
-                index += 1
-            }
-            let verdict = match fault {
-                Option::Some(fault) => {
-                    // A host failure as the block began, or in an earlier
-                    // transaction's deposits, came first.
-                    let verdict = match block.failure() {
-                        Option::Some(BlockError::Host(status)) => Import::Failed(HostFailure::Status(status)),
-                        _ => fault,
-                    }
-                    self.evm = block.abandon()
-                    verdict
-                },
-                Option::None => {
-                    let (evm, finished) = block.finish(withdrawals)
-                    self.evm = evm
-                    match finished {
-                        Result::Err(BlockError::Host(status)) => Import::Failed(HostFailure::Status(status)),
-                        Result::Err(error) => Import::Invalid(InvalidBlock::Execution(error)),
-                        Result::Ok(output) => match (transactions_trie.root(), state_root(mut self.evm.world_mut()),
-                                                     receipts_trie.root(), withdrawals_trie.root()) {
-                            (Option::Some(transactions_root), Option::Some(state), Option::Some(receipt_root),
-                             Option::Some(withdrawals_root)) => {
-                                let access_list_hash = match output.access_list {
-                                    Option::Some(ref list) => Option::Some(list.hash),
-                                    Option::None => Option::None,
-                                }
-                                let reason = if output.gas_used != header.gas_used { Option::Some(InvalidBlock::GasUsed) }
-                                    else if transactions_root != header.transactions_root { Option::Some(InvalidBlock::TransactionsRoot) }
-                                    else if state != header.state_root { Option::Some(InvalidBlock::StateRoot) }
-                                    else if receipt_root != header.receipt_root { Option::Some(InvalidBlock::ReceiptsRoot) }
-                                    else if output.logs_bloom.words != header.bloom.words { Option::Some(InvalidBlock::LogsBloom) }
-                                    else if withdrawals_root != header.withdrawals_root { Option::Some(InvalidBlock::WithdrawalsRoot) }
-                                    else if output.blob_gas_used != header.blob_gas_used { Option::Some(InvalidBlock::BlobGasUsed) }
-                                    else if output.requests_hash != header.requests_hash { Option::Some(InvalidBlock::RequestsHash) }
-                                    else if access_list_hash != header.block_access_list_hash { Option::Some(InvalidBlock::AccessListHash) }
-                                    else { Option::None }
-                                match reason {
-                                    Option::Some(reason) => Import::Invalid(reason),
-                                    Option::None => Import::Valid(Imported { receipts, output }),
-                                }
-                            },
-                            _ => Import::Failed(HostFailure::Status(ERR_HOST_ALLOCATION)),
-                        },
-                    }
-                },
-            }
+            let verdict = self.execute(header, env, withdrawals, withdrawals_trie, mut tracer)
             match verdict {
                 Import::Valid(_) => self.head = header,
                 _ => self.evm.set_world(snapshot),
             }
             verdict
+        }
+    }
+
+    // Runs the block `header` heads, whose transactions are the second item
+    // of `rlp`, on the head's world, and compares what it gives with the
+    // header. The block holds the `Evm` until finishing it or abandoning it
+    // gives it back: `self.evm` is a hole until then, which every path fills.
+    fn execute<T: Tracer>(mut self, _ header: Header, _ env: BlockEnv, _ withdrawals: own MemVec<Withdrawal>,
+                          _ withdrawals_trie: own Trie, _ tracer: mut T) -> Import uses (rlp: MemSpan) {
+        var block = Block::begin(self.evm, env, parent_hash: header.parent_hash,
+                                 parent_beacon_block_root: header.parent_beacon_block_root)
+        var transactions_trie = Trie::new()
+        var receipts_trie = Trie::new()
+        var receipts: MemVec<Receipt> = MemVec::new()
+        var fault: Option<Import> = Option::None
+        var items = Decoder::new()
+        let body = mut items.list()
+        let _ = body.raw()
+        let transactions = mut body.list()
+        var index: usize = 0
+        while fault.is_none() && !transactions.is_empty() {
+            // A string that holds a list, a legacy transaction wrapped as a
+            // typed one, is malformed in every fork: EELS's Amsterdam
+            // `decode_transaction` takes it, but it makes block bodies
+            // malleable, and clients reject it.
+            let typed = !transactions.is_list()
+            let tx = next_transaction(mut transactions)
+            transactions_trie.item().raw(tx)
+            let decoded = if typed && tx.len() != 0 && tx[0] >= 0xc0 { Result::Err(TxError::Malformed) }
+                else { decode_transaction(tx) }
+            fault = match decoded {
+                Result::Err(TxError::Allocation) => Option::Some(Import::Failed(ALLOCATION)),
+                Result::Err(error) => Option::Some(Import::Invalid(InvalidBlock::Undecodable(index, error))),
+                Result::Ok((request, _)) => {
+                    let receipt = block.transact(request, mut tracer)
+                    if receipt.invalid != VALID {
+                        Option::Some(Import::Invalid(InvalidBlock::Transaction(index, receipt.invalid)))
+                    } else if !is_evm_outcome(receipt.status) {
+                        Option::Some(Import::Failed(HostFailure::Status(receipt.status)))
+                    } else {
+                        encode_receipt(mut receipts_trie.item(), receipt, kind: request.env.kind)
+                        if receipts.try_push(receipt).is_ok() { Option::None }
+                            else { Option::Some(Import::Failed(ALLOCATION)) }
+                    }
+                },
+            }
+            index += 1
+        }
+        if let Option::Some(fault) = fault {
+            // A host failure as the block began, or in an earlier
+            // transaction's deposits, came first.
+            let failure = block.failure()
+            self.evm = block.abandon()
+            return match failure {
+                Option::Some(BlockError::Host(status)) => Import::Failed(HostFailure::Status(status)),
+                _ => fault,
+            }
+        }
+        let (evm, finished) = block.finish(withdrawals)
+        self.evm = evm
+        let output = match finished {
+            Result::Ok(output) => output,
+            Result::Err(BlockError::Host(status)) => return Import::Failed(HostFailure::Status(status)),
+            Result::Err(error) => return Import::Invalid(InvalidBlock::Execution(error)),
+        }
+        let roots = (transactions_trie.root(), state_root(mut self.evm.world_mut()), receipts_trie.root(),
+                     withdrawals_trie.root())
+        let (Option::Some(transactions_root), Option::Some(state), Option::Some(receipts_root),
+             Option::Some(withdrawals_root)) = roots else { return Import::Failed(ALLOCATION) }
+        match mismatch(header, output, transactions_root, state_root: state, receipts_root, withdrawals_root) {
+            Option::Some(reason) => Import::Invalid(reason),
+            Option::None => Import::Valid(Imported { receipts, output }),
         }
     }
 }

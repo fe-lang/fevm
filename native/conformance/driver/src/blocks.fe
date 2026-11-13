@@ -74,7 +74,7 @@ fn reason(_ invalid: InvalidBlock) -> (MemBuffer, Option<usize>) {
         InvalidBlock::Header(error) => (format!("header.", header_error(error)), Option::None),
         InvalidBlock::Ommers => (format!("ommers"), Option::None),
         InvalidBlock::Undecodable(index, error) => (format!("undecodable.", tx_error(error)), Option::Some(index)),
-        InvalidBlock::Transaction(index, invalid) => (format!("transaction.", invalid_name(invalid)), Option::Some(index)),
+        InvalidBlock::Transaction(index, code) => (format!("transaction.", invalid_name(code)), Option::Some(index)),
         InvalidBlock::Execution(error) => (format!("execution.", block_error(error)), Option::None),
         InvalidBlock::GasUsed => (format!("gas_used"), Option::None),
         InvalidBlock::TransactionsRoot => (format!("transactions_root"), Option::None),
