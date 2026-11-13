@@ -654,14 +654,13 @@ pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxReq
     }
 }
 
-/// A system call (EIP-4788): `data` to `target`'s code from the system
-/// address, with 30,000,000 gas that no one pays for and, from EIP-8037, a
-/// state gas reservoir for 16 storage slots. It starts with no account warm,
-/// or from Amsterdam with a transaction's (`Rules::WARM_SYSTEM_CALLS`). A
-/// call that succeeds keeps its state changes; its logs and refund are
-/// dropped. A target without code does nothing and succeeds; a delegated
-/// target runs its delegate's code, without charging for or warming the
-/// delegate.
+/// A system call (EIP-4788): `data` to `target` from the system address,
+/// run as a transaction's message is, with 30,000,000 gas that no one pays
+/// for and, from EIP-8037, a state gas reservoir for 16 storage slots. It
+/// starts with no account warm, or from Amsterdam with a transaction's
+/// (`Rules::WARM_SYSTEM_CALLS`). A call that succeeds keeps its state
+/// changes; its logs and refund are dropped. A target without code does
+/// nothing and succeeds.
 pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data: own InputData, _ block: BlockEnv,
                                     _ config: Config) -> ExecutionResult {
     let target = address_word(target)
@@ -670,23 +669,26 @@ pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data:
     } else {
         tx.begin_cold(config)
     }
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::None, sender: SYSTEM_ADDRESS, to: target, creates: false, nonce: 0,
+        gas_limit: SYSTEM_CALL_GAS, gas_price: block.basefee, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0,
+        value: 0,
+    }
+    let request = TxRequest::new(env, data)
+    var gas = SYSTEM_CALL_GAS
+    var state_gas = StateGas::new(if F::STATE_GAS { SYSTEM_CALL_SLOTS * STORAGE_SET } else { 0 })
+    let prepared = if F::STATE_GAS {
+        prepare_message<F>(mut tx, request, target, chain_id: block.chainid, mut gas, mut state_gas)
+    } else {
+        OK
+    }
     let call = CallEnv {
         address: target, caller: SYSTEM_ADDRESS, origin: SYSTEM_ADDRESS, callvalue: 0,
-        gasprice: block.basefee, gas_limit: SYSTEM_CALL_GAS, is_static: false,
+        gasprice: block.basefee, gas_limit: gas, is_static: false,
     }
-    let noted = if F::BLOCK_ACCESS_LIST { tx.access_account(target, warm: true) } else { OK }
-    if noted != OK {
-        tx.end(commit: false)
-        return status_result(noted)
-    }
-    let checkpoint = tx.checkpoint(is_static: false)
-    var vm = Vm::new()
-    vm.reset(gas: SYSTEM_CALL_GAS, state_gas: StateGas::new(if F::STATE_GAS { SYSTEM_CALL_SLOTS * STORAGE_SET } else { 0 }))
     var tracer = ()
-    let code = tx.delegate(target).unwrap_or(default: target)
-    vm.run_root<F>(tx.program(code), data, call, block, mut tx, mut tracer, creates: false)
-    if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
-    let result = vm.into_result(mut tx.buffers())
+    let result = if prepared == OK { execute_message<F>(mut tx, request, call, block, state_gas, mut tracer) }
+        else { status_result(prepared) }
     if is_evm_outcome(result.status) {
         tx.settle<F>()
         if F::BLOCK_ACCESS_LIST { tx.record_changes() }

@@ -1,10 +1,11 @@
-use core::{MemBuffer, MemVec, Option, Result}
+use core::{MemVec, Option, Result}
 use ingot::block::{Block, BlockError}
 use ingot::evm::Evm
 use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
-use ingot::state::WorldState
+use ingot::state::{WorldState, designator}
 use ingot::status::{INVALID_GAS_LIMIT, OK, VALID}
-use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+use ingot::transaction::SYSTEM_ADDRESS
+use ingot::types::{BlockEnv, Config, ExecutionResult, InputData, default_block_env, empty_bytes}
 
 const SENDER: u256 = 0x1000
 const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
@@ -13,6 +14,7 @@ const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
 const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
 const BUILDER_DEPOSIT_REQUESTS: u256 = 0x0000bff46984e3725691fa540a8c7589300d8282
 const BUILDER_EXIT_REQUESTS: u256 = 0x000064d678505ad48f8ccb093bc65613800e8282
+const DELEGATE: u256 = 0xde1e
 
 // A funded sender, system contracts that store their input's first word in
 // slot 0, a withdrawal request contract that returns the byte 0xab and a
@@ -129,17 +131,43 @@ fn genesis_block_makes_no_system_calls() {
     core::assert(list.items == 4)
 }
 
-// The gas left when `code`, run by a system call to the beacon roots
-// contract in a block with coinbase 0xc0ffee, pushes GAS and stores it in
-// slot 0.
-fn system_call_gas(_ config: Config, _ code: [u8; 10]) -> u256 {
-    var world = WorldState::empty()
-    core::assert(world.set_code(address: BEACON_ROOTS, code) == OK)
+// A system call to `target` on `world` with `input`, in a block with
+// coinbase 0xc0ffee: the `Evm` after it, and its result.
+fn system_call_on(_ world: own WorldState, _ config: Config, target: u256,
+                  _ input: own InputData) -> (Evm, ExecutionResult) {
     var evm = Evm::new(world, config)
     var block = env()
     block.coinbase = 0xc0ffee
-    core::assert(evm.system_call(target: BEACON_ROOTS, InputData::new(MemBuffer::empty(), status: OK), block).status == OK)
+    let result = evm.system_call(target, input, block)
+    (evm, result)
+}
+
+// The gas left when `code`, run by a system call to the beacon roots
+// contract, pushes GAS and stores it in slot 0.
+fn system_call_gas(_ config: Config, _ code: [u8; 10]) -> u256 {
+    var world = WorldState::empty()
+    core::assert(world.set_code(address: BEACON_ROOTS, code) == OK)
+    let (evm, result) = system_call_on(world, config, target: BEACON_ROOTS, empty_bytes())
+    core::assert(result.status == OK)
     evm.world().storage_load(BEACON_ROOTS, 0)
+}
+
+// Delegates the beacon roots contract to `delegate` (EIP-7702).
+fn delegate_beacon_roots(_ world: mut WorldState, _ delegate: u256) {
+    core::assert(world.set_code(address: BEACON_ROOTS, code: designator(delegate)) == OK)
+}
+
+// The accounts and storage keys in the access list of an Amsterdam block
+// on `world` without transactions or withdrawals.
+fn listed(_ world: own WorldState) -> u64 {
+    let block = Block::begin(Evm::new(world, Config::amsterdam()), env(), parent_hash: 1, parent_beacon_block_root: 2)
+    match block.finish(MemVec::new()).1 {
+        Result::Ok(output) => match output.access_list {
+            Option::Some(list) => list.items,
+            Option::None => 0,
+        },
+        Result::Err(_) => 0,
+    }
 }
 
 // BALANCE of ADDRESS, CALLER, precompile 1 and COINBASE, then GAS; PUSH0; SSTORE.
@@ -176,6 +204,66 @@ fn amsterdam_system_call_starts_with_a_transactions_warm_accounts() {
     // Amsterdam's 3,000. 30,000,000 - 3 - 3,000 - 2.
     let other: [u8; 10] = [0x61, 0xbe, 0xef, 0x31, 0x5a, 0x5f, 0x55, 0, 0, 0]
     core::assert(system_call_gas(Config::amsterdam(), other) == 29_996_995)
+}
+
+#[test]
+fn osaka_system_call_warms_its_delegate_for_free() {
+    var world = WorldState::empty()
+    delegate_beacon_roots(mut world, DELEGATE)
+    // PUSH2 0xde1e; BALANCE; POP; ADDRESS; BALANCE; POP; GAS; PUSH0; SSTORE.
+    let code: [u8; 11] = [0x61, 0xde, 0x1e, 0x31, 0x50, 0x30, 0x31, 0x50, 0x5a, 0x5f, 0x55]
+    core::assert(world.set_code(address: DELEGATE, code) == OK)
+    let (evm, result) = system_call_on(world, Config::osaka(), target: BEACON_ROOTS, empty_bytes())
+    // The delegate is warm and the target cold: 30,000,000 - 3 (PUSH2) - 100
+    // - 2 (POP) - 2 (ADDRESS) - 2,600 - 2 (POP) - 2 (GAS).
+    core::assert(result.status == OK && evm.world().storage_load(BEACON_ROOTS, 0) == 29_997_289)
+}
+
+#[test]
+fn amsterdam_system_call_charges_and_lists_its_delegate() {
+    var world = amsterdam_world()
+    // The six system contracts, and the slot that each of two of them writes.
+    core::assert(listed(amsterdam_world()) == 8)
+    delegate_beacon_roots(mut world, DELEGATE)
+    // GAS; PUSH0; SSTORE, into the beacon roots contract's slot 0.
+    core::assert(world.set_code(address: DELEGATE, code: [0x5a as u8, 0x5f, 0x55]) == OK)
+    let block = Block::begin(Evm::new(world, Config::amsterdam()), env(), parent_hash: 1, parent_beacon_block_root: 2)
+    // 30,000,000 - 3,000 (the cold delegate) - 2 (GAS).
+    core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 29_996_998)
+    let world = block.abandon().into_world()
+    // And the delegate.
+    core::assert(listed(world) == 9)
+}
+
+#[test]
+fn system_call_to_a_precompile_delegate_runs_nothing() {
+    for delegate in [4, 0xc0ffee, SYSTEM_ADDRESS] {
+        var world = WorldState::empty()
+        delegate_beacon_roots(mut world, delegate)
+        let input: [u8; 2] = [0xab, 0xcd]
+        let (_, result) = system_call_on(world, Config::amsterdam(), target: BEACON_ROOTS,
+                                         InputData::copy_from(input, offset: 0, len: 2))
+        // The identity precompile, the coinbase and the system address are
+        // warm: 30,000,000 - 100.
+        core::assert(result.status == OK && result.output.len() == 0 && result.gas_remaining == 29_999_900)
+    }
+    var world = WorldState::empty()
+    delegate_beacon_roots(mut world, 4)
+    let (_, result) = system_call_on(world, Config::osaka(), target: BEACON_ROOTS, empty_bytes())
+    // Before Amsterdam the delegate is free.
+    core::assert(result.status == OK && result.gas_remaining == 30_000_000)
+}
+
+#[test]
+fn system_call_runs_a_precompile_target() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        let input: [u8; 2] = [0xab, 0xcd]
+        let (_, result) = system_call_on(WorldState::empty(), config, target: 4,
+                                         InputData::copy_from(input, offset: 0, len: 2))
+        // The identity precompile returns its input: 30,000,000 - 15 - 3 (one word).
+        core::assert(result.status == OK && result.gas_remaining == 29_999_982)
+        core::assert(result.output.len() == 2 && result.output[0] == 0xab && result.output[1] == 0xcd)
+    }
 }
 
 #[test]
