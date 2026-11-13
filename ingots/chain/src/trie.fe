@@ -183,6 +183,9 @@ pub fn state_root(_ world: mut WorldState) -> Option<u256> {
         value.fixed(if code_hash == 0 { EMPTY_CODE_HASH } else { code_hash }, len: 32)
         value.end(list)
     }
+    // Every slot's account is in the world: `storage_store` gives a new
+    // slot's account a record, and removing an account removes its slots.
+    core::assert(next == slots.len())
     accounts.root()
 }
 
