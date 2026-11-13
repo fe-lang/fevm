@@ -475,7 +475,7 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
         let program = Program::copy_from(request.data(), len: request.data().len() as usize)
         var vm = Vm::new()
         vm.reset(gas: call.gas_limit, state_gas)
-        vm.run_root<F, T>(program, empty_bytes(), call, block, mut tx, mut tracer, creates: true)
+        vm.run_root<F>(program, empty_bytes(), call, block, mut tx, mut tracer, creates: true)
         if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
         return vm.into_result(mut tx.buffers())
     }
@@ -517,7 +517,7 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
     }
     var vm = Vm::new()
     vm.reset(gas: call.gas_limit, state_gas)
-    vm.run_root<F, T>(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer,
+    vm.run_root<F>(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer,
                       creates: false)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     vm.into_result(mut tx.buffers())
@@ -548,8 +548,8 @@ fn apply<T: Tracer>(_ world: own WorldState, _ request: TxRequest, _ block: Bloc
                     _ buffers: mut Buffers, _ tracer: mut T, commit: bool) -> Applied {
     var tx = Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers)
     let receipt = match config.fork {
-        Fork::Osaka => apply_in<Osaka, T>(mut tx, request, block, config, mut tracer, commit),
-        Fork::Amsterdam => apply_in<Amsterdam, T>(mut tx, request, block, config, mut tracer, commit),
+        Fork::Osaka => apply_in<Osaka>(mut tx, request, block, config, mut tracer, commit),
+        Fork::Amsterdam => apply_in<Amsterdam>(mut tx, request, block, config, mut tracer, commit),
     }
     let (state, lent) = tx.release()
     buffers = lent
@@ -593,7 +593,7 @@ fn apply_in<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ 
         // The transaction's own message is a call or creation at depth zero.
         tracer.enter(CallStart { kind: if env.creates { 0xf0 } else { 0xf1 }, depth: 0, from: sender, to: target,
                                  value: env.value, gas: call.gas_limit }, input: request.data().bytes())
-        let result = execute_message<F, T>(mut tx, request, call, block, state_gas, mut tracer)
+        let result = execute_message<F>(mut tx, request, call, block, state_gas, mut tracer)
         tracer.leave(CallEnd { depth: 0, status: result.status, gas: result.gas_remaining },
                      output: result.output.span())
         result
