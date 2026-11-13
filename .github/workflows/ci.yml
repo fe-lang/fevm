@@ -93,7 +93,7 @@ jobs:
           path: |
             ~/eest/fixtures/state_tests
             ~/eest/fixtures/blockchain_tests
-          key: eest-blocks-amsterdam-${{ env.EEST_RELEASE }}
+          key: eest-chain-${{ env.EEST_RELEASE }}
 
       - name: Download the fixtures
         id: download
@@ -105,7 +105,13 @@ jobs:
             -D "$RUNNER_TEMP"
           mkdir -p ~/eest
           tar -xzf "$RUNNER_TEMP/fixtures.tar.gz" -C ~/eest fixtures/state_tests \
-            fixtures/blockchain_tests/for_osaka fixtures/blockchain_tests/for_amsterdam
+            fixtures/blockchain_tests/for_osaka fixtures/blockchain_tests/for_amsterdam \
+            fixtures/blockchain_tests/for_bpo1 fixtures/blockchain_tests/for_bpo2 \
+            fixtures/blockchain_tests/for_osakatobpo1attime15k fixtures/blockchain_tests/for_bpo1tobpo2attime15k \
+            fixtures/blockchain_tests/for_bpo2toamsterdamattime15k \
+            fixtures/blockchain_tests/for_amsterdambpoincrease fixtures/blockchain_tests/for_amsterdambpodecrease \
+            fixtures/blockchain_tests/for_amsterdamtobpoincreaseattime15k \
+            fixtures/blockchain_tests/for_amsterdamtobpodecreaseattime15k
 
       - name: Save the fixtures
         if: ${{ !cancelled() && steps.download.outcome == 'success' }}
