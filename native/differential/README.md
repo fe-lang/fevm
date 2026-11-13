@@ -1,7 +1,7 @@
 # Osaka frame differential corpus
 
 This runner compares FeVM's single-frame execution with `revm-interpreter`
-**31.1.0** with a pinned [DUP/SWAP halt-classification correction](https://github.com/sbillig/revm/commit/d613ef5735b9beb17acd53a5a1802ebc2198a18d),
+**43.0.2** (revm 43.0.3) with a pinned [DUP and DUPN underflow-classification correction](https://github.com/sbillig/revm/commit/5701d0aa213057c8fe7ed5a4cadd606767ab7a59),
 explicitly configured for **Osaka**. Cargo.lock pins the reference and its
 dependencies. The corpus includes 1,845 frames: arithmetic batches, all PUSH
 widths and truncation positions, jumps, stack limits, memory/copy boundaries,
@@ -81,8 +81,8 @@ PUSH cases follow
 jump analysis follows
 [valid jump destinations](https://github.com/ethereum/execution-specs/blob/c335bc4e9e99f7b91024d9033bdc89ce54394848/src/ethereum/forks/cancun/vm/runtime.py).
 These are local, specification-derived cases, not the Ethereum execution-spec
-test distribution. The reference crate was released from revm commit
-[`0d424ba11fd59d2a2a13988d61381e5b5cfccd22`](https://github.com/bluealloy/revm/tree/0d424ba11fd59d2a2a13988d61381e5b5cfccd22).
+test distribution. The reference's revm is release v120
+[`6b2e655b`](https://github.com/bluealloy/revm/tree/6b2e655b91f21c3a21770bed78def5b379ed1d17) with that correction.
 
 
 ## Stateful transaction sequences

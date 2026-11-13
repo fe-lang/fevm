@@ -8,7 +8,7 @@ use revm_interpreter::host::DummyHost;
 use revm_interpreter::interpreter::{EthInterpreter, ExtBytecode};
 use revm_interpreter::{
     CallInput, InputsImpl, InstructionResult, Interpreter, InterpreterResult, SharedMemory,
-    instruction_table,
+    instruction_table, instructions::gas_table_spec,
 };
 use revm_primitives::{Bytes, hardfork::SpecId, hex};
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,8 @@ fn execute(case: Case) -> Result<Frame, Box<dyn Error>> {
     let result = interpreter
         .run_plain(
             &instruction_table::<EthInterpreter, DummyHost>(),
-            &mut DummyHost,
+            &gas_table_spec(SpecId::OSAKA),
+            &mut DummyHost::new(SpecId::OSAKA),
         )
         .into_result_return()
         .ok_or("nested frames are outside this corpus")?;

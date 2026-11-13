@@ -6,7 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-revm = { git = "https://github.com/sbillig/revm", rev = "d613ef5735b9beb17acd53a5a1802ebc2198a18d", default-features = false, features = ["std"] }
+revm = { git = "https://github.com/sbillig/revm", rev = "5701d0aa213057c8fe7ed5a4cadd606767ab7a59", default-features = false, features = ["std"] }
 
 [profile.release]
 codegen-units = 1
