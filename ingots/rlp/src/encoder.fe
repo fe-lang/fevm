@@ -52,8 +52,27 @@ impl Encoder {
         self.bytes.extend_from(bytes)
     }
 
+    /// A string of the words' big-endian bytes, such as a logs bloom's 256.
+    pub fn words<const N: usize>(mut self, _ words: [u256; N]) {
+        if !self.reserve(N * 32 + 9) { return }
+        self.header(N * 32, base: 0x80)
+        for word in words { self.bytes.extend_from_word(word, len: 32) }
+    }
+
+    /// An item already encoded, as it is.
+    pub fn raw(mut self, _ item: MemSpan) {
+        if !self.reserve(item.len()) { return }
+        self.bytes.extend_from(item)
+    }
+
     /// Where a list begins, for `end`.
     pub fn begin(self) -> usize { self.bytes.len() }
+
+    /// What was put since `begin` gave `start`, such as an item to hash.
+    pub fn since(self, _ start: usize) -> ref MemSpan { self.bytes.slice(offset: start, len: self.bytes.len() - start) }
+
+    /// Drops what was put since `begin` gave `start`.
+    pub fn truncate(mut self, _ start: usize) { self.bytes.truncate(start) }
 
     /// Makes a list of the items put since `begin` gave `start`.
     pub fn end(mut self, _ start: usize) {
@@ -105,4 +124,28 @@ fn rlp_encodes_integers_strings_and_lists() {
     let head: [u8; 13] = [0xf8, 72, 0x80, 0x0f, 0x82, 0x04, 0x00, 0x83, 0x64, 0x6f, 0x67, 0xc0, 0xb8]
     core::assert(bytes.len() == 74 && bytes[13] == 60)
     for index in 0..13 { core::assert(bytes[index] == head[index]) }
+}
+
+#[test]
+fn rlp_puts_words_and_encoded_items() {
+    // [<two words>, 0x01, "dog"], the last two put encoded, and "cat" put
+    // after them and dropped.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.words([0x0102, 0x03 << 248])
+    let start = rlp.begin()
+    let encoded: [u8; 5] = [0x01, 0x83, 0x64, 0x6f, 0x67]
+    var items = MemBuffer::empty()
+    for byte in encoded { items.push(byte) }
+    rlp.raw(items.span())
+    core::assert(rlp.since(start).len() == 5 && rlp.since(start)[1] == 0x83)
+    let cat = rlp.begin()
+    rlp.fixed(0x636174, len: 3)
+    rlp.truncate(cat)
+    rlp.end(list)
+    let bytes = rlp.finish().unwrap()
+    // f8 47, b8 40 and the 64 bytes, then the 5.
+    core::assert(bytes.len() == 73 && bytes[0] == 0xf8 && bytes[1] == 71 && bytes[2] == 0xb8 && bytes[3] == 64)
+    core::assert(bytes[34] == 0x01 && bytes[35] == 0x02 && bytes[36] == 0x03 && bytes[67] == 0)
+    for index in 0..5 { core::assert(bytes[68 + index] == encoded[index]) }
 }
