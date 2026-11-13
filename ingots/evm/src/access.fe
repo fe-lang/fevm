@@ -1,9 +1,9 @@
 // EIP-7928: a block's access list, built as the block runs.
 use core::{MemBuffer, MemSpan, MemVec, Option}
 use core::ops::Ord
+use fevm_rlp::Encoder
 use keccak::Keccak256
 use swisstable::SwissTable
-use ingot::rlp::Encoder
 use ingot::state::{StorageKey, delegation}
 
 // EIP-7928: the gas of a block's gas limit that each of the list's accounts
