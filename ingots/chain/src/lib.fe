@@ -2,3 +2,4 @@
 // validating headers against their parents, computing Merkle roots, and
 // importing blocks through `fevm::Block`.
 pub use transaction::{TxError, decode_transaction}
+pub use header::{Header, HeaderError, blob_base_fee}
