@@ -124,7 +124,7 @@ impl Transaction {
     pub fn access(mut self) -> mut AccessRecorder { mut self.access }
 
     /// The block's changes.
-    pub fn changes(mut self) -> mut BlockChanges { mut self.changes }
+    pub(ingot) fn changes(mut self) -> mut BlockChanges { mut self.changes }
 
     pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
 
@@ -623,7 +623,7 @@ impl Transaction {
     /// balance, nonce, code and slots where they end different from the
     /// start. False if the block's changes cannot grow, for the caller to
     /// undo the run, which `settle` has not changed yet.
-    pub fn record_changes<F: Rules>(mut self) -> bool {
+    pub(ingot) fn record_changes<F: Rules>(mut self) -> bool {
         if !self.changes.recording() { return true }
         let listing = F::BLOCK_ACCESS_LIST && self.access.recording()
         if listing { self.access.begin_changes() }

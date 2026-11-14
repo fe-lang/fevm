@@ -48,7 +48,7 @@ pub struct BlockChanges {
 }
 
 impl BlockChanges {
-    pub fn new() -> Self {
+    pub(ingot) fn new() -> Self {
         BlockChanges {
             recording: false, positions: SwissTable<u256, usize>::empty(), accounts: MemVec::new(),
             kept: SwissTable<StorageKey, bool>::empty(), slots: MemVec::new(), block_hashes: MemVec::new(),
@@ -56,9 +56,9 @@ impl BlockChanges {
     }
 
     /// Whether a block records its changes here.
-    pub fn recording(self) -> bool { self.recording }
+    pub(ingot) fn recording(self) -> bool { self.recording }
     /// Starts recording a block's changes.
-    pub fn start(mut self) { self.recording = true }
+    pub(ingot) fn start(mut self) { self.recording = true }
 
     /// The accounts the block changed, as they were before it.
     pub fn accounts(self) -> ref MemVec<AccountBefore> { ref self.accounts }
