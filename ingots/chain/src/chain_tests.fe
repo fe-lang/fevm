@@ -86,17 +86,24 @@ fn block(at: usize, byte: u8) -> MemBuffer {
 
 pub fn valid() -> MemBuffer { block(at: usize::max(), byte: 0) }
 
-// Whether `chain` is still at genesis, with the genesis state.
-fn at_genesis(_ chain: Chain) -> bool {
+// The chain's state root, which must be its world's.
+fn root(_ chain: mut Chain) -> u256 {
     var world = chain.world().try_clone().unwrap()
-    chain.head().hash == GENESIS_HASH && state_root(mut world).unwrap() == GENESIS_STATE_ROOT
+    let root = chain.state_root().unwrap()
+    core::assert(root == state_root(mut world).unwrap())
+    root
+}
+
+// Whether `chain` is still at genesis, with the genesis state.
+fn at_genesis(_ chain: mut Chain) -> bool {
+    chain.head().hash == GENESIS_HASH && root(mut chain) == GENESIS_STATE_ROOT
 }
 
 // Whether importing `rlp` into the chain at genesis is invalid for
 // `reason`, leaves the chain at genesis, and the valid block can follow.
 fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
     var chain = genesis(chain_id: 1)
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
     var tracer = ()
     let rejected = match (chain.import(rlp.span(), mut tracer), reason) {
         (Import::Invalid(InvalidBlock::StateRoot), InvalidBlock::StateRoot) => true,
@@ -109,9 +116,9 @@ fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
          InvalidBlock::Undecodable(0, TxError::Malformed)) => true,
         _ => false,
     }
-    if !rejected || !at_genesis(chain) { return false }
+    if !rejected || !at_genesis(mut chain) { return false }
     match chain.import(valid().span(), mut tracer) {
-        Import::Valid(_) => chain.head().hash == BLOCK_HASH,
+        Import::Valid(_) => chain.head().hash == BLOCK_HASH && root(mut chain) == BLOCK_STATE_ROOT,
         _ => false,
     }
 }
@@ -119,7 +126,7 @@ fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
 #[test]
 fn chain_imports_a_valid_block() {
     var chain = genesis(chain_id: 1)
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
     var tracer = ()
     match chain.import(valid().span(), mut tracer) {
         Import::Valid(imported) => {
@@ -130,14 +137,14 @@ fn chain_imports_a_valid_block() {
         },
         _ => core::assert(false),
     }
-    var world = chain.world().try_clone().unwrap()
     core::assert(chain.head().hash == BLOCK_HASH && chain.head().number == 1)
-    core::assert(state_root(mut world).unwrap() == BLOCK_STATE_ROOT)
+    core::assert(root(mut chain) == BLOCK_STATE_ROOT)
     // The head's child must be block 2: the block again is not.
     match chain.import(valid().span(), mut tracer) {
         Import::Invalid(InvalidBlock::Header(_)) => {},
         _ => core::assert(false),
     }
+    core::assert(root(mut chain) == BLOCK_STATE_ROOT)
     core::assert(chain.head().hash == BLOCK_HASH)
 }
 
@@ -181,5 +188,5 @@ fn chain_rejects_an_invalid_transaction() {
         Import::Invalid(InvalidBlock::Transaction(0, invalid)) => core::assert(invalid == INVALID_CHAIN_ID),
         _ => core::assert(false),
     }
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
 }

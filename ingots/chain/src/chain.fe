@@ -1,14 +1,15 @@
 // A chain of blocks on one world: importing a block from its RLP.
 use core::{MemSpan, MemVec, Option, Result}
-use fevm::{Block, BlockEnv, BlockError, BlockOutput, Evm, Receipt, Withdrawal, WorldState}
+use fevm::{Block, BlockChanges, BlockEnv, BlockError, BlockOutput, Evm, Receipt, Withdrawal, WorldState}
 use fevm::status::{ERR_HOST_ALLOCATION, VALID, is_evm_outcome}
 use fevm::trace::Tracer
 use fevm_rlp::Decoder
 use ingot::header::{Header, HeaderError}
 use ingot::receipt::encode_receipt
 use ingot::schedule::Schedule
+use ingot::state_trie::StateTrie
 use ingot::transaction::{TxError, decode_transaction}
-use ingot::trie::{Trie, state_root}
+use ingot::trie::Trie
 
 // EIP-7934: the longest block RLP, 10 MiB less a 2 MiB margin.
 const MAX_RLP_BLOCK_SIZE: usize = 8_388_608
@@ -69,8 +70,9 @@ pub enum Import {
 }
 
 /// A chain from Osaka on: the world after its head block, which only a
-/// valid child of the head replaces. It keeps one head and no side branches.
-pub struct Chain { evm: Evm, schedule: Schedule, chain_id: u256, head: Header }
+/// valid child of the head replaces, and the state trie of that world. It
+/// keeps one head and no side branches.
+pub struct Chain { evm: Evm, trie: StateTrie, schedule: Schedule, chain_id: u256, head: Header }
 
 // The next transaction as a block carries it: a legacy one's list, or a
 // typed one's string, without its header, of its type and payload.
@@ -103,12 +105,25 @@ impl Chain {
     /// A chain at `genesis`, whose state is `world`, with the forks of
     /// `schedule`.
     pub fn new(_ world: own WorldState, _ schedule: own Schedule, chain_id: u256, genesis: own Header) -> Self {
-        let evm = Evm::new(world, schedule.config_at(genesis.timestamp))
-        Chain { evm, schedule, chain_id, head: genesis }
+        var evm = Evm::new(world, schedule.config_at(genesis.timestamp))
+        let trie = StateTrie::new(mut evm.world_mut())
+        Chain { evm, trie, schedule, chain_id, head: genesis }
     }
 
     pub fn head(self) -> ref Header { ref self.head }
     pub fn world(self) -> ref WorldState { self.evm.world() }
+
+    /// The state root of the head's world, from its trie. A trie that an
+    /// allocation failed is rebuilt from the world here; none if that fails
+    /// too.
+    pub fn state_root(mut self) -> Option<u256> {
+        if let Option::Some(root) = self.trie.root() { return Option::Some(root) }
+        // The failed trie goes before its replacement is built.
+        var none = WorldState::empty()
+        self.trie = StateTrie::new(mut none)
+        self.trie = StateTrie::new(mut self.evm.world_mut())
+        self.trie.root()
+    }
 
     /// Imports the block `rlp` encodes as the head's child, by the rules of
     /// the fork in force at its timestamp: checks its size and decoding, its
@@ -163,6 +178,8 @@ impl Chain {
             let Option::Some(env) = header.block_env(chain_id: self.chain_id, config) else {
                 return Import::Failed(HostFailure::BlobBaseFee)
             }
+            // The trie, rebuilt if it failed, holds the world the block begins on.
+            if self.state_root().is_none() { return Import::Failed(ALLOCATION) }
             self.evm.set_config(config)
             let verdict = self.execute(header, env, withdrawals, withdrawals_trie, mut tracer)
             if let Import::Valid(_) = verdict { self.head = header }
@@ -233,19 +250,36 @@ impl Chain {
             Result::Err(BlockError::Host(status)) => return Import::Failed(HostFailure::Status(status)),
             Result::Err(error) => return Import::Invalid(InvalidBlock::Execution(error)),
         }
-        let roots = (transactions_trie.root(), state_root(mut self.evm.world_mut()), receipts_trie.root(),
-                     withdrawals_trie.root())
+        self.reread(output.changes)
+        let roots = (transactions_trie.root(), self.trie.root(), receipts_trie.root(), withdrawals_trie.root())
         let (Option::Some(transactions_root), Option::Some(state), Option::Some(receipts_root),
              Option::Some(withdrawals_root)) = roots else {
-            output.changes.undo(mut self.evm.world_mut())
+            self.undo(output.changes)
             return Import::Failed(ALLOCATION)
         }
         match mismatch(header, output, transactions_root, state_root: state, receipts_root, withdrawals_root) {
             Option::Some(reason) => {
-                output.changes.undo(mut self.evm.world_mut())
+                self.undo(output.changes)
                 Import::Invalid(reason)
             },
             Option::None => Import::Valid(Imported { receipts, output }),
         }
+    }
+
+    // Rereads into the trie each account and slot `changes` names, the
+    // accounts first: a removed account goes with its slots, which then
+    // need no reading.
+    fn reread(mut self, _ changes: BlockChanges) {
+        for account in changes.accounts() { self.trie.reread_account(mut self.evm.world_mut(), account.address) }
+        for slot in changes.slots() {
+            self.trie.reread_slot(mut self.evm.world_mut(), address: slot.address, slot: slot.slot)
+        }
+    }
+
+    // Puts the world back as it was before the block of `changes`, and the
+    // trie with it.
+    fn undo(mut self, _ changes: BlockChanges) {
+        changes.undo(mut self.evm.world_mut())
+        self.reread(changes)
     }
 }

@@ -3,7 +3,7 @@ use std::io::Stdout
 use fevm::{BlobSchedule, BlockError, Config, WorldState}
 use fevm::hex::write_hex_word
 use fevm::status::{invalid_name, status_name}
-use fevm_chain::{Chain, Header, HeaderError, HostFailure, Import, InvalidBlock, Schedule, TxError, state_root}
+use fevm_chain::{Chain, Header, HeaderError, HostFailure, Import, InvalidBlock, Schedule, TxError}
 use fevm_rlp::Decoder
 use ingot::{Reader, host_error, read_accounts, read_fork, write_world}
 
@@ -121,8 +121,10 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
             return 0
         },
     }
-    let Option::Some(root) = state_root(mut world) else { return host_error("state root allocation failed") }
-    if root != genesis.state_root {
+    let genesis_root = genesis.state_root
+    var chain = Chain::new(world, schedule, chain_id, genesis)
+    let Option::Some(root) = chain.state_root() else { return host_error("state root allocation failed") }
+    if root != genesis_root {
         var text = MemBuffer::empty()
         with (mut text) {
             "{\"genesis\":\"the pre-state's root is ".fmt(mut text)
@@ -132,7 +134,6 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
         print!(text)
         return 0
     }
-    var chain = Chain::new(world, schedule, chain_id, genesis)
     var tracer = ()
     var text = MemBuffer::empty()
     with (mut text) {
