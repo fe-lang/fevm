@@ -163,21 +163,18 @@ impl Chain {
             let Option::Some(env) = header.block_env(chain_id: self.chain_id, config) else {
                 return Import::Failed(HostFailure::BlobBaseFee)
             }
-            let Option::Some(snapshot) = self.evm.world().try_clone() else { return Import::Failed(ALLOCATION) }
             self.evm.set_config(config)
             let verdict = self.execute(header, env, withdrawals, withdrawals_trie, mut tracer)
-            match verdict {
-                Import::Valid(_) => self.head = header,
-                _ => self.evm.set_world(snapshot),
-            }
+            if let Import::Valid(_) = verdict { self.head = header }
             verdict
         }
     }
 
     // Runs the block `header` heads, whose transactions are the second item
     // of `rlp`, on the head's world, and compares what it gives with the
-    // header. The block holds the `Evm` until finishing it or abandoning it
-    // gives it back: `self.evm` is a hole until then, which every path fills.
+    // header; undoes it unless it is valid. The block holds the `Evm` until
+    // finishing it or abandoning it gives it back: `self.evm` is a hole
+    // until then, which every path fills.
     fn execute<T: Tracer>(mut self, _ header: Header, _ env: BlockEnv, _ withdrawals: own MemVec<Withdrawal>,
                           _ withdrawals_trie: own Trie, _ tracer: mut T) -> Import uses (rlp: MemSpan) {
         var block = Block::begin(self.evm, env, parent_hash: header.parent_hash,
@@ -239,9 +236,15 @@ impl Chain {
         let roots = (transactions_trie.root(), state_root(mut self.evm.world_mut()), receipts_trie.root(),
                      withdrawals_trie.root())
         let (Option::Some(transactions_root), Option::Some(state), Option::Some(receipts_root),
-             Option::Some(withdrawals_root)) = roots else { return Import::Failed(ALLOCATION) }
+             Option::Some(withdrawals_root)) = roots else {
+            output.changes.undo(mut self.evm.world_mut())
+            return Import::Failed(ALLOCATION)
+        }
         match mismatch(header, output, transactions_root, state_root: state, receipts_root, withdrawals_root) {
-            Option::Some(reason) => Import::Invalid(reason),
+            Option::Some(reason) => {
+                output.changes.undo(mut self.evm.world_mut())
+                Import::Invalid(reason)
+            },
             Option::None => Import::Valid(Imported { receipts, output }),
         }
     }

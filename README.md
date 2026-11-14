@@ -213,8 +213,8 @@ head, and `Imported` has its receipts and `BlockOutput`. `InvalidBlock` names
 the first rule an invalid block breaks; a host failure (an allocation, a
 balance past 2^256, a blob base fee too large to compute) is no verdict on
 the block.
-Either leaves the world and the head as they were: the chain keeps a copy of
-the world while a block runs.
+Either leaves the world and the head as they were: the chain undoes the
+block from its changes.
 
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks
