@@ -24,6 +24,7 @@ pub use processor::{self, Authorization, Capacity, Receipt, TxEnv, TxRequest, Wi
 pub use evm::Evm
 pub use block::{Block, BlockError, BlockOutput}
 pub use access::BlockAccessList
+pub use changes::{AccountBefore, BlockChanges, SlotBefore}
 
 #[cfg(target = "native")]
 pub fn main() -> i32 uses (args: Args, input: mut Stdin, out: mut Stdout) {

@@ -1,0 +1,165 @@
+// A block's changes to the world, with what each value held before the block.
+use core::{MemVec, Option}
+use swisstable::SwissTable
+use ingot::journal::{Change, ChangeKind}
+use ingot::state::{Field, StorageKey, WorldState}
+
+/// An account a block changed, as it was before the block: whether it
+/// existed, and each of its balance, nonce and code that the block changed.
+/// From Osaka code appears only on an account without code, and only an
+/// EIP-7702 delegation replaces or clears a delegation, so `code` holds the
+/// delegation the account had, or none for no code.
+pub struct AccountBefore {
+    pub address: u256,
+    pub existed: bool,
+    pub balance: Option<u256>,
+    pub nonce: Option<u256>,
+    pub code: Option<Option<u256>>,
+    // Its slots are among the block's: settlement deleted them with it.
+    storage_kept: bool,
+}
+impl Copy for AccountBefore {}
+
+/// A storage slot a block changed, with its value before the block.
+pub struct SlotBefore { pub address: u256, pub slot: u256, pub value: u256 }
+impl Copy for SlotBefore {}
+
+/// What a block changed: each account and storage slot, with what it held
+/// before the block, and the BLOCKHASH entries the block wrote. What each
+/// holds after is the world's, which may be what it held before, since a
+/// later change can put a value back. An account whose storage alone changed
+/// is not among the accounts; its slots name it.
+///
+/// The changes are not tracked as they are written: when a transaction, a
+/// system call or the withdrawals commit, the journal's surviving entries
+/// name what it changed with what each value held when it began, and the
+/// block's first change of each value keeps that.
+pub struct BlockChanges {
+    recording: bool,
+    // Each account's place in `accounts`.
+    positions: SwissTable<u256, usize>,
+    accounts: MemVec<AccountBefore>,
+    // The slots in `slots`.
+    kept: SwissTable<StorageKey, bool>,
+    slots: MemVec<SlotBefore>,
+    // Block numbers and their hashes before the block.
+    block_hashes: MemVec<(u256, u256)>,
+}
+
+impl BlockChanges {
+    pub fn new() -> Self {
+        BlockChanges {
+            recording: false, positions: SwissTable<u256, usize>::empty(), accounts: MemVec::new(),
+            kept: SwissTable<StorageKey, bool>::empty(), slots: MemVec::new(), block_hashes: MemVec::new(),
+        }
+    }
+
+    /// Whether a block records its changes here.
+    pub fn recording(self) -> bool { self.recording }
+    /// Starts recording a block's changes.
+    pub fn start(mut self) { self.recording = true }
+
+    /// The accounts the block changed, as they were before it.
+    pub fn accounts(self) -> ref MemVec<AccountBefore> { ref self.accounts }
+    /// The storage slots the block changed, with their values before it.
+    pub fn slots(self) -> ref MemVec<SlotBefore> { ref self.slots }
+
+    // The place of the record of `address`, made with `existed` if it has
+    // none; none if the changes cannot grow.
+    fn record(mut self, _ address: u256, existed: bool) -> Option<usize> {
+        let lookup = self.positions.get(address)
+        if lookup.found { return Option::Some(lookup.value) }
+        let at = self.accounts.len()
+        let account = AccountBefore {
+            address, existed, balance: Option::None, nonce: Option::None, code: Option::None, storage_kept: false,
+        }
+        if self.accounts.try_push(account).is_err() { return Option::None }
+        if !self.positions.try_insert(address, at) {
+            let _ = self.accounts.pop()
+            return Option::None
+        }
+        Option::Some(at)
+    }
+
+    // Keeps `value` for a slot the block has not changed; false if the
+    // changes cannot grow.
+    fn keep_slot(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let key = StorageKey { address, slot }
+        let count = self.kept.len()
+        if self.kept.try_find_or_insert(key).is_none() { return false }
+        if self.kept.len() == count || self.slots.try_push(SlotBefore { address, slot, value }).is_ok() { return true }
+        let _ = self.kept.remove(key)
+        false
+    }
+
+    // Keeps for `address` that it `existed`, and each of the balance, nonce
+    // and code given that the block has not changed before; false if the
+    // changes cannot grow.
+    fn keep_account(mut self, _ address: u256, existed: bool, balance: Option<u256>, nonce: Option<u256>,
+                    code: Option<Option<u256>>) -> bool {
+        let Option::Some(at) = self.record(address, existed) else { return false }
+        let account = mut self.accounts[at]
+        if account.balance.is_none() { account.balance = balance }
+        if account.nonce.is_none() { account.nonce = nonce }
+        if account.code.is_none() { account.code = code }
+        true
+    }
+
+    /// Keeps what `change`, a surviving journal entry of a transaction,
+    /// system call or the withdrawals, says its account or slot held when
+    /// the run began, unless the block changed it before. `world` is as the
+    /// run left it before settlement, whose deletions bypass the journal:
+    /// for a touched account left empty, which settlement deletes, it keeps
+    /// that the account existed and the slots it holds, with their values
+    /// at the start from `originals`. False if the changes cannot grow.
+    pub(ingot) fn keep(mut self, _ change: Change, world: WorldState, originals: SwissTable<StorageKey, u256>) -> bool {
+        let address = change.address
+        let kept = match change.kind {
+            ChangeKind::Account { field, previous, existed } => match field {
+                Field::Balance => self.keep_account(address, existed, balance: Option::Some(previous),
+                                                    nonce: Option::None, code: Option::None),
+                Field::Nonce => self.keep_account(address, existed, balance: Option::None,
+                                                  nonce: Option::Some(previous), code: Option::None),
+            },
+            ChangeKind::Sender { nonce, balance, existed } => self.keep_account(address, existed,
+                balance: Option::Some(balance), nonce: Option::Some(nonce), code: Option::None),
+            ChangeKind::Contract { balance, existed } => self.keep_account(address, existed,
+                balance: Option::Some(balance), nonce: Option::Some(0), code: Option::None),
+            // A write that made the account changed its existence.
+            ChangeKind::Storage { slot, previous, existed } => (existed || self.record(address, existed).is_some())
+                && self.keep_slot(address, slot, previous),
+            ChangeKind::Code { existed } => self.keep_account(address, existed, balance: Option::None,
+                nonce: Option::None, code: Option::Some(Option::None)),
+            ChangeKind::Delegation { previous, existed } => self.keep_account(address, existed,
+                balance: Option::None, nonce: Option::None, code: Option::Some(previous)),
+            _ => true,
+        }
+        // Settlement deletes a touched account left empty, which existed when
+        // the run began: one the run made has a nonce or code, or ether that
+        // only code of its own could take away (EIP-161), and a
+        // self-destructed one has a nonce until settlement clears it.
+        if !kept || !change.touches() || !world.is_empty(address) || !world.exists(address) { return kept }
+        let Option::Some(at) = self.record(address, existed: true) else { return false }
+        if self.accounts[at].storage_kept || !world.has_storage(address) { return true }
+        for slot in 0..world.storage_slots() {
+            let entry = world.storage_at(slot)
+            if entry.occupied && entry.address == address {
+                let original = originals.get(StorageKey { address, slot: entry.slot })
+                if !self.keep_slot(address, entry.slot, if original.found { original.value } else { entry.value }) {
+                    return false
+                }
+            }
+        }
+        self.accounts[at].storage_kept = true
+        true
+    }
+
+    /// Keeps `hash`, the hash of block `number` before the block, unless the
+    /// block wrote it before; false if the changes cannot grow.
+    pub(ingot) fn keep_block_hash(mut self, _ number: u256, _ hash: u256) -> bool {
+        for (kept, _) in self.block_hashes {
+            if kept == number { return true }
+        }
+        self.block_hashes.try_push((number, hash)).is_ok()
+    }
+}

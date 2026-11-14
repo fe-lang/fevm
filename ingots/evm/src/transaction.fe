@@ -1,5 +1,6 @@
 use core::{MemSpan, MemVec, Option, Result}
 use ingot::access::AccessRecorder
+use ingot::changes::BlockChanges
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
@@ -59,6 +60,8 @@ pub struct Transaction {
     // What the block's transactions read and change (EIP-7928), while a
     // block records it.
     access: AccessRecorder,
+    // What the block changed, with what it held before, while a block runs.
+    changes: BlockChanges,
 }
 
 impl Transaction {
@@ -81,6 +84,7 @@ impl Transaction {
             config,
             buffers,
             access: AccessRecorder::new(),
+            changes: BlockChanges::new(),
         }
     }
 
@@ -118,6 +122,9 @@ impl Transaction {
 
     /// The block's access list recorder.
     pub fn access(mut self) -> mut AccessRecorder { mut self.access }
+
+    /// The block's changes.
+    pub fn changes(mut self) -> mut BlockChanges { mut self.changes }
 
     pub fn buffers(mut self) -> mut Buffers { mut self.buffers }
 
@@ -607,48 +614,64 @@ impl Transaction {
         first
     }
 
-    /// Notes in the block's access list what the transaction, system call
-    /// or withdrawals left changed, after `settle`: each account that a
-    /// surviving journal entry names, and its balance, nonce, code and
-    /// slots where they differ from what they were at the start. The first
-    /// entry for each holds what it was then, since a reverted frame put
-    /// back what it changed.
-    pub fn record_changes(mut self) {
-        if !self.access.recording() { return }
-        self.access.begin_changes()
+    /// Adds what the transaction, system call or withdrawals left changed to
+    /// the block's changes and, from Amsterdam, its access list, in one pass
+    /// over the journal's surviving entries before `settle`, whose deletions
+    /// bypass the journal. The first entry for each account field and slot
+    /// holds what it was at the start, since a reverted frame put back what
+    /// it changed. The access list has each account an entry names, and its
+    /// balance, nonce, code and slots where they end different from the
+    /// start. False if the block's changes cannot grow, for the caller to
+    /// undo the run, which `settle` has not changed yet.
+    pub fn record_changes<F: Rules>(mut self) -> bool {
+        if !self.changes.recording() { return true }
+        let listing = F::BLOCK_ACCESS_LIST && self.access.recording()
+        if listing { self.access.begin_changes() }
         var position: usize = 0
         while position < self.buffers.journal.len() {
             let change = self.buffers.journal.changes()[position]
             position += 1
+            if !self.changes.keep(change, world: self.state, originals: self.buffers.originals) {
+                // The list has part of a run that is to be undone.
+                self.access.fail()
+                return false
+            }
+            if !listing { continue }
             let address = change.address
             if self.note_read(address) != OK {
                 self.access.fail()
                 continue
             }
+            // Settlement clears a self-destructed account, which this run
+            // made, of its nonce, code and storage, so they end as they
+            // began; from EIP-8246 it keeps the ether.
+            let cleared = self.marked(address, Mark::Doomed)
             match change.kind {
                 ChangeKind::Account { field, previous, .. } => match field {
                     Field::Balance => self.note_balance(address, previous),
-                    Field::Nonce => self.note_nonce(address, previous),
+                    Field::Nonce => if !cleared { self.note_nonce(address, previous) },
                 },
                 ChangeKind::Sender { nonce, balance, .. } => {
                     self.note_nonce(address, previous: nonce)
                     self.note_balance(address, previous: balance)
                 },
                 ChangeKind::Contract { balance, .. } => {
-                    self.note_nonce(address, previous: 0)
+                    if !cleared { self.note_nonce(address, previous: 0) }
                     self.note_balance(address, previous: balance)
                 },
                 ChangeKind::Storage { slot, .. } => {
                     // The slot's first write kept what it held at the start.
-                    if let Option::Some(original) = self.buffers.originals.take(StorageKey { address, slot }) {
+                    let original = self.buffers.originals.take(StorageKey { address, slot })
+                    if !cleared && let Option::Some(original) = original {
                         self.access.storage(address, slot, pre: original, post: self.state.storage_load(address, slot))
                     }
                 },
-                ChangeKind::Code { .. } => self.note_code(address, previous: Option::None),
-                ChangeKind::Delegation { previous, .. } => self.note_code(address, previous),
+                ChangeKind::Code { .. } => if !cleared { self.note_code(address, previous: Option::None) },
+                ChangeKind::Delegation { previous, .. } => if !cleared { self.note_code(address, previous) },
                 _ => {},
             }
         }
+        true
     }
 
     fn note_balance(mut self, _ address: u256, previous: u256) {

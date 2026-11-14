@@ -144,10 +144,10 @@ EIP-7251; from Amsterdam the builder request contracts too, EIP-8282). It
 returns the `Evm`, and a `BlockOutput` with what the header commits to apart
 from its Merkle roots: gas used (from Amsterdam the larger of execution and
 state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
-hash, and from Amsterdam the block's access list (EIP-7928) with its hash. A
-block whose request contract is missing or fails, whose deposit contract
-logged a malformed deposit, or whose access list is too large for its gas
-limit gives a `BlockError` instead.
+hash, from Amsterdam the block's access list (EIP-7928) with its hash, and
+the block's changes. A block whose request contract is missing or fails,
+whose deposit contract logged a malformed deposit, or whose access list is
+too large for its gas limit gives a `BlockError` instead.
 
 The access list is built as the block runs. A read is noted where its gas has
 been paid, the point at which an account or slot is warmed, and stays through
@@ -155,6 +155,25 @@ reverts. Changes are not tracked as they are written: when a transaction
 ends, the journal's surviving entries name what it changed with the values it
 began with, so a write that restored a value counts as a read. Outside a
 block, and in a simulation, nothing is recorded.
+
+The block's changes (`BlockChanges`) are each account it changed, with
+whether it existed and the balance, nonce and code it changed as they were
+before, each storage slot it changed with its value before, and the
+BLOCKHASH entries `begin` wrote. The values after are the world's, and may
+be those before. Code changes only on an account without code or with an
+EIP-7702 delegation, so the code before is none or a delegation. A host
+persists the changes or computes the state root from them. They come from
+the journal in the same pass as the access list, when each transaction,
+system call or the withdrawals end, and only a `Block` records them. A
+transaction whose changes cannot be recorded for want of memory is undone
+and fails as a host failure, so the changes always hold what the block
+changed:
+
+```fe
+let Result::Ok(output) = finished else { return }
+for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code
+for slot in output.changes.slots() {}         // slot.address, .slot, .value
+```
 
 `Block` does not check a header against its parent, decode transactions or
 compute Merkle roots, and does not undo an invalid block's changes; a `Chain`

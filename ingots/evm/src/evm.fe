@@ -1,6 +1,7 @@
 use ingot::fork::{Amsterdam, Fork, Osaka}
 use core::MemVec
 use ingot::access::AccessRecorder
+use ingot::changes::BlockChanges
 use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal, apply, checked, system_call, withdraw}
 use ingot::state::WorldState
 use ingot::trace::Tracer
@@ -73,6 +74,14 @@ impl Evm {
 
     /// The recorder of the block's access list (EIP-7928).
     pub(ingot) fn access(mut self) -> mut AccessRecorder { self.tx.access() }
+
+    /// The block's changes.
+    pub(ingot) fn changes(mut self) -> mut BlockChanges { self.tx.changes() }
+
+    /// The block's changes, which stop recording.
+    pub(ingot) fn take_changes(mut self) -> BlockChanges {
+        core::mem::replace(mut self.tx.changes(), BlockChanges::new())
+    }
 
     pub(ingot) fn system_call(mut self, target: u256, _ data: own InputData, _ block: BlockEnv) -> ExecutionResult {
         match self.config.fork {
