@@ -1,4 +1,5 @@
 use core::Option
+use ingot::block::Block
 use ingot::evm::Evm
 use ingot::status::{ERR_REVERT, OK}
 use ingot::processor::{Authorization, Receipt, TX_FEE_MARKET, TX_SET_CODE, TxEnv, TxRequest}
@@ -10,6 +11,11 @@ use ingot::types::{BlockEnv, Config, default_block_env, empty_bytes}
 const SIGNER: u256 = 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b
 const DELEGATE: u256 = 0xcf896bba480167831b94b3bbf9285b1f211e6963
 const OTHER_SIGNER: u256 = 0x95d1be958d22adf294428c13cc71d89ff320bfd3
+// The signer of `signed(nonce: 0)` with its address cleared.
+const CLEARING_SIGNER: u256 = 0x75069f8c1f49f6d40ab982c1117d6fb1c73f7a78
+// The system contracts a block calls before its transactions.
+const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
+const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
 
 fn signed(nonce: u256) -> Authorization {
     Authorization {
@@ -100,6 +106,70 @@ fn set_code_skips_invalid_authorizations() {
     evm = Evm::new(world(), Config::osaka())
     let ignored = set_code(mut evm, to: 0xdd, nonce: 0, authorizations: [foreign, foreign], count: 1)
     core::assert(ignored.invalid == VALID && evm.world().delegate(SIGNER).is_none())
+}
+
+// A set-code transaction with `signed(nonce: 0)` altered to clear, which
+// recovers a signer with nonce 0 and no account.
+fn clearing() -> TxRequest {
+    let env = TxEnv {
+        kind: TX_SET_CODE, chain_id: Option::Some(1), sender: 0x1000, to: 0xdd, creates: false, nonce: 0,
+        gas_limit: 1_000_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var request = TxRequest::new(env, data: empty_bytes())
+    var clearing = signed(nonce: 0)
+    clearing.address = 0
+    core::assert(request.add_authorization(clearing))
+    request
+}
+
+#[test]
+fn clearing_authorizations_of_new_accounts_undo_and_apply() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        let request = clearing()
+        var evm = Evm::new(world(), config)
+        var tracer = ()
+        let simulated = evm.simulate(request, block(), mut tracer)
+        core::assert(simulated.invalid == VALID && simulated.status == OK)
+        // Undone, the clear leaves the signer without an account, as it was.
+        let state = ref evm.world()
+        core::assert(state.account_count() == 2 && !state.exists(CLEARING_SIGNER) && state.code_size(DELEGATE) == 17)
+        core::assert(state.nonce(0x1000) == 0 && state.balance(0x1000) == 1_000_000_000)
+        // EIP-7702: the signer's code stays empty and its nonce becomes one.
+        let applied = evm.transact(request, block(), mut tracer)
+        core::assert(applied.invalid == VALID && applied.status == OK)
+        let state = ref evm.world()
+        core::assert(state.exists(CLEARING_SIGNER) && state.nonce(CLEARING_SIGNER) == 1)
+        core::assert(state.code_size(CLEARING_SIGNER) == 0 && state.balance(CLEARING_SIGNER) == 0)
+    }
+}
+
+#[test]
+fn abandoned_blocks_undo_clearing_authorizations_of_new_accounts() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        var world = world()
+        // PUSH0; CALLDATALOAD; PUSH0; SSTORE: the system contracts store their input.
+        let store: [u8; 4] = [0x5f, 0x35, 0x5f, 0x55]
+        for address in [BEACON_ROOTS, HISTORY_STORAGE] { core::assert(world.set_code(address, code: store) == OK) }
+        let before = world.try_clone().unwrap()
+        var env = block()
+        env.number = 1
+        let request = clearing()
+        var block = Block::begin(Evm::new(world, config), env, parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+        core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0x5678)
+        var tracer = ()
+        let simulated = block.simulate(request, mut tracer)
+        core::assert(simulated.invalid == VALID && simulated.status == OK && !block.world().exists(CLEARING_SIGNER))
+        let applied = block.transact(request, mut tracer)
+        core::assert(applied.invalid == VALID && applied.status == OK && block.world().nonce(CLEARING_SIGNER) == 1)
+        // Abandoned, the block leaves the world as it was before it, the signer without an account.
+        let world = block.abandon().into_world()
+        core::assert(world.account_count() == before.account_count() && !world.exists(CLEARING_SIGNER))
+        core::assert(world.nonce(0x1000) == before.nonce(0x1000) && world.balance(0x1000) == before.balance(0x1000))
+        core::assert(world.code_size(DELEGATE) == before.code_size(DELEGATE) && world.block_hash(0) == before.block_hash(0))
+        for address in [BEACON_ROOTS, HISTORY_STORAGE] {
+            core::assert(world.storage_load(address, 0) == before.storage_load(address, 0))
+        }
+    }
 }
 
 #[test]
