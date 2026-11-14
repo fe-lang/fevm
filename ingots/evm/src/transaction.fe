@@ -539,6 +539,8 @@ impl Transaction {
         let address = address_word(address)
         let previous = self.state.delegate(address)
         core::assert(self.state.code_size(address) == 0 || previous.is_some())
+        // Clearing no code changes nothing, and makes no account, with nothing to undo.
+        if delegate == 0 && previous.is_none() { return OK }
         // Journaled first: restoring a designator can need allocation.
         let kind = ChangeKind::Delegation { previous, existed: self.state.exists(address) }
         if !self.buffers.journal.push(Change { address, kind }) {
