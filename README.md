@@ -184,9 +184,9 @@ does these.
 ### Chain
 
 `ingots/chain` (`fevm_chain`) imports blocks as a client does, from their
-RLP. A `Chain` holds an `Evm` on the world after its head block, the forks
-by activation time (`Schedule`, each fork a `Config` with its blob
-schedule) and the chain ID:
+RLP. A `Chain` holds an `Evm` on the world after its head block, the state
+trie of that world (`StateTrie`), the forks by activation time (`Schedule`,
+each fork a `Config` with its blob schedule) and the chain ID:
 
 ```fe
 var schedule = Schedule::new(Config::osaka())
@@ -198,6 +198,7 @@ match chain.import(block_rlp, mut tracer) {
     Import::Failed(failure) => {},   // a host failure: no verdict
 }
 let head = chain.head().hash
+let root = chain.state_root()   // the head's, from the trie
 ```
 
 `import` follows the specification's `execute_block`: it rejects a block
@@ -216,10 +217,20 @@ the block.
 Either leaves the world and the head as they were: the chain undoes the
 block from its changes.
 
+The state root is kept incrementally. `Chain::new` builds the trie of the
+whole world once. After each block the chain rereads into it the accounts
+and slots the block's changes name, and the root rehashes only their
+paths; a block rejected after it ran is undone and its keys reread. The trie holds a
+node for every account and slot of the world with its hash, besides the
+world itself: about 100 MB more for 100,000 accounts of 10 slots, a third of
+what that world takes. A trie that an allocation failed is rebuilt from the
+world before the next block. A host that keeps the state in its own storage
+would not use `Chain`, but `Block`, the changes it gives, and its own trie.
+`state_root(world)` computes the root of a whole world in one pass.
+
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks
-before Osaka are not implemented, and the state root is computed from the
-whole world for each block, with no stored trie.
+before Osaka are not implemented.
 
 ### Forks
 
