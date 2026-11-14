@@ -73,12 +73,14 @@ impl Trie {
 }
 
 // The nibble of `key` at `at`, counting from its most significant.
-fn nibble(_ key: u256, _ at: usize) -> usize { ((key >> ((63 - at) * 4) as u256) & 0xf).downcast_truncate() }
+pub(ingot) fn nibble(_ key: u256, _ at: usize) -> usize {
+    ((key >> ((63 - at) * 4) as u256) & 0xf).downcast_truncate()
+}
 
 // Puts the hex-prefix encoding of the nibbles of `key` from `from` to `to`, a
 // leaf's or an extension's path, made in `path`: a flag nibble, then the
 // first nibble if their count is odd and a zero one if not, then the rest.
-fn put_path(_ rlp: mut Encoder, _ path: mut MemBuffer, _ key: u256, from: usize, to: usize, leaf: bool) {
+pub(ingot) fn put_path(_ rlp: mut Encoder, _ path: mut MemBuffer, _ key: u256, from: usize, to: usize, leaf: bool) {
     let odd = (to - from) % 2
     let flag = if leaf { 2 + odd } else { odd }
     path[0] = (flag * 16 + if odd == 1 { nibble(key, from) } else { 0 }).downcast_truncate()
@@ -138,7 +140,7 @@ impl Ord for Slot {
 }
 
 // keccak256 of the low `len` bytes of `word`.
-fn hash(_ word: u256, len: usize) -> u256 {
+pub(ingot) fn hash(_ word: u256, len: usize) -> u256 {
     var digest = Keccak256::new()
     digest.update_word(word, len)
     digest.finish_word()

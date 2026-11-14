@@ -1,6 +1,7 @@
 use core::{MemBuffer, MemSpan, MemVec, Option, Result}
 use fevm_precompiles::sha256
 use ingot::access::BlockAccessList
+use ingot::changes::BlockChanges
 use ingot::evm::Evm
 use ingot::fork::Fork
 use ingot::logs::{Bloom, LogBuffer}
@@ -60,7 +61,8 @@ impl Copy for BlockError {}
 /// What a block's header commits to, apart from its Merkle roots: its gas
 /// used, blob gas used, logs bloom, its EIP-7685 requests, each a type byte
 /// and its data, with their hash, and from Amsterdam its access list
-/// (EIP-7928) with its hash.
+/// (EIP-7928) with its hash. Also the block's changes to the world, from
+/// which a host computes its state root or undoes it.
 pub struct BlockOutput {
     pub gas_used: u64,
     pub blob_gas_used: u64,
@@ -68,13 +70,15 @@ pub struct BlockOutput {
     pub requests: MemVec<MemBuffer>,
     pub requests_hash: u256,
     pub access_list: Option<BlockAccessList>,
+    pub changes: BlockChanges,
 }
 
 /// A block being executed on an `Evm`'s world, which it holds from `begin`
-/// to `finish`. `begin` makes the system calls that precede the block's
-/// transactions; `transact` runs each transaction against the gas and blob
-/// gas the block has left; `finish` credits the withdrawals and collects the
-/// block's requests.
+/// to `finish` or `abandon`. `begin` makes the system calls that precede the
+/// block's transactions; `transact` runs each transaction against the gas
+/// and blob gas the block has left; `finish` credits the withdrawals and
+/// collects the block's requests. It records what it changes, with what that
+/// held before, to undo the block.
 pub struct Block {
     evm: Evm,
     env: BlockEnv,
@@ -144,12 +148,11 @@ impl Block {
         // at index 0, each transaction at its place and one, and what
         // follows them at one more.
         if block.evm.config().fork.since(Fork::Amsterdam) { block.evm.access().start() }
+        block.evm.changes().start()
         if env.number != 0 {
-            if !block.evm.world_mut().set_block_hash(env.number - 1, parent_hash) {
-                block.fail(BlockError::Host(ERR_HOST_ALLOCATION))
-            }
+            block.set_block_hash(env.number - 1, parent_hash)
             // The hash this block is the first not to reach.
-            if env.number > BLOCK_HASHES { let _ = block.evm.world_mut().set_block_hash(env.number - BLOCK_HASHES - 1, 0) }
+            if env.number > BLOCK_HASHES { block.set_block_hash(env.number - BLOCK_HASHES - 1, 0) }
             let _ = block.system_call(BEACON_ROOTS, word_input(parent_beacon_block_root))
             let _ = block.system_call(HISTORY_STORAGE, word_input(parent_hash))
         }
@@ -175,6 +178,15 @@ impl Block {
     // Keeps the first reason the block is invalid.
     fn fail(mut self, _ error: BlockError) {
         if self.failure.is_none() { self.failure = Option::Some(error) }
+    }
+
+    // Sets the hash of block `number` for BLOCKHASH, once its hash before
+    // is among the block's changes.
+    fn set_block_hash(mut self, _ number: u256, _ hash: u256) {
+        let before = self.evm.world().block_hash(number)
+        if !self.evm.changes().keep_block_hash(number, before) || !self.evm.world_mut().set_block_hash(number, hash) {
+            self.fail(BlockError::Host(ERR_HOST_ALLOCATION))
+        }
     }
 
     fn system_call(mut self, _ target: u256, _ data: own InputData) -> ExecutionResult {
@@ -252,9 +264,8 @@ impl Block {
     /// Ends the block: credits `withdrawals` (EIP-4895) and collects its
     /// requests, the transactions' deposits (EIP-6110) and those the request
     /// contracts return to their system calls (EIP-7002, EIP-7251 and, from
-    /// Amsterdam, EIP-8282). Returns
-    /// the `Evm`, and the block's output unless the block is invalid. An
-    /// invalid block's changes to the world are not undone.
+    /// Amsterdam, EIP-8282). Returns the `Evm`, and the block's output
+    /// unless the block is invalid, which it undoes as `abandon` does.
     pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm, Result<BlockError, BlockOutput>) {
         var block = self
         block.evm.access().set_index(block.transactions + 1)
@@ -281,21 +292,26 @@ impl Block {
             }
         }
         let gas_used = if block.gas_used > block.state_gas_used { block.gas_used } else { block.state_gas_used }
+        let changes = block.evm.take_changes()
         let output = match block.failure {
-            Option::Some(error) => Result::Err(error),
+            Option::Some(error) => {
+                changes.undo(mut block.evm.world_mut())
+                Result::Err(error)
+            },
             Option::None => Result::Ok(BlockOutput {
                 gas_used, blob_gas_used: block.blob_gas_used, logs_bloom: block.bloom, requests,
-                requests_hash: hash.unwrap_or(default: 0), access_list,
+                requests_hash: hash.unwrap_or(default: 0), access_list, changes,
             }),
         }
         (block.evm, output)
     }
 
     /// Leaves the block unfinished and returns the `Evm`, with the world as
-    /// the block's transactions so far left it.
+    /// it was before `begin`.
     pub fn abandon(own self) -> Evm {
         var evm = self.evm
         evm.access().stop()
+        evm.take_changes().undo(mut evm.world_mut())
         evm
     }
 }

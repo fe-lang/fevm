@@ -14,9 +14,9 @@ use ingot::trie::state_root
 // one block, with one legacy transaction to a deposit contract that logs
 // without topics. Values are the fixture's.
 const GENESIS_HASH: u256 = 0x61979677223ceeb59138bb828d0e33e39ddeea85b97c23e40f3947b4efcc4a07
-const GENESIS_STATE_ROOT: u256 = 0x2ebebbe1694cc72a21e11e3de347718483bc8a5a869c56b64b60dd20465f190a
+pub const GENESIS_STATE_ROOT: u256 = 0x2ebebbe1694cc72a21e11e3de347718483bc8a5a869c56b64b60dd20465f190a
 const BLOCK_HASH: u256 = 0xe43ff24c24407cf8dd078e3b28ec0dca10e84ba8df974b914f24f43171be874b
-const BLOCK_STATE_ROOT: u256 = 0x6b5d84825a86e8cdd9f50caf3beac633d810ef47100437c5fd63d9d0e105d50d
+pub const BLOCK_STATE_ROOT: u256 = 0x6b5d84825a86e8cdd9f50caf3beac633d810ef47100437c5fd63d9d0e105d50d
 const BLOCK_GAS_USED: u64 = 0x5488
 
 // Where the block's state root, receipts root, difficulty and its
@@ -27,7 +27,7 @@ const DIFFICULTY_AT: usize = 451
 const SIGNATURE_S_AT: usize = 675
 
 // The fixture's `pre`.
-fn genesis_world() -> WorldState {
+pub fn genesis_world() -> WorldState {
     var world = WorldState::empty()
     let history = decode_hex("0x3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500").unwrap()
     let consolidations = decode_hex("0x3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd").unwrap()
@@ -69,7 +69,7 @@ fn genesis_world() -> WorldState {
 }
 
 // The fixture's chain at genesis, on chain `chain_id`; its own is 1.
-fn genesis(chain_id: u256) -> Chain {
+pub fn genesis(chain_id: u256) -> Chain {
     // The first item of the fixture's `genesisRLP`.
     let header = decode_hex("0xf90257a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a02ebebbe1694cc72a21e11e3de347718483bc8a5a869c56b64b60dd20465f190aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080808407270e00808000a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b4218080a00000000000000000000000000000000000000000000000000000000000000000a0e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap()
     let genesis = Header::decode(header.span()).unwrap()
@@ -84,19 +84,26 @@ fn block(at: usize, byte: u8) -> MemBuffer {
     rlp
 }
 
-fn valid() -> MemBuffer { block(at: usize::max(), byte: 0) }
+pub fn valid() -> MemBuffer { block(at: usize::max(), byte: 0) }
+
+// The chain's state root, which must be its world's.
+fn root(_ chain: mut Chain) -> u256 {
+    var world = chain.world().try_clone().unwrap()
+    let root = chain.state_root().unwrap()
+    core::assert(root == state_root(mut world).unwrap())
+    root
+}
 
 // Whether `chain` is still at genesis, with the genesis state.
-fn at_genesis(_ chain: Chain) -> bool {
-    var world = chain.world().try_clone().unwrap()
-    chain.head().hash == GENESIS_HASH && state_root(mut world).unwrap() == GENESIS_STATE_ROOT
+fn at_genesis(_ chain: mut Chain) -> bool {
+    chain.head().hash == GENESIS_HASH && root(mut chain) == GENESIS_STATE_ROOT
 }
 
 // Whether importing `rlp` into the chain at genesis is invalid for
 // `reason`, leaves the chain at genesis, and the valid block can follow.
 fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
     var chain = genesis(chain_id: 1)
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
     var tracer = ()
     let rejected = match (chain.import(rlp.span(), mut tracer), reason) {
         (Import::Invalid(InvalidBlock::StateRoot), InvalidBlock::StateRoot) => true,
@@ -109,9 +116,9 @@ fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
          InvalidBlock::Undecodable(0, TxError::Malformed)) => true,
         _ => false,
     }
-    if !rejected || !at_genesis(chain) { return false }
+    if !rejected || !at_genesis(mut chain) { return false }
     match chain.import(valid().span(), mut tracer) {
-        Import::Valid(_) => chain.head().hash == BLOCK_HASH,
+        Import::Valid(_) => chain.head().hash == BLOCK_HASH && root(mut chain) == BLOCK_STATE_ROOT,
         _ => false,
     }
 }
@@ -119,7 +126,7 @@ fn rejects(_ rlp: MemBuffer, _ reason: InvalidBlock) -> bool {
 #[test]
 fn chain_imports_a_valid_block() {
     var chain = genesis(chain_id: 1)
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
     var tracer = ()
     match chain.import(valid().span(), mut tracer) {
         Import::Valid(imported) => {
@@ -130,14 +137,14 @@ fn chain_imports_a_valid_block() {
         },
         _ => core::assert(false),
     }
-    var world = chain.world().try_clone().unwrap()
     core::assert(chain.head().hash == BLOCK_HASH && chain.head().number == 1)
-    core::assert(state_root(mut world).unwrap() == BLOCK_STATE_ROOT)
+    core::assert(root(mut chain) == BLOCK_STATE_ROOT)
     // The head's child must be block 2: the block again is not.
     match chain.import(valid().span(), mut tracer) {
         Import::Invalid(InvalidBlock::Header(_)) => {},
         _ => core::assert(false),
     }
+    core::assert(root(mut chain) == BLOCK_STATE_ROOT)
     core::assert(chain.head().hash == BLOCK_HASH)
 }
 
@@ -181,5 +188,5 @@ fn chain_rejects_an_invalid_transaction() {
         Import::Invalid(InvalidBlock::Transaction(0, invalid)) => core::assert(invalid == INVALID_CHAIN_ID),
         _ => core::assert(false),
     }
-    core::assert(at_genesis(chain))
+    core::assert(at_genesis(mut chain))
 }

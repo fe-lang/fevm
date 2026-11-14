@@ -123,12 +123,12 @@ balance overflow) undoes the transaction and reports that status.
 ### Blocks
 
 A `Block` runs a block's transactions on an `Evm`'s world, which it holds
-from `begin` to `finish`:
+from `begin` to `finish` or `abandon`:
 
 ```fe
 var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
 let receipt = block.transact(request, mut tracer)
-let (evm, finished) = block.finish(withdrawals)
+let (evm, finished) = block.finish(withdrawals)   // or: let evm = block.abandon()
 ```
 
 `begin` records the parent hash for BLOCKHASH and makes the system calls
@@ -144,10 +144,11 @@ EIP-7251; from Amsterdam the builder request contracts too, EIP-8282). It
 returns the `Evm`, and a `BlockOutput` with what the header commits to apart
 from its Merkle roots: gas used (from Amsterdam the larger of execution and
 state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
-hash, and from Amsterdam the block's access list (EIP-7928) with its hash. A
-block whose request contract is missing or fails, whose deposit contract
-logged a malformed deposit, or whose access list is too large for its gas
-limit gives a `BlockError` instead.
+hash, from Amsterdam the block's access list (EIP-7928) with its hash, and
+the block's changes. A block whose request contract is missing or fails,
+whose deposit contract logged a malformed deposit, or whose access list is
+too large for its gas limit gives a `BlockError` instead, and `finish` undoes
+it.
 
 The access list is built as the block runs. A read is noted where its gas has
 been paid, the point at which an account or slot is warmed, and stays through
@@ -156,16 +157,36 @@ ends, the journal's surviving entries name what it changed with the values it
 began with, so a write that restored a value counts as a read. Outside a
 block, and in a simulation, nothing is recorded.
 
-`Block` does not check a header against its parent, decode transactions or
-compute Merkle roots, and does not undo an invalid block's changes; a `Chain`
-does all of these.
+The block's changes (`BlockChanges`) are each account it changed, with
+whether it existed and the balance, nonce and code it changed as they were
+before, each storage slot it changed with its value before, and the
+BLOCKHASH entries `begin` wrote. The values after are the world's, and may
+be those before. Code changes only on an account without code or with an
+EIP-7702 delegation, so the code before is none or a delegation. A host
+persists the changes or computes the state root from them, and undoes the
+block with them. They come from the journal in the same pass as the access
+list, when each transaction, system call or the withdrawals end, and only a
+`Block` records them. A transaction whose changes cannot be recorded for
+want of memory is undone and fails as a host failure, so the changes always
+undo the block:
+
+```fe
+let Result::Ok(output) = finished else { return }
+for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code
+for slot in output.changes.slots() {}         // slot.address, .slot, .value
+output.changes.undo(mut evm.world_mut())      // the world as it was before `begin`
+```
+
+`abandon` undoes the block as it stands. `Block` does not check a header
+against its parent, decode transactions or compute Merkle roots; a `Chain`
+does these.
 
 ### Chain
 
 `ingots/chain` (`fevm_chain`) imports blocks as a client does, from their
-RLP. A `Chain` holds an `Evm` on the world after its head block, the forks
-by activation time (`Schedule`, each fork a `Config` with its blob
-schedule) and the chain ID:
+RLP. A `Chain` holds an `Evm` on the world after its head block, the state
+trie of that world (`StateTrie`), the forks by activation time (`Schedule`,
+each fork a `Config` with its blob schedule) and the chain ID:
 
 ```fe
 var schedule = Schedule::new(Config::osaka())
@@ -177,6 +198,7 @@ match chain.import(block_rlp, mut tracer) {
     Import::Failed(failure) => {},   // a host failure: no verdict
 }
 let head = chain.head().hash
+let root = chain.state_root()   // the head's, from the trie
 ```
 
 `import` follows the specification's `execute_block`: it rejects a block
@@ -192,13 +214,23 @@ head, and `Imported` has its receipts and `BlockOutput`. `InvalidBlock` names
 the first rule an invalid block breaks; a host failure (an allocation, a
 balance past 2^256, a blob base fee too large to compute) is no verdict on
 the block.
-Either leaves the world and the head as they were: the chain keeps a copy of
-the world while a block runs.
+Either leaves the world and the head as they were: the chain undoes the
+block from its changes.
+
+The state root is kept incrementally. `Chain::new` builds the trie of the
+whole world once. After each block the chain rereads into it the accounts
+and slots the block's changes name, and the root rehashes only their
+paths; a block rejected after it ran is undone and its keys reread. The trie holds a
+node for every account and slot of the world with its hash, besides the
+world itself: about 100 MB more for 100,000 accounts of 10 slots, a third of
+what that world takes. A trie that an allocation failed is rebuilt from the
+world before the next block. A host that keeps the state in its own storage
+would not use `Chain`, but `Block`, the changes it gives, and its own trie.
+`state_root(world)` computes the root of a whole world in one pass.
 
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks
-before Osaka are not implemented, and the state root is computed from the
-whole world for each block, with no stored trie.
+before Osaka are not implemented.
 
 ### Forks
 

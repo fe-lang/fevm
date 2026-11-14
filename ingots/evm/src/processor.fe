@@ -680,8 +680,10 @@ pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxReq
     // Settlement's deletions bypass the journal, which undoes the rest.
     // Aborting discards the logs, which a simulation still reports.
     let logs = if commit {
+        if !tx.record_changes<F>() {
+            return host_failure(mut tx, status: ERR_HOST_ALLOCATION)
+        }
         tx.settle<F>()
-        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
         tx.end(commit: true)
         tx.take_logs()
     } else {
@@ -731,13 +733,12 @@ pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data:
         gasprice: block.basefee, gas_limit: gas, is_static: false,
     }
     var tracer = ()
-    let result = if prepared == OK { execute_message<F>(mut tx, request, call, block, state_gas, mut tracer) }
+    var result = if prepared == OK { execute_message<F>(mut tx, request, call, block, state_gas, mut tracer) }
         else { status_result(prepared) }
-    if is_evm_outcome(result.status) {
-        tx.settle<F>()
-        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
-    }
-    tx.end(commit: is_evm_outcome(result.status))
+    if is_evm_outcome(result.status) && !tx.record_changes<F>() { result = status_result(ERR_HOST_ALLOCATION) }
+    let commit = is_evm_outcome(result.status)
+    if commit { tx.settle<F>() }
+    tx.end(commit)
     let _ = tx.take_logs()
     result
 }
@@ -755,10 +756,8 @@ pub(ingot) fn withdraw<F: Rules>(_ tx: mut Transaction, _ withdrawals: MemVec<Wi
     for withdrawal in withdrawals {
         if status == OK { status = tx.credit(address: withdrawal.address, amount: withdrawal.amount as u256 * 1_000_000_000) }
     }
-    if status == OK {
-        tx.settle<F>()
-        if F::BLOCK_ACCESS_LIST { tx.record_changes() }
-    }
+    if status == OK && !tx.record_changes<F>() { status = ERR_HOST_ALLOCATION }
+    if status == OK { tx.settle<F>() }
     tx.end(commit: status == OK)
     status
 }
