@@ -53,6 +53,11 @@ pub trait Rules {
     // and target, the block's coinbase and the precompiles. Before
     // Amsterdam it starts with none.
     const WARM_SYSTEM_CALLS: bool = Self::FORK.since(Fork::Amsterdam)
+    // EELS from Amsterdam checks a transaction's chain ID, then its own
+    // fields, its nonce limit first and its intrinsic gas last, before the
+    // block's gas; before, its intrinsic gas first and its chain ID after
+    // the block's gas.
+    const FIELDS_FIRST: bool = Self::FORK.since(Fork::Amsterdam)
     // EIP-2929 and EIP-8038: the first access of an account in a transaction.
     const COLD_ACCOUNT_ACCESS: u64 = if Self::FORK.since(Fork::Amsterdam) { 3000 } else { 2600 }
     // EIP-8038: EXTCODESIZE and EXTCODECOPY read the code.

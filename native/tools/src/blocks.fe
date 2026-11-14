@@ -1,5 +1,6 @@
 // Blockchain tests for `fevm_tools conformance`: the driver's case for a
-// test's blocks, what the test expects of them, and the driver's verdict.
+// test's chain and blocks, what the test expects of them, and the driver's
+// verdict.
 use core::{HashMap, MemBuffer, MemSpan, MemVec, Option}
 use json::{Value, parse}
 use std::abi::DynString
@@ -10,310 +11,254 @@ use ingot::conformance::{
     HOST_ERROR,
     PASSED,
     Verdict,
-    blob_base_fee,
     chain_id,
     driver_result,
     expected_state,
-    fork_name,
     hex_bytes,
     number,
-    number_or,
     observed_state,
     output,
     put,
     put_len,
-    put_number,
     put_pre,
-    put_words,
-    short_hex,
     state_difference,
     to_hex,
-    update_fraction,
 }
 
-// Whether fevm judges a block invalid for `exception`, one of a fixture's
-// alternatives. It takes decoded transactions with recovered senders, and
-// leaves the header's own validity and the Merkle roots to its host.
-fn judges(_ exception: MemSpan) -> bool {
-    if exception.starts_with("TransactionException.") {
-        return exception != "TransactionException.INVALID_SIGNATURE_VRS"
-            && exception != "TransactionException.TYPE_3_TX_WITH_FULL_BLOBS"
-    }
-    exception == "BlockException.INVALID_REQUESTS" || exception == "BlockException.INVALID_DEPOSIT_EVENT_LAYOUT"
-        || exception == "BlockException.SYSTEM_CONTRACT_CALL_FAILED" || exception == "BlockException.SYSTEM_CONTRACT_EMPTY"
-        || exception == "BlockException.INCORRECT_BLOB_GAS_USED" || exception == "BlockException.BLOB_GAS_USED_ABOVE_LIMIT"
-        || exception == "BlockException.INVALID_GAS_USED" || exception == "BlockException.GAS_USED_OVERFLOW"
-        || exception == "BlockException.INVALID_BLOCK_ACCESS_LIST"
-        || exception == "BlockException.BLOCK_ACCESS_LIST_GAS_LIMIT_EXCEEDED"
-}
-
-// The offset and length of each alternative of `exceptions`, which `|`
-// separates.
-fn alternatives(_ exceptions: MemSpan) -> MemVec<(usize, usize)> {
-    var parts: MemVec<(usize, usize)> = MemVec::new()
-    var start: usize = 0
-    for index in 0..exceptions.len() + 1 {
-        if index == exceptions.len() || exceptions[index] == b'|' {
-            parts.push((start, index - start))
-            start = index + 1
-        }
-    }
-    parts
-}
-
-// Whether fevm judges a block invalid for each of `exceptions`.
-fn judges_all(_ exceptions: MemSpan) -> bool {
-    for (offset, len) in alternatives(exceptions) {
-        if !judges(exceptions.slice(offset, len)) { return false }
-    }
-    true
-}
-
-// Whether each of `exceptions` is the block's own, with every transaction valid.
-fn of_block(_ exceptions: MemSpan) -> bool {
-    for (offset, len) in alternatives(exceptions) {
-        if exceptions.slice(offset, len).starts_with("TransactionException.") { return false }
-    }
-    true
-}
-
-// The block's header, transactions and withdrawals, if fevm judges the
-// block: a valid block's own, or those an invalid block's bytes decode to.
-fn judged(_ block: Value) -> Option<ref Value> {
-    match block.get("expectException") {
-        Option::Some(ref exception) => {
-            if block.has("rlp_decoded") && judges_all(exception.text()) { Option::Some(ref block["rlp_decoded"]) }
-            else { Option::None }
-        },
-        Option::None => Option::Some(ref block),
-    }
-}
-
-// The most blobs in a block of `fork`: the fixture's blob schedule's, or
-// mainnet's.
-fn max_blobs(_ test: Value, fork: usize) -> Result<MemBuffer, u256> {
-    let default: u256 = if fork == 0 { 9 } else { 21 }
-    if let Option::Some(ref config) = test.get("config") {
-        if let Option::Some(ref schedule) = config.get("blobSchedule") {
-            if let Option::Some(ref fork) = schedule.get(fork_name(fork)) {
-                return number_or(fork, "max", default)
-            }
-        }
-    }
-    Result::Ok(default)
-}
-
-fn put_transaction(_ out: mut MemBuffer, _ tx: Value) -> Result<MemBuffer, ()> {
-    let kind = number(tx["type"])?
-    put(mut out, kind, 1)?
-    // A legacy transaction signed before EIP-155 has no chain ID.
-    let chain = number_or(tx, "chainId", 0)?
-    out.push((kind != 0 || chain != 0) as u8)
-    put(mut out, chain, 32)?
-    put_number(mut out, tx["sender"], 20)?
-    let to = tx["to"].text()
-    if to == "" || to == "0x" {
-        out.push(1)
-        put(mut out, 0, 20)?
+// The rules of the fork `name`, as the driver's byte for them: Amsterdam's
+// for the forks whose names begin with it, Osaka's for Osaka and its BPO
+// forks; none for a fork fevm does not implement.
+fn rules(_ name: MemSpan) -> Option<u8> {
+    if name.starts_with("Amsterdam") {
+        Option::Some(1)
+    } else if name == "Osaka" || name == "BPO1" || name == "BPO2" {
+        Option::Some(0)
     } else {
+        Option::None
+    }
+}
+
+/// The forks of the fixtures' network `network` with their activation
+/// timestamps, if fevm runs them all: a fork from genesis, or for
+/// `XToYAtTime15k`, X and then Y from 15,000. After an Amsterdam fork a BPO
+/// fork is Amsterdam's, so `AmsterdamToBPOIncreaseAtTime15k`'s second fork is
+/// `AmsterdamBPOIncrease`.
+pub fn forks(_ network: MemSpan) -> Option<MemVec<(u64, MemBuffer)>> {
+    var forks: MemVec<(u64, MemBuffer)> = MemVec::new()
+    let suffix: DynString = "AtTime15k"
+    match network.index_of("To") {
+        Option::Some(at) => {
+            if !network.ends_with(suffix) { return Option::None }
+            let first = network.slice(offset: 0, len: at)
+            let second = network.slice(offset: at + 2, len: network.len() - at - 2 - suffix.len())
+            forks.push((0, MemBuffer::from_span(first)))
+            if first.starts_with("Amsterdam") && second.starts_with("BPO") {
+                forks.push((15000, format!("Amsterdam", second)))
+            } else {
+                forks.push((15000, MemBuffer::from_span(second)))
+            }
+        },
+        Option::None => forks.push((0, MemBuffer::from_span(network))),
+    }
+    for (_, ref name) in forks {
+        if rules(name.span()).is_none() { return Option::None }
+    }
+    Option::Some(forks)
+}
+
+// A fork's rules, and unless it is Osaka or Amsterdam, which have their
+// own, its blob schedule from the fixture's `config.blobSchedule`.
+fn put_fork(_ out: mut MemBuffer, _ test: Value, _ name: MemBuffer) -> Result<MemBuffer, ()> {
+    out.push(rules(name.span()).unwrap())
+    if name == "Osaka" || name == "Amsterdam" {
         out.push(0)
-        put_number(mut out, tx["to"], 20)?
+        return Result::Ok(())
     }
-    put_number(mut out, tx["nonce"], 32)?
-    put_number(mut out, tx["gasLimit"], 8)?
-    if kind >= 2 {
-        put_number(mut out, tx["maxFeePerGas"], 32)?
-    } else {
-        put_number(mut out, tx["gasPrice"], 32)?
+    let Option::Some(ref blobs) = test["config"]["blobSchedule"].get(name.span()) else {
+        return Result::Err(format!("no blob schedule for ", name))
     }
-    put(mut out, number_or(tx, "maxPriorityFeePerGas", 0)?, 32)?
-    put(mut out, number_or(tx, "maxFeePerBlobGas", 0)?, 32)?
-    put_number(mut out, tx["value"], 32)?
-    let data = hex_bytes(tx["data"].text())?
-    put_len(mut out, data.len())?
-    out.extend_from(data.span())
-    match tx.get("accessList") {
-        Option::Some(ref entries) => {
-            put_len(mut out, entries.items().len())?
-            for ref entry in entries.items() {
-                put_number(mut out, entry["address"], 20)?
-                put_words(mut out, entry, "storageKeys")?
-            }
-        },
-        Option::None => put_len(mut out, 0)?,
-    }
-    put_words(mut out, tx, "blobVersionedHashes")?
-    match tx.get("authorizationList") {
-        Option::Some(ref list) => {
-            put_len(mut out, list.items().len())?
-            for ref entry in list.items() {
-                put_number(mut out, entry["chainId"], 32)?
-                put_number(mut out, entry["address"], 20)?
-                put_number(mut out, entry["nonce"], 32)?
-                if entry.has("yParity") {
-                    put_number(mut out, entry["yParity"], 32)?
-                } else {
-                    put_number(mut out, entry["v"], 32)?
-                }
-                put_number(mut out, entry["r"], 32)?
-                put_number(mut out, entry["s"], 32)?
-            }
-        },
-        Option::None => put_len(mut out, 0)?,
-    }
-    Result::Ok(())
+    out.push(1)
+    put(mut out, number(blobs["target"])?, 8)?
+    put(mut out, number(blobs["max"])?, 8)?
+    put(mut out, number(blobs["baseFeeUpdateFraction"])?, 8)
 }
 
-// The driver's binary case format for running the blocks of `test` that
-// fevm judges, by the rules of `fork`: the chain, the pre-state, and each
-// block's values, what its header says of its execution, its transactions
-// and its withdrawals. Integers and lengths are big endian.
-pub fn encode(_ test: Value, fork: usize) -> Result<MemBuffer, MemBuffer> {
+// The driver's binary case format for importing the blocks of `test`, whose
+// network has `forks`: the chain ID, the genesis fork and each later one
+// with its activation timestamp, the pre-state, the genesis block's RLP and
+// each block's. Integers and lengths are big endian.
+pub fn encode(_ test: Value, _ forks: MemVec<(u64, MemBuffer)>) -> Result<MemBuffer, MemBuffer> {
     var out = MemBuffer::empty()
-    out.push(6)
-    out.push(fork.downcast_truncate())
+    out.push(7)
     put(mut out, chain_id(test)?, 32)?
-    put(mut out, max_blobs(test, fork)?, 8)?
-    put_pre(mut out, test["pre"])?
-    let fraction = update_fraction(test, fork)?
-    var count: usize = 0
-    for ref block in test["blocks"].items() {
-        if judged(block).is_some() { count += 1 }
+    put_fork(mut out, test, forks[0].1)?
+    put_len(mut out, forks.len() - 1)?
+    for index in 1..forks.len() {
+        put(mut out, forks[index].0 as u256, 8)?
+        put_fork(mut out, test, forks[index].1)?
     }
-    put_len(mut out, count)?
-    for ref block in test["blocks"].items() {
-        let Option::Some(ref body) = judged(block) else { continue }
-        let header = ref body["blockHeader"]
-        put_number(mut out, header["coinbase"], 20)?
-        put_number(mut out, header["number"], 32)?
-        put_number(mut out, header["timestamp"], 32)?
-        put_number(mut out, header["mixHash"], 32)?
-        put_number(mut out, header["gasLimit"], 32)?
-        put_number(mut out, header["baseFeePerGas"], 32)?
-        put(mut out, blob_base_fee(number(header["excessBlobGas"])?, fraction)?, 32)?
-        put(mut out, number_or(header, "slotNumber", 0)?, 32)?
-        put_number(mut out, header["parentHash"], 32)?
-        put_number(mut out, header["parentBeaconBlockRoot"], 32)?
-        put_number(mut out, header["gasUsed"], 8)?
-        put_number(mut out, header["blobGasUsed"], 8)?
-        let bloom = hex_bytes(header["bloom"].text())?
-        if bloom.len() != 256 { return Result::Err(format!("a bloom of ", bloom.len(), " bytes")) }
-        out.extend_from(bloom.span())
-        put_number(mut out, header["requestsHash"], 32)?
-        put(mut out, number_or(header, "blockAccessListHash", 0)?, 32)?
-        let transactions = ref body["transactions"].items()
-        put_len(mut out, transactions.len())?
-        for ref tx in transactions { put_transaction(mut out, tx)? }
-        let withdrawals = ref body["withdrawals"].items()
-        put_len(mut out, withdrawals.len())?
-        for ref withdrawal in withdrawals {
-            put_number(mut out, withdrawal["address"], 20)?
-            put_number(mut out, withdrawal["amount"], 8)?
-        }
+    put_pre(mut out, test["pre"])?
+    let genesis = hex_bytes(test["genesisRLP"].text())?
+    put_len(mut out, genesis.len())?
+    out.extend_from(genesis.span())
+    let blocks = ref test["blocks"].items()
+    put_len(mut out, blocks.len())?
+    for ref block in blocks {
+        let rlp = hex_bytes(block["rlp"].text())?
+        put_len(mut out, rlp.len())?
+        out.extend_from(rlp.span())
     }
     Result::Ok(out)
 }
 
-// A log's address, topics and data, as the same text from a fixture and
-// from the driver.
-fn log_text(_ address: Value, _ topics: Value, _ data: Value) -> Result<MemBuffer, MemBuffer> {
-    var text = format!(short_hex(number(address)?), " [")
-    for ref topic in topics.items() {
-        text = format!(text, " ", short_hex(number(topic)?))
+// The EEST exceptions, `|`-separated, that each reason the driver gives for
+// an invalid block stands for.
+fn exceptions(_ reason: MemSpan) -> Option<DynString> {
+    let names: DynString = if reason == "too_large" {
+        "BlockException.RLP_BLOCK_LIMIT_EXCEEDED"
+    } else if reason == "malformed" {
+        "BlockException.RLP_STRUCTURES_ENCODING"
+    } else if reason == "header.missing_access_list_hash" {
+        "BlockException.INVALID_BAL_HASH"
+    } else if reason == "header.unexpected_access_list_hash" {
+        // Before Amsterdam the field is no part of the header the block hash
+        // commits to.
+        "BlockException.INVALID_BLOCK_HASH"
+    } else if reason == "header.missing_slot_number" || reason == "header.unexpected_slot_number" {
+        "BlockException.INCORRECT_BLOCK_FORMAT"
+    } else if reason == "header.number" {
+        "BlockException.INVALID_BLOCK_NUMBER"
+    } else if reason == "header.excess_blob_gas" {
+        "BlockException.INCORRECT_EXCESS_BLOB_GAS"
+    } else if reason == "header.gas_used" {
+        "BlockException.INVALID_GAS_USED_ABOVE_LIMIT"
+    } else if reason == "header.gas_limit" {
+        "BlockException.INVALID_GASLIMIT"
+    } else if reason == "header.base_fee" {
+        "BlockException.INVALID_BASEFEE_PER_GAS"
+    } else if reason == "header.timestamp" {
+        "BlockException.INVALID_BLOCK_TIMESTAMP_OLDER_THAN_PARENT"
+    } else if reason == "header.extra_data" {
+        "BlockException.EXTRA_DATA_TOO_BIG"
+    } else if reason == "header.difficulty" {
+        "BlockException.IMPORT_IMPOSSIBLE_DIFFICULTY_OVER_PARIS"
+    } else if reason == "header.nonce" {
+        "BlockException.INCORRECT_BLOCK_FORMAT"
+    } else if reason == "header.ommers_hash" {
+        "BlockException.IMPORT_IMPOSSIBLE_UNCLES_OVER_PARIS"
+    } else if reason == "header.parent_hash" {
+        "BlockException.UNKNOWN_PARENT|BlockException.UNKNOWN_PARENT_ZERO"
+    } else if reason == "ommers" {
+        "BlockException.IMPORT_IMPOSSIBLE_UNCLES_OVER_PARIS"
+    } else if reason == "undecodable.unknown_type" {
+        "TransactionException.TYPE_NOT_SUPPORTED"
+    } else if reason == "undecodable.malformed" {
+        "BlockException.RLP_STRUCTURES_ENCODING"
+    } else if reason == "undecodable.invalid_signature" {
+        "TransactionException.INVALID_SIGNATURE_VRS"
+    } else if reason == "transaction.intrinsic_gas" {
+        // fevm's intrinsic gas is at least the calldata floor (EIP-7623).
+        "TransactionException.INTRINSIC_GAS_TOO_LOW|TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"
+    } else if reason == "transaction.initcode_size" {
+        "TransactionException.INITCODE_SIZE_EXCEEDED"
+    } else if reason == "transaction.nonce_limit" {
+        "TransactionException.NONCE_IS_MAX"
+    } else if reason == "transaction.priority_fee" {
+        "TransactionException.PRIORITY_GREATER_THAN_MAX_FEE_PER_GAS"
+    } else if reason == "transaction.gas_limit" {
+        "TransactionException.GAS_ALLOWANCE_EXCEEDED"
+    } else if reason == "transaction.blob_count" {
+        "TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED"
+    } else if reason == "transaction.fee_cap" {
+        "TransactionException.INSUFFICIENT_MAX_FEE_PER_GAS"
+    } else if reason == "transaction.create" {
+        // One code for blob and set-code transactions.
+        "TransactionException.TYPE_3_TX_CONTRACT_CREATION|TransactionException.TYPE_4_TX_CONTRACT_CREATION"
+    } else if reason == "transaction.no_blobs" {
+        "TransactionException.TYPE_3_TX_ZERO_BLOBS"
+    } else if reason == "transaction.blob_version" {
+        "TransactionException.TYPE_3_TX_INVALID_BLOB_VERSIONED_HASH"
+    } else if reason == "transaction.blob_fee_cap" {
+        "TransactionException.INSUFFICIENT_MAX_FEE_PER_BLOB_GAS"
+    } else if reason == "transaction.nonce" {
+        // One code for a nonce above and below the sender's.
+        "TransactionException.NONCE_MISMATCH_TOO_HIGH|TransactionException.NONCE_MISMATCH_TOO_LOW"
+    } else if reason == "transaction.balance" {
+        "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS"
+    } else if reason == "transaction.sender_code" {
+        "TransactionException.SENDER_NOT_EOA"
+    } else if reason == "transaction.tx_type" {
+        "TransactionException.TYPE_NOT_SUPPORTED"
+    } else if reason == "transaction.gas_limit_cap" {
+        "TransactionException.GAS_LIMIT_EXCEEDS_MAXIMUM"
+    } else if reason == "transaction.chain_id" {
+        "TransactionException.INVALID_CHAINID"
+    } else if reason == "transaction.no_authorizations" {
+        "TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST"
+    } else if reason == "transaction.blob_gas" {
+        "TransactionException.TYPE_3_TX_MAX_BLOB_GAS_ALLOWANCE_EXCEEDED"
+    } else if reason == "execution.request_contract_missing" {
+        "BlockException.SYSTEM_CONTRACT_EMPTY"
+    } else if reason == "execution.request_call_failed" {
+        "BlockException.SYSTEM_CONTRACT_CALL_FAILED"
+    } else if reason == "execution.malformed_deposit" {
+        "BlockException.INVALID_DEPOSIT_EVENT_LAYOUT"
+    } else if reason == "execution.access_list_too_large" {
+        "BlockException.BLOCK_ACCESS_LIST_GAS_LIMIT_EXCEEDED"
+    } else if reason == "gas_used" {
+        "BlockException.INVALID_GAS_USED"
+    } else if reason == "transactions_root" {
+        "BlockException.INVALID_TRANSACTIONS_ROOT"
+    } else if reason == "state_root" {
+        "BlockException.INVALID_STATE_ROOT"
+    } else if reason == "receipts_root" {
+        "BlockException.INVALID_RECEIPTS_ROOT"
+    } else if reason == "logs_bloom" {
+        "BlockException.INVALID_LOG_BLOOM"
+    } else if reason == "withdrawals_root" {
+        "BlockException.INVALID_WITHDRAWALS_ROOT"
+    } else if reason == "blob_gas_used" {
+        "BlockException.INCORRECT_BLOB_GAS_USED"
+    } else if reason == "requests_hash" {
+        "BlockException.INVALID_REQUESTS"
+    } else if reason == "access_list_hash" {
+        // The list is no part of the block, only its hash in the header, so
+        // a wrong list, or one with its accounts out of order or repeated,
+        // which a client given the list rejects as malformed, shows as a
+        // wrong hash.
+        "BlockException.INVALID_BAL_HASH|BlockException.INVALID_BLOCK_ACCESS_LIST|BlockException.INCORRECT_BLOCK_FORMAT"
+    } else {
+        return Option::None
     }
-    Result::Ok(format!(text, " ] ", to_hex(hex_bytes(data.text())?.span())))
+    Option::Some(names)
 }
 
-// What a fixture's receipt says: whether the transaction succeeded, the
-// cumulative gas used and the logs.
-struct ReceiptExpect { succeeded: bool, gas: u256, logs: MemVec<MemBuffer> }
+// Whether `expected` and `names`, each `|`-separated, share a name.
+fn shares_a_name(_ expected: MemSpan, _ names: MemSpan) -> bool {
+    for name in names.split(b'|') {
+        for alternative in expected.split(b'|') {
+            if alternative == name { return true }
+        }
+    }
+    false
+}
 
-// What a test expects of a block that fevm judges, by its place among the
-// test's blocks: the exception if it is invalid, and its receipts if it is
-// valid and the fixture has them.
-struct BlockExpect { number: usize, exception: Option<MemBuffer>, receipts: Option<MemVec<ReceiptExpect>> }
-
-/// What a blockchain test expects: of each block that fevm judges, and of
-/// the state after the last valid one, if the fixture has it. `unjudged`
-/// counts the invalid blocks left out.
-pub struct ChainExpect { blocks: MemVec<BlockExpect>, state: Option<HashMap<u256, Account>>, pub unjudged: usize }
+/// What a blockchain test expects: each block's exception if it is invalid,
+/// the head's hash after the last block, and the state then.
+pub struct ChainExpect { blocks: MemVec<Option<MemBuffer>>, head: u256, state: HashMap<u256, Account> }
 
 impl ChainExpect {
     pub fn of(_ test: Value) -> Result<MemBuffer, Self> {
-        var blocks: MemVec<BlockExpect> = MemVec::new()
-        var unjudged: usize = 0
-        var position: usize = 0
+        var blocks: MemVec<Option<MemBuffer>> = MemVec::new()
         for ref block in test["blocks"].items() {
-            position += 1
-            if judged(block).is_none() {
-                unjudged += 1
-                continue
-            }
-            var receipts: Option<MemVec<ReceiptExpect>> = Option::None
-            if let Option::Some(ref list) = block.get("receipts") {
-                var expected: MemVec<ReceiptExpect> = MemVec::new()
-                for ref receipt in list.items() {
-                    var logs: MemVec<MemBuffer> = MemVec::new()
-                    for ref log in receipt["logs"].items() {
-                        logs.push(log_text(log["address"], log["topics"], log["data"])?)
-                    }
-                    expected.push(ReceiptExpect {
-                        succeeded: receipt["status"].as_bool() == Option::Some(true),
-                        gas: number(receipt["cumulativeGasUsed"])?,
-                        logs,
-                    })
-                }
-                receipts = Option::Some(expected)
-            }
-            blocks.push(BlockExpect {
-                number: position - 1,
-                exception: match block.get("expectException") {
-                    Option::Some(ref exception) => Option::Some(MemBuffer::from_span(exception.text())),
-                    Option::None => Option::None,
-                },
-                receipts,
+            blocks.push(match block.get("expectException") {
+                Option::Some(ref exception) => Option::Some(MemBuffer::from_span(exception.text())),
+                Option::None => Option::None,
             })
         }
-        let state = match test.get("postState") {
-            Option::Some(ref alloc) => Option::Some(expected_state(alloc)?),
-            Option::None => Option::None,
-        }
-        Result::Ok(ChainExpect { blocks, state, unjudged })
+        let head = number(test["lastblockhash"])?
+        Result::Ok(ChainExpect { blocks, head, state: expected_state(test["postState"])? })
     }
-}
-
-// The differences between a valid block's receipts and those expected.
-fn receipt_difference(_ block: usize, _ expected: MemVec<ReceiptExpect>, _ receipts: Value,
-                      _ problems: mut MemVec<MemBuffer>) -> Result<MemBuffer, ()> {
-    let got = ref receipts.items()
-    if got.len() != expected.len() {
-        problems.push(format!("block ", block, ": ", got.len(), " receipts, expected ", expected.len()))
-        return Result::Ok(())
-    }
-    for index in 0..got.len() {
-        let want = ref expected[index]
-        let receipt = ref got[index]
-        let name = format!("block ", block, " receipt ", index)
-        let status = receipt["status"].text()
-        if (status == "success") != want.succeeded {
-            problems.push(format!(name, ": status ", status, ", expected ", if want.succeeded { "success" } else { "failure" }))
-        }
-        if receipt["gas"].as_u256() != Option::Some(want.gas) {
-            problems.push(format!(name, ": cumulative gas ", receipt["gas"], " != ", want.gas))
-        }
-        let logs = ref receipt["logs"].items()
-        if logs.len() != want.logs.len() {
-            problems.push(format!(name, ": ", logs.len(), " logs, expected ", want.logs.len()))
-            continue
-        }
-        for log in 0..logs.len() {
-            let text = log_text(logs[log][0], logs[log][1], logs[log][2])?
-            if text != want.logs[log] {
-                problems.push(format!(name, " log ", log, ": ", text, ", expected ", want.logs[log]))
-            }
-        }
-    }
-    Result::Ok(())
 }
 
 /// Judges the driver's output for a blockchain test.
@@ -323,35 +268,43 @@ pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<Me
         Result::Err(verdict) => return Result::Ok(verdict),
     }
     var verdict = Verdict::new(FAILED)
+    if let Option::Some(ref genesis) = result.get("genesis") {
+        return Result::Ok(verdict.with(format!("genesis: ", genesis.text())))
+    }
     let blocks = ref result["blocks"].items()
     if blocks.len() != expect.blocks.len() {
         return Result::Ok(verdict.with(format!(blocks.len(), " blocks, expected ", expect.blocks.len())))
     }
     for index in 0..blocks.len() {
-        let want = ref expect.blocks[index]
         let block = ref blocks[index]
         let valid = block["valid"].as_bool() == Option::Some(true)
-        match want.exception {
-            Option::Some(ref exception) => {
-                if valid {
-                    verdict.problems.push(format!("block ", want.number, ": valid, expected ", exception))
-                } else if of_block(exception.span()) && block["reason"].text().starts_with("transaction") {
-                    // A block that is invalid in itself has only valid transactions.
-                    verdict.problems.push(format!("block ", want.number, ": ", block["reason"].text(), ", expected ", exception))
+        let name = if valid { MemBuffer::empty() } else { MemBuffer::from_span(block["reason"].text()) }
+        var reason = format!(name)
+        if let Option::Some(ref transaction) = block.get("transaction") {
+            reason = format!(reason, " (transaction ", transaction, ")")
+        }
+        let at = format!("block ", index, ": ")
+        match expect.blocks[index] {
+            Option::Some(ref exception) => if valid {
+                verdict.problems.push(format!(at, "valid, expected ", exception))
+            } else {
+                match exceptions(name.span()) {
+                    Option::Some(names) => if !shares_a_name(exception.span(), names.span()) {
+                        verdict.problems.push(format!(at, reason, ", which is ", names, "; expected ", exception))
+                    },
+                    Option::None => {
+                        verdict.problems.push(format!(at, reason, ", which names no exception; expected ", exception))
+                    },
                 }
             },
-            Option::None => {
-                if !valid {
-                    verdict.problems.push(format!("block ", want.number, ": invalid, ", block["reason"].text()))
-                } else if let Option::Some(ref receipts) = want.receipts {
-                    receipt_difference(want.number, receipts, block["receipts"], mut verdict.problems)?
-                }
-            },
+            Option::None => if !valid { verdict.problems.push(format!(at, "invalid, ", reason)) },
         }
     }
-    if let Option::Some(ref state) = expect.state {
-        state_difference(state, observed_state(result)?, mut verdict.problems)
+    let head = number(result["head"])?
+    if head != expect.head {
+        verdict.problems.push(format!("head ", result["head"].text(), ", expected the last block hash"))
     }
+    state_difference(expect.state, observed_state(result)?, mut verdict.problems)
     if verdict.problems.is_empty() {
         return Result::Ok(Verdict::new(PASSED))
     }
@@ -359,25 +312,44 @@ pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<Me
 }
 
 #[test]
-fn judges_the_blocks_fevm_can() {
-    let invalid: DynString = "{\"expectException\":\"TransactionException.NONCE_MISMATCH_TOO_LOW\",\"rlp_decoded\":{}}"
-    assert!(judged(parse(invalid.span()).unwrap()).is_some())
-    // Not without the decoded block, and not if any alternative is the host's to judge.
-    let undecoded: DynString = "{\"expectException\":\"TransactionException.NONCE_MISMATCH_TOO_LOW\"}"
-    assert!(judged(parse(undecoded.span()).unwrap()).is_none())
-    let header: DynString = "{\"expectException\":\"BlockException.INVALID_REQUESTS|BlockException.INVALID_BLOCK_HASH\",\"rlp_decoded\":{}}"
-    assert!(judged(parse(header.span()).unwrap()).is_none())
-    let valid: DynString = "{}"
-    assert!(judged(parse(valid.span()).unwrap()).is_some())
-    let block: DynString = "BlockException.INVALID_REQUESTS"
-    let either: DynString = "BlockException.INCORRECT_BLOB_GAS_USED|TransactionException.TYPE_3_TX_BLOB_COUNT_EXCEEDED"
-    assert!(of_block(block.span()) && !of_block(either.span()))
+fn forks_follow_the_network_names() {
+    let osaka = blocks_forks("Osaka")
+    assert!(osaka.len() == 1 && osaka[0].0 == 0 && osaka[0].1 == "Osaka")
+    let transition = blocks_forks("OsakaToBPO1AtTime15k")
+    assert!(transition.len() == 2 && transition[0].1 == "Osaka")
+    assert!(transition[1].0 == 15000 && transition[1].1 == "BPO1")
+    let amsterdam = blocks_forks("BPO2ToAmsterdamAtTime15k")
+    assert!(amsterdam[0].1 == "BPO2" && amsterdam[1].1 == "Amsterdam")
+    let increase = blocks_forks("AmsterdamToBPOIncreaseAtTime15k")
+    assert!(increase[0].1 == "Amsterdam" && increase[1].1 == "AmsterdamBPOIncrease")
+    // Forks before Osaka, and a transition without its time.
+    let prague: DynString = "Prague"
+    let cancun: DynString = "CancunToPragueAtTime15k"
+    let into_osaka: DynString = "PragueToOsakaAtTime15k"
+    let untimed: DynString = "OsakaToBPO1"
+    assert!(forks(prague.span()).is_none() && forks(cancun.span()).is_none())
+    assert!(forks(into_osaka.span()).is_none() && forks(untimed.span()).is_none())
 }
 
-// Two judged blocks around one left out: a valid block with a receipt, and
-// one invalid in itself.
+fn blocks_forks(_ network: DynString) -> MemVec<(u64, MemBuffer)> { forks(network.span()).unwrap() }
+
+#[test]
+fn exceptions_name_each_reason() {
+    let reason: DynString = "transaction.intrinsic_gas"
+    let names = exceptions(reason.span()).unwrap()
+    let either: DynString = "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS|TransactionException.INTRINSIC_GAS_TOO_LOW"
+    let floor: DynString = "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"
+    let funds: DynString = "TransactionException.INSUFFICIENT_ACCOUNT_FUNDS"
+    assert!(shares_a_name(either.span(), names.span()) && shares_a_name(floor.span(), names.span()))
+    assert!(!shares_a_name(funds.span(), names.span()))
+    let unknown: DynString = "transaction.unknown"
+    assert!(exceptions(unknown.span()).is_none())
+}
+
+// Three blocks: a valid one, one with an invalid transaction and one with
+// wrong requests.
 fn chain() -> ChainExpect {
-    let source: DynString = "{\"blocks\":[{\"receipts\":[{\"status\":true,\"cumulativeGasUsed\":\"0x5208\",\"logs\":[{\"address\":\"0x00aa\",\"topics\":[\"0x01\"],\"data\":\"0x02\"}]}]},{\"expectException\":\"BlockException.INVALID_GASLIMIT\"},{\"expectException\":\"BlockException.INVALID_REQUESTS\",\"rlp_decoded\":{}}],\"postState\":{\"0x01\":{\"balance\":\"0x01\"}}}"
+    let source: DynString = "{\"blocks\":[{},{\"expectException\":\"TransactionException.INSUFFICIENT_ACCOUNT_FUNDS|TransactionException.INTRINSIC_GAS_TOO_LOW\"},{\"expectException\":\"BlockException.INVALID_REQUESTS\"}],\"lastblockhash\":\"0x0a\",\"postState\":{\"0x01\":{\"balance\":\"0x01\"}}}"
     ChainExpect::of(parse(source.span()).unwrap()).unwrap()
 }
 
@@ -386,24 +358,43 @@ fn chain_verdict(_ stdout: DynString) -> Verdict {
 }
 
 #[test]
-fn check_compares_blocks_receipts_and_the_post_state() {
-    assert!(chain().unjudged == 1)
+fn check_compares_blocks_the_head_and_the_post_state() {
     let passing = chain_verdict(
-        "{\"blocks\":[{\"valid\":true,\"receipts\":[{\"status\":\"success\",\"gas\":21000,\"logs\":[[\"0xaa\",[\"0x1\"],\"0x02\"]]}]},{\"valid\":false,\"reason\":\"requests hash\"}],\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}",
+        "{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}",
     )
     assert!(passing.outcome == PASSED && passing.problems.is_empty())
     let failing = chain_verdict(
-        "{\"blocks\":[{\"valid\":true,\"receipts\":[{\"status\":\"revert\",\"gas\":21001,\"logs\":[[\"0xaa\",[\"0x1\"],\"0x03\"]]}]},{\"valid\":false,\"reason\":\"transaction 0: nonce\"}],\"accounts\":[[\"0x01\",\"0x2\",\"0x0\",\"0x\"]],\"storage\":[]}",
+        "{\"blocks\":[{\"valid\":false,\"reason\":\"state_root\"},{\"valid\":false,\"reason\":\"transaction.nonce\",\"transaction\":1},{\"valid\":true}],\"head\":\"0x0b\",\"accounts\":[[\"0x01\",\"0x2\",\"0x0\",\"0x\"]],\"storage\":[]}",
     )
     assert!(failing.outcome == FAILED && failing.problems.len() == 5)
-    assert!(failing.problems[0] == "block 0 receipt 0: status revert, expected success")
-    assert!(failing.problems[1] == "block 0 receipt 0: cumulative gas 21001 != 21000")
-    assert!(failing.problems[2] == "block 0 receipt 0 log 0: 0xaa [ 0x1 ] 0x03, expected 0xaa [ 0x1 ] 0x02")
-    assert!(failing.problems[3] == "block 2: transaction 0: nonce, expected BlockException.INVALID_REQUESTS")
-    let valid = chain_verdict("{\"blocks\":[{\"valid\":false,\"reason\":\"gas used 1 != 2\"},{\"valid\":true,\"receipts\":[]}],\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}")
-    assert!(valid.problems.len() == 2 && valid.problems[0] == "block 0: invalid, gas used 1 != 2")
-    assert!(valid.problems[1] == "block 2: valid, expected BlockException.INVALID_REQUESTS")
+    assert!(failing.problems[0] == "block 0: invalid, state_root")
+    let nonce: DynString = "block 1: transaction.nonce (transaction 1), which is TransactionException.NONCE_MISMATCH_TOO_HIGH|TransactionException.NONCE_MISMATCH_TOO_LOW; expected TransactionException.INSUFFICIENT_ACCOUNT_FUNDS|TransactionException.INTRINSIC_GAS_TOO_LOW"
+    assert!(failing.problems[1].span() == nonce.span())
+    assert!(failing.problems[2] == "block 2: valid, expected BlockException.INVALID_REQUESTS")
+    assert!(failing.problems[3] == "head 0x0b, expected the last block hash")
+    // A reason without exceptions fails a block expected to be invalid.
+    let unnamed = chain_verdict(
+        "{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.unknown\"},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}",
+    )
+    let unknown: DynString = "block 1: transaction.unknown, which names no exception"
+    assert!(unnamed.problems.len() == 1 && unnamed.problems[0].span().starts_with(unknown))
+    let genesis = chain_verdict("{\"genesis\":\"the pre-state's root is 0x01, not the header's\"}")
+    let root: DynString = "genesis: the pre-state's root is 0x01, not the header's"
+    assert!(genesis.outcome == FAILED && genesis.problems[0].span() == root.span())
     // A host failure is no verdict on a block, even one expected to be invalid.
-    let host = check(chain(), output("{\"host_error\":\"host host_allocation\"}", Status::Exited(3)), timeout: 1).unwrap()
-    assert!(host.outcome == HOST_ERROR && host.problems[0] == "host host_allocation")
+    let failed = output("{\"host_error\":\"block 1: host host_allocation\"}", Status::Exited(3))
+    let host = check(chain(), failed, timeout: 1).unwrap()
+    assert!(host.outcome == HOST_ERROR && host.problems[0] == "block 1: host host_allocation")
+}
+
+#[test]
+fn encode_writes_the_chain_format() {
+    let source: DynString = "{\"network\":\"OsakaToBPO1AtTime15k\",\"config\":{\"chainid\":\"0x01\",\"blobSchedule\":{\"BPO1\":{\"target\":\"0x0a\",\"max\":\"0x0f\",\"baseFeeUpdateFraction\":\"0x7f5a51\"}}},\"pre\":{\"0x01\":{\"balance\":\"0x02\",\"nonce\":\"0x03\",\"code\":\"0x00\",\"storage\":{\"0x04\":\"0x05\"}}},\"genesisRLP\":\"0xc0\",\"blocks\":[{\"rlp\":\"0xc180\"}]}"
+    let test = parse(source.span()).unwrap()
+    let network: DynString = "OsakaToBPO1AtTime15k"
+    let encoded = encode(test, forks(network.span()).unwrap()).unwrap()
+    // 7, chain 1; Osaka's rules and blobs; one later fork, at 15,000, with
+    // Osaka's rules and BPO1's blobs; one account; the genesis; one block.
+    let expected: DynString = "0x0700000000000000000000000000000000000000000000000000000000000000010000000000010000000000003a980001000000000000000a000000000000000f00000000007f5a51000000010000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000030000000100000000010000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000500000001c00000000100000002c180"
+    assert!(to_hex(encoded.span()).span() == expected.span())
 }

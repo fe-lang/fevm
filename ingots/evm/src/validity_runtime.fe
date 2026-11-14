@@ -1,0 +1,218 @@
+// Transactions that break two includability rules which Osaka and Amsterdam
+// check in different orders. Each fork gives the code of the rule EELS
+// (e27f097e) checks first: Osaka's `validate_transaction` (intrinsic gas,
+// initcode size, gas cap, nonce limit, priority fee), then `check_transaction`
+// (block gas, blob gas, chain ID, fee cap, blobs, blob fee cap, creation,
+// authorizations, nonce, balance, sender code); Amsterdam's chain ID, then
+// `validate_transaction` (nonce limit, initcode size, gas cap, priority fee,
+// blobs, creation, authorizations, intrinsic gas), then the block's gas and
+// blob gas, fee cap, blob fee cap, nonce, balance and sender code.
+use core::{MemBuffer, Option}
+use ingot::evm::Evm
+use ingot::processor::{Authorization, TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TX_SET_CODE, TxEnv, TxRequest}
+use ingot::state::WorldState
+use ingot::status::{
+    INVALID_BLOB_COUNT,
+    INVALID_BLOB_FEE_CAP,
+    INVALID_BLOB_GAS,
+    INVALID_BLOB_VERSION,
+    INVALID_CHAIN_ID,
+    INVALID_CREATE,
+    INVALID_FEE_CAP,
+    INVALID_GAS_LIMIT,
+    INVALID_GAS_LIMIT_CAP,
+    INVALID_INITCODE_SIZE,
+    INVALID_INTRINSIC_GAS,
+    INVALID_NONCE_LIMIT,
+    INVALID_NO_AUTHORIZATIONS,
+    INVALID_NO_BLOBS,
+    INVALID_PRIORITY_FEE,
+    OK,
+}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env}
+
+const SENDER: u256 = 0x1000
+const VERSION_1: u256 = 0x01 << 248
+const VERSION_2: u256 = 0x02 << 248
+// Past both forks' initcode limits, 49,152 and 131,072 bytes.
+const LONG_INITCODE: usize = 131_073
+
+fn block() -> BlockEnv {
+    var block = default_block_env()
+    block.gaslimit = 60_000_000
+    block.chainid = 1
+    block
+}
+
+// A call of `kind` from a funded sender on chain 1, which both forks accept
+// with a blob for a blob transaction and an authorization for a set-code one.
+fn tx(_ kind: u8) -> TxEnv {
+    TxEnv {
+        kind, chain_id: Option::Some(1), sender: SENDER, to: 0xbb, creates: false, nonce: 0, gas_limit: 100_000,
+        gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 1, value: 0,
+    }
+}
+
+// `env` with `data` zero bytes, `blobs` blob hashes `hash` and
+// `authorizations` authorizations.
+fn request(_ env: TxEnv, data: usize, blobs: usize, hash: u256, authorizations: usize) -> TxRequest {
+    var request = TxRequest::new(env, data: InputData::new(MemBuffer::new(data), status: OK))
+    for _ in 0..blobs { core::assert(request.add_blob_hash(hash)) }
+    let authorization = Authorization { chain_id: 0, address: 0xcc, nonce: 0, y_parity: 0, r: 1, s: 1 }
+    for _ in 0..authorizations { core::assert(request.add_authorization(authorization)) }
+    request
+}
+
+fn plain(_ env: TxEnv) -> TxRequest {
+    let blobs: usize = if env.kind == TX_BLOB { 1 } else { 0 }
+    let authorizations: usize = if env.kind == TX_SET_CODE { 1 } else { 0 }
+    request(env, data: 0, blobs, hash: VERSION_1, authorizations)
+}
+
+// Whether Osaka gives `request` in `block` the code `osaka` and Amsterdam
+// `amsterdam`, with at most `max_blobs` blobs in a block.
+fn first(_ request: TxRequest, _ block: BlockEnv, max_blobs: u64, osaka: i32, amsterdam: i32) -> bool {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    var config = Config::osaka()
+    config.blob_schedule.max = max_blobs
+    var evm = Evm::new(world, config)
+    let by_osaka = evm.validate(request, block)
+    config = Config::amsterdam()
+    config.blob_schedule.max = max_blobs
+    evm.set_config(config)
+    by_osaka == osaka && evm.validate(request, block) == amsterdam
+}
+
+#[test]
+fn validity_checks_the_chain_id_first_from_amsterdam() {
+    var env = tx(TX_LEGACY)
+    env.chain_id = Option::Some(2)
+    var short = env
+    short.gas_limit = 10_000
+    core::assert(first(plain(short), block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_CHAIN_ID))
+    var create = env
+    create.creates = true
+    create.gas_limit = 10_000_000
+    let initcode = request(create, data: LONG_INITCODE, blobs: 0, hash: 0, authorizations: 0)
+    core::assert(first(initcode, block(), max_blobs: 9, osaka: INVALID_INITCODE_SIZE, amsterdam: INVALID_CHAIN_ID))
+    var capped = env
+    capped.gas_limit = 1 << 32
+    core::assert(first(plain(capped), block(), max_blobs: 9, osaka: INVALID_GAS_LIMIT_CAP, amsterdam: INVALID_CHAIN_ID))
+    var last_nonce = env
+    last_nonce.nonce = 0xffffffffffffffff
+    core::assert(first(plain(last_nonce), block(), max_blobs: 9, osaka: INVALID_NONCE_LIMIT,
+                       amsterdam: INVALID_CHAIN_ID))
+    var tip = env
+    tip.kind = TX_FEE_MARKET
+    tip.max_priority_fee_per_gas = 2
+    core::assert(first(plain(tip), block(), max_blobs: 9, osaka: INVALID_PRIORITY_FEE, amsterdam: INVALID_CHAIN_ID))
+    var small = block()
+    small.gaslimit = 50_000
+    core::assert(first(plain(env), small, max_blobs: 9, osaka: INVALID_GAS_LIMIT, amsterdam: INVALID_CHAIN_ID))
+    var blob = tx(TX_BLOB)
+    blob.chain_id = Option::Some(2)
+    let blobs = request(blob, data: 0, blobs: 2, hash: VERSION_1, authorizations: 0)
+    core::assert(first(blobs, block(), max_blobs: 1, osaka: INVALID_BLOB_GAS, amsterdam: INVALID_CHAIN_ID))
+}
+
+#[test]
+fn validity_checks_the_nonce_limit_before_gas_from_amsterdam() {
+    var env = tx(TX_LEGACY)
+    env.nonce = 0xffffffffffffffff
+    var short = env
+    short.gas_limit = 10_000
+    core::assert(first(plain(short), block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS,
+                       amsterdam: INVALID_NONCE_LIMIT))
+    var create = env
+    create.creates = true
+    create.gas_limit = 10_000_000
+    let initcode = request(create, data: LONG_INITCODE, blobs: 0, hash: 0, authorizations: 0)
+    core::assert(first(initcode, block(), max_blobs: 9, osaka: INVALID_INITCODE_SIZE, amsterdam: INVALID_NONCE_LIMIT))
+    var capped = env
+    capped.gas_limit = 1 << 32
+    core::assert(first(plain(capped), block(), max_blobs: 9, osaka: INVALID_GAS_LIMIT_CAP,
+                       amsterdam: INVALID_NONCE_LIMIT))
+}
+
+#[test]
+fn validity_checks_intrinsic_gas_after_the_fields_from_amsterdam() {
+    var create = tx(TX_LEGACY)
+    create.creates = true
+    create.gas_limit = 10_000
+    let initcode = request(create, data: LONG_INITCODE, blobs: 0, hash: 0, authorizations: 0)
+    core::assert(first(initcode, block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_INITCODE_SIZE))
+    var tip = tx(TX_FEE_MARKET)
+    tip.gas_limit = 10_000
+    tip.max_priority_fee_per_gas = 2
+    core::assert(first(plain(tip), block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS,
+                       amsterdam: INVALID_PRIORITY_FEE))
+    var blob = tx(TX_BLOB)
+    blob.gas_limit = 10_000
+    let none = request(blob, data: 0, blobs: 0, hash: 0, authorizations: 0)
+    core::assert(first(none, block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_NO_BLOBS))
+    let seven = request(blob, data: 0, blobs: 7, hash: VERSION_1, authorizations: 0)
+    core::assert(first(seven, block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_BLOB_COUNT))
+    let version = request(blob, data: 0, blobs: 1, hash: VERSION_2, authorizations: 0)
+    core::assert(first(version, block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_BLOB_VERSION))
+    var set_code = tx(TX_SET_CODE)
+    set_code.gas_limit = 10_000
+    var creates = set_code
+    creates.creates = true
+    core::assert(first(plain(creates), block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS, amsterdam: INVALID_CREATE))
+    let unauthorized = request(set_code, data: 0, blobs: 0, hash: 0, authorizations: 0)
+    core::assert(first(unauthorized, block(), max_blobs: 9, osaka: INVALID_INTRINSIC_GAS,
+                       amsterdam: INVALID_NO_AUTHORIZATIONS))
+}
+
+// Whether each transaction of `requests`, which break a rule of their own
+// fields, gets Osaka's `osaka` code, of a rule of the block's gas or its fee,
+// and Amsterdam's of its own rule, `amsterdam[i]`.
+fn fields_first(_ requests: [TxRequest; 5], _ block: BlockEnv, max_blobs: u64, osaka: i32,
+                _ amsterdam: [i32; 5]) -> bool {
+    for index in 0..5 {
+        if !first(requests[index], block, max_blobs, osaka, amsterdam: amsterdam[index]) { return false }
+    }
+    true
+}
+
+// A blob transaction without blobs, with seven, with a hash of version 2,
+// a blob transaction that creates, and a set-code one without authorizations;
+// each with two blobs where it has any.
+fn malformed_envelopes() -> [TxRequest; 5] {
+    let blob = tx(TX_BLOB)
+    var creates = blob
+    creates.creates = true
+    [
+        request(blob, data: 0, blobs: 0, hash: 0, authorizations: 0),
+        request(blob, data: 0, blobs: 7, hash: VERSION_1, authorizations: 0),
+        request(blob, data: 0, blobs: 2, hash: VERSION_2, authorizations: 0),
+        request(creates, data: 0, blobs: 2, hash: VERSION_1, authorizations: 0),
+        request(tx(TX_SET_CODE), data: 0, blobs: 0, hash: 0, authorizations: 0),
+    ]
+}
+
+#[test]
+fn validity_checks_the_fields_before_the_blocks_gas_from_amsterdam() {
+    let codes = [INVALID_NO_BLOBS, INVALID_BLOB_COUNT, INVALID_BLOB_VERSION, INVALID_CREATE, INVALID_NO_AUTHORIZATIONS]
+    var small = block()
+    small.gaslimit = 50_000
+    core::assert(fields_first(malformed_envelopes(), small, max_blobs: 9, osaka: INVALID_GAS_LIMIT, codes))
+    var fee = block()
+    fee.basefee = 10
+    core::assert(fields_first(malformed_envelopes(), fee, max_blobs: 9, osaka: INVALID_FEE_CAP, codes))
+    // Each with blobs has two, past a block's one.
+    let blobs = malformed_envelopes()
+    for index in 1..4 {
+        core::assert(first(blobs[index], block(), max_blobs: 1, osaka: INVALID_BLOB_GAS, amsterdam: codes[index]))
+    }
+}
+
+#[test]
+fn validity_checks_a_blob_creation_before_the_blob_fee_from_amsterdam() {
+    var creates = tx(TX_BLOB)
+    creates.creates = true
+    var block = block()
+    block.blobbasefee = 10
+    core::assert(first(plain(creates), block, max_blobs: 9, osaka: INVALID_BLOB_FEE_CAP, amsterdam: INVALID_CREATE))
+}

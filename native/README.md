@@ -73,8 +73,9 @@ blockchain tests on both hosts for every pull request and push to `main`.
 ## State and blockchain tests
 
 The [conformance runner](conformance/README.md) runs execution-spec-tests
-Osaka and Amsterdam state tests through `Evm::transact`, and their
-blockchain tests through `Block`. It is not part of acceptance.
+Osaka and Amsterdam state tests through `Evm::transact`, and blockchain tests
+of Osaka, Amsterdam, their BPO forks and the transitions between them
+through `Chain::import`. It is not part of acceptance.
 
 ## Resident memory
 

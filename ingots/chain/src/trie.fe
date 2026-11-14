@@ -1,0 +1,363 @@
+// Merkle-Patricia trie roots, computed from the leaves without storing a
+// trie.
+use core::{MemBuffer, MemVec, Option}
+use core::num::leading_zeros
+use core::ops::Ord
+use fevm::{OK, WorldState}
+use fevm::state::EMPTY_CODE_HASH
+use fevm_rlp::{Decoder, Encoder}
+use keccak::{Keccak256, keccak256_word}
+
+/// The root of the empty trie: keccak256 of the empty string's RLP.
+pub const EMPTY_ROOT: u256 = 0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
+
+// A leaf: the first `nibbles` nibbles of `key`, which holds them from its
+// most significant, and its value, `len` bytes at `offset` of the values.
+struct Leaf { key: u256, nibbles: usize, offset: usize, len: usize }
+impl Copy for Leaf {}
+
+// Keys are prefix-free, so their order is that of the words.
+impl Ord for Leaf {
+    fn lt(self, _ other: Leaf) -> bool { self.key < other.key }
+    fn le(self, _ other: Leaf) -> bool { self.key <= other.key }
+    fn gt(self, _ other: Leaf) -> bool { self.key > other.key }
+    fn ge(self, _ other: Leaf) -> bool { self.key >= other.key }
+}
+
+/// The leaves of a Merkle-Patricia trie, of which it computes the root: an
+/// ordered list's, such as a block's transactions, receipts or withdrawals,
+/// where each item's key is its index's RLP. Every key set used is
+/// prefix-free, so no branch holds a value. An allocation that fails leaves
+/// the trie failed.
+pub struct Trie { leaves: MemVec<Leaf>, values: Encoder, failed: bool }
+
+impl Trie {
+    pub fn new() -> Self { Trie { leaves: MemVec::new(), values: Encoder::new(), failed: false } }
+
+    // The encoder for the value of a leaf at the first `nibbles` nibbles of
+    // `key`, which the trie adds after the encoder's last use.
+    fn leaf(mut self, _ key: u256, nibbles: usize) -> mut Encoder {
+        let offset = self.values.begin()
+        yield mut self.values
+        let leaf = Leaf { key, nibbles, offset, len: self.values.begin() - offset }
+        if self.leaves.try_push(leaf).is_err() { self.failed = true }
+    }
+
+    /// The encoder for the list's next item, which the trie adds after the
+    /// encoder's last use.
+    pub fn item(mut self) -> mut Encoder {
+        // The index's RLP: below 0x80 the index itself, otherwise 0x80 and
+        // the count of its big-endian bytes, then those.
+        let index = self.leaves.len() as u256
+        let bytes = (256 - leading_zeros(index) + 7) / 8
+        let (key, len) = if index != 0 && index < 0x80 { (index, 1) } else {
+            ((0x80 + bytes) << (bytes * 8) | index, 1 + bytes)
+        }
+        yield mut self.leaf(key << ((32 - len) * 8), nibbles: (len * 2).downcast_truncate())
+    }
+
+    /// The root; none if an allocation failed.
+    pub fn root(own self) -> Option<u256> {
+        var trie = self
+        let values = trie.values.finish()?
+        if trie.failed { return Option::None }
+        if trie.leaves.is_empty() { return Option::Some(EMPTY_ROOT) }
+        trie.leaves.sort()
+        var path = MemBuffer::try_new(33)?
+        var rlp = Encoder::new()
+        node(mut rlp, mut path, trie.leaves, values, lo: 0, hi: trie.leaves.len(), depth: 0)
+        let root = rlp.finish()?
+        // The root's node is hashed even when short.
+        Option::Some(if root.len() < 32 { keccak256_word(root) } else { root.read_word(1) })
+    }
+}
+
+// The nibble of `key` at `at`, counting from its most significant.
+fn nibble(_ key: u256, _ at: usize) -> usize { ((key >> ((63 - at) * 4) as u256) & 0xf).downcast_truncate() }
+
+// Puts the hex-prefix encoding of the nibbles of `key` from `from` to `to`, a
+// leaf's or an extension's path, made in `path`: a flag nibble, then the
+// first nibble if their count is odd and a zero one if not, then the rest.
+fn put_path(_ rlp: mut Encoder, _ path: mut MemBuffer, _ key: u256, from: usize, to: usize, leaf: bool) {
+    let odd = (to - from) % 2
+    let flag = if leaf { 2 + odd } else { odd }
+    path[0] = (flag * 16 + if odd == 1 { nibble(key, from) } else { 0 }).downcast_truncate()
+    let bytes = (to - from) / 2
+    if bytes > 0 { path.write_word(offset: 1, value: key << ((from + odd) * 4) as u256) }
+    rlp.bytes(path.slice(offset: 0, len: 1 + bytes))
+}
+
+// Puts the node of `leaves[lo..hi]`, sorted, whose keys share their first
+// `depth` nibbles: its RLP if under 32 bytes, otherwise its hash. Leaf
+// values are in `values`; `path` takes paths.
+fn node(_ rlp: mut Encoder, _ path: mut MemBuffer, _ leaves: MemVec<Leaf>, _ values: MemBuffer, lo: usize,
+        hi: usize, depth: usize) {
+    let start = rlp.begin()
+    let first = leaves[lo]
+    // The nibbles all the keys share, those the first and last do: distinct
+    // prefix-free keys differ before either ends.
+    let shared: usize = (leading_zeros(first.key ^ leaves[hi - 1].key) / 4).downcast_truncate()
+    if hi - lo == 1 {
+        put_path(mut rlp, mut path, first.key, from: depth, to: first.nibbles, leaf: true)
+        rlp.bytes(values.slice(offset: first.offset, len: first.len))
+    } else if shared > depth {
+        put_path(mut rlp, mut path, first.key, from: depth, to: shared, leaf: false)
+        node(mut rlp, mut path, leaves, values, lo, hi, depth: shared)
+    } else {
+        var at = lo
+        for digit in 0..16 {
+            var end = at
+            while end < hi && nibble(leaves[end].key, depth) == digit { end += 1 }
+            if end == at {
+                rlp.fixed(0, len: 0)
+            } else {
+                node(mut rlp, mut path, leaves, values, lo: at, hi: end, depth: depth + 1)
+            }
+            at = end
+        }
+        // The branch's value, empty.
+        rlp.fixed(0, len: 0)
+    }
+    rlp.end(start)
+    if rlp.since(start).len() >= 32 {
+        let hash = keccak256_word(rlp.since(start))
+        rlp.truncate(start)
+        rlp.fixed(hash, len: 32)
+    }
+}
+
+// A storage slot, ordered by its account.
+struct Slot { address: u256, slot: u256, value: u256 }
+impl Copy for Slot {}
+
+impl Ord for Slot {
+    fn lt(self, _ other: Slot) -> bool { self.address < other.address }
+    fn le(self, _ other: Slot) -> bool { self.address <= other.address }
+    fn gt(self, _ other: Slot) -> bool { self.address > other.address }
+    fn ge(self, _ other: Slot) -> bool { self.address >= other.address }
+}
+
+// keccak256 of the low `len` bytes of `word`.
+fn hash(_ word: u256, len: usize) -> u256 {
+    var digest = Keccak256::new()
+    digest.update_word(word, len)
+    digest.finish_word()
+}
+
+/// The state root: of the trie of every account in `world`, keyed by
+/// keccak256 of its address, of `rlp([nonce, balance, storage_root,
+/// code_hash])`, where `storage_root` is that of the trie of the account's
+/// slots, keyed by keccak256 of the slot, of the value's RLP. Mutable for the
+/// code hashes the world computes on first use; none if an allocation failed.
+pub fn state_root(_ world: mut WorldState) -> Option<u256> {
+    var count: usize = 0
+    for at in 0..world.storage_slots() { if world.storage_at(at).occupied { count += 1 } }
+    var slots: MemVec<Slot> = MemVec::new()
+    var addresses: MemVec<u256> = MemVec::new()
+    if !slots.try_reserve(count) || !addresses.try_reserve(world.account_count()) { return Option::None }
+    // The world keeps no zero slots.
+    for at in 0..world.storage_slots() {
+        let entry = world.storage_at(at)
+        if entry.occupied { slots.push(Slot { address: entry.address, slot: entry.slot, value: entry.value }) }
+    }
+    for position in 0..world.account_count() { addresses.push(world.account_at(position).address) }
+    // Each account's slots, in the order of the accounts.
+    slots.sort()
+    addresses.sort()
+    var accounts = Trie::new()
+    var next: usize = 0
+    for address in addresses {
+        var storage = Trie::new()
+        while next < slots.len() && slots[next].address == address {
+            storage.leaf(hash(slots[next].slot, len: 32), nibbles: 64).uint(slots[next].value)
+            next += 1
+        }
+        let storage_root = storage.root()?
+        // Zero for an empty account, which has no code.
+        let code_hash = world.code_hash(address)
+        let value = mut accounts.leaf(hash(address, len: 20), nibbles: 64)
+        let list = value.begin()
+        value.uint(world.nonce(address))
+        value.uint(world.balance(address))
+        value.fixed(storage_root, len: 32)
+        value.fixed(if code_hash == 0 { EMPTY_CODE_HASH } else { code_hash }, len: 32)
+        value.end(list)
+    }
+    // Every slot's account is in the world: `storage_store` gives a new
+    // slot's account a record, and removing an account removes its slots.
+    core::assert(next == slots.len())
+    accounts.root()
+}
+
+// Puts a withdrawal, `rlp([index, validator_index, address, amount])`, as the
+// list's next item.
+fn withdrawal(_ trie: mut Trie, index: usize, validator: usize, address: u256, amount: u64) {
+    let item = mut trie.item()
+    let list = item.begin()
+    item.uint(index as u256)
+    item.uint(validator as u256)
+    item.fixed(address, len: 20)
+    item.uint(amount as u256)
+    item.end(list)
+}
+
+#[test]
+fn trie_roots_an_empty_list_and_world() {
+    core::assert(Trie::new().root().unwrap() == EMPTY_ROOT)
+    var world = WorldState::empty()
+    core::assert(state_root(mut world).unwrap() == EMPTY_ROOT)
+}
+
+#[test]
+fn trie_roots_withdrawals_as_evmone_does() {
+    // evmone's mpt_hashing_test: 100,000 gwei to 0xc0...01 and on. With two
+    // or more, each leaf is under 32 bytes and embedded in the branch above.
+    let roots: [u256; 3] = [
+        0x4ae14e53d6bf2a9c73891aef9d2e6373ff06d400b6e7727b17a5eceb5e8dec9d,
+        0xc5128234c0282b256e2aa91ddc783ddb2c21556766f2e11e64159561b59f8ac7,
+        0xaa45c53e9f7d6a8362f80876029915da00b1441ef39eb9bbb74f98465ff433ad,
+    ]
+    let counts: [usize; 3] = [1, 2, 10]
+    let addresses: [u256; 10] = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x10]
+    for test in 0..3 {
+        var trie = Trie::new()
+        for index in 0..counts[test] {
+            let address = 0xc0 << 152 | addresses[index]
+            withdrawal(mut trie, index, validator: 0, address, amount: 100_000)
+        }
+        core::assert(trie.root().unwrap() == roots[test])
+    }
+}
+
+#[test]
+fn trie_roots_withdrawals_of_fixtures() {
+    // Fixtures tests/mpt/test_withdrawals_trie_structure.py: one leaf of 30
+    // bytes, whose root is hashed all the same; two leaves of 31 bytes,
+    // embedded, and of 32 and 33, hashed.
+    let first = 0xc0f6dc9e5836f54caadbf59cc69346c508e1992b
+    let second = 0x95d1be958d22adf294428c13cc71d89ff320bfd3
+    var trie = Trie::new()
+    withdrawal(mut trie, index: 0, validator: 0, address: first, amount: 0x64)
+    core::assert(trie.root().unwrap() == 0x111f82fececb123666f35bf3d6e437e5e7f992ac5db348579ca2d9f6cc7d9eec)
+    let amounts: [u64; 3] = [0x010000, 0x01000000, 0x0100000000]
+    let roots: [u256; 3] = [
+        0x0e83b24d061f19b1285cf4b98cf29b4f6dc9fe8a06aacac5fe0522f6d5555386,
+        0x95ba3fb456a2d5a1ee25be41661c6369ab87439518ea2fe421a9a72efcdc7a6c,
+        0x72cc68a4692a9b6ef922a001a799b662f9bacbabfcff17ae9bb5d66c1318a64d,
+    ]
+    for test in 0..3 {
+        var trie = Trie::new()
+        withdrawal(mut trie, index: 0, validator: 1, address: first, amount: amounts[test])
+        withdrawal(mut trie, index: 1, validator: 2, address: second, amount: amounts[test])
+        core::assert(trie.root().unwrap() == roots[test])
+    }
+    // Three and sixteen, whose root branch has embedded and hashed children.
+    let addresses: [u256; 16] = [
+        first, second, 0x621bccc1be164ceafcc132dd24bd847f2cd8992c, 0xaa28d37a0582359e3143845f72c4605f64b9dcbb,
+        0xa7e8d165afe2a56577c060003e3103087c041e7d, 0xd2b16aa381aad3412ab37c594cc8b54dc8c1dba8,
+        0x8892b8527755f5e4cc388dd0edc87e6f0412d2da, 0xb8cba90494300b401921b528673acb055a650557,
+        0xf2f9f0f6cf29fa8158f85afc04c93134260bdd44, 0x93bf7f2d245273a1f4a3ffe986ef10f4b1841b73,
+        0x0793290f88d888da63421574cd84629bbfc7818c, 0x9347423fbe051560e17b76729a8f31b760bb9f40,
+        0xf5e5e5e8e6934e53695b47f710c935a1ec5d41c3, 0x8ee84cb255499e0e834124d2943a6d0fa495fe71,
+        0x4bdd05557577990df94509603af4eeed7390c093, 0x07d15465e36ae8883af29f23072c6ff6d83f5cde,
+    ]
+    let counts: [usize; 2] = [3, 16]
+    let roots: [u256; 2] = [
+        0x2a6846fe6b9ee0fe0727a2837bdcc015c2a8b9496978e7d77221679d2675a408,
+        0xece1ffd73a7daac69dc36ce57d69f825bdc11d0a6e14ee278a76f5ee06fedaff,
+    ]
+    for test in 0..2 {
+        var trie = Trie::new()
+        for index in 0..counts[test] {
+            let amount: u64 = if index % 2 == 0 { 0x01000000 } else { 0x010000 }
+            withdrawal(mut trie, index, validator: index, address: addresses[index], amount)
+        }
+        core::assert(trie.root().unwrap() == roots[test])
+    }
+}
+
+#[test]
+fn trie_roots_transactions_as_a_decoder_gives_them() {
+    // test_authorization_reusing_nonce's block's transactions: a legacy one,
+    // a list, and a set-code one, a string of its type and payload.
+    let words: [u256; 10] = [
+        0xf90126f85f800a82520894c0f6dc9e5836f54caadbf59cc69346c508e1992b01,
+        0x8025a0376463c2f2d089182fe67d9e06194738c4c91935bbdfe54ef92aac5d31,
+        0xb74179a0788a21b03caf79419aef35c860fe171c7f3b36d91ae73ba22013be76,
+        0xe3eb21b1b8c304f8c00180800782b3b094c0f6dc9e5836f54caadbf59cc69346,
+        0xc508e1992b8080c0f85cf85a8094000000000000000000000000000000000000,
+        0x00018001a0bd85b1e84a4bb5d161e65c31b216c77d686ac97deebbbd79a8ee78,
+        0x0a79693759a019f911b87741efb3140f3b107036d44724d392b779fe9e56ae8c,
+        0x903580e2560e80a033060926eb763553f1f1719ca3187430816d1008a3d78651,
+        0x2f131deee8b65857a03aca7c948312ef372388c2458f76c1a019869f4633886e,
+        0x411cede8bf692171c30000000000000000000000000000000000000000000000,
+    ]
+    var list = MemBuffer::new(320)
+    for index in 0..10 { list.write_word(offset: index * 32, value: words[index]) }
+    list.truncate(297)
+    var transactions = Trie::new()
+    let rlp = list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let txs = mut items.list()
+        while !txs.is_empty() {
+            if txs.is_list() { transactions.item().raw(txs.raw()) } else { transactions.item().raw(txs.bytes()) }
+        }
+        core::assert(items.finish())
+    }
+    core::assert(transactions.root().unwrap() == 0xf7c7535ff047580016698c9425ef65cc4cb9f4a98a81b3495141b3402b74217a)
+}
+
+#[test]
+fn state_root_matches_evmone() {
+    // evmone's state_mpt_hash_test: one account; an empty account; and that
+    // with one holding code and two slots.
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x02, 1))
+    core::assert(state_root(mut world).unwrap() == 0x084f337237951e425716a04fb0aaa74111eda9d9c61767f2497697d0a201c92e)
+    var world = WorldState::empty()
+    core::assert(world.ensure_account(0))
+    core::assert(state_root(mut world).unwrap() == 0x0ce23f3c809de377b008a4a3ee94a0834aac8bec1f86e28ffe4fdb5a15b0c785)
+    let code: [u8; 1] = [0x00]
+    core::assert(world.set_nonce(0x01, 1) && world.set_code(address: 0x01, code) == OK)
+    core::assert(world.set_balance(0x01, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe))
+    core::assert(world.storage_store(0x01, 1, 0xfe) && world.storage_store(0x01, 2, 0xfd))
+    core::assert(state_root(mut world).unwrap() == 0xd3e845156fca75de99712281581304fbde104c0fc5a102b09288c07cdde0b666)
+}
+
+#[test]
+fn state_root_matches_fixtures() {
+    // Post-states of fixtures tests/mpt: test_genesis_extension_and_branch,
+    // whose account trie has an extension.
+    var world = WorldState::empty()
+    core::assert(world.set_balance(0x1014a, 1) && world.set_balance(0x101a4, 2))
+    core::assert(world.set_nonce(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 1))
+    core::assert(world.set_balance(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 0x033b2e3c9fd0803ce7fccbb0))
+    core::assert(world.set_balance(0xf36afef4dcb45e52f80cb039335952f77cec8960, 1))
+    core::assert(world.set_balance(0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba, 0xf618))
+    core::assert(state_root(mut world).unwrap() == 0x320918aaf955740b497061822aea3d3280f7f6ae4486ea1365c15234bc99a9a1)
+    // test_embedded_leaf_boundary[depth8_value1_embedded_31], whose storage
+    // trie has an extension over two embedded leaves; the code hashed on
+    // first use.
+    var world = WorldState::empty()
+    let account = 0xec1b457b0d5be4ac5761bfa5bdd6735df5cf539d
+    let code: [u8; 14] = [0x60, 0x01, 0x61, 0x9d, 0xac, 0x55, 0x60, 0x01, 0x62, 0x01, 0x9c, 0x5e, 0x55, 0x00]
+    core::assert(world.set_nonce(account, 1) && world.set_code_unhashed(address: account, code) == OK)
+    core::assert(world.storage_store(account, 0x9dac, 1) && world.storage_store(account, 0x019c5e, 1))
+    core::assert(world.set_nonce(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 1))
+    core::assert(world.set_balance(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 0x033b2e3c9fd0803ce7f60ca8))
+    core::assert(world.set_balance(0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba, 0x02fc34))
+    core::assert(state_root(mut world).unwrap() == 0x6d0cac5a8fcd3f3d344697ab8d2fb97ef7aced8d94e413fac6dea49c17275c06)
+    // test_insert_into_committed_extension, with two extensions in the
+    // storage trie.
+    var world = WorldState::empty()
+    let account = 0x17291267354229e0e7b8c815fddf56cd5aa03a10
+    let code: [u8; 6] = [0x60, 0x03, 0x60, 0x54, 0x55, 0x00]
+    core::assert(world.set_nonce(account, 1) && world.set_code(address: account, code) == OK)
+    core::assert(world.storage_store(account, 0x0297, 1) && world.storage_store(account, 0x0320, 2))
+    core::assert(world.storage_store(account, 0x54, 3))
+    core::assert(world.set_nonce(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 1))
+    core::assert(world.set_balance(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 0x033b2e3c9fd0803ce7f96c2c))
+    core::assert(world.set_balance(0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba, 0x01f926))
+    core::assert(state_root(mut world).unwrap() == 0xef228e79f06fc9ad7ae8f984c2b723b29702bc5cdca98a0080b539bdad2d60eb)
+}

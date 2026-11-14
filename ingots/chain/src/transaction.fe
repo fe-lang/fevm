@@ -1,0 +1,147 @@
+// Transactions as a block carries them (EIP-2718), decoded into requests
+// with their senders recovered.
+use core::{MemSpan, Option, Result}
+use core::num::leading_zeros
+use keccak::{Keccak256, keccak256_word}
+use fevm::{Authorization, InputData, OK, TxEnv, TxRequest}
+use fevm::address::{rlp_integer_len, update_rlp_integer}
+use fevm::processor::{TX_ACCESS_LIST, TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TX_SET_CODE}
+use fevm_precompiles::recover_signer
+use fevm_precompiles::secp256k1::N
+use fevm_rlp::Decoder
+
+/// Why a transaction does not decode.
+pub enum TxError {
+    /// Its first byte is neither a transaction type, 1 to 4, nor the prefix
+    /// of a legacy transaction's list.
+    UnknownType,
+    /// Its RLP is malformed or is not its type's list, or a field is out of
+    /// its type's range.
+    Malformed,
+    /// v or the y parity is out of range, r or s is out of range or s is
+    /// high (EIP-2), or no key recovers.
+    InvalidSignature,
+    /// Allocating its data or lists failed.
+    Allocation,
+}
+
+impl Copy for TxError {}
+
+/// Decodes a transaction as a block carries it, a legacy transaction's RLP
+/// list or a typed transaction's type byte and RLP list, into its request,
+/// with the sender recovered from its signature, and its hash, the
+/// keccak256 of `bytes`. Fields have the specification's ranges, but for
+/// the gas limit, a u64, and the gas prices, u256s, which it leaves
+/// unbounded. What validation rejects with a validity code, such as a blob
+/// or set-code transaction that creates, decodes as it is.
+pub fn decode_transaction(_ bytes: MemSpan) -> Result<TxError, (TxRequest, u256)> {
+    if bytes.len() == 0 { return Result::Err(TxError::Malformed) }
+    let legacy = bytes[0] >= 0xc0 && bytes[0] <= 0xfe
+    if !legacy && (bytes[0] < TX_ACCESS_LIST || bytes[0] > TX_SET_CODE) { return Result::Err(TxError::UnknownType) }
+    let kind = if legacy { TX_LEGACY } else { bytes[0] }
+    let start: usize = if legacy { 0 } else { 1 }
+    let rlp = bytes.slice(offset: start, len: bytes.len() - start)
+    with (rlp) {
+        var items = Decoder::new()
+        let fields = mut items.list()
+        let chain_id = if legacy { 0 } else { fields.u64() }
+        // EIP-7702's nonce is a U64, the others' a U256.
+        let nonce = if kind == TX_SET_CODE { fields.u64() as u256 } else { fields.uint() }
+        let max_priority_fee_per_gas = if kind >= TX_FEE_MARKET { fields.uint() } else { 0 }
+        let gas_price = fields.uint()
+        let gas_limit = fields.u64()
+        let to = fields.optional(20)
+        let env = TxEnv {
+            kind, chain_id: Option::Some(chain_id as u256), sender: 0, to: to.unwrap_or(default: 0),
+            creates: to.is_none(), nonce, gas_limit, gas_price, max_priority_fee_per_gas, max_fee_per_blob_gas: 0,
+            value: fields.uint(),
+        }
+        var request = TxRequest::new(env, data: InputData::copy_bytes(fields.bytes()))
+        var allocated = request.data().status == OK
+        if !legacy {
+            let entries = mut fields.list()
+            while !entries.is_empty() {
+                let entry = mut entries.list()
+                let address = entry.fixed(20)
+                allocated = allocated && request.add_access_account(address)
+                let keys = mut entry.list()
+                while !keys.is_empty() {
+                    let slot = keys.fixed(32)
+                    allocated = allocated && request.add_access_key(address, slot)
+                }
+            }
+        }
+        if kind == TX_BLOB {
+            request.env.max_fee_per_blob_gas = fields.uint()
+            let hashes = mut fields.list()
+            while !hashes.is_empty() {
+                let hash = hashes.fixed(32)
+                allocated = allocated && request.add_blob_hash(hash)
+            }
+        }
+        // An authorization's y parity is a U8.
+        var wide_parity = false
+        if kind == TX_SET_CODE {
+            let authorizations = mut fields.list()
+            while !authorizations.is_empty() {
+                let tuple = mut authorizations.list()
+                let chain_id = tuple.uint()
+                let address = tuple.fixed(20)
+                let nonce = tuple.u64() as u256
+                let y_parity = tuple.u64()
+                wide_parity = wide_parity || y_parity > 0xff
+                let r = tuple.uint()
+                let s = tuple.uint()
+                let authorization = Authorization { chain_id, address, nonce, y_parity: y_parity as u256, r, s }
+                allocated = allocated && request.add_authorization(authorization)
+            }
+        }
+        let v = fields.uint()
+        let r = fields.uint()
+        let s = fields.uint()
+        if !items.finish() || wide_parity { return Result::Err(TxError::Malformed) }
+        if !allocated { return Result::Err(TxError::Allocation) }
+        // A legacy v is 27 plus the parity, or from EIP-155 35 plus twice
+        // the chain ID, a U64, plus the parity.
+        var parity = v
+        if legacy {
+            if v == 27 || v == 28 {
+                request.env.chain_id = Option::None
+                parity = v - 27
+            } else if v >= 35 && (v - 35) >> 1 <= 0xffffffffffffffff {
+                request.env.chain_id = Option::Some((v - 35) >> 1)
+                parity = (v - 35) & 1
+            } else {
+                return Result::Err(TxError::InvalidSignature)
+            }
+        }
+        if parity > 1 || r == 0 || r >= N || s == 0 || s > N / 2 { return Result::Err(TxError::InvalidSignature) }
+        // The signed list is the transaction's without (v, r, s), and with
+        // EIP-155 the chain ID and two zeros in their place.
+        let protected = legacy && request.env.chain_id.is_some()
+        let header: usize = if rlp[0] < 0xf8 { 1 } else { 1 + (rlp[0] - 0xf7) as usize }
+        let unsigned = rlp.len() - header - rlp_integer_len(v) - rlp_integer_len(r) - rlp_integer_len(s)
+        let len = unsigned + if protected { rlp_integer_len(request.env.chain_id.unwrap()) + 2 } else { 0 }
+        var hash = Keccak256::new()
+        if !legacy { hash.update_word(kind as u256, len: 1) }
+        if len < 56 {
+            hash.update_word(0xc0 + len as u256, len: 1)
+        } else {
+            let width: usize = ((256 - leading_zeros(len as u256) + 7) / 8).downcast_truncate()
+            hash.update_word(((0xf7 + width as u256) << (8 * width) as u256) | len as u256, len: 1 + width)
+        }
+        hash.update(rlp, offset: header, len: unsigned)
+        if protected {
+            update_rlp_integer(mut hash, request.env.chain_id.unwrap())
+            hash.update_word(0x8080, len: 2)
+        }
+        match recover_signer(hash: hash.finish_word(), recovery_id: parity, r, s) {
+            Option::Some(sender) => {
+                request.env.sender = sender
+                Result::Ok((request, keccak256_word(bytes)))
+            },
+            Option::None => Result::Err(TxError::InvalidSignature),
+        }
+    }
+}
+
