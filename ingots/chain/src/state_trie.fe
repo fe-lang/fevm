@@ -1,0 +1,520 @@
+// The state trie held in memory with each node's hash, so that changing a
+// few accounts and slots rehashes only their paths.
+use core::{MemBuffer, MemVec, Option}
+use core::num::leading_zeros
+use core::ops::Index
+use fevm::WorldState
+use fevm::state::EMPTY_CODE_HASH
+use fevm_rlp::Encoder
+use keccak::keccak256_word
+use ingot::trie::{EMPTY_ROOT, hash, nibble, put_path}
+
+// A node as its parent holds it: its kind and its position in that kind's
+// arena.
+enum Child { Empty, Leaf(u32), Account(u32), Extension(u32), Branch(u32) }
+impl Copy for Child {}
+
+impl Child {
+    fn is_empty(self) -> bool {
+        match self {
+            Child::Empty => true,
+            _ => false,
+        }
+    }
+}
+
+// Each node keeps its reference in its parent, `len` bytes: its hash, or
+// under 32 bytes its RLP, in the low bytes of `reference`. `len` is zero
+// while the node is stale.
+
+// A slot: its key, keccak256 of the slot, and its value.
+struct Leaf { key: u256, value: u256, reference: u256, len: u8 }
+impl Copy for Leaf {}
+
+// An account: keccak256 of its address, its fields, with `EMPTY_CODE_HASH`
+// for an empty account's code, and the root node of its storage trie.
+struct Account {
+    key: u256,
+    nonce: u256,
+    balance: u256,
+    code_hash: u256,
+    reference: u256,
+    storage: Child,
+    len: u8,
+}
+impl Copy for Account {}
+
+// An extension: the nibbles of `key` from its depth to `end`, over a
+// branch. Every key under it has all the nibbles of `key` before `end`.
+struct Extension { key: u256, reference: u256, child: Child, end: u8, len: u8 }
+impl Copy for Extension {}
+
+// A branch: a child for each nibble at its depth, two or more of them not
+// empty. Its value is always empty, since keys are prefix-free.
+struct Branch { children: [Child; 16], reference: u256, len: u8 }
+impl Copy for Branch {}
+
+// Nodes of one kind, each at a position that stays its own until it is
+// released, which reuses it.
+struct Arena<T> { items: MemVec<T>, free: MemVec<u32> }
+
+impl<T> Arena<T> {
+    fn new() -> Self { Arena { items: MemVec::new(), free: MemVec::new() } }
+
+    // The position of `item`, added; none if an allocation fails.
+    fn add(mut self, _ item: own T) -> Option<u32> {
+        if let Option::Some(at) = self.free.pop() {
+            self.items.set(at as usize, item)
+            return Option::Some(at)
+        }
+        let at = self.items.len()
+        // `free` has room for every position, so releasing never allocates.
+        if at == u32::max() as usize || !self.free.try_reserve(at + 1) || self.items.try_push(item).is_err() {
+            return Option::None
+        }
+        Option::Some(at.downcast_truncate())
+    }
+
+    fn release(mut self, _ at: u32) { self.free.push(at) }
+
+    // The positions in use.
+    fn len(self) -> usize { self.items.len() - self.free.len() }
+}
+
+impl<T> Index<u32> for Arena<T> {
+    type Output = T
+
+    fn index(mut? self, _ index: u32) -> mut? T { mut? self.items[index as usize] }
+}
+
+// The count of leading nibbles `a` and `b` share.
+fn shared(_ a: u256, _ b: u256) -> usize { (leading_zeros(a ^ b) / 4).downcast_truncate() }
+
+/// The state trie of a world: the trie of its accounts, keyed by keccak256
+/// of the address, of `rlp([nonce, balance, storage_root, code_hash])`, and
+/// for each account the trie of its slots, keyed by keccak256 of the slot,
+/// of the value's RLP. Each node keeps its hash. After changing the world, a
+/// caller rereads each account and slot that changed, and the root rehashes
+/// only their paths. The trie depends only on what it holds, not on the
+/// order of the changes: rereading what a block changed after restoring the
+/// world undoes the block. An allocation that fails leaves the trie failed,
+/// without a root, until a new trie of the world replaces it.
+pub struct StateTrie {
+    root: Child,
+    accounts: Arena<Account>,
+    leaves: Arena<Leaf>,
+    extensions: Arena<Extension>,
+    branches: Arena<Branch>,
+    failed: bool,
+}
+
+impl StateTrie {
+    /// The trie of every account and slot in `world`; mutable for the code
+    /// hashes the world computes on first use.
+    pub fn new(_ world: mut WorldState) -> Self {
+        var trie = StateTrie {
+            root: Child::Empty,
+            accounts: Arena::new(),
+            leaves: Arena::new(),
+            extensions: Arena::new(),
+            branches: Arena::new(),
+            failed: false,
+        }
+        for position in 0..world.account_count() {
+            let address = world.account_at(position).address
+            trie.reread_account(mut world, address)
+        }
+        for at in 0..world.storage_slots() {
+            let entry = world.storage_at(at)
+            if entry.occupied { trie.reread_slot(mut world, address: entry.address, slot: entry.slot) }
+        }
+        trie
+    }
+
+    /// Rereads the account of `address` from `world`: adds it, updates it,
+    /// or if it no longer exists removes it with its storage.
+    pub fn reread_account(mut self, _ world: mut WorldState, _ address: u256) {
+        if !self.failed { self.failed = self.read_account(mut world, address).is_none() }
+    }
+
+    /// Rereads slot `slot` of `address` from `world`: adds it, updates it, or
+    /// if it is zero removes it, and with it the account's storage root. An
+    /// account the trie does not hold is read first.
+    pub fn reread_slot(mut self, _ world: mut WorldState, address: u256, slot: u256) {
+        if !self.failed { self.failed = self.read_slot(mut world, address, slot).is_none() }
+    }
+
+    /// The state root; none once an allocation has failed.
+    pub fn root(mut self) -> Option<u256> {
+        if self.failed { return Option::None }
+        var rlp = Encoder::new()
+        var value = Encoder::new()
+        let Option::Some(var path) = MemBuffer::try_new(33) else {
+            self.failed = true
+            return Option::None
+        }
+        self.rehash(self.root, depth: 0, mut rlp, mut value, mut path)
+        if rlp.finish().is_none() || value.finish().is_none() {
+            self.failed = true
+            return Option::None
+        }
+        Option::Some(self.root_of(self.root))
+    }
+
+    /// The nodes in use, which are those of a new trie of the same world.
+    pub(ingot) fn nodes(self) -> usize {
+        self.accounts.len() + self.leaves.len() + self.extensions.len() + self.branches.len()
+    }
+
+    // `reread_account`; none if an allocation fails.
+    fn read_account(mut self, _ world: mut WorldState, _ address: u256) -> Option<()> {
+        let key = hash(address, len: 20)
+        let found = self.find(self.root, key, depth: 0)
+        if !world.exists(address) {
+            if found.is_some() { self.root = self.remove(self.root, key, depth: 0)? }
+            return Option::Some(())
+        }
+        // Zero for an empty account, which has no code.
+        let code_hash = world.code_hash(address)
+        let nonce = world.nonce(address)
+        let balance = world.balance(address)
+        let code_hash = if code_hash == 0 { EMPTY_CODE_HASH } else { code_hash }
+        let Option::Some(at) = found else {
+            let account = Account {
+                key, nonce, balance, code_hash, reference: 0, storage: Child::Empty, len: 0,
+            }
+            let leaf = Child::Account(self.accounts.add(account)?)
+            self.root = self.insert(self.root, leaf, key, depth: 0)?
+            return Option::Some(())
+        }
+        let account = mut self.accounts[at]
+        if account.nonce == nonce && account.balance == balance && account.code_hash == code_hash {
+            return Option::Some(())
+        }
+        account.nonce = nonce
+        account.balance = balance
+        account.code_hash = code_hash
+        self.touch(self.root, key, depth: 0)
+        Option::Some(())
+    }
+
+    // `reread_slot`; none if an allocation fails.
+    fn read_slot(mut self, _ world: mut WorldState, address: u256, slot: u256) -> Option<()> {
+        let value = world.storage_load(address, slot)
+        let account_key = hash(address, len: 20)
+        var found = self.find(self.root, account_key, depth: 0)
+        if found.is_none() {
+            // The world keeps no zero slots, and a slot's account exists.
+            if value == 0 { return Option::Some(()) }
+            self.read_account(mut world, address)?
+            found = self.find(self.root, account_key, depth: 0)
+        }
+        let account = found.unwrap()
+        let storage = self.accounts[account].storage
+        let key = hash(slot, len: 32)
+        let storage = match self.find(storage, key, depth: 0) {
+            Option::Some(at) => {
+                if self.leaves[at].value == value { return Option::Some(()) }
+                if value == 0 { self.remove(storage, key, depth: 0)? } else {
+                    self.leaves[at].value = value
+                    self.touch(storage, key, depth: 0)
+                    storage
+                }
+            },
+            Option::None => {
+                if value == 0 { return Option::Some(()) }
+                let leaf = Child::Leaf(self.leaves.add(Leaf { key, value, reference: 0, len: 0 })?)
+                self.insert(storage, leaf, key, depth: 0)?
+            },
+        }
+        self.accounts[account].storage = storage
+        self.touch(self.root, account_key, depth: 0)
+        Option::Some(())
+    }
+
+    // The position of the leaf of `key` under `node`, at `depth`, if it has
+    // one.
+    fn find(self, _ node: Child, _ key: u256, depth: usize) -> Option<u32> {
+        match node {
+            Child::Branch(at) => self.find(self.branches[at].children[nibble(key, depth)], key, depth: depth + 1),
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                if shared(extension.key, key) < extension.end as usize { return Option::None }
+                self.find(extension.child, key, depth: extension.end as usize)
+            },
+            Child::Leaf(at) => if self.leaves[at].key == key { Option::Some(at) } else { Option::None },
+            Child::Account(at) => if self.accounts[at].key == key { Option::Some(at) } else { Option::None },
+            Child::Empty => Option::None,
+        }
+    }
+
+    // Makes the nodes from `node`, at `depth`, to the leaf of `key`, which is
+    // under it, stale.
+    fn touch(mut self, _ node: Child, _ key: u256, depth: usize) {
+        self.stale(node)
+        match node {
+            Child::Branch(at) => self.touch(self.branches[at].children[nibble(key, depth)], key, depth: depth + 1),
+            Child::Extension(at) => self.touch(self.extensions[at].child, key, depth: self.extensions[at].end as usize),
+            _ => {},
+        }
+    }
+
+    // The node in place of `node`, at `depth`, once `leaf`, of `key`, which
+    // is not under it, is added; none if an allocation fails.
+    fn insert(mut self, _ node: Child, _ leaf: Child, _ key: u256, depth: usize) -> Option<Child> {
+        match node {
+            Child::Empty => Option::Some(leaf),
+            Child::Branch(at) => {
+                let digit = nibble(key, depth)
+                let child = self.insert(self.branches[at].children[digit], leaf, key, depth: depth + 1)?
+                let branch = mut self.branches[at]
+                branch.children[digit] = child
+                branch.len = 0
+                Option::Some(node)
+            },
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                let end = extension.end as usize
+                let shared = shared(extension.key, key)
+                if shared >= end {
+                    let child = self.insert(extension.child, leaf, key, depth: end)?
+                    let extension = mut self.extensions[at]
+                    extension.child = child
+                    extension.len = 0
+                    return Option::Some(node)
+                }
+                // Below the fork, the rest of the extension, if any, over its
+                // branch.
+                let rest = if shared + 1 == end {
+                    self.extensions.release(at)
+                    extension.child
+                } else {
+                    self.stale(node)
+                    node
+                }
+                self.fork(depth, at: shared, leaf, key, other: rest, other_key: extension.key)
+            },
+            _ => {
+                // A leaf, which moves down below the fork.
+                let other_key = self.key(node)
+                self.stale(node)
+                self.fork(depth, at: shared(other_key, key), leaf, key, other: node, other_key)
+            },
+        }
+    }
+
+    // A branch at depth `at` over `leaf`, of `key`, and `other`, which holds
+    // keys with the nibble of `other_key` there, below an extension from
+    // `depth` if `at` is deeper; none if an allocation fails.
+    fn fork(mut self, depth: usize, at: usize, _ leaf: Child, _ key: u256, other: Child, other_key: u256)
+        -> Option<Child> {
+        var children = [Child::Empty; 16]
+        children[nibble(key, at)] = leaf
+        children[nibble(other_key, at)] = other
+        let branch = Child::Branch(self.branches.add(Branch { children, reference: 0, len: 0 })?)
+        if at == depth { return Option::Some(branch) }
+        let extension = Extension { key, reference: 0, child: branch, end: at.downcast_truncate(), len: 0 }
+        Option::Some(Child::Extension(self.extensions.add(extension)?))
+    }
+
+    // The node in place of `node`, at `depth`, once the leaf of `key`, which
+    // is under it, is removed with its storage; none if an allocation fails.
+    // A branch left with one child gives way to it, and an extension over
+    // what is no longer a branch gives it its path.
+    fn remove(mut self, _ node: Child, _ key: u256, depth: usize) -> Option<Child> {
+        match node {
+            Child::Branch(at) => {
+                let digit = nibble(key, depth)
+                let child = self.remove(self.branches[at].children[digit], key, depth: depth + 1)?
+                let branch = mut self.branches[at]
+                branch.children[digit] = child
+                branch.len = 0
+                var count: usize = 0
+                var only: usize = 0
+                for index in 0..16 {
+                    if !branch.children[index].is_empty() {
+                        count += 1
+                        only = index
+                    }
+                }
+                if count > 1 { return Option::Some(node) }
+                let child = branch.children[only]
+                self.branches.release(at)
+                let Child::Branch(_) = child else {
+                    // A leaf or an extension, which moves up a nibble.
+                    self.stale(child)
+                    return Option::Some(child)
+                }
+                // An extension of the one nibble over the branch, with the
+                // removed key's nibbles before it.
+                let key = key ^ ((nibble(key, depth) ^ only) as u256) << ((63 - depth) * 4) as u256
+                let extension = Extension { key, reference: 0, child, end: (depth + 1).downcast_truncate(), len: 0 }
+                Option::Some(Child::Extension(self.extensions.add(extension)?))
+            },
+            Child::Extension(at) => {
+                let child = self.remove(self.extensions[at].child, key, depth: self.extensions[at].end as usize)?
+                let Child::Branch(_) = child else {
+                    // A stale leaf or extension, which takes this one's path.
+                    self.extensions.release(at)
+                    return Option::Some(child)
+                }
+                let extension = mut self.extensions[at]
+                extension.child = child
+                extension.len = 0
+                Option::Some(node)
+            },
+            _ => {
+                self.clear(node)
+                Option::Some(Child::Empty)
+            },
+        }
+    }
+
+    // Releases `node` and every node under it.
+    fn clear(mut self, _ node: Child) {
+        match node {
+            Child::Leaf(at) => self.leaves.release(at),
+            Child::Account(at) => {
+                self.clear(self.accounts[at].storage)
+                self.accounts.release(at)
+            },
+            Child::Extension(at) => {
+                self.clear(self.extensions[at].child)
+                self.extensions.release(at)
+            },
+            Child::Branch(at) => {
+                let children = self.branches[at].children
+                for child in children { self.clear(child) }
+                self.branches.release(at)
+            },
+            Child::Empty => {},
+        }
+    }
+
+    // The key of a leaf.
+    fn key(self, _ leaf: Child) -> u256 {
+        match leaf {
+            Child::Leaf(at) => self.leaves[at].key,
+            Child::Account(at) => self.accounts[at].key,
+            _ => 0,
+        }
+    }
+
+    fn stale(mut self, _ node: Child) { self.cache(node, reference: 0, len: 0) }
+
+    fn cache(mut self, _ node: Child, reference: u256, len: u8) {
+        match node {
+            Child::Leaf(at) => {
+                let leaf = mut self.leaves[at]
+                leaf.reference = reference
+                leaf.len = len
+            },
+            Child::Account(at) => {
+                let account = mut self.accounts[at]
+                account.reference = reference
+                account.len = len
+            },
+            Child::Extension(at) => {
+                let extension = mut self.extensions[at]
+                extension.reference = reference
+                extension.len = len
+            },
+            Child::Branch(at) => {
+                let branch = mut self.branches[at]
+                branch.reference = reference
+                branch.len = len
+            },
+            Child::Empty => {},
+        }
+    }
+
+    // The reference of a node and its length, zero for the empty node or a
+    // stale one.
+    fn reference(self, _ node: Child) -> (u256, usize) {
+        match node {
+            Child::Leaf(at) => (self.leaves[at].reference, self.leaves[at].len as usize),
+            Child::Account(at) => (self.accounts[at].reference, self.accounts[at].len as usize),
+            Child::Extension(at) => (self.extensions[at].reference, self.extensions[at].len as usize),
+            Child::Branch(at) => (self.branches[at].reference, self.branches[at].len as usize),
+            Child::Empty => (0, 0),
+        }
+    }
+
+    // The root of the trie whose root node is `node`, which is not stale: its
+    // hash, even if under 32 bytes.
+    fn root_of(self, _ node: Child) -> u256 {
+        if node.is_empty() { return EMPTY_ROOT }
+        let (reference, len) = self.reference(node)
+        if len == 32 { reference } else { hash(reference, len) }
+    }
+
+    // Puts the reference of `node`, which is not stale, in a parent's RLP,
+    // using `path` for an embedded node.
+    fn put_child(self, _ rlp: mut Encoder, _ path: mut MemBuffer, _ node: Child) {
+        let (reference, len) = self.reference(node)
+        if node.is_empty() {
+            rlp.fixed(0, len: 0)
+        } else if len == 32 {
+            rlp.fixed(reference, len: 32)
+        } else {
+            path.write_word(offset: 0, value: reference)
+            rlp.raw(path.slice(offset: 32 - len, len))
+        }
+    }
+
+    // Caches the reference of `node`, at `depth`, and of each stale node
+    // under it: each node's RLP is made in `rlp`, a leaf's value in `value`,
+    // and paths in `path`.
+    fn rehash(mut self, _ node: Child, depth: usize, _ rlp: mut Encoder, _ value: mut Encoder,
+              _ path: mut MemBuffer) {
+        if node.is_empty() || self.reference(node).1 != 0 { return }
+        let start = rlp.begin()
+        match node {
+            Child::Leaf(at) => {
+                let leaf = self.leaves[at]
+                put_path(mut rlp, mut path, leaf.key, from: depth, to: 64, leaf: true)
+                let item = value.begin()
+                value.uint(leaf.value)
+                rlp.bytes(value.since(item))
+                value.truncate(item)
+            },
+            Child::Account(at) => {
+                let account = self.accounts[at]
+                self.rehash(account.storage, depth: 0, mut rlp, mut value, mut path)
+                put_path(mut rlp, mut path, account.key, from: depth, to: 64, leaf: true)
+                let item = value.begin()
+                value.uint(account.nonce)
+                value.uint(account.balance)
+                value.fixed(self.root_of(account.storage), len: 32)
+                value.fixed(account.code_hash, len: 32)
+                value.end(item)
+                rlp.bytes(value.since(item))
+                value.truncate(item)
+            },
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                let end = extension.end as usize
+                self.rehash(extension.child, depth: end, mut rlp, mut value, mut path)
+                put_path(mut rlp, mut path, extension.key, from: depth, to: end, leaf: false)
+                self.put_child(mut rlp, mut path, extension.child)
+            },
+            Child::Branch(at) => {
+                let children = self.branches[at].children
+                for child in children { self.rehash(child, depth: depth + 1, mut rlp, mut value, mut path) }
+                for child in children { self.put_child(mut rlp, mut path, child) }
+                rlp.fixed(0, len: 0)
+            },
+            Child::Empty => {},
+        }
+        rlp.end(start)
+        let len = rlp.since(start).len()
+        var reference: u256 = 0
+        if len >= 32 {
+            reference = keccak256_word(rlp.since(start))
+        } else {
+            for index in 0..len { reference = reference << 8 | rlp.since(start)[index] as u256 }
+        }
+        rlp.truncate(start)
+        self.cache(node, reference, len: if len >= 32 { 32 } else { len.downcast_truncate() })
+    }
+}
