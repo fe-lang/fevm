@@ -62,7 +62,7 @@ impl Copy for BlockError {}
 /// used, blob gas used, logs bloom, its EIP-7685 requests, each a type byte
 /// and its data, with their hash, and from Amsterdam its access list
 /// (EIP-7928) with its hash. Also the block's changes to the world, from
-/// which a host computes its state root.
+/// which a host computes its state root or undoes it.
 pub struct BlockOutput {
     pub gas_used: u64,
     pub blob_gas_used: u64,
@@ -78,7 +78,7 @@ pub struct BlockOutput {
 /// block's transactions; `transact` runs each transaction against the gas
 /// and blob gas the block has left; `finish` credits the withdrawals and
 /// collects the block's requests. It records what it changes, with what that
-/// held before.
+/// held before, to undo the block.
 pub struct Block {
     evm: Evm,
     env: BlockEnv,
@@ -265,8 +265,7 @@ impl Block {
     /// requests, the transactions' deposits (EIP-6110) and those the request
     /// contracts return to their system calls (EIP-7002, EIP-7251 and, from
     /// Amsterdam, EIP-8282). Returns the `Evm`, and the block's output
-    /// unless the block is invalid. An invalid block's changes to the world
-    /// are not undone.
+    /// unless the block is invalid, which it undoes as `abandon` does.
     pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm, Result<BlockError, BlockOutput>) {
         var block = self
         block.evm.access().set_index(block.transactions + 1)
@@ -295,7 +294,10 @@ impl Block {
         let gas_used = if block.gas_used > block.state_gas_used { block.gas_used } else { block.state_gas_used }
         let changes = block.evm.take_changes()
         let output = match block.failure {
-            Option::Some(error) => Result::Err(error),
+            Option::Some(error) => {
+                changes.undo(mut block.evm.world_mut())
+                Result::Err(error)
+            },
             Option::None => Result::Ok(BlockOutput {
                 gas_used, blob_gas_used: block.blob_gas_used, logs_bloom: block.bloom, requests,
                 requests_hash: hash.unwrap_or(default: 0), access_list, changes,
@@ -305,11 +307,11 @@ impl Block {
     }
 
     /// Leaves the block unfinished and returns the `Evm`, with the world as
-    /// the block's transactions so far left it.
+    /// it was before `begin`.
     pub fn abandon(own self) -> Evm {
         var evm = self.evm
         evm.access().stop()
-        let _ = evm.take_changes()
+        evm.take_changes().undo(mut evm.world_mut())
         evm
     }
 }

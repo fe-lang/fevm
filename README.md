@@ -123,12 +123,12 @@ balance overflow) undoes the transaction and reports that status.
 ### Blocks
 
 A `Block` runs a block's transactions on an `Evm`'s world, which it holds
-from `begin` to `finish`:
+from `begin` to `finish` or `abandon`:
 
 ```fe
 var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
 let receipt = block.transact(request, mut tracer)
-let (evm, finished) = block.finish(withdrawals)
+let (evm, finished) = block.finish(withdrawals)   // or: let evm = block.abandon()
 ```
 
 `begin` records the parent hash for BLOCKHASH and makes the system calls
@@ -147,7 +147,8 @@ state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
 hash, from Amsterdam the block's access list (EIP-7928) with its hash, and
 the block's changes. A block whose request contract is missing or fails,
 whose deposit contract logged a malformed deposit, or whose access list is
-too large for its gas limit gives a `BlockError` instead.
+too large for its gas limit gives a `BlockError` instead, and `finish` undoes
+it.
 
 The access list is built as the block runs. A read is noted where its gas has
 been paid, the point at which an account or slot is warmed, and stays through
@@ -162,22 +163,23 @@ before, each storage slot it changed with its value before, and the
 BLOCKHASH entries `begin` wrote. The values after are the world's, and may
 be those before. Code changes only on an account without code or with an
 EIP-7702 delegation, so the code before is none or a delegation. A host
-persists the changes or computes the state root from them. They come from
-the journal in the same pass as the access list, when each transaction,
-system call or the withdrawals end, and only a `Block` records them. A
-transaction whose changes cannot be recorded for want of memory is undone
-and fails as a host failure, so the changes always hold what the block
-changed:
+persists the changes or computes the state root from them, and undoes the
+block with them. They come from the journal in the same pass as the access
+list, when each transaction, system call or the withdrawals end, and only a
+`Block` records them. A transaction whose changes cannot be recorded for
+want of memory is undone and fails as a host failure, so the changes always
+undo the block:
 
 ```fe
 let Result::Ok(output) = finished else { return }
 for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code
 for slot in output.changes.slots() {}         // slot.address, .slot, .value
+output.changes.undo(mut evm.world_mut())      // the world as it was before `begin`
 ```
 
-`Block` does not check a header against its parent, decode transactions or
-compute Merkle roots, and does not undo an invalid block's changes; a `Chain`
-does all of these.
+`abandon` undoes the block as it stands. `Block` does not check a header
+against its parent, decode transactions or compute Merkle roots; a `Chain`
+does these.
 
 ### Chain
 

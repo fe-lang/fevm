@@ -2,7 +2,8 @@
 use core::{MemVec, Option}
 use swisstable::SwissTable
 use ingot::journal::{Change, ChangeKind}
-use ingot::state::{Field, StorageKey, WorldState}
+use ingot::state::{Field, StorageKey, WorldState, designator}
+use ingot::status::OK
 
 /// An account a block changed, as it was before the block: whether it
 /// existed, and each of its balance, nonce and code that the block changed.
@@ -161,5 +162,33 @@ impl BlockChanges {
             if kept == number { return true }
         }
         self.block_hashes.try_push((number, hash)).is_ok()
+    }
+
+    /// Puts `world`, as the block left it, back as it was before the block.
+    /// It restores entries the world's tables held before; a table that
+    /// cannot allocate to hold one again is a fatal host failure.
+    pub fn undo(self, _ world: mut WorldState) {
+        let empty: [u8; 0] = []
+        // Slots first: an account the block made had none, so removing it
+        // then finds none left to delete.
+        for slot in self.slots { core::assert(world.storage_store(slot.address, slot.slot, slot.value)) }
+        for account in self.accounts {
+            let address = account.address
+            if !account.existed {
+                world.remove_account(address)
+                continue
+            }
+            core::assert(world.ensure_account(address))
+            if let Option::Some(balance) = account.balance { core::assert(world.set_balance(address, balance)) }
+            if let Option::Some(nonce) = account.nonce { core::assert(world.set_nonce(address, nonce)) }
+            match account.code {
+                Option::Some(Option::Some(delegate)) => if world.delegate(address) != Option::Some(delegate) {
+                    core::assert(world.set_code_unhashed(address, code: designator(delegate)) == OK)
+                },
+                Option::Some(Option::None) => core::assert(world.set_code(address, code: empty) == OK),
+                Option::None => {},
+            }
+        }
+        for (number, hash) in self.block_hashes { core::assert(world.set_block_hash(number, hash)) }
     }
 }

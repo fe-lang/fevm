@@ -1,6 +1,6 @@
 use core::{MemBuffer, MemVec, Option, Result}
 use ingot::address::create_address
-use ingot::block::Block
+use ingot::block::{Block, BlockError}
 use ingot::changes::BlockChanges
 use ingot::evm::Evm
 use ingot::processor::{Authorization, TX_LEGACY, TX_SET_CODE, TxEnv, TxRequest, Withdrawal}
@@ -109,6 +109,27 @@ fn same_account(_ a: WorldState, _ b: WorldState, _ address: u256) -> bool {
         && a.nonce(address) == b.nonce(address) && same_code(a, b, address)
 }
 
+// Whether every account and slot of `a` is the same in `b`, and `b` has no
+// others.
+fn same(_ a: WorldState, _ b: WorldState) -> bool {
+    if a.account_count() != b.account_count() { return false }
+    for position in 0..a.account_count() {
+        if !same_account(a, b, a.account_at(position).address) { return false }
+    }
+    var slots: usize = 0
+    for slot in 0..a.storage_slots() {
+        let entry = a.storage_at(slot)
+        if entry.occupied {
+            if b.storage_load(entry.address, entry.slot) != entry.value { return false }
+            slots += 1
+        }
+    }
+    for slot in 0..b.storage_slots() {
+        if b.storage_at(slot).occupied { slots -= 1 }
+    }
+    slots == 0
+}
+
 // Whether `changes` has each account and slot of `world` that differs
 // between `before` and `after`.
 fn lists_differences(_ changes: BlockChanges, _ world: WorldState, _ before: WorldState, _ after: WorldState) -> bool {
@@ -161,6 +182,11 @@ fn listed_slot(_ changes: BlockChanges, _ address: u256, _ slot: u256) -> bool {
     false
 }
 
+// Whether the block hashes the block writes or prunes are as `prestate` has them.
+fn hashes_restored(_ world: WorldState) -> bool {
+    world.block_hash(43) == 0x43 && world.block_hash(299) == 0x299
+}
+
 // Transfers, storage writes, a reverted, an invalid and a simulated
 // transaction, and touches of existing empty accounts.
 fn transact(_ block: mut Block) {
@@ -194,12 +220,24 @@ fn withdrawals() -> MemVec<Withdrawal> {
 }
 
 #[test]
-fn finished_block_lists_its_changes() {
+fn abandoned_block_puts_the_world_back() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        var block = begin(prestate(), config)
+        core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0x5678 && block.world().block_hash(299) == 0x1234)
+        core::assert(block.world().block_hash(43) == 0)
+        transact(mut block)
+        var world = block.abandon().into_world()
+        core::assert(same(world, prestate()) && hashes_restored(world))
+    }
+}
+
+#[test]
+fn finished_block_lists_its_changes_and_undoes_them() {
     for config in [Config::osaka(), Config::amsterdam()] {
         var block = begin(prestate(), config)
         transact(mut block)
         let (evm, finished) = block.finish(withdrawals())
-        let world = evm.into_world()
+        var world = evm.into_world()
         let Result::Ok(output) = finished else { return core::assert(false) }
         core::assert(!world.exists(BARE) && world.balance(0xdd) == 2_000_000_000 && !world.exists(0xee))
         core::assert(world.storage_load(WITHDRAWAL_REQUESTS, 0) == 1)
@@ -207,7 +245,25 @@ fn finished_block_lists_its_changes() {
         core::assert(lists(output.changes, before, after: world))
         // The simulated transaction's recipient is not among them.
         core::assert(!listed(output.changes, 0xcc) && listed(output.changes, COINBASE))
+        output.changes.undo(mut world)
+        core::assert(same(world, before) && hashes_restored(world))
     }
+}
+
+#[test]
+fn block_without_its_request_contracts_fails_and_is_undone() {
+    var world = prestate()
+    world.remove_account(CONSOLIDATION_REQUESTS)
+    let before = world.try_clone().unwrap()
+    var block = begin(world, Config::osaka())
+    transact(mut block)
+    let (evm, finished) = block.finish(withdrawals())
+    core::assert(match finished {
+        Result::Err(BlockError::RequestContractMissing) => true,
+        _ => false,
+    })
+    let world = evm.into_world()
+    core::assert(same(world, before) && hashes_restored(world))
 }
 
 // PUSH1 1; PUSH0; SSTORE; then return one zero byte: PUSH1 0; PUSH0;
@@ -217,7 +273,7 @@ const DEPLOYS: [u8; 12] = [0x60, 1, 0x5f, 0x55, 0x60, 0, 0x5f, 0x53, 0x60, 1, 0x
 const DESTROYS: [u8; 12] = [0x60, 1, 0x5f, 0x55, 0x61, 0xbe, 0xef, 0xff, 0, 0, 0, 0]
 
 #[test]
-fn created_and_destroyed_contracts_are_listed() {
+fn created_and_destroyed_contracts_are_undone() {
     for config in [Config::osaka(), Config::amsterdam()] {
         var world = prestate()
         // The second creation's address already holds ether.
@@ -233,9 +289,11 @@ fn created_and_destroyed_contracts_are_listed() {
         // Osaka deletes the account; Amsterdam keeps it while it has ether, which it has not.
         core::assert(!block.world().exists(address) && block.world().storage_load(address, 0) == 0)
         let (evm, finished) = block.finish(MemVec::new())
-        let world = evm.into_world()
+        var world = evm.into_world()
         let Result::Ok(output) = finished else { return core::assert(false) }
         core::assert(lists(output.changes, before, after: world))
+        output.changes.undo(mut world)
+        core::assert(same(world, before) && hashes_restored(world))
     }
 }
 
@@ -254,7 +312,7 @@ fn authorization(nonce: u256) -> Authorization {
 }
 
 #[test]
-fn delegations_set_replaced_and_cleared_are_listed() {
+fn delegations_set_replaced_and_cleared_are_undone() {
     for config in [Config::osaka(), Config::amsterdam()] {
         // The authority without an account, and with a delegation and ether.
         for delegated in [false, true] {
@@ -280,9 +338,11 @@ fn delegations_set_replaced_and_cleared_are_listed() {
                 })
             }
             let (evm, finished) = block.finish(MemVec::new())
-            let world = evm.into_world()
+            var world = evm.into_world()
             let Result::Ok(output) = finished else { return core::assert(false) }
             core::assert(lists(output.changes, before, after: world))
+            output.changes.undo(mut world)
+            core::assert(same(world, before))
         }
     }
 }
