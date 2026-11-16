@@ -1,6 +1,6 @@
 // The opcode handlers: the `Cursor` they pass from one to the next, the
 // operations they run and the dispatch between them.
-use core::num::{IntWord, from_be}
+use core::num::{IntWord, from_be, to_le}
 use core::ptr::{cast, offset_bytes}
 use ingot::memory::small_growth_cost
 use ingot::gas::base_cost
@@ -383,14 +383,16 @@ impl Vm {
     fn op_other<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) { self.save(c) }
 
     // The top word indexes a byte of the second from its most significant
-    // end. A native word holds its bytes least significant first, so the
-    // byte is read from the second word's place.
+    // end, which is read from the second word's place: a word holds its
+    // bytes least significant first where memory is little-endian, as on
+    // native targets, and most significant first where it is big-endian.
+    // The test of the target's order is a constant.
     fn op_byte<F: Rules, T: Tracer>(mut self, var _ c: own Cursor<F>, _ tracer: mut T) {
         if !c.charge(3) { return self.out_of_gas(c) }
         if !c.holds(2) { return self.underflow(c) }
         let index = c.pop()
         c.set(1, if index >= 32 { 0 } else {
-            let at: usize = (31 - index).downcast_unchecked()
+            let at: usize = (if to_le<u16>(1) == 1 { 31 - index } else { index }).downcast_unchecked()
             unsafe { *offset_bytes(cast<u256, u8>(c.slot(1)), at) } as u256
         })
         c.advance(1)
