@@ -1,0 +1,175 @@
+use core::{MemBuffer, Option, Result}
+use std::io::Stdout
+use fevm::{BlobSchedule, BlockError, Config, WorldState}
+use fevm::hex::write_hex_word
+use fevm::status::{invalid_name, status_name}
+use fevm_chain::{Chain, Header, HeaderError, HostFailure, Import, InvalidBlock, Schedule, TxError}
+use fevm_rlp::Decoder
+use ingot::{Reader, host_error, read_accounts, read_fork, write_world}
+
+// A fork's rules, and its blob schedule unless it has its own.
+fn read_config(_ reader: mut Reader) -> Option<Config> {
+    var config = Config::of(read_fork(mut reader)?)
+    if reader.word(bytes: 1) == 1 {
+        config.blob_schedule = BlobSchedule { target: reader.u64(), max: reader.u64(), update_fraction: reader.u64() }
+    }
+    Option::Some(config)
+}
+
+// The next bytes, after their length.
+fn read_bytes(_ reader: mut Reader) -> MemBuffer {
+    let len: usize = reader.count().downcast_truncate()
+    let bytes = MemBuffer::from_span(reader.data.slice(offset: reader.position, len))
+    reader.position += len
+    bytes
+}
+
+fn header_error(_ error: HeaderError) -> String<27> {
+    match error {
+        HeaderError::Malformed => "malformed",
+        HeaderError::Allocation => "allocation",
+        HeaderError::MissingAccessListHash => "missing_access_list_hash",
+        HeaderError::UnexpectedAccessListHash => "unexpected_access_list_hash",
+        HeaderError::MissingSlotNumber => "missing_slot_number",
+        HeaderError::UnexpectedSlotNumber => "unexpected_slot_number",
+        HeaderError::Number => "number",
+        HeaderError::ExcessBlobGas => "excess_blob_gas",
+        HeaderError::GasUsed => "gas_used",
+        HeaderError::GasLimit => "gas_limit",
+        HeaderError::BaseFee => "base_fee",
+        HeaderError::Timestamp => "timestamp",
+        HeaderError::ExtraData => "extra_data",
+        HeaderError::Difficulty => "difficulty",
+        HeaderError::Nonce => "nonce",
+        HeaderError::OmmersHash => "ommers_hash",
+        HeaderError::ParentHash => "parent_hash",
+    }
+}
+
+fn tx_error(_ error: TxError) -> String<17> {
+    match error {
+        TxError::UnknownType => "unknown_type",
+        TxError::Malformed => "malformed",
+        TxError::InvalidSignature => "invalid_signature",
+        TxError::Allocation => "allocation",
+    }
+}
+
+fn block_error(_ error: BlockError) -> String<24> {
+    match error {
+        BlockError::RequestContractMissing => "request_contract_missing",
+        BlockError::RequestCallFailed => "request_call_failed",
+        BlockError::MalformedDeposit => "malformed_deposit",
+        BlockError::AccessListTooLarge => "access_list_too_large",
+        BlockError::Host(_) => "host",
+    }
+}
+
+// The name `fevm_tools` knows an invalid block's reason by, and the index of
+// the transaction it is about.
+fn reason(_ invalid: InvalidBlock) -> (MemBuffer, Option<usize>) {
+    match invalid {
+        InvalidBlock::TooLarge => (format!("too_large"), Option::None),
+        InvalidBlock::Malformed => (format!("malformed"), Option::None),
+        InvalidBlock::Header(error) => (format!("header.", header_error(error)), Option::None),
+        InvalidBlock::Ommers => (format!("ommers"), Option::None),
+        InvalidBlock::Undecodable(index, error) => (format!("undecodable.", tx_error(error)), Option::Some(index)),
+        InvalidBlock::Transaction(index, code) => (format!("transaction.", invalid_name(code)), Option::Some(index)),
+        InvalidBlock::Execution(error) => (format!("execution.", block_error(error)), Option::None),
+        InvalidBlock::GasUsed => (format!("gas_used"), Option::None),
+        InvalidBlock::TransactionsRoot => (format!("transactions_root"), Option::None),
+        InvalidBlock::StateRoot => (format!("state_root"), Option::None),
+        InvalidBlock::ReceiptsRoot => (format!("receipts_root"), Option::None),
+        InvalidBlock::LogsBloom => (format!("logs_bloom"), Option::None),
+        InvalidBlock::WithdrawalsRoot => (format!("withdrawals_root"), Option::None),
+        InvalidBlock::BlobGasUsed => (format!("blob_gas_used"), Option::None),
+        InvalidBlock::RequestsHash => (format!("requests_hash"), Option::None),
+        InvalidBlock::AccessListHash => (format!("access_list_hash"), Option::None),
+    }
+}
+
+// Runs a blockchain test: imports each block's RLP into a chain at the
+// genesis, as a client would. Prints each block's validity, with the reason
+// an invalid one is, the head's hash and the final world; or that the
+// pre-state is not the genesis header's; or, after a host failure, which is
+// no verdict on a block, only that.
+pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
+    core::assert(reader.word(bytes: 1) == 7)
+    let chain_id = reader.word(bytes: 32)
+    let Option::Some(genesis_config) = read_config(mut reader) else { return 2 }
+    var schedule = Schedule::new(genesis_config)
+    let later: usize = reader.count().downcast_truncate()
+    for _ in 0..later {
+        let timestamp = reader.u64()
+        let Option::Some(config) = read_config(mut reader) else { return 2 }
+        if !schedule.add(timestamp, config) { return host_error("schedule allocation failed") }
+    }
+    var world = WorldState::empty()
+    if !read_accounts(mut reader, mut world) { return host_error("pre-state allocation failed") }
+    // The genesis block's header, its first item.
+    let genesis_block = read_bytes(mut reader)
+    let rlp = genesis_block.span()
+    let decoded = with (rlp) {
+        var items = Decoder::new()
+        Header::decode(items.list().raw())
+    }
+    let genesis = match decoded {
+        Result::Ok(header) => header,
+        Result::Err(HeaderError::Allocation) => return host_error("genesis allocation failed"),
+        Result::Err(_) => {
+            println!("{\"genesis\":\"the header does not decode\"}")
+            return 0
+        },
+    }
+    let genesis_root = genesis.state_root
+    var chain = Chain::new(world, schedule, chain_id, genesis)
+    let Option::Some(root) = chain.state_root() else { return host_error("state root allocation failed") }
+    if root != genesis_root {
+        var text = MemBuffer::empty()
+        with (mut text) {
+            "{\"genesis\":\"the pre-state's root is ".fmt(mut text)
+            write_hex_word(root)
+            ", not the header's\"}\n".fmt(mut text)
+        }
+        print!(text)
+        return 0
+    }
+    var tracer = ()
+    var text = MemBuffer::empty()
+    with (mut text) {
+        "{\"blocks\":[".fmt(mut text)
+        let blocks: usize = reader.count().downcast_truncate()
+        for number in 0..blocks {
+            let rlp = read_bytes(mut reader)
+            if number != 0 { ",".fmt(mut text) }
+            match chain.import(rlp.span(), mut tracer) {
+                Import::Valid(_) => "{\"valid\":true}".fmt(mut text),
+                Import::Invalid(invalid) => {
+                    let (name, index) = reason(invalid)
+                    "{\"valid\":false,\"reason\":\"".fmt(mut text)
+                    name.fmt(mut text)
+                    "\"".fmt(mut text)
+                    if let Option::Some(index) = index {
+                        ",\"transaction\":".fmt(mut text)
+                        index.fmt(mut text)
+                    }
+                    "}".fmt(mut text)
+                },
+                Import::Failed(HostFailure::Status(status)) => {
+                    return host_error(format!("block ", number, ": host ", status_name(status)))
+                },
+                Import::Failed(HostFailure::BlobBaseFee) => {
+                    return host_error(format!("block ", number, ": blob base fee too large to compute"))
+                },
+            }
+        }
+        core::assert(reader.position == reader.data.len())
+        "],\"head\":\"".fmt(mut text)
+        write_hex_word(chain.head().hash)
+        "\"".fmt(mut text)
+        write_world(chain.world())
+        "}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}

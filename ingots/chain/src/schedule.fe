@@ -1,0 +1,67 @@
+// The forks of a chain by activation timestamp.
+use core::{MemVec, Option}
+use fevm::{BlobSchedule, Config, Fork}
+
+struct Activation { timestamp: u64, config: Config }
+
+impl Copy for Activation {}
+
+/// The forks of a chain: the genesis's `Config`, and each later fork's from
+/// its activation timestamp on.
+pub struct Schedule { genesis: Config, forks: MemVec<Activation> }
+
+impl Schedule {
+    pub fn new(_ genesis: Config) -> Self { Schedule { genesis, forks: MemVec::new() } }
+
+    /// Adds a fork activating at `timestamp`, which must be after the last
+    /// fork's. False if allocation fails.
+    pub fn add(mut self, timestamp: u64, _ config: Config) -> bool {
+        if let Option::Some(last) = self.forks.last() { core::assert(last.timestamp < timestamp) }
+        self.forks.try_push(Activation { timestamp, config }).is_ok()
+    }
+
+    /// The `Config` in force at `timestamp`.
+    pub fn config_at(self, _ timestamp: u64) -> Config {
+        var config = self.genesis
+        for fork in self.forks {
+            if fork.timestamp > timestamp { break }
+            config = fork.config
+        }
+        config
+    }
+}
+
+fn with_blobs(_ config: Config, target: u64, max: u64, update_fraction: u64) -> Config {
+    var config = config
+    config.blob_schedule = BlobSchedule { target, max, update_fraction }
+    config
+}
+
+// The transition networks of the fixtures (tests@v21.0.2), with the blob
+// schedules in their `config.blobSchedule`.
+#[test]
+fn schedule_gives_the_config_at_a_timestamp() {
+    // OsakaToBPO1AtTime15k: Osaka, then BPO1's blobs from 15,000.
+    var chain = Schedule::new(Config::osaka())
+    let bpo1 = with_blobs(Config::osaka(), target: 10, max: 15, update_fraction: 0x7f5a51)
+    core::assert(chain.add(timestamp: 15000, bpo1))
+    core::assert(chain.config_at(0).blob_schedule.max == 9 && chain.config_at(14999).blob_schedule.max == 9)
+    let bpo1 = chain.config_at(15000).blob_schedule
+    core::assert(bpo1.target == 10 && bpo1.max == 15 && bpo1.update_fraction == 8346193)
+    core::assert(chain.config_at(0xffffffffffffffff).blob_schedule.max == 15)
+    // BPO2ToAmsterdamAtTime15k: BPO2's blobs under Osaka's rules, then
+    // Amsterdam.
+    let bpo2 = with_blobs(Config::osaka(), target: 14, max: 21, update_fraction: 0xb24b3f)
+    var chain = Schedule::new(bpo2)
+    core::assert(chain.add(timestamp: 15000, Config::amsterdam()))
+    core::assert(!chain.config_at(14999).fork.since(Fork::Amsterdam))
+    core::assert(chain.config_at(14999).blob_schedule.update_fraction == 11684671)
+    core::assert(chain.config_at(15000).fork.since(Fork::Amsterdam))
+    // AmsterdamToBPOIncreaseAtTime15k, and Amsterdam's blobs again from
+    // 30,000.
+    var chain = Schedule::new(Config::amsterdam())
+    let increase = with_blobs(Config::amsterdam(), target: 0x15, max: 0x20, update_fraction: 0x010b70de)
+    core::assert(chain.add(timestamp: 15000, increase) && chain.add(timestamp: 30000, Config::amsterdam()))
+    core::assert(chain.config_at(14999).blob_schedule.max == 21 && chain.config_at(15000).blob_schedule.max == 32)
+    core::assert(chain.config_at(29999).blob_schedule.max == 32 && chain.config_at(30000).blob_schedule.max == 21)
+}

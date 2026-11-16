@@ -1,0 +1,501 @@
+use core::{MemBuffer, MemSpan, Option}
+use ingot::Encoder
+
+/// A cursor over RLP items, strict about their canonical form as consensus
+/// is. Its methods read the input from a `MemSpan` effect, which a
+/// `with (rlp)` block provides. A malformed item leaves the cursor failed: it
+/// then has no items left and its reads give zero and empty, and `finish`
+/// fails, as do the lists around it.
+pub struct Decoder { pos: usize, end: usize, failed: bool }
+
+impl Decoder {
+    /// A cursor over the whole input.
+    pub fn new() -> Self uses (rlp: MemSpan) { Decoder { pos: 0, end: rlp.len(), failed: false } }
+
+    /// Whether every item has been read.
+    pub fn is_empty(self) -> bool { self.pos == self.end }
+
+    /// Whether the next item is a list.
+    pub fn is_list(self) -> bool uses (rlp: MemSpan) { self.pos < self.end && rlp[self.pos] >= 0xc0 }
+
+    // Leaves the cursor failed, and gives an empty payload.
+    fn fail(mut self) -> (usize, usize) {
+        self.failed = true
+        self.pos = self.end
+        (self.end, 0)
+    }
+
+    // Reads past the next item, a list if `list` and a string otherwise, and
+    // gives its payload's offset and length.
+    fn payload(mut self, list: bool) -> (usize, usize) uses (rlp: MemSpan) {
+        if self.pos == self.end { return self.fail() }
+        let prefix = rlp[self.pos]
+        let start = self.pos + 1
+        let left = self.end - start
+        if prefix < 0x80 {
+            if list { return self.fail() }
+            self.pos = start
+            return (start - 1, 1)
+        }
+        if (prefix >= 0xc0) != list { return self.fail() }
+        let short = (prefix - if list { 0xc0 } else { 0x80 }) as usize
+        if short <= 55 {
+            // A single byte below 0x80 is its own encoding.
+            if short > left || (!list && short == 1 && rlp[start] < 0x80) { return self.fail() }
+            self.pos = start + short
+            return (start, short)
+        }
+        // The long form: the payload's length, in `bytes` bytes.
+        let bytes = short - 55
+        if bytes > left || rlp[start] == 0 { return self.fail() }
+        var len: u256 = 0
+        for index in 0..bytes { len = len << 8 | rlp[start + index] as u256 }
+        if len <= 55 || len > (left - bytes) as u256 { return self.fail() }
+        let len: usize = len.downcast_truncate()
+        self.pos = start + bytes + len
+        (start + bytes, len)
+    }
+
+    // The `len` bytes from `start` on as a big-endian integer.
+    fn word(_ start: usize, _ len: usize) -> u256 uses (rlp: MemSpan) {
+        var word: u256 = 0
+        for index in 0..len { word = word << 8 | rlp[start + index] as u256 }
+        word
+    }
+
+    // An integer of at most `max` bytes.
+    fn integer(mut self, max: usize) -> u256 uses (rlp: MemSpan) {
+        let (start, len) = self.payload(list: false)
+        if len > max || (len > 0 && rlp[start] == 0) {
+            self.fail()
+            return 0
+        }
+        Self::word(start, len)
+    }
+
+    /// An integer: its big-endian bytes without leading zeros, none for zero.
+    pub fn uint(mut self) -> u256 uses (rlp: MemSpan) { self.integer(max: 32) }
+
+    /// An integer of at most 8 bytes.
+    pub fn u64(mut self) -> u64 uses (rlp: MemSpan) { self.integer(max: 8).downcast_truncate() }
+
+    /// A string of exactly `len` bytes, at most 32, as a big-endian word, such
+    /// as an address's 20 or a hash's 32.
+    pub fn fixed(mut self, _ len: usize) -> u256 uses (rlp: MemSpan) {
+        let (start, actual) = self.payload(list: false)
+        if actual != len || len > 32 {
+            self.fail()
+            return 0
+        }
+        Self::word(start, len)
+    }
+
+    /// None for an empty string, such as a creation's recipient, and
+    /// otherwise `fixed(len)`.
+    pub fn optional(mut self, _ len: usize) -> Option<u256> uses (rlp: MemSpan) {
+        if self.pos < self.end && rlp[self.pos] == 0x80 {
+            self.pos += 1
+            return Option::None
+        }
+        Option::Some(self.fixed(len))
+    }
+
+    /// A string's bytes. The cursor stays held until their last use.
+    pub fn bytes(mut self) -> ref MemSpan uses (rlp: MemSpan) {
+        let (start, len) = self.payload(list: false)
+        rlp.slice(offset: start, len)
+    }
+
+    /// The next item whole, its header included, such as a block header to
+    /// hash. The cursor stays held until its last use.
+    pub fn raw(mut self) -> ref MemSpan uses (rlp: MemSpan) {
+        let start = self.pos
+        self.payload(list: self.is_list())
+        rlp.slice(offset: start, len: if self.failed { 0 } else { self.pos - start })
+    }
+
+    /// A cursor over the next item, a list, which this one moves past and
+    /// stays held by until the list cursor's last use. Then a list cursor that
+    /// failed or has items left fails this one.
+    pub fn list(mut self) -> mut Decoder uses (rlp: MemSpan) {
+        let (start, len) = self.payload(list: true)
+        var items = Decoder { pos: start, end: start + len, failed: false }
+        yield mut items
+        if items.failed || !items.is_empty() { self.fail() }
+    }
+
+    /// Whether every item was read and none was malformed.
+    #[must_use]
+    pub fn finish(own self) -> bool { !self.failed && self.is_empty() }
+}
+
+// `head`, then zeros to `len` bytes.
+fn input<const N: usize>(_ head: [u8; N], len: usize) -> MemBuffer {
+    var input = MemBuffer::new(len)
+    for index in 0..N { input[index] = head[index] }
+    input
+}
+
+// Whether `input` is one canonical integer.
+fn one_uint(_ input: MemBuffer) -> bool {
+    let rlp = input.span()
+    with (rlp) {
+        var items = Decoder::new()
+        items.uint()
+        items.finish()
+    }
+}
+
+// Whether `input` is one canonical integer of at most 8 bytes.
+fn one_u64(_ input: MemBuffer) -> bool {
+    let rlp = input.span()
+    with (rlp) {
+        var items = Decoder::new()
+        items.u64()
+        items.finish()
+    }
+}
+
+// Whether `input` is one canonical string.
+fn one_string(_ input: MemBuffer) -> bool {
+    let rlp = input.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let _ = items.bytes()
+        items.finish()
+    }
+}
+
+// Whether `input` is one canonical string of `len` bytes.
+fn one_fixed(_ input: MemBuffer, len: usize) -> bool {
+    let rlp = input.span()
+    with (rlp) {
+        var items = Decoder::new()
+        items.fixed(len)
+        items.finish()
+    }
+}
+
+// Whether `input` is one canonical empty list.
+fn one_empty_list(_ input: MemBuffer) -> bool {
+    let rlp = input.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let _ = mut items.list()
+        items.finish()
+    }
+}
+
+#[test]
+fn rlp_decodes_strings_and_lists() {
+    // The Ethereum wiki's examples. ["cat", "dog"]:
+    let cat_dog = input([0xc8, 0x83, 0x63, 0x61, 0x74, 0x83, 0x64, 0x6f, 0x67], len: 9)
+    let rlp = cat_dog.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.is_list())
+        let list = mut items.list()
+        let cat = list.bytes()
+        core::assert(cat.len() == 3 && cat[0] == 0x63 && cat[1] == 0x61 && cat[2] == 0x74)
+        core::assert(!list.is_list() && list.fixed(3) == 0x646f67 && list.is_empty())
+        core::assert(items.finish())
+    }
+    // The set-theoretical three, [[], [[]], [[], [[]]]].
+    let three = input([0xc7, 0xc0, 0xc1, 0xc0, 0xc3, 0xc0, 0xc1, 0xc0], len: 8)
+    let rlp = three.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let set = mut items.list()
+        core::assert(set.list().is_empty())
+        let one = mut set.list()
+        core::assert(one.list().is_empty() && one.is_empty())
+        let two = mut set.list()
+        core::assert(two.list().is_empty())
+        let inner = mut two.list()
+        core::assert(inner.list().is_empty() && inner.is_empty() && two.is_empty() && set.is_empty())
+        core::assert(items.finish())
+    }
+    // The empty string, and a 56-byte one, the shortest in the long form.
+    core::assert(one_string(input([0x80], len: 1)) && one_string(input([0xb8, 0x38], len: 58)))
+    let long = input([0xb8, 0x38, 0x4c], len: 58)
+    let rlp = long.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let text = items.bytes()
+        core::assert(text.len() == 56 && text[0] == 0x4c)
+        core::assert(items.finish())
+    }
+    // A list of 56 bytes' payload: the long form, f8 38.
+    var long_list = input([0xf8, 0x38], len: 58)
+    for index in 2..58 { long_list[index] = 0x80 }
+    let rlp = long_list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let list = mut items.list()
+        var count: usize = 0
+        while !list.is_empty() {
+            core::assert(list.uint() == 0)
+            count += 1
+        }
+        core::assert(count == 56 && items.finish())
+    }
+}
+
+#[test]
+fn rlp_decodes_integers() {
+    // 0, 15, 1024, 127, 128.
+    let small = input([0x80, 0x0f, 0x82, 0x04, 0x00, 0x7f, 0x81, 0x80], len: 8)
+    let rlp = small.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.uint() == 0 && items.u64() == 15 && items.uint() == 1024)
+        core::assert(items.u64() == 127 && items.uint() == 128 && items.finish())
+    }
+    // The largest u64 and u256: 88 and eight ff, a0 and 32 ff.
+    var max = input([], len: 42)
+    for index in 0..42 { max[index] = 0xff }
+    max[0] = 0x88
+    max[9] = 0xa0
+    let rlp = max.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.u64() == 0xffffffffffffffff)
+        core::assert(items.uint() == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)
+        core::assert(items.finish())
+    }
+}
+
+#[test]
+fn rlp_decodes_fixed_width_strings() {
+    // An address and a hash with leading zero bytes, a byte below 0x80 that
+    // is its own encoding, and an absent and a present recipient.
+    var fixed = input([0x94], len: 77)
+    fixed[20] = 0x01
+    fixed[21] = 0xa0
+    fixed[53] = 0x02
+    fixed[54] = 0x7f
+    fixed[55] = 0x80
+    fixed[56] = 0x94
+    fixed[57] = 0xaa
+    let rlp = fixed.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.fixed(20) == 1 && items.fixed(32) == 2 && items.fixed(1) == 0x7f)
+        core::assert(items.optional(20).is_none())
+        core::assert(items.optional(20).unwrap() == 0xaa << 152)
+        core::assert(items.finish())
+    }
+}
+
+#[test]
+fn rlp_decodes_what_it_encodes() {
+    // [0, 15, 1024, "dog", [], <60 bytes>, [<address>, [<hash>]]].
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.uint(0)
+    rlp.uint(15)
+    rlp.uint(1024)
+    rlp.fixed(0x646f67, len: 3)
+    let empty = rlp.begin()
+    rlp.end(empty)
+    var long = MemBuffer::new(60)
+    long[59] = 0x07
+    rlp.bytes(long.span())
+    let entry = rlp.begin()
+    rlp.fixed(0xaa, len: 20)
+    let keys = rlp.begin()
+    rlp.fixed(0xbb, len: 32)
+    rlp.end(keys)
+    rlp.end(entry)
+    rlp.end(list)
+    let bytes = rlp.finish().unwrap()
+    let rlp = bytes.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let list = mut items.list()
+        core::assert(list.uint() == 0 && list.u64() == 15 && list.uint() == 1024 && list.fixed(3) == 0x646f67)
+        core::assert(list.list().is_empty())
+        let long = list.bytes()
+        core::assert(long.len() == 60 && long[59] == 0x07)
+        let entry = mut list.list()
+        core::assert(entry.fixed(20) == 0xaa)
+        let keys = mut entry.list()
+        core::assert(keys.fixed(32) == 0xbb && keys.is_empty() && entry.is_empty() && list.is_empty())
+        core::assert(items.finish())
+    }
+}
+
+#[test]
+fn rlp_takes_items_whole() {
+    // A block-like [[1], [[2], "\x03\x04"]]: a header, then a list
+    // transaction and a string one.
+    let block = input([0xc8, 0xc1, 0x01, 0xc5, 0xc1, 0x02, 0x82, 0x03, 0x04], len: 9)
+    let rlp = block.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let block = mut items.list()
+        let header = block.raw()
+        core::assert(header.len() == 2 && header[0] == 0xc1 && header[1] == 0x01)
+        with (header) {
+            var header = Decoder::new()
+            core::assert(header.list().u64() == 1 && header.finish())
+        }
+        let txs = mut block.list()
+        core::assert(txs.is_list())
+        let legacy = txs.raw()
+        core::assert(legacy.len() == 2 && legacy[0] == 0xc1 && legacy[1] == 0x02)
+        core::assert(!txs.is_list())
+        let typed = txs.bytes()
+        core::assert(typed.len() == 2 && typed[0] == 0x03 && typed[1] == 0x04)
+        core::assert(txs.is_empty() && block.is_empty() && !block.is_list())
+        core::assert(items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_a_single_byte_with_a_header() {
+    core::assert(!one_string(input([0x81, 0x05], len: 2)) && !one_uint(input([0x81, 0x7f], len: 2)))
+    core::assert(!one_fixed(input([0x81, 0x00], len: 2), len: 1))
+    core::assert(one_string(input([0x81, 0x80], len: 2)) && one_fixed(input([0x05], len: 1), len: 1))
+}
+
+#[test]
+fn rlp_rejects_the_long_form_of_a_short_payload() {
+    // Strings of 55 bytes and of 1, and a list of 55.
+    core::assert(!one_string(input([0xb8, 0x37], len: 57)) && !one_string(input([0xb8, 0x01, 0x61], len: 3)))
+    var list = input([0xf8, 0x37], len: 57)
+    for index in 2..57 { list[index] = 0x80 }
+    let rlp = list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let list = mut items.list()
+        core::assert(list.is_empty())
+        core::assert(!items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_a_leading_zero_in_a_length() {
+    // 56 bytes, with the length in two bytes, 00 38.
+    core::assert(!one_string(input([0xb9, 0x00, 0x38], len: 59)))
+    var list = input([0xf9, 0x00, 0x38], len: 59)
+    for index in 3..59 { list[index] = 0x80 }
+    let rlp = list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.list().is_empty())
+        core::assert(!items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_a_leading_zero_in_an_integer() {
+    // Zero is the empty string, never 00.
+    core::assert(!one_uint(input([0x00], len: 1)) && !one_u64(input([0x82, 0x00, 0x01], len: 3)))
+    core::assert(!one_uint(input([0xa0], len: 33)))
+    // A string may begin with zeros.
+    core::assert(one_string(input([0x82, 0x00, 0x01], len: 3)) && one_fixed(input([0x00], len: 1), len: 1))
+}
+
+#[test]
+fn rlp_rejects_an_integer_wider_than_its_type() {
+    // 2^64 in nine bytes, and 2^256 in 33.
+    core::assert(!one_u64(input([0x89, 0x01], len: 10)) && one_uint(input([0x89, 0x01], len: 10)))
+    core::assert(!one_uint(input([0xa1, 0x01], len: 34)))
+}
+
+#[test]
+fn rlp_rejects_a_string_of_the_wrong_width() {
+    core::assert(!one_fixed(input([0x93], len: 20), len: 20) && !one_fixed(input([0x95], len: 22), len: 20))
+    core::assert(!one_fixed(input([0x80], len: 1), len: 20) && !one_fixed(input([0xa1], len: 34), len: 33))
+    let short = input([0x93], len: 20)
+    let rlp = short.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.optional(20).unwrap() == 0 && !items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_the_wrong_kind_of_item() {
+    core::assert(!one_uint(input([0xc0], len: 1)) && !one_string(input([0xc0], len: 1)))
+    core::assert(!one_empty_list(input([0x80], len: 1)) && one_empty_list(input([0xc0], len: 1)))
+    // A byte below 0x80 is a string, not a list of itself.
+    let byte = input([0x01], len: 1)
+    let rlp = byte.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(!items.is_list() && items.list().u64() == 0 && !items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_truncated_input() {
+    // Nothing; "dog" without its g; a length without its bytes; 56 bytes
+    // with one missing; a list of two bytes with one.
+    core::assert(!one_uint(input([], len: 0)) && !one_string(input([0x83, 0x64, 0x6f], len: 3)))
+    let dog = input([0x83, 0x64, 0x6f], len: 3)
+    let rlp = dog.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.raw().is_empty() && !items.finish())
+    }
+    core::assert(!one_string(input([0xb8], len: 1)) && !one_string(input([0xb9, 0x01], len: 2)))
+    core::assert(!one_string(input([0xb8, 0x38], len: 57)) && !one_empty_list(input([0xc2, 0x80], len: 2)))
+    // The largest length eight bytes hold, far past the end.
+    var huge = input([], len: 9)
+    for index in 0..9 { huge[index] = 0xff }
+    core::assert(!one_empty_list(huge))
+    huge[0] = 0xbf
+    core::assert(!one_string(huge))
+}
+
+#[test]
+fn rlp_rejects_an_item_overrunning_its_list() {
+    // c5 c1 83 64 6f 67: "dog" begins in a list of one byte and runs past
+    // it, though not past the input.
+    let overrun = input([0xc5, 0xc1, 0x83, 0x64, 0x6f, 0x67], len: 6)
+    let rlp = overrun.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let outer = mut items.list()
+        let inner = mut outer.list()
+        core::assert(inner.bytes().is_empty() && inner.failed && inner.is_empty())
+        // The inner list's failure reaches the outer one.
+        core::assert(outer.failed && outer.is_empty() && outer.uint() == 0)
+        core::assert(!items.finish())
+    }
+}
+
+#[test]
+fn rlp_rejects_trailing_bytes() {
+    let pair = input([0x80, 0x80], len: 2)
+    core::assert(!one_uint(pair))
+    // A list with an item left unread.
+    let list = input([0xc2, 0x80, 0x80], len: 3)
+    let rlp = list.span()
+    with (rlp) {
+        var items = Decoder::new()
+        core::assert(items.list().uint() == 0 && !items.finish())
+        var items = Decoder::new()
+        let list = mut items.list()
+        core::assert(list.uint() == 0 && list.uint() == 0)
+        core::assert(items.finish())
+    }
+}
+
+#[test]
+fn rlp_ends_loops_over_a_failed_list() {
+    // [[1, 00, 2]]: the 00 fails the loop's list and every list around it.
+    let keys = input([0xc4, 0xc3, 0x01, 0x00, 0x02], len: 5)
+    let rlp = keys.span()
+    with (rlp) {
+        var items = Decoder::new()
+        let outer = mut items.list()
+        let keys = mut outer.list()
+        var sum: u256 = 0
+        while !keys.is_empty() { sum += keys.uint() }
+        core::assert(sum == 1 && outer.failed)
+        core::assert(!items.finish())
+    }
+}

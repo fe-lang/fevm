@@ -70,6 +70,7 @@ pub const INVALID_INTRINSIC_GAS: i32 = 1
 pub const INVALID_INITCODE_SIZE: i32 = 2
 pub const INVALID_NONCE_LIMIT: i32 = 3
 pub const INVALID_PRIORITY_FEE: i32 = 4
+// The block has less gas left than the transaction's gas limit.
 pub const INVALID_GAS_LIMIT: i32 = 5
 pub const INVALID_BLOB_COUNT: i32 = 6
 pub const INVALID_FEE_CAP: i32 = 7
@@ -84,6 +85,8 @@ pub const INVALID_TX_TYPE: i32 = 15
 pub const INVALID_GAS_LIMIT_CAP: i32 = 16
 pub const INVALID_CHAIN_ID: i32 = 17
 pub const INVALID_NO_AUTHORIZATIONS: i32 = 18
+// The block has less blob gas left than the transaction's blobs use.
+pub const INVALID_BLOB_GAS: i32 = 19
 
 pub fn invalid_name(_ invalid: i32) -> String<20> {
     match invalid {
@@ -106,6 +109,7 @@ pub fn invalid_name(_ invalid: i32) -> String<20> {
         INVALID_GAS_LIMIT_CAP => "gas_limit_cap",
         INVALID_CHAIN_ID => "chain_id",
         INVALID_NO_AUTHORIZATIONS => "no_authorizations",
+        INVALID_BLOB_GAS => "blob_gas",
         _ => "unknown",
     }
 }

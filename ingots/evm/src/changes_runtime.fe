@@ -1,0 +1,348 @@
+use core::{MemBuffer, MemVec, Option, Result}
+use ingot::address::create_address
+use ingot::block::{Block, BlockError}
+use ingot::changes::BlockChanges
+use ingot::evm::Evm
+use ingot::processor::{Authorization, TX_LEGACY, TX_SET_CODE, TxEnv, TxRequest, Withdrawal}
+use ingot::state::{WorldState, designator}
+use ingot::status::{ERR_REVERT, INVALID_NONCE, OK, VALID}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+
+const SENDER: u256 = 0x1000
+const COINBASE: u256 = 0xc0ffee
+const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
+const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
+const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
+const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
+const BUILDER_DEPOSIT_REQUESTS: u256 = 0x0000bff46984e3725691fa540a8c7589300d8282
+const BUILDER_EXIT_REQUESTS: u256 = 0x000064d678505ad48f8ccb093bc65613800e8282
+// Stores its second calldata word in the slot its first names, then
+// reverts if its third is not zero.
+const STORE: u256 = 0x5704e
+// Existing empty accounts, the first with a slot, which a touch deletes.
+const EMPTY: u256 = 0xe0
+const BARE: u256 = 0xe1
+// The signer of `authorization`'s authorizations, from the private key
+// 0x4646...46, and their delegates.
+const AUTHORITY: u256 = 0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f
+const FIRST_DELEGATE: u256 = 0xde1e
+const SECOND_DELEGATE: u256 = 0xde2e
+
+// The world before each block: a funded sender; the system contracts, of
+// which the two before the transactions store their input in slot 0 and the
+// withdrawal request contract stores 1 there; the store contract; two empty
+// accounts; and two block hashes, one of which the block replaces and one
+// it prunes.
+fn prestate() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    // PUSH0; CALLDATALOAD; PUSH0; SSTORE.
+    let store: [u8; 4] = [0x5f, 0x35, 0x5f, 0x55]
+    core::assert(world.set_code(address: BEACON_ROOTS, code: store) == OK)
+    core::assert(world.storage_store(BEACON_ROOTS, 0, 0xbeac))
+    core::assert(world.set_code(address: HISTORY_STORAGE, code: store) == OK)
+    // PUSH1 1; PUSH0; SSTORE.
+    core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: [0x60 as u8, 1, 0x5f, 0x55]) == OK)
+    for address in [CONSOLIDATION_REQUESTS, BUILDER_DEPOSIT_REQUESTS, BUILDER_EXIT_REQUESTS] {
+        core::assert(world.set_code(address, code: [0x00 as u8]) == OK)
+    }
+    // PUSH1 0x20; CALLDATALOAD; PUSH0; CALLDATALOAD; SSTORE; PUSH1 0x40;
+    // CALLDATALOAD; PUSH1 13; JUMPI; STOP; JUMPDEST; PUSH0; PUSH0; REVERT.
+    let code: [u8; 17] = [0x60, 0x20, 0x35, 0x5f, 0x35, 0x55, 0x60, 0x40, 0x35, 0x60, 13, 0x57, 0x00, 0x5b, 0x5f, 0x5f, 0xfd]
+    core::assert(world.set_code(address: STORE, code) == OK)
+    core::assert(world.storage_store(STORE, 2, 3) && world.storage_store(STORE, 4, 4))
+    core::assert(world.ensure_account(EMPTY) && world.storage_store(EMPTY, 1, 9) && world.ensure_account(BARE))
+    core::assert(world.set_block_hash(43, 0x43) && world.set_block_hash(299, 0x299))
+    world
+}
+
+fn env() -> BlockEnv {
+    var env = default_block_env()
+    env.number = 300
+    env.gaslimit = 30_000_000
+    env.chainid = 1
+    env.coinbase = COINBASE
+    env
+}
+
+fn begin(_ world: own WorldState, _ config: Config) -> Block {
+    Block::begin(Evm::new(world, config), env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+}
+
+fn request(nonce: u256, to: u256, value: u256, _ data: own InputData) -> TxRequest {
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to, creates: false, nonce,
+        gas_limit: 1_000_000, gas_price: 2, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value,
+    }
+    TxRequest::new(env, data)
+}
+
+// Calldata for the store contract.
+fn store(slot: u256, value: u256, revert: bool) -> InputData {
+    var bytes = MemBuffer::new(96)
+    bytes.write_word(offset: 0, value: slot)
+    bytes.write_word(offset: 32, value)
+    bytes.write_word(offset: 64, value: if revert { 1 } else { 0 })
+    InputData::new(bytes, status: OK)
+}
+
+fn creation(nonce: u256, value: u256, _ initcode: [u8; 12], len: usize) -> TxRequest {
+    var request = request(nonce, to: 0, value, InputData::copy_from(initcode, offset: 0, len))
+    request.env.creates = true
+    request
+}
+
+fn same_code(_ a: WorldState, _ b: WorldState, _ address: u256) -> bool {
+    let code = a.code(address)
+    let other = b.code(address)
+    if code.len() != other.len() { return false }
+    for index in 0..code.len() {
+        if code[index] != other[index] { return false }
+    }
+    true
+}
+
+// Whether `address` is the same in both worlds: its existence, balance,
+// nonce and code.
+fn same_account(_ a: WorldState, _ b: WorldState, _ address: u256) -> bool {
+    a.exists(address) == b.exists(address) && a.balance(address) == b.balance(address)
+        && a.nonce(address) == b.nonce(address) && same_code(a, b, address)
+}
+
+// Whether every account and slot of `a` is the same in `b`, and `b` has no
+// others.
+fn same(_ a: WorldState, _ b: WorldState) -> bool {
+    if a.account_count() != b.account_count() { return false }
+    for position in 0..a.account_count() {
+        if !same_account(a, b, a.account_at(position).address) { return false }
+    }
+    var slots: usize = 0
+    for slot in 0..a.storage_slots() {
+        let entry = a.storage_at(slot)
+        if entry.occupied {
+            if b.storage_load(entry.address, entry.slot) != entry.value { return false }
+            slots += 1
+        }
+    }
+    for slot in 0..b.storage_slots() {
+        if b.storage_at(slot).occupied { slots -= 1 }
+    }
+    slots == 0
+}
+
+// Whether `changes` has each account and slot of `world` that differs
+// between `before` and `after`.
+fn lists_differences(_ changes: BlockChanges, _ world: WorldState, _ before: WorldState, _ after: WorldState) -> bool {
+    for position in 0..world.account_count() {
+        let address = world.account_at(position).address
+        if !same_account(before, after, address) && !listed(changes, address) { return false }
+    }
+    for at in 0..world.storage_slots() {
+        let entry = world.storage_at(at)
+        let differs = entry.occupied
+            && before.storage_load(entry.address, entry.slot) != after.storage_load(entry.address, entry.slot)
+        if differs && !listed_slot(changes, entry.address, entry.slot) { return false }
+    }
+    true
+}
+
+// Whether `changes` lists each account and slot that differs between
+// `before` and `after` with what it held in `before`, and lists only
+// accounts of which each value it does not give is the same in both.
+fn lists(_ changes: BlockChanges, _ before: WorldState, _ after: WorldState) -> bool {
+    for account in changes.accounts() {
+        let address = account.address
+        if account.existed != before.exists(address) { return false }
+        if account.balance.unwrap_or(default: after.balance(address)) != before.balance(address) { return false }
+        if account.nonce.unwrap_or(default: after.nonce(address)) != before.nonce(address) { return false }
+        let code = match account.code {
+            Option::Some(Option::Some(delegate)) => before.delegate(address) == Option::Some(delegate),
+            Option::Some(Option::None) => before.code_size(address) == 0,
+            Option::None => same_code(before, after, address),
+        }
+        if !code { return false }
+    }
+    for slot in changes.slots() {
+        if before.storage_load(slot.address, slot.slot) != slot.value { return false }
+    }
+    lists_differences(changes, world: before, before, after) && lists_differences(changes, world: after, before, after)
+}
+
+fn listed(_ changes: BlockChanges, _ address: u256) -> bool {
+    for account in changes.accounts() {
+        if account.address == address { return true }
+    }
+    false
+}
+
+fn listed_slot(_ changes: BlockChanges, _ address: u256, _ slot: u256) -> bool {
+    for kept in changes.slots() {
+        if kept.address == address && kept.slot == slot { return true }
+    }
+    false
+}
+
+// Whether the block hashes the block writes or prunes are as `prestate` has them.
+fn hashes_restored(_ world: WorldState) -> bool {
+    world.block_hash(43) == 0x43 && world.block_hash(299) == 0x299
+}
+
+// Transfers, storage writes, a reverted, an invalid and a simulated
+// transaction, and touches of existing empty accounts.
+fn transact(_ block: mut Block) {
+    var tracer = ()
+    let to_new = block.transact(request(nonce: 0, to: 0xbb, value: 5, empty_bytes()), mut tracer)
+    core::assert(to_new.invalid == VALID && to_new.status == OK)
+    // Slot 1 is set and cleared; slot 2 goes from 3 to 7 to 9.
+    for (nonce, slot, value) in [(1 as u256, 1 as u256, 5 as u256), (2, 2, 7)] {
+        core::assert(block.transact(request(nonce, to: STORE, value: 0, store(slot, value, revert: false)), mut tracer).status == OK)
+    }
+    let reverted = block.transact(request(nonce: 3, to: STORE, value: 1, store(slot: 4, value: 0, revert: true)), mut tracer)
+    core::assert(reverted.invalid == VALID && reverted.status == ERR_REVERT && block.world().storage_load(STORE, 4) == 4)
+    core::assert(block.transact(request(nonce: 9, to: 0xbb, value: 1, empty_bytes()), mut tracer).invalid == INVALID_NONCE)
+    for (nonce, slot, value) in [(4 as u256, 1 as u256, 0 as u256), (5, 2, 9)] {
+        core::assert(block.transact(request(nonce, to: STORE, value: 0, store(slot, value, revert: false)), mut tracer).status == OK)
+    }
+    // A simulation changes nothing, and is no change of the block's.
+    core::assert(block.simulate(request(nonce: 6, to: 0xcc, value: 1, empty_bytes()), mut tracer).status == OK)
+    // A call without value touches the empty account, which is deleted with its slot.
+    core::assert(block.transact(request(nonce: 6, to: EMPTY, value: 0, empty_bytes()), mut tracer).status == OK)
+    core::assert(!block.world().exists(EMPTY) && block.world().storage_load(EMPTY, 1) == 0)
+    core::assert(block.world().storage_load(STORE, 1) == 0 && block.world().storage_load(STORE, 2) == 9)
+}
+
+fn withdrawals() -> MemVec<Withdrawal> {
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    for (address, amount) in [(SENDER, 1 as u64), (0xdd, 2), (BARE, 0), (0xee, 0)] {
+        withdrawals.push(Withdrawal { address, amount })
+    }
+    withdrawals
+}
+
+#[test]
+fn abandoned_block_puts_the_world_back() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        var block = begin(prestate(), config)
+        core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0x5678 && block.world().block_hash(299) == 0x1234)
+        core::assert(block.world().block_hash(43) == 0)
+        transact(mut block)
+        var world = block.abandon().into_world()
+        core::assert(same(world, prestate()) && hashes_restored(world))
+    }
+}
+
+#[test]
+fn finished_block_lists_its_changes_and_undoes_them() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        var block = begin(prestate(), config)
+        transact(mut block)
+        let (evm, finished) = block.finish(withdrawals())
+        var world = evm.into_world()
+        let Result::Ok(output) = finished else { return core::assert(false) }
+        core::assert(!world.exists(BARE) && world.balance(0xdd) == 2_000_000_000 && !world.exists(0xee))
+        core::assert(world.storage_load(WITHDRAWAL_REQUESTS, 0) == 1)
+        let before = prestate()
+        core::assert(lists(output.changes, before, after: world))
+        // The simulated transaction's recipient is not among them.
+        core::assert(!listed(output.changes, 0xcc) && listed(output.changes, COINBASE))
+        output.changes.undo(mut world)
+        core::assert(same(world, before) && hashes_restored(world))
+    }
+}
+
+#[test]
+fn block_without_its_request_contracts_fails_and_is_undone() {
+    var world = prestate()
+    world.remove_account(CONSOLIDATION_REQUESTS)
+    let before = world.try_clone().unwrap()
+    var block = begin(world, Config::osaka())
+    transact(mut block)
+    let (evm, finished) = block.finish(withdrawals())
+    core::assert(match finished {
+        Result::Err(BlockError::RequestContractMissing) => true,
+        _ => false,
+    })
+    let world = evm.into_world()
+    core::assert(same(world, before) && hashes_restored(world))
+}
+
+// PUSH1 1; PUSH0; SSTORE; then return one zero byte: PUSH1 0; PUSH0;
+// MSTORE8; PUSH1 1; PUSH0; RETURN.
+const DEPLOYS: [u8; 12] = [0x60, 1, 0x5f, 0x55, 0x60, 0, 0x5f, 0x53, 0x60, 1, 0x5f, 0xf3]
+// PUSH1 1; PUSH0; SSTORE; PUSH2 0xbeef; SELFDESTRUCT.
+const DESTROYS: [u8; 12] = [0x60, 1, 0x5f, 0x55, 0x61, 0xbe, 0xef, 0xff, 0, 0, 0, 0]
+
+#[test]
+fn created_and_destroyed_contracts_are_undone() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        var world = prestate()
+        // The second creation's address already holds ether.
+        core::assert(world.set_balance(create_address(sender: SENDER, nonce: 1), 7))
+        let before = world.try_clone().unwrap()
+        var block = begin(world, config)
+        var tracer = ()
+        let deployed = block.transact(creation(nonce: 0, value: 3, DEPLOYS, len: 12), mut tracer)
+        core::assert(deployed.status == OK && block.world().code_size(create_address(sender: SENDER, nonce: 0)) == 1)
+        let destroyed = block.transact(creation(nonce: 1, value: 3, DESTROYS, len: 8), mut tracer)
+        let address = create_address(sender: SENDER, nonce: 1)
+        core::assert(destroyed.status == OK && block.world().balance(0xbeef) == 10)
+        // Osaka deletes the account; Amsterdam keeps it while it has ether, which it has not.
+        core::assert(!block.world().exists(address) && block.world().storage_load(address, 0) == 0)
+        let (evm, finished) = block.finish(MemVec::new())
+        var world = evm.into_world()
+        let Result::Ok(output) = finished else { return core::assert(false) }
+        core::assert(lists(output.changes, before, after: world))
+        output.changes.undo(mut world)
+        core::assert(same(world, before) && hashes_restored(world))
+    }
+}
+
+// The authorizations of `AUTHORITY`: to the first delegate at nonce 0, to
+// the second at nonce 1, and clearing the delegation at nonce 2.
+fn authorization(nonce: u256) -> Authorization {
+    let (address, y_parity, r, s) = match nonce {
+        0 => (FIRST_DELEGATE, 0, 0x5b9691e0a1e435c2a9236cb9206c6e398b5f53c910c5f0ded02f7f8f62b82646,
+              0x72b0aa1c251098f29ca5bda58ea522556c6ff7da06b17bad669e6e715fcf380b),
+        1 => (SECOND_DELEGATE, 1, 0xc5df47389c05bd926f43c9c7e1dfe21c285871bf6edf8cd0839ba9f4f4cb1327,
+              0x2ef640c6b63066a6cc0b85b88d5e7a92f8d84c02795d1280301b0627cdf174f1),
+        _ => (0, 0, 0xeaa30295358fd27e0e6b8a313849969e8509f8eeda99da273d265913d447530c,
+              0x3fbc2f0bf420eee4141d99f413f53509a6b034617d22881ca5854d98e5690e12),
+    }
+    Authorization { chain_id: 0, address, nonce, y_parity, r, s }
+}
+
+#[test]
+fn delegations_set_replaced_and_cleared_are_undone() {
+    for config in [Config::osaka(), Config::amsterdam()] {
+        // The authority without an account, and with a delegation and ether.
+        for delegated in [false, true] {
+            var world = prestate()
+            if delegated {
+                core::assert(world.set_code(address: AUTHORITY, code: designator(0xd0)) == OK)
+                core::assert(world.set_balance(AUTHORITY, 11))
+            }
+            let before = world.try_clone().unwrap()
+            var block = begin(world, config)
+            var tracer = ()
+            for nonce in [0 as u256, 1, 2] {
+                var request = request(nonce, to: 0xbb, value: 0, empty_bytes())
+                request.env.kind = TX_SET_CODE
+                core::assert(request.add_authorization(authorization(nonce)))
+                core::assert(block.transact(request, mut tracer).status == OK)
+                let delegate = block.world().delegate(AUTHORITY)
+                core::assert(block.world().nonce(AUTHORITY) == nonce + 1)
+                core::assert(match nonce {
+                    0 => delegate == Option::Some(FIRST_DELEGATE),
+                    1 => delegate == Option::Some(SECOND_DELEGATE),
+                    _ => block.world().code_size(AUTHORITY) == 0,
+                })
+            }
+            let (evm, finished) = block.finish(MemVec::new())
+            var world = evm.into_world()
+            let Result::Ok(output) = finished else { return core::assert(false) }
+            core::assert(lists(output.changes, before, after: world))
+            output.changes.undo(mut world)
+            core::assert(same(world, before))
+        }
+    }
+}

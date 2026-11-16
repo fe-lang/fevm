@@ -1,0 +1,44 @@
+use core::Option
+use fevm::{AccountBefore, Block, Config, Evm, TxEnv, TxRequest, WorldState, default_block_env, empty_bytes}
+use fevm::processor::TX_LEGACY
+use fevm::status::{ERR_HOST_ALLOCATION, OK, VALID}
+
+const SENDER: u256 = 0x1000
+const BALANCE: u256 = 1_000_000
+
+// Relinked with the controlled allocator watching allocations of 7,168
+// bytes: the block's changes growing to 32 accounts of 224 bytes, when
+// the 16th transfer, each to a new account, adds the 17th. Failing it fails
+// that transaction as a host failure and undoes it; the block's changes
+// still undo the 15 before. Without the failure all 20 run, and undoing
+// them leaves the world as it was.
+pub fn main() -> i32 {
+    core::assert(core::size_of<AccountBefore>() == 224)
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, BALANCE))
+    var env = default_block_env()
+    env.gaslimit = 30_000_000
+    env.chainid = 1
+    var block = Block::begin(Evm::new(world, Config::osaka()), env, parent_hash: 0, parent_beacon_block_root: 0)
+    var tracer = ()
+    var sent: u256 = 0
+    var status = OK
+    while sent < 20 && status == OK {
+        let tx = TxEnv {
+            kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: 0x2000 + sent, creates: false,
+            nonce: sent, gas_limit: 21_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0,
+            value: 1,
+        }
+        let receipt = block.transact(TxRequest::new(tx, data: empty_bytes()), mut tracer)
+        core::assert(receipt.invalid == VALID)
+        status = receipt.status
+        if status == OK { sent += 1 }
+    }
+    core::assert((status == OK && sent == 20) || (status == ERR_HOST_ALLOCATION && sent == 15))
+    // The failed transfer is undone: its recipient has no account.
+    core::assert(block.world().nonce(SENDER) == sent && !block.world().exists(0x2000 + sent))
+    core::assert(block.world().balance(SENDER) == BALANCE - sent)
+    let world = block.abandon().into_world()
+    core::assert(world.account_count() == 1 && world.balance(SENDER) == BALANCE && world.nonce(SENDER) == 0)
+    0
+}

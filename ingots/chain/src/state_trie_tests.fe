@@ -1,0 +1,384 @@
+use core::{MemBuffer, MemVec}
+use core::num::leading_zeros
+use fevm::{OK, WorldState}
+use fevm::state::StorageKey
+use ingot::chain::Import
+use ingot::chain_tests::{BLOCK_STATE_ROOT, GENESIS_STATE_ROOT, genesis, genesis_world, valid}
+use ingot::state_trie::StateTrie
+use ingot::trie::{EMPTY_ROOT, hash, state_root}
+
+// Whether `trie` has the root `state_root` gives `world`, with the nodes of
+// a new trie of it.
+fn agrees(_ trie: mut StateTrie, _ world: mut WorldState) -> bool {
+    let fresh = StateTrie::new(mut world)
+    trie.root().unwrap() == state_root(mut world).unwrap() && trie.nodes() == fresh.nodes()
+}
+
+// The first word from 1 on whose keccak256, of its low `len` bytes, shares
+// exactly `nibbles` leading nibbles with `key`.
+fn sharing(_ key: u256, nibbles: u256, len: usize) -> u256 {
+    var word: u256 = 1
+    while leading_zeros(hash(word, len) ^ key) / 4 != nibbles { word += 1 }
+    word
+}
+
+// Sets `word` to `value` in `world`, zero removing it: an account's balance
+// if `accounts`, and otherwise a slot of account 1. Rereads it into `trie`,
+// which must then agree with the world.
+fn put(_ trie: mut StateTrie, _ world: mut WorldState, accounts: bool, word: u256, value: u256) -> bool {
+    if accounts {
+        if value == 0 { world.remove_account(word) } else { core::assert(world.set_balance(word, value)) }
+        trie.reread_account(mut world, word)
+    } else {
+        core::assert(world.storage_store(1, word, value))
+        trie.reread_slot(mut world, address: 1, slot: word)
+    }
+    agrees(mut trie, mut world)
+}
+
+// Splits and merges extensions in the account trie if `accounts`, and
+// otherwise in a storage trie, with keys sharing their first nibbles with
+// that of word 0.
+fn extensions(accounts: bool) {
+    let len: usize = if accounts { 20 } else { 32 }
+    let key = hash(0, len)
+    let none = sharing(key, nibbles: 0, len)
+    let one = sharing(key, nibbles: 1, len)
+    let two = sharing(key, nibbles: 2, len)
+    let three = sharing(key, nibbles: 3, len)
+    var world = WorldState::empty()
+    var trie = StateTrie::new(mut world)
+    // A leaf, then a branch at nibble 3 below an extension of three.
+    core::assert(put(mut trie, mut world, accounts, word: 0, value: 1))
+    core::assert(put(mut trie, mut world, accounts, word: three, value: 2))
+    // A key sharing one nibble splits the extension into one above a new
+    // branch and one, of the third nibble, below it.
+    core::assert(put(mut trie, mut world, accounts, word: one, value: 3))
+    // One sharing two splits the extension of one nibble, which goes.
+    core::assert(put(mut trie, mut world, accounts, word: two, value: 4))
+    // Removing it leaves a branch over a branch, which becomes an extension
+    // of one nibble.
+    core::assert(put(mut trie, mut world, accounts, word: two, value: 0))
+    // Removing the one sharing a nibble leaves a branch over that
+    // extension, which takes its place and merges with the one above.
+    core::assert(put(mut trie, mut world, accounts, word: one, value: 0))
+    // One sharing none puts a branch at the root, over the extension
+    // without its first nibble, which it takes back once that one goes.
+    core::assert(put(mut trie, mut world, accounts, word: none, value: 5))
+    core::assert(put(mut trie, mut world, accounts, word: none, value: 0))
+    // Removing a leaf under the extension merges it into the other leaf.
+    core::assert(put(mut trie, mut world, accounts, word: three, value: 0))
+    // The last slot or account goes.
+    core::assert(put(mut trie, mut world, accounts, word: 0, value: 0))
+    if accounts {
+        core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
+    } else {
+        // Account 1, empty, with an empty storage trie.
+        core::assert(world.exists(1) && trie.nodes() == 1)
+    }
+}
+
+#[test]
+fn state_trie_splits_and_merges_extensions_of_accounts() {
+    extensions(accounts: true)
+}
+
+#[test]
+fn state_trie_splits_and_merges_extensions_of_slots() {
+    extensions(accounts: false)
+}
+
+#[test]
+fn state_trie_splits_leaves_and_collapses_branches() {
+    // One account, a leaf at the root; a second, a branch over two leaves;
+    // the second removed, the first a leaf at the root again; then none.
+    var world = WorldState::empty()
+    core::assert(world.set_balance(1, 1))
+    var trie = StateTrie::new(mut world)
+    core::assert(agrees(mut trie, mut world))
+    core::assert(world.set_balance(2, 2))
+    trie.reread_account(mut world, 2)
+    core::assert(agrees(mut trie, mut world))
+    world.remove_account(2)
+    trie.reread_account(mut world, 2)
+    core::assert(agrees(mut trie, mut world))
+    world.remove_account(1)
+    trie.reread_account(mut world, 1)
+    core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
+}
+
+#[test]
+fn state_trie_roots_an_empty_world() {
+    var world = WorldState::empty()
+    var trie = StateTrie::new(mut world)
+    core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
+    // Rereading what the world does not hold changes nothing.
+    trie.reread_account(mut world, 1)
+    trie.reread_slot(mut world, address: 1, slot: 2)
+    core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
+}
+
+#[test]
+fn state_trie_follows_storage_alone() {
+    // An account whose storage changes and whose fields do not: rereading
+    // its slots alone changes its storage root.
+    var world = WorldState::empty()
+    let code: [u8; 1] = [0x00]
+    core::assert(world.set_nonce(1, 1) && world.set_balance(1, 7) && world.set_code(address: 1, code) == OK)
+    core::assert(world.storage_store(1, 1, 1) && world.storage_store(1, 2, 2) && world.set_balance(2, 1))
+    var trie = StateTrie::new(mut world)
+    core::assert(agrees(mut trie, mut world))
+    core::assert(world.storage_store(1, 1, 0x100) && world.storage_store(1, 3, 3) && world.storage_store(1, 2, 0))
+    for slot in [1 as u256, 2, 3] { trie.reread_slot(mut world, address: 1, slot) }
+    core::assert(agrees(mut trie, mut world))
+    // The last slot removed leaves the empty storage root.
+    core::assert(world.storage_store(1, 1, 0) && world.storage_store(1, 3, 0))
+    trie.reread_slot(mut world, address: 1, slot: 1)
+    trie.reread_slot(mut world, address: 1, slot: 3)
+    core::assert(agrees(mut trie, mut world))
+    // A slot of an account the trie does not hold yet adds the account.
+    core::assert(world.storage_store(3, 1, 1))
+    trie.reread_slot(mut world, address: 3, slot: 1)
+    core::assert(agrees(mut trie, mut world))
+    // Removing an account removes its storage, and its slots, reread
+    // after, are already gone.
+    world.remove_account(3)
+    trie.reread_account(mut world, 3)
+    core::assert(agrees(mut trie, mut world))
+    trie.reread_slot(mut world, address: 3, slot: 1)
+    core::assert(agrees(mut trie, mut world))
+}
+
+// The post-state of a test of fixtures tests/mpt
+// test_embedded_leaf_boundary: an account `address` with `len` bytes of code,
+// the low bytes of `code`, and its slots `first` and `second` at `value`.
+fn boundary_world(address: u256, code: u256, len: usize, first: u256, second: u256, value: u256) -> WorldState {
+    var world = WorldState::empty()
+    var bytes = MemBuffer::new(32)
+    bytes.span().write_word(offset: 0, value: code << ((32 - len) * 8) as u256)
+    bytes.truncate(len)
+    core::assert(world.set_nonce(address, 1) && world.set_code(address, code: bytes) == OK)
+    core::assert(world.storage_store(address, first, value) && world.storage_store(address, second, value))
+    core::assert(world.set_nonce(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 1))
+    core::assert(world.set_balance(0xf6c3a9edc1afa0ad5b720e4d42e1437c43d3b3ff, 0x033b2e3c9fd0803ce7f60ca8))
+    core::assert(world.set_balance(0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba, 0x02fc34))
+    world
+}
+
+#[test]
+fn state_trie_embeds_nodes_under_32_bytes() {
+    // The post-states of the tests of fixtures tests/mpt
+    // test_embedded_leaf_boundary: two slots whose keys share their first
+    // 10, 8 or 7 nibbles, so leaves below a branch at that depth of 30, 32,
+    // 31, 33 and 32 bytes, the first and third embedded in it. Each world in
+    // turn, rereading the accounts and slots of the one before and its own.
+    let addresses: [u256; 5] = [
+        0x7da71823f2608f294d9f6a97b0f6f33cd21ebc0b, 0x99f14877d286bc995e6e299d3d15bd7633510d5b,
+        0xec1b457b0d5be4ac5761bfa5bdd6735df5cf539d, 0xbe1c8e335dbbbe44cb3a4c99a87a57a774ca787f,
+        0x66ef74dc386e881bdff7ec452502f7247572d769,
+    ]
+    let codes: [u256; 5] = [
+        0x60016203c6b45560016207dc4f5500, 0x60806203c6b45560806207dc4f5500, 0x6001619dac55600162019c5e5500,
+        0x6080619dac55608062019c5e5500, 0x60016153df556001615be75500,
+    ]
+    let lens: [usize; 5] = [15, 15, 14, 14, 13]
+    let firsts: [u256; 5] = [0x03c6b4, 0x03c6b4, 0x9dac, 0x9dac, 0x53df]
+    let seconds: [u256; 5] = [0x07dc4f, 0x07dc4f, 0x019c5e, 0x019c5e, 0x5be7]
+    let values: [u256; 5] = [0x01, 0x80, 0x01, 0x80, 0x01]
+    let roots: [u256; 5] = [
+        0x58b220ed195f87f2e8904241a0e9a3a7a771e556a53a1f261e4d97466995f90d,
+        0x09b7bb0a01fb2fe6d6e5172f133768643991933ef61eefb5b921a18a7640ea49,
+        0x6d0cac5a8fcd3f3d344697ab8d2fb97ef7aced8d94e413fac6dea49c17275c06,
+        0xb11096314607720b295efc1f3c731d1e9f3dfa68935139f21460fd4ba683cd2c,
+        0x89be8def75f51c39e9dbf5fbd6fcad4c370e27108a1cf791016876cbe0e5723d,
+    ]
+    var world = boundary_world(address: addresses[0], code: codes[0], len: lens[0], first: firsts[0],
+                               second: seconds[0], value: values[0])
+    var trie = StateTrie::new(mut world)
+    core::assert(trie.root().unwrap() == roots[0])
+    // The leaves of 30 bytes grow to 32 in place, hashed, and shrink back.
+    for value in [0x80 as u256, 0x01] {
+        core::assert(world.storage_store(addresses[0], firsts[0], value))
+        trie.reread_slot(mut world, address: addresses[0], slot: firsts[0])
+        core::assert(agrees(mut trie, mut world))
+        core::assert(world.storage_store(addresses[0], seconds[0], value))
+        trie.reread_slot(mut world, address: addresses[0], slot: seconds[0])
+        core::assert(agrees(mut trie, mut world))
+    }
+    core::assert(trie.root().unwrap() == roots[0])
+    for test in 1..5 {
+        world = boundary_world(address: addresses[test], code: codes[test], len: lens[test], first: firsts[test],
+                               second: seconds[test], value: values[test])
+        for at in test - 1..test + 1 {
+            trie.reread_account(mut world, addresses[at])
+            trie.reread_slot(mut world, address: addresses[at], slot: firsts[at])
+            trie.reread_slot(mut world, address: addresses[at], slot: seconds[at])
+        }
+        core::assert(trie.root().unwrap() == roots[test] && agrees(mut trie, mut world))
+    }
+}
+
+// Rereads from `world` into `trie` every account and slot `keys` holds.
+fn reread_all(_ trie: mut StateTrie, _ world: mut WorldState, keys: WorldState) {
+    for position in 0..keys.account_count() { trie.reread_account(mut world, keys.account_at(position).address) }
+    for at in 0..keys.storage_slots() {
+        let entry = keys.storage_at(at)
+        if entry.occupied { trie.reread_slot(mut world, address: entry.address, slot: entry.slot) }
+    }
+}
+
+#[test]
+fn state_trie_follows_a_fixture_block() {
+    // The genesis state of the chain fixture `chain_tests` has, then its
+    // block's, rereading every account and slot either holds, then the
+    // genesis state again.
+    var before = genesis_world()
+    var trie = StateTrie::new(mut before)
+    core::assert(trie.root().unwrap() == GENESIS_STATE_ROOT)
+    var chain = genesis(chain_id: 1)
+    var tracer = ()
+    match chain.import(valid().span(), mut tracer) {
+        Import::Valid(_) => {},
+        _ => core::assert(false),
+    }
+    var after = chain.world().try_clone().unwrap()
+    let keys = before.try_clone().unwrap()
+    reread_all(mut trie, mut after, keys)
+    reread_all(mut trie, mut after, keys: chain.world())
+    core::assert(trie.root().unwrap() == BLOCK_STATE_ROOT)
+    reread_all(mut trie, mut before, keys: chain.world())
+    reread_all(mut trie, mut before, keys)
+    core::assert(trie.root().unwrap() == GENESIS_STATE_ROOT)
+}
+
+// The accounts and slots a batch of changes to a world changed.
+struct Changes { accounts: MemVec<u256>, slots: MemVec<StorageKey> }
+
+impl Changes {
+    fn new() -> Self { Changes { accounts: MemVec::new(), slots: MemVec::new() } }
+
+    // Rereads them from `world` into `trie`, the slots first if `slots_first`.
+    fn reread(self, _ trie: mut StateTrie, _ world: mut WorldState, slots_first: bool) {
+        if slots_first { for key in self.slots { trie.reread_slot(mut world, address: key.address, slot: key.slot) } }
+        for address in self.accounts { trie.reread_account(mut world, address) }
+        if !slots_first { for key in self.slots { trie.reread_slot(mut world, address: key.address, slot: key.slot) } }
+    }
+}
+
+// A deterministic pseudo-random sequence: keccak256 of the word before.
+struct Random { state: u256 }
+
+impl Random {
+    fn word(mut self) -> u256 {
+        self.state = hash(self.state, len: 32)
+        self.state
+    }
+
+    fn below(mut self, _ bound: usize) -> usize { (self.word() % bound as u256).downcast_truncate() }
+
+    // A nonzero value of 1 to 32 bytes, for leaves of many lengths.
+    fn value(mut self) -> u256 {
+        let value = self.word() >> (self.below(32) * 8) as u256
+        if value == 0 { 1 } else { value }
+    }
+}
+
+// Accounts whose keys share their first nibbles, of fixtures tests/mpt
+// test_genesis_extension_and_branch.
+const PAIRED_ACCOUNTS: [u256; 2] = [0x1014a, 0x101a4]
+
+// Slots whose keys share their first nibbles, of fixtures tests/mpt: up to
+// ten for the first two, eight for the next two, seven for the next two,
+// and the last three are test_insert_into_committed_extension's.
+const PAIRED_SLOTS: [u256; 9] = [0x03c6b4, 0x07dc4f, 0x9dac, 0x019c5e, 0x53df, 0x5be7, 0x0297, 0x0320, 0x54]
+
+// Applies `batches` pseudo-random batches of changes from `seed`, each of up
+// to `size` changes, to a world of accounts 1 to `accounts` and the paired
+// ones, with slots 0 to `slots` and the paired ones. Rereads each batch
+// into a trie, which must then agree with the world; every fourth batch is
+// then undone, by restoring the world and rereading the batch again.
+fn differential(seed: u256, batches: usize, accounts: usize, slots: usize, size: usize) {
+    var random = Random { state: seed }
+    var world = WorldState::empty()
+    var trie = StateTrie::new(mut world)
+    for batch in 0..batches {
+        let before = world.try_clone().unwrap()
+        let root = trie.root().unwrap()
+        var changes = Changes::new()
+        for _ in 0..1 + random.below(size) {
+            let address = if random.below(8) == 0 { PAIRED_ACCOUNTS[random.below(2)] }
+                else { 1 + random.below(accounts) as u256 }
+            let slot = if random.below(4) == 0 { PAIRED_SLOTS[random.below(9)] } else { random.below(slots) as u256 }
+            let change = random.below(16)
+            if change < 3 {
+                core::assert(world.set_balance(address, random.value()))
+            } else if change < 4 {
+                core::assert(world.set_nonce(address, random.below(3) as u256))
+            } else if change < 5 {
+                let code: [u8; 2] = [random.below(256).downcast_truncate(), 0]
+                core::assert(world.set_code(address, code) == OK)
+            } else if change < 6 {
+                let code: [u8; 0] = []
+                core::assert(world.set_code(address, code) == OK)
+            } else if change < 9 {
+                core::assert(world.storage_store(address, slot, random.value()))
+            } else if change < 11 {
+                core::assert(world.storage_store(address, slot, 0))
+            } else if change == 11 {
+                world.remove_account(address)
+            } else if change == 12 {
+                world.clear_keeping_balance(address)
+            } else if change == 13 {
+                world.remove_if_empty(address)
+            } else if change == 14 {
+                core::assert(world.ensure_account(address))
+            } else {
+                // Storage in every slot or none.
+                let fill = random.below(2) == 0
+                for at in 0..slots + 9 {
+                    let slot = if at < slots { at as u256 } else { PAIRED_SLOTS[at - slots] }
+                    core::assert(world.storage_store(address, slot, if fill { random.value() } else { 0 }))
+                }
+            }
+            changes.accounts.push(address)
+            // Removing or clearing the account, or filling its storage,
+            // changes any of its slots.
+            if change > 10 {
+                for at in 0..slots + 9 {
+                    let slot = if at < slots { at as u256 } else { PAIRED_SLOTS[at - slots] }
+                    changes.slots.push(StorageKey { address, slot })
+                }
+            } else {
+                changes.slots.push(StorageKey { address, slot })
+            }
+        }
+        let slots_first = random.below(2) == 0
+        changes.reread(mut trie, mut world, slots_first)
+        core::assert(agrees(mut trie, mut world))
+        if batch % 4 == 3 {
+            world = before
+            changes.reread(mut trie, mut world, slots_first: !slots_first)
+            core::assert(trie.root().unwrap() == root && agrees(mut trie, mut world))
+        }
+    }
+}
+
+#[test]
+fn state_trie_follows_a_small_world() {
+    differential(seed: 1, batches: 1500, accounts: 6, slots: 6, size: 3)
+}
+
+#[test]
+fn state_trie_follows_single_changes() {
+    differential(seed: 2, batches: 2000, accounts: 30, slots: 12, size: 1)
+}
+
+#[test]
+fn state_trie_follows_a_world_of_many_slots() {
+    differential(seed: 3, batches: 400, accounts: 40, slots: 64, size: 24)
+}
+
+#[test]
+fn state_trie_follows_a_world_of_many_accounts() {
+    differential(seed: 4, batches: 200, accounts: 3000, slots: 4, size: 100)
+}

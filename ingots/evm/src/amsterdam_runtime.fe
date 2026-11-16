@@ -1,6 +1,7 @@
 use core::Option
 use ingot::{OK, Program, Transaction, WorldState, default_block_env, default_call_env, empty_bytes, execute}
-use ingot::processor::{Receipt, TX_LEGACY, TxEnv, TxRequest, transact}
+use ingot::evm::Evm
+use ingot::processor::{Receipt, TX_LEGACY, TxEnv, TxRequest}
 use ingot::status::{ERR_INVALID_IMMEDIATE, ERR_INVALID_OPCODE, ERR_STACK_UNDERFLOW}
 use ingot::types::{BlockEnv, Config, ExecutionResult}
 use ingot::vm::Buffers
@@ -83,9 +84,9 @@ fn store(_ code: [u8; 7], len: usize, gas_limit: u64, config: Config) -> Receipt
     var block = default_block_env()
     block.gaslimit = 60_000_000
     block.chainid = 1
-    var buffers = Buffers::new()
+    var evm = Evm::new(world, config)
     var tracer = ()
-    transact(world, TxRequest::new(env, data: empty_bytes()), block, config, mut buffers, mut tracer).receipt
+    evm.transact(TxRequest::new(env, data: empty_bytes()), block, mut tracer)
 }
 
 #[test]

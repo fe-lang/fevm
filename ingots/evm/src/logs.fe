@@ -1,4 +1,5 @@
 use core::{MemBuffer, MemSpan, MemVec}
+use keccak::Keccak256
 use ingot::state::address_word
 
 // Copied header metadata. Payload bytes are read through their current owner.
@@ -98,4 +99,65 @@ impl LogBuffer {
         self.topics.truncate(topic_end.downcast_truncate())
         self.entries.truncate(count.downcast_truncate())
     }
+}
+
+/// A logs bloom filter, a receipt's or a block's: its 256 bytes as eight
+/// big-endian words, the first the most significant.
+pub struct Bloom { pub words: [u256; 8] }
+
+impl Copy for Bloom {}
+
+impl Bloom {
+    pub fn new() -> Self { Bloom { words: [0; 8] } }
+
+    // Sets the three bits of the low `len` bytes of `word`: the low eleven
+    // bits of each of its hash's first three byte pairs.
+    fn add(mut self, _ word: u256, len: usize) {
+        var hash = Keccak256::new()
+        hash.update_word(word, len)
+        let digest = hash.finish_word()
+        for shift in [240, 224, 208] {
+            let bit = (digest >> shift) & 0x7ff
+            let word: usize = (bit / 256).downcast_unchecked()
+            self.words[7 - word] |= 1 << (bit % 256)
+        }
+    }
+
+    /// Adds each log's address and topics.
+    pub fn add_logs(mut self, _ logs: LogBuffer) {
+        var index: u64 = 0
+        while index < logs.len() {
+            let entry = logs.entry(index)
+            self.add(entry.address, len: 20)
+            for topic in 0..entry.topic_count.downcast_truncate() { self.add(entry.topics[topic], len: 32) }
+            index += 1
+        }
+    }
+}
+
+#[test]
+fn bloom_sets_three_bits_for_an_address_and_each_topic() {
+    // EIP-7708's transfer log of 100 wei, from fixture
+    // transfer_logs_and_bal_balance_changes' first receipt.
+    var logs = LogBuffer::new()
+    let topics = [
+        0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef,
+        0xccc9c717613133bb58a7982ce89665970e60ab4f,
+        0x95d1be958d22adf294428c13cc71d89ff320bfd3,
+        0,
+    ]
+    core::assert(logs.append_word(address: 0xfffffffffffffffffffffffffffffffffffffffe, topics, topic_count: 3, word: 100))
+    var bloom = Bloom::new()
+    bloom.add_logs(logs)
+    let expected: [u256; 8] = [
+        0x0000000000000000080000000000000000000000400000000000000000000000,
+        0x0000000000000000000000000010000000000000000000000000000000000000,
+        0x0000000000000000000000080000000000000000000000000000000000000000,
+        0x0000000000000000200000000000000000000000000000200000001000000000,
+        0,
+        0,
+        0x0000000200000000000800000000000000000000000000000000000000000040,
+        0x0000000000000000000000000000040000000000000000000000000000080000,
+    ]
+    core::assert(bloom.words == expected)
 }

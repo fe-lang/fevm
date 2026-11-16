@@ -15,8 +15,11 @@ The repo is a Fe workspace:
 
 - `ingots/evm`: the interpreter library and the `fevm` CLI
 - `ingots/precompiles`: the precompiled contracts, which Amsterdam keeps
+- `ingots/rlp`: RLP encoding and strict decoding
+- `ingots/chain`: the chain layer, which decodes, validates and imports
+  blocks
 - `native/client`: a Rust client for `fevm serve`, the session mode
-- `native/conformance`: the Ethereum state-test driver
+- `native/conformance`: the Ethereum state and blockchain test driver
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
@@ -70,8 +73,20 @@ the protocol.
 
 ### Transactions
 
-`transact(world, request, block, config, buffers, tracer)` runs one
-transaction and returns `Applied { state, receipt }`.
+An `Evm` holds a world across transactions, with the allocations they
+reuse (frame memory, stacks and child frames, the journal and a transaction's
+tables):
+
+```fe
+var evm = Evm::new(world, Config::osaka())
+let receipt = evm.transact(request, block, mut tracer)
+let balance = evm.world().balance(address)
+```
+
+`transact` runs one transaction and keeps its changes; `simulate` runs it the
+same way and keeps none; `validate` only checks that it could be included.
+Between transactions a host reads the world with `world()` and writes it with
+`world_mut()`; `set_world` and `into_world` replace it and take it back.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -83,7 +98,8 @@ transaction and returns `Applied { state, receipt }`.
   authorizations. fevm takes the recovered sender; decoding and checking
   signed envelopes belongs to the host.
 - `BlockEnv` holds the block's values and the chain ID.
-- `Config` holds the host's settings: the fork, the EIP-170 and EIP-3860 code
+- `Config` holds the host's settings, which `set_config` changes between
+  transactions: the fork, the EIP-170 and EIP-3860 code
   size limits, EIP-7825's 2^24 gas cap, and the chain ID, nonce, base fee and
   EIP-3607 sender checks. `Config::osaka()` and `Config::amsterdam()` are
   mainnet's; Amsterdam raises the code size limits (EIP-7954), and from it
@@ -91,11 +107,9 @@ transaction and returns `Applied { state, receipt }`.
   gas (EIP-8037). A test harness may raise the limits or skip the checks; a
   transaction priced below the base fee then pays its own price and no
   priority fee.
-- `Buffers` holds allocations that repeated transactions reuse: frame memory,
-  stacks and child frames, and the journal.
 - `tracer` watches the transaction run (below); `()` traces nothing.
 
-An invalid transaction returns the untouched state and a receipt whose
+An invalid transaction changes nothing and returns a receipt whose
 `invalid` field names the reason. A valid one buys its gas, increments the
 sender's nonce, warms the sender, recipient, coinbase, precompiles and access
 list, applies its authorizations, runs the call or creation, charges at least
@@ -104,7 +118,119 @@ priority fee, and deletes self-destructed new accounts and touched empty
 accounts. The receipt has the status, gas used and refunded, the gas it adds
 to the block's totals (from Amsterdam, execution gas before refunds and state
 gas apart), the created contract's address, the output and the logs. A host failure (allocation,
-balance overflow) returns the pre-state with that status.
+balance overflow) undoes the transaction and reports that status.
+
+### Blocks
+
+A `Block` runs a block's transactions on an `Evm`'s world, which it holds
+from `begin` to `finish` or `abandon`:
+
+```fe
+var block = Block::begin(evm, env, parent_hash, parent_beacon_block_root)
+let receipt = block.transact(request, mut tracer)
+let (evm, finished) = block.finish(withdrawals)   // or: let evm = block.abandon()
+```
+
+`begin` records the parent hash for BLOCKHASH and makes the system calls
+that store the parent beacon block root (EIP-4788) and the parent hash
+(EIP-2935), except for the genesis block, which has no parent. `transact`
+runs a transaction if the block has the gas and blob gas left for it
+(`Config` has the fork's blob limit), and its receipt has the cumulative gas
+used; `simulate` tries one without counting it. `finish`
+credits the withdrawals (EIP-4895), collects the block's requests (EIP-7685):
+the deposits its transactions logged (EIP-6110) and those the withdrawal and
+consolidation request contracts return to their system calls (EIP-7002,
+EIP-7251; from Amsterdam the builder request contracts too, EIP-8282). It
+returns the `Evm`, and a `BlockOutput` with what the header commits to apart
+from its Merkle roots: gas used (from Amsterdam the larger of execution and
+state gas, EIP-7778), blob gas used, the logs bloom, the requests with their
+hash, from Amsterdam the block's access list (EIP-7928) with its hash, and
+the block's changes. A block whose request contract is missing or fails,
+whose deposit contract logged a malformed deposit, or whose access list is
+too large for its gas limit gives a `BlockError` instead, and `finish` undoes
+it.
+
+The access list is built as the block runs. A read is noted where its gas has
+been paid, the point at which an account or slot is warmed, and stays through
+reverts. Changes are not tracked as they are written: when a transaction
+ends, the journal's surviving entries name what it changed with the values it
+began with, so a write that restored a value counts as a read. Outside a
+block, and in a simulation, nothing is recorded.
+
+The block's changes (`BlockChanges`) are each account it changed, with
+whether it existed and the balance, nonce and code it changed as they were
+before, each storage slot it changed with its value before, and the
+BLOCKHASH entries `begin` wrote. The values after are the world's, and may
+be those before. Code changes only on an account without code or with an
+EIP-7702 delegation, so the code before is none or a delegation. A host
+persists the changes or computes the state root from them, and undoes the
+block with them. They come from the journal in the same pass as the access
+list, when each transaction, system call or the withdrawals end, and only a
+`Block` records them. A transaction whose changes cannot be recorded for
+want of memory is undone and fails as a host failure, so the changes always
+undo the block:
+
+```fe
+let Result::Ok(output) = finished else { return }
+for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code
+for slot in output.changes.slots() {}         // slot.address, .slot, .value
+output.changes.undo(mut evm.world_mut())      // the world as it was before `begin`
+```
+
+`abandon` undoes the block as it stands. `Block` does not check a header
+against its parent, decode transactions or compute Merkle roots; a `Chain`
+does these.
+
+### Chain
+
+`ingots/chain` (`fevm_chain`) imports blocks as a client does, from their
+RLP. A `Chain` holds an `Evm` on the world after its head block, the state
+trie of that world (`StateTrie`), the forks by activation time (`Schedule`,
+each fork a `Config` with its blob schedule) and the chain ID:
+
+```fe
+var schedule = Schedule::new(Config::osaka())
+schedule.add(timestamp: 15_000, bpo1)
+var chain = Chain::new(world, schedule, chain_id: 1, genesis: Header::decode(genesis_rlp).unwrap())
+match chain.import(block_rlp, mut tracer) {
+    Import::Valid(imported) => {},   // imported.receipts, imported.output
+    Import::Invalid(reason) => {},   // the rule the block breaks
+    Import::Failed(failure) => {},   // a host failure: no verdict
+}
+let head = chain.head().hash
+let root = chain.state_root()   // the head's, from the trie
+```
+
+`import` follows the specification's `execute_block`: it rejects a block
+whose RLP is longer than EIP-7934's limit, decodes the block, checks its
+header against the head's by the rules in force at its timestamp and that it
+has no ommers, then runs its transactions through `Block`, decoding each and
+recovering its sender as it comes to it (`tracer` sees them run), credits
+its withdrawals, and
+compares the gas used, the transactions, state, receipts and withdrawals
+roots, the logs bloom, the blob gas used, the requests hash and, from
+Amsterdam, the access list hash with the header's. A valid block becomes the
+head, and `Imported` has its receipts and `BlockOutput`. `InvalidBlock` names
+the first rule an invalid block breaks; a host failure (an allocation, a
+balance past 2^256, a blob base fee too large to compute) is no verdict on
+the block.
+Either leaves the world and the head as they were: the chain undoes the
+block from its changes.
+
+The state root is kept incrementally. `Chain::new` builds the trie of the
+whole world once. After each block the chain rereads into it the accounts
+and slots the block's changes name, and the root rehashes only their
+paths; a block rejected after it ran is undone and its keys reread. The trie holds a
+node for every account and slot of the world with its hash, besides the
+world itself: about 100 MB more for 100,000 accounts of 10 slots, a third of
+what that world takes. A trie that an allocation failed is rebuilt from the
+world before the next block. A host that keeps the state in its own storage
+would not use `Chain`, but `Block`, the changes it gives, and its own trie.
+`state_root(world)` computes the root of a whole world in one pass.
+
+The chain has one head: a block whose parent is not the head fails header
+validation, so side branches and reorganizations are left to a host. Forks
+before Osaka are not implemented.
 
 ### Forks
 
@@ -125,12 +251,12 @@ pub struct Amsterdam {}
 impl Rules for Amsterdam { const FORK: Fork = Fork::Amsterdam }
 ```
 
-`transact`, `simulate`, `validate` and `Vm::run` match `Config.fork` once and
+`Evm`'s `transact`, `simulate` and `validate`, and `Vm::run`, match `Config.fork` once and
 run code generic over its `Rules` type, as they are over the tracer. Each fork
 compiles to its own interpreter, with its rules folded into its code: Osaka's
 dispatch table sends SLOTNUM and DUPN to the invalid opcode path, and its code
 has no state gas in it. A host may switch forks between transactions; the
-world and `Buffers` are the same for every fork.
+world and the `Evm`'s allocations are the same for every fork.
 
 ### Tracing
 
@@ -202,9 +328,9 @@ Acceptance runs nine stages: the workspace tests at O0, O1 and O2, CLI and
 allocation-failure checks, the Osaka frame and state comparisons against revm,
 a build of `fevm_tools`, the session client's tests and the arithmetic matrix
 ([native/README.md](native/README.md)). The
-[state-test runner](native/conformance/README.md) is separate; the 25 state
-tests of each fork it does not count have malformed signatures, which fevm,
-given a recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
+[state and blockchain test runner](native/conformance/README.md) is
+separate; the 25 state tests of each fork it does not count have malformed
+signatures, which fevm, given a recovered sender, never sees. [Benchmarks](native/bench/README.md) time the
 evm-benchmarks state tests against revm and evmone.
 
 ## License

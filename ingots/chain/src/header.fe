@@ -1,0 +1,258 @@
+// Block headers: decoding, validation against the parent by the rules in
+// force at a header's timestamp, and a block's values for execution.
+use core::{MemBuffer, MemSpan, Option, Result}
+use core::num::{checked_mul_div, mul_div}
+use keccak::keccak256_word
+use fevm::{BlockEnv, Bloom, Config, Fork}
+use fevm::processor::GAS_PER_BLOB
+use fevm_rlp::Decoder
+
+// keccak256(rlp([])), the ommers hash of a block without ommers.
+const EMPTY_OMMERS_HASH: u256 = 0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347
+
+/// Why a header does not decode, or is not a valid child of its parent.
+pub enum HeaderError {
+    /// Its RLP is malformed or not a header's list, or a field is out of its
+    /// range.
+    Malformed,
+    /// Allocating its extra data failed.
+    Allocation,
+    /// From Amsterdam a header has EIP-7928's block access list hash, and
+    /// before it none.
+    MissingAccessListHash,
+    UnexpectedAccessListHash,
+    /// From Amsterdam a header has EIP-7843's slot number, and before it
+    /// none.
+    MissingSlotNumber,
+    UnexpectedSlotNumber,
+    /// The number is not the parent's plus one.
+    Number,
+    /// The excess blob gas is not what the parent's blob gas leaves (EIP-4844
+    /// and EIP-7918).
+    ExcessBlobGas,
+    /// The gas used is above the gas limit.
+    GasUsed,
+    /// The gas limit is 1/1024 of the parent's or more away from it, or
+    /// below 5,000.
+    GasLimit,
+    /// The base fee is not what the parent's gas used leaves (EIP-1559).
+    BaseFee,
+    /// The timestamp is not after the parent's.
+    Timestamp,
+    /// The extra data is longer than 32 bytes.
+    ExtraData,
+    /// The difficulty, the nonce or the ommers hash is not proof of stake's
+    /// (EIP-3675).
+    Difficulty,
+    Nonce,
+    OmmersHash,
+    /// The parent hash is not the parent's hash.
+    ParentHash,
+}
+
+impl Copy for HeaderError {}
+
+/// A block header from Osaka on. `block_access_list_hash` (EIP-7928) and
+/// `slot_number` (EIP-7843) are Amsterdam's. The number, gas limit, gas used
+/// and timestamp are u64s, and the difficulty and base fee u256s, where the
+/// specification leaves them unbounded or has a U256 timestamp. `hash` is
+/// the keccak256 of the RLP it was decoded from.
+pub struct Header {
+    pub parent_hash: u256,
+    pub ommers_hash: u256,
+    pub coinbase: u256,
+    pub state_root: u256,
+    pub transactions_root: u256,
+    pub receipt_root: u256,
+    pub bloom: Bloom,
+    pub difficulty: u256,
+    pub number: u64,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    pub timestamp: u64,
+    pub extra_data: MemBuffer,
+    pub prev_randao: u256,
+    pub nonce: u64,
+    pub base_fee_per_gas: u256,
+    pub withdrawals_root: u256,
+    pub blob_gas_used: u64,
+    pub excess_blob_gas: u64,
+    pub parent_beacon_block_root: u256,
+    pub requests_hash: u256,
+    pub block_access_list_hash: Option<u256>,
+    pub slot_number: Option<u64>,
+    pub hash: u256,
+}
+
+/// EIP-4844's blob base fee, `fake_exponential(1, excess_blob_gas,
+/// update_fraction)`. None once its sum, about the fee times the update
+/// fraction, passes 2^256: at an excess of about 161 times the update
+/// fraction.
+pub fn blob_base_fee(_ excess_blob_gas: u64, update_fraction: u64) -> Option<u256> {
+    let fraction = update_fraction as u256
+    var sum: u256 = 0
+    var term = fraction
+    var index: u256 = 1
+    while term != 0 {
+        if term > u256::max() - sum { return Option::None }
+        sum += term
+        let Option::Some(next) = checked_mul_div(term, excess_blob_gas as u256, fraction * index) else {
+            return Option::None
+        }
+        term = next
+        index += 1
+    }
+    Option::Some(sum / fraction)
+}
+
+impl Header {
+    /// Decodes a header from its RLP: Osaka's 21 fields, then Amsterdam's
+    /// block access list hash and slot number, either of which may be
+    /// missing for validation to reject.
+    pub fn decode(_ rlp: MemSpan) -> Result<HeaderError, Header> {
+        with (rlp) {
+            var items = Decoder::new()
+            let fields = mut items.list()
+            let parent_hash = fields.fixed(32)
+            let ommers_hash = fields.fixed(32)
+            let coinbase = fields.fixed(20)
+            let state_root = fields.fixed(32)
+            let transactions_root = fields.fixed(32)
+            let receipt_root = fields.fixed(32)
+            var bloom = Bloom::new()
+            let bits = fields.bytes()
+            var malformed = bits.len() != 256
+            if !malformed {
+                for word in 0..8 { bloom.words[word] = bits.read_word(32 * word) }
+            }
+            let difficulty = fields.uint()
+            let number = fields.u64()
+            let gas_limit = fields.u64()
+            let gas_used = fields.u64()
+            let timestamp = fields.u64()
+            let extra_data = MemBuffer::try_from_span(fields.bytes())
+            let prev_randao = fields.fixed(32)
+            let nonce: u64 = fields.fixed(8).downcast_truncate()
+            let base_fee_per_gas = fields.uint()
+            let withdrawals_root = fields.fixed(32)
+            let blob_gas_used = fields.u64()
+            let excess_blob_gas = fields.u64()
+            let parent_beacon_block_root = fields.fixed(32)
+            let requests_hash = fields.fixed(32)
+            // A 32-byte string after the requests hash is the block access
+            // list hash; an integer, the slot number without it.
+            var block_access_list_hash: Option<u256> = Option::None
+            var slot_number: Option<u64> = Option::None
+            if !fields.is_empty() {
+                let item = fields.raw()
+                if item.len() == 33 && item[0] == 0xa0 {
+                    block_access_list_hash = Option::Some(item.read_word(1))
+                } else {
+                    with (item) {
+                        var slot = Decoder::new()
+                        slot_number = Option::Some(slot.u64())
+                        malformed = malformed || !slot.finish()
+                    }
+                }
+            }
+            if block_access_list_hash.is_some() && !fields.is_empty() { slot_number = Option::Some(fields.u64()) }
+            if !items.finish() || malformed { return Result::Err(HeaderError::Malformed) }
+            let Option::Some(extra_data) = extra_data else { return Result::Err(HeaderError::Allocation) }
+            Result::Ok(Header {
+                parent_hash, ommers_hash, coinbase, state_root, transactions_root, receipt_root, bloom, difficulty,
+                number, gas_limit, gas_used, timestamp, extra_data, prev_randao, nonce, base_fee_per_gas,
+                withdrawals_root, blob_gas_used, excess_blob_gas, parent_beacon_block_root, requests_hash,
+                block_access_list_hash, slot_number, hash: keccak256_word(rlp),
+            })
+        }
+    }
+
+    /// Checks the header against its parent's by `config`, the rules in
+    /// force at its timestamp, in the specification's order: the fields
+    /// the fork has, then `validate_header`'s rules.
+    pub fn validate(self, _ parent: Header, _ config: Config) -> Result<HeaderError, ()> {
+        let amsterdam = config.fork.since(Fork::Amsterdam)
+        if self.block_access_list_hash.is_some() != amsterdam {
+            return Result::Err(if amsterdam { HeaderError::MissingAccessListHash }
+                else { HeaderError::UnexpectedAccessListHash })
+        }
+        if self.slot_number.is_some() != amsterdam {
+            return Result::Err(if amsterdam { HeaderError::MissingSlotNumber }
+                else { HeaderError::UnexpectedSlotNumber })
+        }
+        if self.number == 0 { return Result::Err(HeaderError::Number) }
+        // EIP-4844: the parent's excess and blob gas less this block's
+        // target. From EIP-7918, while 2^13 times the parent's base fee is
+        // above 2^17 times its blob base fee, the excess instead grows by
+        // (max - target) / max of the parent's blob gas. A blob base fee
+        // `blob_base_fee` does not compute is above 2^256 / update fraction,
+        // which only a base fee above 2^260 / update fraction exceeds.
+        let blobs = config.blob_schedule
+        let target = blobs.target as u128 * GAS_PER_BLOB as u128
+        let parent_blob_gas = parent.excess_blob_gas as u128 + parent.blob_gas_used as u128
+        var excess: u128 = 0
+        if parent_blob_gas >= target {
+            let reserved = match blob_base_fee(parent.excess_blob_gas, update_fraction: blobs.update_fraction) {
+                Option::Some(fee) => fee <= u256::max() / 16 && parent.base_fee_per_gas > 16 * fee,
+                Option::None => false,
+            }
+            excess = if reserved {
+                parent.excess_blob_gas as u128
+                    + parent.blob_gas_used as u128 * (blobs.max - blobs.target) as u128 / blobs.max as u128
+            } else {
+                parent_blob_gas - target
+            }
+        }
+        if self.excess_blob_gas as u128 != excess { return Result::Err(HeaderError::ExcessBlobGas) }
+        if self.gas_used > self.gas_limit { return Result::Err(HeaderError::GasUsed) }
+        let step = parent.gas_limit / 1024
+        if self.gas_limit as u128 >= parent.gas_limit as u128 + step as u128
+            || self.gas_limit <= parent.gas_limit - step || self.gas_limit < 5000 {
+            return Result::Err(HeaderError::GasLimit)
+        }
+        // EIP-1559: the parent's base fee moves by up to 1/8, by how far its
+        // gas used is from its target, half its gas limit, and up by at
+        // least 1. The gas limit's bounds keep the target above zero.
+        let fee = parent.base_fee_per_gas
+        let gas_target = (parent.gas_limit / 2) as u256
+        let gas_used = parent.gas_used as u256
+        let base_fee = if gas_used == gas_target {
+            Option::Some(fee)
+        } else if gas_used > gas_target {
+            // Past 2^256 only for a parent whose gas used is above its gas limit.
+            match checked_mul_div(fee, gas_used - gas_target, 8 * gas_target) {
+                Option::Some(delta) => {
+                    let delta = if delta == 0 { 1 } else { delta }
+                    if delta > u256::max() - fee { Option::None } else { Option::Some(fee + delta) }
+                },
+                Option::None => Option::None,
+            }
+        } else {
+            Option::Some(fee - mul_div(fee, gas_target - gas_used, 8 * gas_target))
+        }
+        if base_fee.is_none() || base_fee.unwrap() != self.base_fee_per_gas { return Result::Err(HeaderError::BaseFee) }
+        if self.timestamp <= parent.timestamp { return Result::Err(HeaderError::Timestamp) }
+        if self.number as u128 != parent.number as u128 + 1 { return Result::Err(HeaderError::Number) }
+        if self.extra_data.len() > 32 { return Result::Err(HeaderError::ExtraData) }
+        if self.difficulty != 0 { return Result::Err(HeaderError::Difficulty) }
+        if self.nonce != 0 { return Result::Err(HeaderError::Nonce) }
+        if self.ommers_hash != EMPTY_OMMERS_HASH { return Result::Err(HeaderError::OmmersHash) }
+        if self.parent_hash != parent.hash { return Result::Err(HeaderError::ParentHash) }
+        Result::Ok(())
+    }
+
+    /// The block's values for execution on chain `chain_id` by `config`, the
+    /// rules in force at its timestamp. None if its blob base fee is past
+    /// what `blob_base_fee` computes.
+    pub fn block_env(self, chain_id: u256, _ config: Config) -> Option<BlockEnv> {
+        let Option::Some(blobbasefee) = blob_base_fee(self.excess_blob_gas,
+                                                      update_fraction: config.blob_schedule.update_fraction) else {
+            return Option::None
+        }
+        Option::Some(BlockEnv {
+            coinbase: self.coinbase, timestamp: self.timestamp as u256, number: self.number as u256,
+            prevrandao: self.prev_randao, gaslimit: self.gas_limit as u256, chainid: chain_id,
+            basefee: self.base_fee_per_gas, blobbasefee, slot_number: self.slot_number.unwrap_or(default: 0) as u256,
+        })
+    }
+}

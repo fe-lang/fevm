@@ -1,0 +1,4 @@
+// Recursive Length Prefix, Ethereum's serialization of byte strings and
+// lists.
+pub use decoder::Decoder
+pub use encoder::Encoder

@@ -2,8 +2,8 @@ use core::{MemVec, Option}
 use ingot::state::Field
 
 /// A mark on an address, one bit of its entry in the marks table. Undo
-/// clears the warm, touched and doomed marks a frame set; creation marks
-/// survive rollback.
+/// clears the warm, touched and doomed marks a frame set; creation and read
+/// marks survive rollback.
 pub enum Mark {
     /// Accessed (EIP-2929).
     Warm,
@@ -13,6 +13,9 @@ pub enum Mark {
     Doomed,
     /// Created by this transaction.
     Created,
+    /// Read by this transaction, and noted in the block's access list
+    /// (EIP-7928).
+    Read,
 }
 impl Copy for Mark {}
 
@@ -23,6 +26,7 @@ impl Mark {
             Mark::Touched => 2,
             Mark::Doomed => 4,
             Mark::Created => 8,
+            Mark::Read => 16,
         }
     }
 }
