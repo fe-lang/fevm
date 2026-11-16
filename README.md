@@ -265,19 +265,20 @@ default:
 
 ```fe
 pub trait Tracer {
-    fn step(mut self, _ step: Step) {}
+    fn step(mut self, _ step: Step, stack: MemSlice<u256>) {}
     fn enter(mut self, _ call: CallStart, input: MemSpan) {}
     fn leave(mut self, _ call: CallEnd, output: MemSpan) {}
 }
 ```
 
 `step` runs before every opcode with its pc, the gas, stack depth and memory
-size, and the call depth. `enter` runs when a call or creation enters its frame
-(opcode, caller, target, value, gas, input) and `leave` when it leaves (status,
-gas left, output), the transaction's own message included. `transact` is
-generic over the tracer, so `()` compiles to the same code as an interpreter
-without hooks. `Trace` is a tracer that records the steps, the calls or both;
-`fevm serve` uses it.
+size, the call depth, and the frame's stack, top word last. It runs before the
+opcode's checks, so the stack may hold fewer words than the opcode needs.
+`enter` runs when a call or creation enters its frame (opcode, caller, target,
+value, gas, input) and `leave` when it leaves (status, gas left, output), the
+transaction's own message included. `transact` is generic over the tracer, so
+`()` compiles to the same code as an interpreter without hooks. `Trace` is a
+tracer that records the steps, the calls or both; `fevm serve` uses it.
 
 ### Statuses
 

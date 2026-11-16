@@ -1,4 +1,4 @@
-use core::Option
+use core::{MemSlice, Option}
 use ingot::address::create_address
 use ingot::constants::MAX_U256
 use ingot::evm::Evm
@@ -268,7 +268,7 @@ fn trace_records_no_steps_for_a_message_without_code() {
 struct DepthCounter { counts: [usize; 2] }
 
 impl Tracer for DepthCounter {
-    fn step(mut self, _ step: Step) { self.counts[step.depth] += 1 }
+    fn step(mut self, _ step: Step, stack: MemSlice<u256>) { self.counts[step.depth] += 1 }
 }
 
 #[test]
@@ -277,4 +277,33 @@ fn trace_runs_a_custom_tracer() {
     var counter = DepthCounter { counts: [0, 0] }
     core::assert(traced(mut evm, nonce: 0, mut counter).status == OK)
     core::assert(counter.counts[0] == 28 && counter.counts[1] == 2)
+}
+
+// Records the top word, the address, at each BALANCE and EXTCODEHASH, and
+// counts the steps whose stack is empty or does not match `stack_len`.
+struct AddressReader { addresses: [u256; 2], reads: usize, empty: usize, mismatched: usize }
+
+impl Tracer for AddressReader {
+    fn step(mut self, _ step: Step, stack: MemSlice<u256>) {
+        if stack.len() != step.stack_len { self.mismatched += 1 }
+        if stack.is_empty() { self.empty += 1 }
+        if step.op == 0x31 || step.op == 0x3f {
+            self.addresses[self.reads] = stack[stack.len() - 1]
+            self.reads += 1
+        }
+    }
+}
+
+#[test]
+fn trace_step_reads_the_stack() {
+    var world = funded()
+    // PUSH2 SENDER; BALANCE; PUSH1 0xaa; EXTCODEHASH; STOP. EXTCODEHASH's
+    // address is above BALANCE's result.
+    core::assert(world.set_code(address: 0xaa, code: [0x61 as u8, 0x10, 0x00, 0x31, 0x60, 0xaa, 0x3f, 0x00]) == OK)
+    var evm = Evm::new(world, Config::osaka())
+    var reader = AddressReader { addresses: [0, 0], reads: 0, empty: 0, mismatched: 0 }
+    core::assert(traced(mut evm, nonce: 0, mut reader).status == OK)
+    core::assert(reader.reads == 2 && reader.addresses[0] == SENDER && reader.addresses[1] == 0xaa)
+    // Only the first opcode runs on an empty stack.
+    core::assert(reader.empty == 1 && reader.mismatched == 0)
 }
