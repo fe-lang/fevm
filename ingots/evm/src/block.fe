@@ -6,6 +6,7 @@ use ingot::evm::Evm
 use ingot::fork::Fork
 use ingot::logs::{Bloom, LogBuffer}
 use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal}
+use ingot::source::StateSource
 use ingot::state::WorldState
 use ingot::status::{ERR_HOST_ALLOCATION, OK, VALID, is_evm_outcome}
 use ingot::trace::Tracer
@@ -79,8 +80,8 @@ pub struct BlockOutput {
 /// and blob gas the block has left; `finish` credits the withdrawals and
 /// collects the block's requests. It records what it changes, with what that
 /// held before, to undo the block.
-pub struct Block {
-    evm: Evm,
+pub struct Block<S: StateSource = ()> {
+    evm: Evm<S>,
     env: BlockEnv,
     // The gas of the whole block.
     limit: Capacity,
@@ -133,14 +134,15 @@ fn requests_hash(_ requests: MemVec<MemBuffer>) -> Option<u256> {
     Option::Some(sha256(hashes.span(), offset: 0, len: hashes.len()))
 }
 
-impl Block {
+impl<S: StateSource> Block<S> {
     /// Begins the block `env` describes on `evm`'s world. Unless it is the
     /// genesis block, which has no parent, records `parent_hash` for
     /// BLOCKHASH and makes the system calls that store
     /// `parent_beacon_block_root` (EIP-4788) and `parent_hash` (EIP-2935).
-    pub fn begin(_ evm: own Evm, _ env: BlockEnv, parent_hash: u256, parent_beacon_block_root: u256) -> Self {
+    /// A source other than `()` needs the type argument, `Block<S>::begin`.
+    pub fn begin(_ evm: own Evm<S>, _ env: BlockEnv, parent_hash: u256, parent_beacon_block_root: u256) -> Self {
         let limit = Capacity::of(env, evm.config())
-        var block = Block {
+        var block = Self {
             evm, env, limit, gas_used: 0, state_gas_used: 0, blob_gas_used: 0, cumulative_gas_used: 0,
             transactions: 0, bloom: Bloom::new(), deposits: MemBuffer::empty(), failure: Option::None,
         }
@@ -266,7 +268,7 @@ impl Block {
     /// contracts return to their system calls (EIP-7002, EIP-7251 and, from
     /// Amsterdam, EIP-8282). Returns the `Evm`, and the block's output
     /// unless the block is invalid, which it undoes as `abandon` does.
-    pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm, Result<BlockError, BlockOutput>) {
+    pub fn finish(own self, _ withdrawals: MemVec<Withdrawal>) -> (Evm<S>, Result<BlockError, BlockOutput>) {
         var block = self
         block.evm.access().set_index(block.transactions + 1)
         let credited = block.evm.withdraw(withdrawals)
@@ -308,7 +310,7 @@ impl Block {
 
     /// Leaves the block unfinished and returns the `Evm`, with the world as
     /// it was before `begin`.
-    pub fn abandon(own self) -> Evm {
+    pub fn abandon(own self) -> Evm<S> {
         var evm = self.evm
         evm.access().stop()
         evm.take_changes().undo(mut evm.world_mut())

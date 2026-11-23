@@ -3,6 +3,7 @@ use core::MemVec
 use ingot::access::AccessRecorder
 use ingot::changes::BlockChanges
 use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal, apply, checked, system_call, withdraw}
+use ingot::source::StateSource
 use ingot::state::WorldState
 use ingot::trace::Tracer
 use ingot::transaction::Transaction
@@ -14,11 +15,31 @@ use ingot::vm::Buffers
 /// memory, stacks and frames of finished calls. Each transaction runs by the
 /// rules of the fork `config` selects, in the block the host passes with it.
 /// Between transactions the host reads the world and writes it directly.
-pub struct Evm { tx: Transaction, config: Config }
+/// A world over a lazy source holds only what it has read from it.
+pub struct Evm<S: StateSource = ()> { tx: Transaction<S>, config: Config }
 
-impl Evm {
+impl Evm<()> {
+    /// An EVM over the complete world `world`.
     pub fn new(_ world: own WorldState, _ config: Config) -> Self {
         Self { tx: Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers: Buffers::new()), config }
+    }
+
+    /// Replaces the world.
+    pub fn set_world(mut self, _ world: own WorldState) {
+        let _ = core::mem::replace(mut self.tx.world_mut(), world)
+    }
+    pub fn into_world(own self) -> WorldState { self.tx.release().0 }
+}
+
+impl<S: StateSource> Evm<S> {
+    /// An EVM over an empty world, which reads the state from `source`. A
+    /// source other than `()` needs the type argument, `Evm<S>::over`: a path
+    /// without it means the `()` instantiation.
+    pub fn over(_ source: own S, _ config: Config) -> Self {
+        Self {
+            tx: Transaction<S>::over(source, sender: 0, destination: 0, coinbase: 0, config, buffers: Buffers::new()),
+            config,
+        }
     }
 
     pub fn config(self) -> Config { self.config }
@@ -26,11 +47,16 @@ impl Evm {
 
     pub fn world(self) -> ref WorldState { self.tx.world() }
     pub fn world_mut(mut self) -> mut WorldState { self.tx.world_mut() }
-    /// Replaces the world.
-    pub fn set_world(mut self, _ world: own WorldState) {
-        let _ = core::mem::replace(mut self.tx.world_mut(), world)
+
+    /// The source the world reads what it does not hold from.
+    pub fn source(self) -> ref S { self.tx.source() }
+    /// The source, for a host's own use between transactions.
+    pub fn source_mut(mut self) -> mut S { self.tx.source_mut() }
+    /// The world and the source.
+    pub fn into_parts(own self) -> (WorldState, S) {
+        let (world, source, _) = self.tx.release()
+        (world, source)
     }
-    pub fn into_world(own self) -> WorldState { self.tx.release().0 }
 
     /// The includability checks, in specification order: VALID, or the first
     /// that fails.

@@ -1,7 +1,8 @@
-use core::{MemVec, Option, Result}
+use core::{MemSpan, MemVec, Option, Result}
 use ingot::block::{Block, BlockError}
 use ingot::evm::Evm
 use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
+use ingot::source::{AccountState, SourceError, StateSource}
 use ingot::state::{WorldState, designator}
 use ingot::status::{INVALID_GAS_LIMIT, OK, VALID}
 use ingot::transaction::SYSTEM_ADDRESS
@@ -91,6 +92,46 @@ fn block_calls_the_system_contracts_and_counts_gas() {
     core::assert(output.requests[0][0] == 1 && output.requests[0][1] == 0xab)
     // sha256(sha256(0x01ab)).
     core::assert(output.requests_hash == 0xed9cc51c743ff9c6e05af21e3ec738ce754013738cca2a60ddc0a6a38bb84859)
+}
+
+// A lazy source that knows nothing and counts what it is asked.
+struct CountingSource { asked: u64 }
+
+impl StateSource for CountingSource {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        self.asked += 1
+        Result::Err(SourceError::Unavailable)
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
+        self.asked += 1
+        Result::Err(SourceError::Unavailable)
+    }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
+        self.asked += 1
+        Result::Err(SourceError::Unavailable)
+    }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> {
+        self.asked += 1
+        Result::Err(SourceError::Unavailable)
+    }
+}
+
+#[test]
+fn block_runs_over_a_lazy_source() {
+    var evm = Evm<CountingSource>::over(CountingSource { asked: 0 }, Config::osaka())
+    core::assert(evm.world_mut().set_balance(SENDER, 1_000_000_000_000))
+    core::assert(evm.world_mut().set_code(address: WITHDRAWAL_REQUESTS, code: [0x00 as u8]) == OK)
+    core::assert(evm.world_mut().set_code(address: CONSOLIDATION_REQUESTS, code: [0x00 as u8]) == OK)
+    var block = Block<CountingSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    let receipt = block.transact(transfer(nonce: 0, gas_limit: 50_000), mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.gas_used == 21_000)
+    let (evm, finished) = block.finish(MemVec::new())
+    core::assert(finished.is_ok())
+    let (world, source) = evm.into_parts()
+    core::assert(world.balance(0xbb) == 1 && world.nonce(SENDER) == 1)
+    // Nothing loads from the source yet.
+    core::assert(source.asked == 0)
 }
 
 #[test]
