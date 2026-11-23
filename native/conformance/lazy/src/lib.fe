@@ -1,0 +1,151 @@
+// The driver for runs over a lazy world. A state test runs as
+// `fevm_conformance` runs it, then again over a world that reads the
+// pre-state from a `WorldSource`; the driver prints `fevm_conformance`'s
+// result with `lazy`, each way the second run differs. A blockchain test
+// runs as `fevm_conformance` runs it.
+use core::{MemBuffer, MemVec, Option}
+use std::io::{Stdin, Stdout}
+use fevm::{Evm, Receipt, StorageKey, WorldSource, WorldState}
+use fevm::hex::write_hex_word
+use fevm_conformance::{Reader, host_error, logs_hash, read_state_test, write_receipt, write_world}
+use fevm_conformance::blocks
+
+// Appends to the `lazy` list the problem `what` about `address`, or about
+// its slot `slot`.
+fn problem<const N: usize>(_ first: mut bool, _ what: String<N>, _ address: u256, slot: Option<u256>)
+uses (text: mut MemBuffer)
+{
+    if !first { ",".fmt(mut text) }
+    first = false
+    "\"".fmt(mut text)
+    what.fmt(mut text)
+    " ".fmt(mut text)
+    write_hex_word(address)
+    if let Option::Some(slot) = slot {
+        " ".fmt(mut text)
+        write_hex_word(slot)
+    }
+    "\"".fmt(mut text)
+}
+
+// Whether `address` is the same account in both worlds: present or absent,
+// with the same balance, nonce and code hash, and code or none.
+fn same_account(_ a: mut WorldState, _ b: mut WorldState, _ address: u256) -> bool {
+    a.exists(address) == b.exists(address) && a.balance(address) == b.balance(address)
+        && a.nonce(address) == b.nonce(address) && a.has_code(address) == b.has_code(address)
+        && a.code_hash(address) == b.code_hash(address)
+}
+
+// The addresses of the accounts of `world`.
+fn accounts(_ world: WorldState) -> MemVec<u256> {
+    var addresses: MemVec<u256> = MemVec::new()
+    for position in 0..world.account_count() { addresses.push(world.account_at(position).address) }
+    addresses
+}
+
+// Writes `,"lazy":[...]`: each way in which `lazy`, the receipt of the run
+// over a lazy world, and `read`, that world after it, disagree with the
+// complete run's `receipt` from `pre` to `post`. Each account and slot the
+// lazy world holds is one it loaded, and holds what `post` does, its code
+// too if read, and storage if `post`'s account has some. Each account and
+// slot that `post` changed from `pre` is one it loaded, or a slot of an
+// account it loaded and no longer holds.
+fn write_differences(_ receipt: Receipt, _ lazy: Receipt, _ pre: mut WorldState, _ post: mut WorldState,
+                     _ read: mut WorldState)
+uses (text: mut MemBuffer)
+{
+    ",\"lazy\":[".fmt(mut text)
+    var first = true
+    let same = receipt.invalid == lazy.invalid && receipt.status == lazy.status && receipt.gas_used == lazy.gas_used
+        && receipt.gas_refunded == lazy.gas_refunded && receipt.execution_gas_used == lazy.execution_gas_used
+        && receipt.state_gas_used == lazy.state_gas_used && receipt.created == lazy.created
+        && receipt.output.span() == lazy.output.span() && logs_hash(receipt.logs) == logs_hash(lazy.logs)
+    if !same {
+        "\"receipt\"".fmt(mut text)
+        first = false
+    }
+    for address in accounts(read) {
+        if !read.loaded().contains(address) { problem(mut first, "unloaded account", address, slot: Option::None) }
+    }
+    // Reading code hashes needs the worlds mutably, so the addresses first.
+    var loaded: MemVec<u256> = MemVec::new()
+    let addresses = ref read.loaded()
+    for at in 0..addresses.capacity() {
+        let entry = addresses.entry(at)
+        if entry.occupied { loaded.push(entry.key) }
+    }
+    for address in loaded {
+        let same = same_account(mut post, mut read, address)
+            && (!read.code_known(address) || post.code(address) == read.code(address))
+            && (!post.has_storage(address) || read.has_storage(address))
+        if !same { problem(mut first, "account", address, slot: Option::None) }
+    }
+    for slot in 0..read.storage_slots() {
+        let entry = read.storage_at(slot)
+        if entry.occupied && !read.loaded_slots().contains(StorageKey { address: entry.address, slot: entry.slot }) {
+            problem(mut first, "unloaded slot", entry.address, slot: Option::Some(entry.slot))
+        }
+    }
+    let slots = ref read.loaded_slots()
+    for at in 0..slots.capacity() {
+        let entry = slots.entry(at)
+        if entry.occupied {
+            let key = entry.key
+            if post.storage_load(key.address, key.slot) != read.storage_load(key.address, key.slot) {
+                problem(mut first, "slot", key.address, slot: Option::Some(key.slot))
+            }
+        }
+    }
+    var changed = accounts(pre)
+    for address in accounts(post) { if !pre.exists(address) { changed.push(address) } }
+    for address in changed {
+        if !same_account(mut pre, mut post, address) && !read.loaded().contains(address) {
+            problem(mut first, "changed account not loaded", address, slot: Option::None)
+        }
+    }
+    changed_slots(mut first, pre, other: post, read)
+    changed_slots(mut first, post, other: pre, read)
+    "]".fmt(mut text)
+}
+
+// Appends a problem for each slot `world` holds with a value `other` does not,
+// which `read` has neither resolved nor lost with its account.
+fn changed_slots(_ first: mut bool, _ world: WorldState, other: WorldState, _ read: WorldState)
+uses (text: mut MemBuffer)
+{
+    for slot in 0..world.storage_slots() {
+        let entry = world.storage_at(slot)
+        let key = StorageKey { address: entry.address, slot: entry.slot }
+        let gone = read.loaded().contains(key.address) && !read.exists(key.address)
+        if entry.occupied && other.storage_load(key.address, key.slot) != entry.value
+            && !read.loaded_slots().contains(key) && !gone {
+            problem(mut first, "changed slot not loaded", key.address, slot: Option::Some(key.slot))
+        }
+    }
+}
+
+pub fn main() -> i32 uses (input: mut Stdin, out: mut Stdout) {
+    var reader = Reader::stdin()
+    if reader.blockchain_test() { return blocks::run(mut reader) }
+    let (block, config, world, request) = match read_state_test(mut reader) {
+        Result::Ok(test) => test,
+        Result::Err(status) => return status,
+    }
+    let Option::Some(pre) = world.try_clone() else { return host_error("pre-state allocation failed") }
+    var evm = Evm::new(world, config)
+    var tracer = ()
+    let receipt = evm.transact(request, block, mut tracer)
+    var over = Evm<WorldSource>::over(WorldSource::new(pre), config)
+    let lazy = over.transact(request, block, mut tracer)
+    let (var read, source) = over.into_parts()
+    var pre = source.into_world()
+    var text = MemBuffer::empty()
+    with (mut text) {
+        write_receipt(receipt)
+        write_world(evm.world())
+        write_differences(receipt, lazy, mut pre, mut evm.world_mut(), mut read)
+        "}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}

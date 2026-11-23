@@ -33,6 +33,20 @@ Given `RUNS [TRANSACT]` arguments, the driver repeats the case RUNS times
 before the reported run, skipping the transaction when TRANSACT is 0; the
 [benchmark runner](../bench/README.md) times the difference.
 
+`--lazy` builds and runs [`fevm_lazy`](lazy/src/lib.fe) instead, which shares
+`fevm_conformance`'s case reading and output and runs each state test's
+transaction a second time, over a world that starts empty and reads the
+pre-state from a `WorldSource` as the transaction needs it. It adds `lazy`,
+each way that run disagrees with the complete one: its receipt; an account
+or slot the lazy world holds but did not load, or that differs from the
+complete post-state (code too, where read, and storage the complete account
+has); or an account or slot the complete run changed that the lazy world
+did not load, unless the slot's account was loaded and is gone. A case with
+any of them, or without `lazy`, fails, and a load the lazy world missed
+fails fevm's assertions and crashes the driver. `fevm_conformance` itself
+instantiates only the complete world, so the benchmark runner times it
+unchanged. Blockchain tests run as without `--lazy`.
+
 A case passes when the transaction's validity matches `expectException`, the
 receipt's logs hash matches, the gas used and success match the fixture's
 receipt where it has one (`tests@v21.0.2` on), and every account's balance,

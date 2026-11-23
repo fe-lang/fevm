@@ -71,6 +71,9 @@ pub struct Options {
     select: MemVec<Arg>,
     // The forks and networks to run; all that fevm runs if none.
     forks: MemVec<Arg>,
+    // Whether `fevm_lazy` is the driver, which runs each state test again
+    // over a lazy world.
+    lazy: bool,
 }
 
 impl Options {
@@ -84,10 +87,15 @@ impl Options {
         var jobs: Option<u64> = Option::None
         var timeout: u64 = 120
         var select: MemVec<Arg> = MemVec::new()
+        var lazy = false
         var i: usize = 2
         while i < args.count() {
             let name = args.get(i)
             i += 1
+            if name == "--lazy" {
+                lazy = true
+                continue
+            }
             if name == "--select" {
                 while i < args.count() && !args.get(i).span().starts_with("--") {
                     select.push(args.get(i))
@@ -139,7 +147,7 @@ impl Options {
         }
         match (fixtures, out) {
             (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
-                Options { fe, executable, fixtures, out, level, jobs, timeout, select, forks },
+                Options { fe, executable, fixtures, out, level, jobs, timeout, select, forks, lazy },
             ),
             _ => Result::Err(format!("fevm_tools conformance needs --fixtures and --out")),
         }
@@ -654,8 +662,9 @@ pub fn driver_result(_ output: Output, timeout: u64) -> Result<Verdict, Value> {
     Result::Ok(result)
 }
 
-// Judges the driver's output for a state test's case.
-fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+// Judges the driver's output for a state test's case, which with `lazy`
+// must say how a run over a lazy world differed.
+fn check(_ expect: Expect, _ output: Output, timeout: u64, lazy: bool) -> Result<MemBuffer, Verdict> {
     let result = match driver_result(output, timeout) {
         Result::Ok(result) => result,
         Result::Err(verdict) => return Result::Ok(verdict),
@@ -685,6 +694,14 @@ fn check(_ expect: Expect, _ output: Output, timeout: u64) -> Result<MemBuffer, 
         verdict.problems.push(format!("status ", status, ", expected ", if succeeded { "success" } else { "failure" }))
     }
     state_difference(expect.state, observed_state(result)?, mut verdict.problems)
+    match result.get("lazy") {
+        Option::Some(ref differences) => {
+            for ref difference in differences.items() {
+                verdict.problems.push(format!("lazy run: ", difference.text()))
+            }
+        },
+        Option::None => if lazy { verdict.problems.push(format!("no lazy run")) },
+    }
     if verdict.problems.len() == 1 {
         return Result::Ok(Verdict::new(PASSED))
     }
@@ -930,6 +947,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     )?
     report.set("dirty", Value::Bool(!changes.is_empty()))
     report.set("level", Value::string(options.level))
+    report.set("lazy", Value::Bool(options.lazy))
     var select = Value::array()
     for ref part in options.select {
         select.push(Value::string(part))
@@ -942,13 +960,14 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
             report.set("compiler_version", Value::string(captured("fe", Command::new(compiler).arg("--version"))?))
             let started = clock.instant()
             let build = format!(dir, "/build")
+            let driver: DynString = if options.lazy { "fevm_lazy" } else { "fevm_conformance" }
             succeed(
                 format!("fe build, see ", dir, "/build.log"),
                 Command::new(compiler)
                     .arg("build")
                     .arg(".")
                     .arg("--ingot")
-                    .arg("fevm_conformance")
+                    .arg(driver)
                     .arg("--backend")
                     .arg("native")
                     .arg("-O")
@@ -959,7 +978,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                     .stderr(Redirect::Stdout),
             )?
             report.set("build_seconds", seconds(clock.instant().duration_since(started)))
-            format!(build, "/fevm_conformance")
+            format!(build, "/", driver)
         },
         Option::None => match options.executable {
             Option::Some(ref path) => named(path, fs.canonicalize(path))?,
@@ -1061,7 +1080,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let verdict = named(
             path_case(done.case.file, done.case.name),
             match done.expect {
-                Expected::Post(ref expect) => check(expect, output, timeout: options.timeout),
+                Expected::Post(ref expect) => check(expect, output, timeout: options.timeout, lazy: options.lazy),
                 Expected::Chain(ref expect) => blocks::check(expect, output, timeout: options.timeout),
             },
         )?
@@ -1148,7 +1167,7 @@ pub fn output(_ stdout: DynString, _ status: Status) -> Output {
 }
 
 fn verdict(_ stdout: DynString) -> Verdict {
-    check(Expect::of(post_entry()).unwrap(), output(stdout, Status::Exited(0)), timeout: 1).unwrap()
+    check(Expect::of(post_entry()).unwrap(), output(stdout, Status::Exited(0)), timeout: 1, lazy: false).unwrap()
 }
 
 #[test]
@@ -1177,24 +1196,40 @@ fn check_compares_the_post_state() {
 fn check_compares_the_receipt() {
     let source: DynString = "{\"state\":{},\"logs\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"receipt\":{\"cumulativeGasUsed\":\"0x5208\",\"status\":true}}"
     let expect = Expect::of(parse(source.span()).unwrap()).unwrap()
-    let failing = check(expect, output("{\"invalid\":null,\"status\":\"revert\",\"host_failure\":false,\"gas_used\":21001,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[],\"storage\":[]}", Status::Exited(0)), timeout: 1).unwrap()
+    let failing = check(expect, output("{\"invalid\":null,\"status\":\"revert\",\"host_failure\":false,\"gas_used\":21001,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[],\"storage\":[]}", Status::Exited(0)), timeout: 1, lazy: false).unwrap()
     assert!(failing.outcome == FAILED && failing.problems.len() == 3)
     assert!(failing.problems[1] == "gas used 21001 != 21000")
     assert!(failing.problems[2] == "status revert, expected success")
 }
 
 #[test]
+fn check_reports_lazy_differences() {
+    let failing = verdict(
+        "{\"invalid\":null,\"status\":\"success\",\"host_failure\":false,\"gas_used\":21000,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x6000\"]],\"storage\":[[\"0x01\",\"0x1\",\"0x2\"]],\"lazy\":[\"receipt\",\"slot 0x01 0x02\"]}",
+    )
+    assert!(failing.outcome == FAILED && failing.problems.len() == 3)
+    assert!(failing.problems[1] == "lazy run: receipt" && failing.problems[2] == "lazy run: slot 0x01 0x02")
+    let passing = verdict(
+        "{\"invalid\":null,\"status\":\"success\",\"host_failure\":false,\"gas_used\":21000,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x6000\"]],\"storage\":[[\"0x01\",\"0x1\",\"0x2\"]],\"lazy\":[]}",
+    )
+    assert!(passing.outcome == PASSED)
+    // A lazy run must report, if only that nothing differs.
+    let missing = check(Expect::of(post_entry()).unwrap(), output("{\"invalid\":null,\"status\":\"success\",\"host_failure\":false,\"gas_used\":21000,\"logs_hash\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x6000\"]],\"storage\":[[\"0x01\",\"0x1\",\"0x2\"]]}", Status::Exited(0)), timeout: 1, lazy: true).unwrap()
+    assert!(missing.outcome == FAILED && missing.problems[1] == "no lazy run")
+}
+
+#[test]
 fn check_reports_drivers_that_fail() {
     let expect = Expect::of(post_entry()).unwrap()
-    let crashed = check(expect, output("", Status::Signaled(11)), timeout: 1).unwrap()
+    let crashed = check(expect, output("", Status::Signaled(11)), timeout: 1, lazy: false).unwrap()
     assert!(crashed.outcome == CRASH && crashed.problems[0] == "signal 11")
-    let timed_out = check(expect, output("", Status::TimedOut), timeout: 7).unwrap()
+    let timed_out = check(expect, output("", Status::TimedOut), timeout: 7, lazy: false).unwrap()
     assert!(timed_out.outcome == TIMEOUT && timed_out.problems[0] == "exceeded 7 seconds")
-    let host = check(expect, output("{\"host_error\":\"pre-state allocation failed\"}", Status::Exited(1)), timeout: 1).unwrap()
+    let host = check(expect, output("{\"host_error\":\"pre-state allocation failed\"}", Status::Exited(1)), timeout: 1, lazy: false).unwrap()
     assert!(host.outcome == HOST_ERROR)
-    let failure = check(expect, output("{\"invalid\":null,\"status\":\"balance overflow\",\"host_failure\":true}", Status::Exited(0)), timeout: 1).unwrap()
+    let failure = check(expect, output("{\"invalid\":null,\"status\":\"balance overflow\",\"host_failure\":true}", Status::Exited(0)), timeout: 1, lazy: false).unwrap()
     assert!(failure.outcome == HOST_ERROR && failure.problems[0] == "balance overflow")
-    let exited = check(expect, output("{\"invalid\":null,\"status\":\"success\",\"host_failure\":false}", Status::Exited(2)), timeout: 1).unwrap()
+    let exited = check(expect, output("{\"invalid\":null,\"status\":\"success\",\"host_failure\":false}", Status::Exited(2)), timeout: 1, lazy: false).unwrap()
     assert!(exited.outcome == CRASH && exited.problems[0] == "exit status 2")
 }
 

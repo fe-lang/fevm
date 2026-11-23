@@ -19,7 +19,8 @@ The repo is a Fe workspace:
 - `ingots/chain`: the chain layer, which decodes, validates and imports
   blocks
 - `native/client`: a Rust client for `fevm serve`, the session mode
-- `native/conformance`: the Ethereum state and blockchain test driver
+- `native/conformance`: the Ethereum state and blockchain test drivers, and
+  `fevm_lazy`, which runs state tests again over a lazy world
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
