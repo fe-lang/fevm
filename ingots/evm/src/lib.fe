@@ -5,6 +5,7 @@ pub use hex::{self, parse_hex_program}
 pub use fork::{Amsterdam, Fork, Osaka, Rules}
 pub use logs::{Bloom, LogBuffer, LogEntry}
 pub use state::{StorageKey, WorldState}
+pub use source::{AccountState, SourceError, StateSource}
 pub use transaction::{Checkpoint, Transaction, TransactionResult}
 pub use trace::{CallEvent, Step, Trace}
 pub use types::{

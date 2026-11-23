@@ -1,0 +1,36 @@
+// State sources: where a world that does not hold all of the state reads
+// the rest, and `()` for a world that does.
+use core::{MemSpan, Option, Result}
+
+/// Where a world reads the state it does not hold.
+pub trait StateSource {
+    /// Whether a world over this source holds only what it has read from it.
+    const LAZY: bool = true
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>>
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256>
+    /// The code that hashes to `hash`.
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan>
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256>
+}
+
+/// `Unavailable`: the source cannot tell. `Allocation`: it ran out of memory.
+pub enum SourceError { Unavailable, Allocation }
+
+impl Copy for SourceError {}
+
+/// An account as a source or a trie holds it. Its nonce is under 2^64
+/// (EIP-2681).
+pub struct AccountState { pub nonce: u64, pub balance: u256, pub code_hash: u256, pub storage_root: u256 }
+
+impl Copy for AccountState {}
+
+/// The source of a complete world, which is never asked.
+impl StateSource for () {
+    const LAZY: bool = false
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        Result::Err(SourceError::Unavailable)
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> { Result::Err(SourceError::Unavailable) }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> { Result::Err(SourceError::Unavailable) }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> { Result::Err(SourceError::Unavailable) }
+}
