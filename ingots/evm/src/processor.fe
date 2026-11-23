@@ -5,6 +5,7 @@ use ingot::constants::MAX_U256
 use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, STORAGE_SET, StateGas, TX_MAX_TOTAL_GAS, account_access}
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
+use ingot::source::StateSource
 use ingot::state::{StorageKey, WorldState, address_word, delegation}
 use ingot::transaction::{SYSTEM_ADDRESS, Transaction}
 use ingot::trace::{CallEnd, CallStart, Tracer}
@@ -387,13 +388,13 @@ fn empty_receipt(invalid: i32, status: i32) -> Receipt {
 }
 
 // A host failure during a valid transaction leaves the pre-state.
-fn host_failure(_ tx: mut Transaction, status: i32) -> Receipt {
+fn host_failure<S: StateSource>(_ tx: mut Transaction<S>, status: i32) -> Receipt {
     tx.end(commit: false)
     empty_receipt(invalid: VALID, status)
 }
 
 // Warm the access list and blob hashes, then buy gas and increment the nonce.
-fn prepare(_ tx: mut Transaction, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
+fn prepare<S: StateSource>(_ tx: mut Transaction<S>, _ request: TxRequest, price: u256, blob_price: u256) -> i32 {
     for address in request.access_accounts {
         if !tx.access_list_account(address) { return ERR_HOST_ALLOCATION }
     }
@@ -438,8 +439,8 @@ fn authority(_ authorization: Authorization, chain_id: u256) -> Option<u256> {
 // for a new account, the authority's first write and a new delegation
 // (EIP-8037 and EIP-8038). The changes precede the message's checkpoint, so
 // they survive its failure.
-fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u256, gas: mut u64,
-                       state_gas: mut StateGas) -> i32 {
+fn authorize<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ request: TxRequest, chain_id: u256, gas: mut u64,
+                                       state_gas: mut StateGas) -> i32 {
     var paid = SwissTable<u256, u8>::empty()
     let env = ref request.env
     for authorization in request.authorizations {
@@ -486,8 +487,8 @@ fn authorize<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, chain_id: u2
 // message to `target`: the EIP-7702 authorizations, the account the message
 // makes, and the access of the target's delegate. A failure undoes all of it
 // and ends the message as an exceptional halt before it starts.
-fn prepare_message<F: Rules>(_ tx: mut Transaction, _ request: TxRequest, target: u256, chain_id: u256,
-                             gas: mut u64, state_gas: mut StateGas) -> i32 {
+fn prepare_message<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ request: TxRequest, target: u256,
+                                             chain_id: u256, gas: mut u64, state_gas: mut StateGas) -> i32 {
     let env = ref request.env
     let checkpoint = tx.checkpoint(is_static: false)
     var status = if env.kind == TX_SET_CODE { authorize<F>(mut tx, request, chain_id, mut gas, mut state_gas) } else { OK }
@@ -525,8 +526,9 @@ fn without_code<F: Rules>(var _ state_gas: own StateGas, _ result: mut Execution
 
 // The top-level message, with the prepared top frame's `call.gas_limit` and
 // `state_gas`: a creation or a call, each under its own checkpoint.
-fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, call: CallEnv, block: BlockEnv,
-                                        state_gas: StateGas, _ tracer: mut T) -> ExecutionResult {
+fn execute_message<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>, _ request: TxRequest,
+                                                        call: CallEnv, block: BlockEnv, state_gas: StateGas,
+                                                        _ tracer: mut T) -> ExecutionResult {
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
@@ -597,8 +599,9 @@ fn execute_message<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequ
 // refunded gas to the sender, pays the priority fee to the coinbase, and
 // settles deletions; without `commit` it is then undone, and its receipt is
 // the one it would have had.
-pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                                         _ available: Capacity, _ tracer: mut T, commit: bool) -> Receipt {
+pub(ingot) fn apply<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>, _ request: TxRequest, _ block: BlockEnv,
+                                                         _ config: Config, _ available: Capacity, _ tracer: mut T,
+                                                         commit: bool) -> Receipt {
     let env = request.env
     let checked = checked<F>(tx.world(), request, block, config, available)
     if checked.invalid != VALID {
@@ -707,8 +710,8 @@ pub(ingot) fn apply<F: Rules, T: Tracer>(_ tx: mut Transaction, _ request: TxReq
 /// (`Rules::WARM_SYSTEM_CALLS`). A call that succeeds keeps its state
 /// changes; its logs and refund are dropped. A target without code does
 /// nothing and succeeds.
-pub(ingot) fn system_call<F: Rules>(_ tx: mut Transaction, target: u256, _ data: own InputData, _ block: BlockEnv,
-                                    _ config: Config) -> ExecutionResult {
+pub(ingot) fn system_call<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, target: u256, _ data: own InputData,
+                                                    _ block: BlockEnv, _ config: Config) -> ExecutionResult {
     let target = address_word(target)
     if F::WARM_SYSTEM_CALLS {
         tx.begin(sender: SYSTEM_ADDRESS, destination: target, coinbase: block.coinbase, config)
@@ -750,7 +753,8 @@ impl Copy for Withdrawal {}
 
 /// Credits a block's withdrawals, together and outside any transaction. A
 /// balance that would pass 2^256 is ERR_BALANCE_OVERFLOW and credits none.
-pub(ingot) fn withdraw<F: Rules>(_ tx: mut Transaction, _ withdrawals: MemVec<Withdrawal>, _ config: Config) -> i32 {
+pub(ingot) fn withdraw<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ withdrawals: MemVec<Withdrawal>,
+                                                 _ config: Config) -> i32 {
     tx.begin_cold(config)
     var status = OK
     for withdrawal in withdrawals {

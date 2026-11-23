@@ -3,6 +3,7 @@ use ingot::access::AccessRecorder
 use ingot::changes::BlockChanges
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
+use ingot::source::StateSource
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, ChangeKind, Mark}
 use ingot::state::{Field, Sender, StorageKey, WorldState, WriteError, Written, address_word, designator}
@@ -42,8 +43,10 @@ pub struct TransactionResult {
 
 // The persistent database is unavailable to callers until finish consumes the
 // transaction. Every write during execution must therefore pass the journal.
-pub struct Transaction {
+pub struct Transaction<S: StateSource = ()> {
     state: WorldState,
+    // Where the state reads what it does not hold.
+    source: S,
     logs: LogBuffer,
     blob_hashes: MemVec<u256>,
     // The sender, destination and coinbase, warm from the start (EIP-2929,
@@ -64,15 +67,31 @@ pub struct Transaction {
     changes: BlockChanges,
 }
 
-impl Transaction {
-    /// A transaction on `state` from `sender` to `destination` (the created
-    /// address for a creation), with `buffers` lent until `finish` returns
-    /// them.
+impl Transaction<()> {
+    /// A transaction on the complete world `state` from `sender` to
+    /// `destination` (the created address for a creation), with `buffers`
+    /// lent until `finish` returns them.
     pub fn new(_ state: own WorldState, sender: u256, destination: u256, coinbase: u256, config: Config,
                buffers: own Buffers) -> Self {
+        Transaction::on(state, source: (), sender, destination, coinbase, config, buffers)
+    }
+}
+
+impl<S: StateSource> Transaction<S> {
+    /// A transaction as `new` makes, on an empty world that reads the state
+    /// from `source`.
+    pub fn over(_ source: own S, sender: u256, destination: u256, coinbase: u256, config: Config,
+                buffers: own Buffers) -> Self {
+        Self::on(WorldState::empty(), source, sender, destination, coinbase, config, buffers)
+    }
+
+    // `new`'s and `over`'s transaction on `state` over `source`.
+    fn on(_ state: own WorldState, source: own S, sender: u256, destination: u256, coinbase: u256, config: Config,
+          buffers: own Buffers) -> Self {
         core::assert(buffers.journal.len() == 0)
         Self {
             state,
+            source,
             logs: LogBuffer::new(),
             blob_hashes: MemVec::new(),
             endpoints: [address_word(sender), address_word(destination), address_word(coinbase)],
@@ -119,6 +138,15 @@ impl Transaction {
     }
 
     pub fn config(self) -> Config { self.config }
+
+    /// The source the state reads what it does not hold from.
+    pub fn source(self) -> ref S { ref self.source }
+
+    /// The source, for a host's own use between transactions.
+    pub fn source_mut(mut self) -> mut S {
+        core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
+        mut self.source
+    }
 
     /// The block's access list recorder.
     pub fn access(mut self) -> mut AccessRecorder { mut self.access }
@@ -709,8 +737,8 @@ impl Transaction {
         self.buffers.originals.clear()
     }
 
-    /// The state and buffers, after `end`.
-    pub fn release(var own self) -> (WorldState, Buffers) { (self.state, self.buffers) }
+    /// The state, source and buffers, after `end`.
+    pub fn release(var own self) -> (WorldState, S, Buffers) { (self.state, self.source, self.buffers) }
 
     pub fn finish(var own self, commit: bool, gas_spent: u64) -> TransactionResult {
         self.end(commit)

@@ -3,6 +3,7 @@
 use core::{Box, MemBuffer, MemVec, Option, Result}
 use keccak::Keccak256
 use ingot::fork::Rules
+use ingot::source::StateSource
 use ingot::gas::{ACCOUNT_WRITE, NEW_ACCOUNT, STATE_BYTE, StateGas, account_access}
 use ingot::state::{address_word, delegation}
 use ingot::address::{create_address, create2_address}
@@ -57,11 +58,12 @@ impl Frame {
         self.creates = creates
     }
 
-    fn resume<F: Rules, T: Tracer>(mut self, _ state: mut Transaction, depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
+    fn resume<F: Rules, S: StateSource, T: Tracer>(mut self, _ state: mut Transaction<S>, depth: usize, _ tracer: mut T)
+        -> Option<Box<Frame>> {
         self.vm.run_until_child<F>(self.program, self.calldata, mut state, depth, mut tracer)
     }
 
-    fn finish<F: Rules>(mut self, _ state: mut Transaction) -> ChildResult {
+    fn finish<F: Rules, S: StateSource>(mut self, _ state: mut Transaction<S>) -> ChildResult {
         let creates = self.creates
         let address = self.vm.call.address
         if creates && self.vm.status == OK { self.vm.deposit_code<F>(address, mut state) }
@@ -78,7 +80,7 @@ impl Frame {
         }
     }
 
-    fn abort(mut self, _ state: mut Transaction) {
+    fn abort<S: StateSource>(mut self, _ state: mut Transaction<S>) {
         state.revert(self.checkpoint.take().unwrap())
     }
 }
@@ -98,7 +100,7 @@ fn frame_allocation(_ buffers: mut Buffers) -> Option<Box<Frame>> {
 /// Move ether as the specification's move_ether, touching both accounts, and
 /// log it if `F` logs transfers. The sender must hold `value`. On failure the
 /// caller reverts its checkpoint.
-pub fn transfer<F: Rules>(_ state: mut Transaction, from: u256, to: u256, value: u256) -> i32 {
+pub fn transfer<F: Rules, S: StateSource>(_ state: mut Transaction<S>, from: u256, to: u256, value: u256) -> i32 {
     // A self-transfer changes no balance, so static frames may perform it.
     if from == to {
         core::assert(state.balance(from) >= value)
@@ -115,7 +117,8 @@ pub fn transfer<F: Rules>(_ state: mut Transaction, from: u256, to: u256, value:
 /// mark, the new account's first nonce and its endowment from the sender, which
 /// the address cannot be. Initcode failure or a rejected deposit reverts all of
 /// it.
-pub fn begin_create<F: Rules>(_ state: mut Transaction, sender: u256, address: u256, value: u256) -> Result<i32, Checkpoint> {
+pub fn begin_create<F: Rules, S: StateSource>(_ state: mut Transaction<S>, sender: u256, address: u256, value: u256)
+    -> Result<i32, Checkpoint> {
     let checkpoint = state.checkpoint(is_static: false)
     var status = state.mark_created(address)
     // Crediting first finds an overflow before any balance changes.
@@ -196,7 +199,7 @@ impl Vm {
     // Deposit successful initcode output: EIP-3541 prefix, the EIP-170 size
     // limit, and 200 gas per byte, or from EIP-8037 the hash of its words and
     // state gas for its bytes. A rejected deposit is an exceptional halt.
-    pub(super) fn deposit_code<F: Rules>(mut self, address: u256, _ state: mut Transaction) {
+    pub(super) fn deposit_code<F: Rules, S: StateSource>(mut self, address: u256, _ state: mut Transaction<S>) {
         let len: u64 = self.output.len().downcast_unchecked()
         if len > 0 && self.output[0] == 0xef {
             self.fault(ERR_CODE_PREFIX)
@@ -215,8 +218,8 @@ impl Vm {
         }
     }
 
-    pub(super) fn start_call<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
-                             _ tracer: mut T) -> Option<Box<Frame>> {
+    pub(super) fn start_call<F: Rules, S: StateSource, T: Tracer>(mut self, op: i32, _ state: mut Transaction<S>,
+                             depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
         let requested = self.pop()
         let code_address = address_word(self.pop())
         let sender = address_word(self.call.address)
@@ -351,8 +354,8 @@ impl Vm {
         Option::Some(frame)
     }
 
-    pub(super) fn start_create<F: Rules, T: Tracer>(mut self, op: i32, _ state: mut Transaction, depth: usize,
-                               _ tracer: mut T) -> Option<Box<Frame>> {
+    pub(super) fn start_create<F: Rules, S: StateSource, T: Tracer>(mut self, op: i32, _ state: mut Transaction<S>,
+                               depth: usize, _ tracer: mut T) -> Option<Box<Frame>> {
         if !self.holds(if op == 0xf5 { 4 } else { 3 }) { return Option::None }
         let value = self.take()
         let offset = self.take()
@@ -444,7 +447,7 @@ impl Vm {
     // EIP-6780: the balance moves to the beneficiary; only an account created by
     // this transaction is deleted, at settlement. Until EIP-8246 it also loses
     // ether sent to itself.
-    pub(super) fn selfdestruct<F: Rules>(mut self, _ state: mut Transaction) {
+    pub(super) fn selfdestruct<F: Rules, S: StateSource>(mut self, _ state: mut Transaction<S>) {
         let beneficiary = address_word(self.pop())
         if !self.ok() { return }
         if state.is_static() {
@@ -476,8 +479,8 @@ impl Vm {
         if self.ok() { self.halted = true }
     }
 
-    pub(super) fn run_children<F: Rules, T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program, _ calldata: InputData,
-                               _ state: mut Transaction, _ tracer: mut T) {
+    pub(super) fn run_children<F: Rules, S: StateSource, T: Tracer>(mut self, _ first: own Box<Frame>, _ program: Program,
+                               _ calldata: InputData, _ state: mut Transaction<S>, _ tracer: mut T) {
         // The executing children, innermost last. Each is boxed, so frame
         // storage grows with the actual call depth and a frame never moves.
         var frames: MemVec<Box<Frame>> = MemVec::new()
