@@ -6,7 +6,7 @@ use ingot::gas::{ACCOUNT_WRITE, AUTH_BASE, NEW_ACCOUNT, STORAGE_SET, StateGas, T
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::source::StateSource
-use ingot::state::{StorageKey, WorldState, address_word, delegation}
+use ingot::state::{StorageKey, address_word, delegation}
 use ingot::transaction::{SYSTEM_ADDRESS, Transaction}
 use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
@@ -264,13 +264,45 @@ impl Capacity {
 }
 
 // Validation's verdict, from the includability checks in specification
-// order, and the intrinsic gas it computed.
-pub(ingot) struct Checked { pub invalid: i32, pub intrinsic: IntrinsicGas }
+// order, or the host status that stopped them, and the intrinsic gas it
+// computed.
+pub(ingot) struct Checked { pub invalid: i32, pub status: i32, pub intrinsic: IntrinsicGas }
 
-pub(ingot) fn checked<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                                _ available: Capacity) -> Checked {
+pub(ingot) fn checked<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ request: TxRequest, _ block: BlockEnv,
+                                                _ config: Config, _ available: Capacity) -> Checked {
     let intrinsic = intrinsic_gas<F>(request)
-    Checked { invalid: verdict<F>(world, request, block, config, available, intrinsic), intrinsic }
+    let invalid = verdict<F>(request, block, config, available, intrinsic)
+    if invalid != VALID { return Checked { invalid, status: OK, intrinsic } }
+    // The checks that read the sender's account load it, and its code where
+    // EIP-3607 needs it.
+    let env = request.env
+    let sender = address_word(env.sender)
+    var status = tx.load_account(sender)
+    if status != OK { return Checked { invalid, status, intrinsic } }
+    let account = tx.sender(sender)
+    var max_fee = checked_mul(env.gas_limit, env.gas_price)
+    if env.kind == TX_BLOB {
+        max_fee = match (max_fee, blob_fee(request, price: env.max_fee_per_blob_gas)) {
+            (Option::Some(gas), Option::Some(blobs)) => checked_add(gas, blobs),
+            _ => Option::None,
+        }
+    }
+    let required = match max_fee {
+        Option::Some(fee) => checked_add(fee, env.value),
+        Option::None => Option::None,
+    }
+    let affordable = match required {
+        Option::Some(required) => account.balance >= required,
+        Option::None => false,
+    }
+    // EIP-3607, except that an EIP-7702 delegated account may send.
+    let invalid = if config.check_nonce && account.nonce != env.nonce { INVALID_NONCE }
+        else if !affordable { INVALID_BALANCE }
+        else if config.check_sender_code && account.has_code {
+            status = tx.load_code(sender)
+            if status == OK && tx.delegate(sender).is_none() { INVALID_SENDER_CODE } else { VALID }
+        } else { VALID }
+    Checked { invalid, status, intrinsic }
 }
 
 // A transaction signed for another chain than the block's.
@@ -307,11 +339,11 @@ fn envelope_invalid(_ request: TxRequest) -> i32 {
 
 // The includability checks in EELS's order for the fork, which
 // `F::FIELDS_FIRST` selects: a rule whose place differs is written once and
-// checked at the fork's place.
-fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEnv, _ config: Config,
-                     _ available: Capacity, _ intrinsic: IntrinsicGas) -> i32 {
+// checked at the fork's place. The checks that read the sender's account,
+// which come last in both orders, are `checked`'s.
+fn verdict<F: Rules>(_ request: TxRequest, _ block: BlockEnv, _ config: Config, _ available: Capacity,
+                     _ intrinsic: IntrinsicGas) -> i32 {
     let env = request.env
-    let sender = address_word(env.sender)
     if env.kind > TX_SET_CODE { return INVALID_TX_TYPE }
     // Only the blob envelope has versioned hashes, and only the set-code
     // envelope authorizations.
@@ -350,31 +382,10 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
         let blobs = blobs_invalid(request)
         if blobs != VALID { return blobs }
     }
-    var max_fee = checked_mul(env.gas_limit, env.gas_price)
-    if env.kind == TX_BLOB {
-        if env.max_fee_per_blob_gas < block.blobbasefee { return INVALID_BLOB_FEE_CAP }
-        max_fee = match (max_fee, blob_fee(request, price: env.max_fee_per_blob_gas)) {
-            (Option::Some(gas), Option::Some(blobs)) => checked_add(gas, blobs),
-            _ => Option::None,
-        }
-    }
+    if env.kind == TX_BLOB && env.max_fee_per_blob_gas < block.blobbasefee { return INVALID_BLOB_FEE_CAP }
     if !F::FIELDS_FIRST {
         let envelope = envelope_invalid(request)
         if envelope != VALID { return envelope }
-    }
-    let account = world.sender(sender)
-    if config.check_nonce && account.nonce != env.nonce { return INVALID_NONCE }
-    let required = match max_fee {
-        Option::Some(fee) => checked_add(fee, env.value),
-        Option::None => Option::None,
-    }
-    match required {
-        Option::Some(required) => if account.balance < required { return INVALID_BALANCE },
-        Option::None => return INVALID_BALANCE,
-    }
-    // EIP-3607, except that an EIP-7702 delegated account may send.
-    if config.check_sender_code && account.has_code && world.delegate(sender).is_none() {
-        return INVALID_SENDER_CODE
     }
     VALID
 }
@@ -449,8 +460,13 @@ fn authorize<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ request: TxRe
         let authority = signer.unwrap()
         var status = tx.warm_account(address: authority)
         if status != OK { return status }
-        let delegable = tx.code_size(authority) == 0 || tx.delegate(authority).is_some()
-        if !delegable || tx.nonce(authority) != authorization.nonce { continue }
+        if tx.nonce(authority) != authorization.nonce { continue }
+        // Only an account without code or with a delegation can delegate.
+        if tx.has_code(authority) {
+            status = tx.load_code(authority)
+            if status != OK { return status }
+            if tx.delegate(authority).is_none() { continue }
+        }
         let delegate = address_word(authorization.address)
         if F::STATE_GAS {
             let Option::Some(slot) = paid.try_find_or_insert(authority) else { return ERR_HOST_ALLOCATION }
@@ -503,11 +519,14 @@ fn prepare_message<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ request
         let creates_account = if env.creates { tx.deployable(target) } else { env.value != 0 }
         if creates_account && tx.is_empty(target) && !state_gas.charge(mut gas, NEW_ACCOUNT) {
             status = ERR_OUT_OF_GAS
-        } else if !env.creates && let Option::Some(delegate) = tx.delegate(target) {
-            status = if spend(mut gas, account_access<F>(warm: tx.account_is_warm(delegate))) {
-                tx.warm_account(address: delegate)
-            } else {
-                ERR_OUT_OF_GAS
+        } else if !env.creates {
+            status = tx.load_code(target)
+            if status == OK && let Option::Some(delegate) = tx.delegate(target) {
+                status = if spend(mut gas, account_access<F>(warm: tx.account_is_warm(delegate))) {
+                    tx.warm_account(address: delegate)
+                } else {
+                    ERR_OUT_OF_GAS
+                }
             }
         }
     }
@@ -532,6 +551,10 @@ fn execute_message<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>
     let sender = call.caller
     let target = call.address
     let value = call.callvalue
+    // Before Amsterdam the message reads its target first; from Amsterdam
+    // its preparation has.
+    let loaded = tx.load_account(target)
+    if loaded != OK { return status_result(loaded) }
     if request.env.creates {
         if !tx.deployable(target) {
             var result = status_result(ERR_ADDRESS_COLLISION)
@@ -552,9 +575,10 @@ fn execute_message<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>
     let checkpoint = tx.checkpoint(is_static: false)
     // The call touches its target even without value; a failed call undoes the touch.
     let moved = if value == 0 { tx.touch_unmarked(target) } else { transfer<F>(mut tx, from: sender, to: target, value) }
-    if moved != OK {
+    let loaded = if moved == OK { tx.load_code(target) } else { moved }
+    if loaded != OK {
         tx.revert(checkpoint)
-        return status_result(moved)
+        return status_result(loaded)
     }
     // A delegated account runs its delegate's code, never a precompile (EIP-7702).
     if is_precompile(target) && tx.delegate(target).is_none() {
@@ -565,17 +589,15 @@ fn execute_message<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>
     }
     let code = tx.code(target)
     let delegate = delegation(code)
-    // A precompile delegate runs nothing.
-    let runs_code = match delegate {
-        Option::Some(address) => !is_precompile(address) && tx.code_size(address) != 0,
-        Option::None => code.len() != 0,
-    }
+    var runs_code = code.len() != 0
     if let Option::Some(address) = delegate {
         let warmed = tx.warm_account(address)
         if warmed != OK {
             tx.revert(checkpoint)
             return status_result(warmed)
         }
+        // A precompile delegate runs nothing.
+        runs_code = !is_precompile(address) && tx.has_code(address)
     }
     // Without code the message stops at once with its gas, as a call from code does.
     if !runs_code {
@@ -585,10 +607,15 @@ fn execute_message<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S>
         without_code<F>(state_gas, mut result)
         return result
     }
+    let runner = delegate.unwrap_or(default: target)
+    let read = tx.load_code(runner)
+    if read != OK {
+        tx.revert(checkpoint)
+        return status_result(read)
+    }
     var vm = Vm::new()
     vm.reset(gas: call.gas_limit, state_gas)
-    vm.run_root<F>(tx.program(delegate.unwrap_or(default: target)), request.data(), call, block, mut tx, mut tracer,
-                      creates: false)
+    vm.run_root<F>(tx.program(runner), request.data(), call, block, mut tx, mut tracer, creates: false)
     if vm.status == OK { tx.commit(checkpoint) } else { tx.revert(checkpoint) }
     vm.into_result(mut tx.buffers())
 }
@@ -603,14 +630,15 @@ pub(ingot) fn apply<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S
                                                          _ config: Config, _ available: Capacity, _ tracer: mut T,
                                                          commit: bool) -> Receipt {
     let env = request.env
-    let checked = checked<F>(tx.world(), request, block, config, available)
-    if checked.invalid != VALID {
-        return empty_receipt(invalid: checked.invalid, status: OK)
+    let checked = checked<F>(mut tx, request, block, config, available)
+    // A transaction whose checks a host failure stopped is valid, with that status.
+    if checked.invalid != VALID || checked.status != OK {
+        return empty_receipt(invalid: checked.invalid, status: checked.status)
     }
     let intrinsic = checked.intrinsic
     let sender = address_word(env.sender)
     let price = effective_gas_price(env, base_fee: block.basefee)
-    let target = if env.creates { create_address(sender, nonce: tx.world().nonce(sender)) } else { address_word(env.to) }
+    let target = if env.creates { create_address(sender, nonce: tx.nonce(sender)) } else { address_word(env.to) }
     tx.begin(sender, destination: target, coinbase: block.coinbase, config)
     var prepared = prepare(mut tx, request, price, blob_price: block.blobbasefee)
     // EIP-8037: gas past the execution cap is the top frame's state gas reservoir.
@@ -673,6 +701,7 @@ pub(ingot) fn apply<F: Rules, S: StateSource, T: Tracer>(_ tx: mut Transaction<S
         else if gas_spent - state_gas_used > floor { gas_spent - state_gas_used }
         else { floor }
     var paid = tx.credit(address: sender, amount: (env.gas_limit - gas_used) as u256 * price)
+    if paid == OK { paid = tx.load_account(block.coinbase) }
     if paid == OK {
         let tip = if price > block.basefee { price - block.basefee } else { 0 }
         paid = tx.credit(address: address_word(block.coinbase), amount: gas_used as u256 * tip)
@@ -758,6 +787,7 @@ pub(ingot) fn withdraw<F: Rules, S: StateSource>(_ tx: mut Transaction<S>, _ wit
     tx.begin_cold(config)
     var status = OK
     for withdrawal in withdrawals {
+        if status == OK { status = tx.load_account(withdrawal.address) }
         if status == OK { status = tx.credit(address: withdrawal.address, amount: withdrawal.amount as u256 * 1_000_000_000) }
     }
     if status == OK && !tx.record_changes<F>() { status = ERR_HOST_ALLOCATION }

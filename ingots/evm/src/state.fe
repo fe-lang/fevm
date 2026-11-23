@@ -253,10 +253,13 @@ impl WorldState {
         let lookup = self.index.get(address_word(address))
         !lookup.found || self.empty_at(lookup.value)
     }
-    /// Deletes the account of `address`, with its storage, if it exists and is empty.
-    pub fn remove_if_empty(mut self, _ address: u256) {
+    /// Deletes the account of `address`, with its storage, if it exists and
+    /// is empty; whether it did.
+    pub fn remove_if_empty(mut self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
-        if lookup.found && self.empty_at(lookup.value) { self.remove_account(address) }
+        let empty = lookup.found && self.empty_at(lookup.value)
+        if empty { self.remove_account(address) }
+        empty
     }
     // Delete an account record with its code and storage.
     pub fn remove_account(mut self, _ address: u256) {
@@ -359,6 +362,8 @@ impl WorldState {
         let lookup = self.index.get(address_word(address))
         if lookup.found { self.accounts[lookup.value].nonce } else { 0 }
     }
+    /// Sets the nonce of `address`, which is under 2^64 (EIP-2681): a
+    /// `StateTrie` and a `WorldSource` assert it.
     pub fn set_nonce(mut self, _ address: u256, _ value: u256) -> bool {
         self.replace(Field::Nonce, address, value).is_ok()
     }
@@ -656,6 +661,24 @@ impl WorldState {
     pub(ingot) fn stored(self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
         lookup.found && self.accounts[lookup.value].flags & STORED != 0
+    }
+    /// Marks `address`, which has a record, as having storage in the source
+    /// that the world has not read, as it had before a deletion undo
+    /// reverses, and forgets every slot of it the world resolved. Settlement
+    /// deletes an account as empty only if no code ever ran at it, so each
+    /// slot of it the world held was the source's: one read before the
+    /// deletion, which undo restores, reads the same again, and one resolved
+    /// as zero after it is asked of the source.
+    pub(ingot) fn restore_stored(mut self, _ address: u256) {
+        let address = address_word(address)
+        let lookup = self.index.get(address)
+        core::assert(lookup.found)
+        self.accounts[lookup.value].flags |= STORED
+        // Removing an entry moves none, so the scan sees each once.
+        for at in 0..self.loaded_slots.capacity() {
+            let entry = self.loaded_slots.entry(at)
+            if entry.occupied && entry.key.address == address { let _ = self.loaded_slots.remove(entry.key) }
+        }
     }
     /// Adds `value`, what slot `slot` of `address`, an address word, holds,
     /// to a slot the world has not resolved; false, changing nothing, if the

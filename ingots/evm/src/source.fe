@@ -1,6 +1,7 @@
 // State sources: where a world that does not hold all of the state reads
 // the rest, and `()` for a world that does.
 use core::{MemSpan, Option, Result}
+use ingot::state::{EMPTY_CODE_HASH, EMPTY_ROOT, WorldState}
 use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATE_UNAVAILABLE}
 
 /// Where a world reads the state it does not hold.
@@ -44,4 +45,43 @@ impl StateSource for () {
     fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> { Result::Err(SourceError::Unavailable) }
     fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> { Result::Err(SourceError::Unavailable) }
     fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> { Result::Err(SourceError::Unavailable) }
+}
+
+/// A source that serves a complete world, for tests: a lazy world over it
+/// runs as a complete world on `world` does. The world has no storage
+/// roots, so an account with storage gets a placeholder root that only
+/// differs from the empty one; code is found by scanning the accounts for
+/// its hash.
+pub struct WorldSource { world: WorldState }
+
+impl WorldSource {
+    pub fn new(_ world: own WorldState) -> Self { WorldSource { world } }
+    /// The world the source serves.
+    pub fn into_world(own self) -> WorldState { self.world }
+}
+
+impl StateSource for WorldSource {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        if !self.world.exists(address) { return Result::Ok(Option::None) }
+        Result::Ok(Option::Some(AccountState {
+            // A complete world's nonce is under 2^64 (EIP-2681).
+            nonce: self.world.nonce(address).downcast().unwrap(),
+            balance: self.world.balance(address),
+            code_hash: if self.world.has_code(address) { self.world.code_hash(address) } else { EMPTY_CODE_HASH },
+            storage_root: if self.world.has_storage(address) { 0 } else { EMPTY_ROOT },
+        }))
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
+        Result::Ok(self.world.storage_load(address, slot))
+    }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
+        for position in 0..self.world.account_count() {
+            let address = self.world.account_at(position).address
+            if self.world.has_code(address) && self.world.code_hash(address) == hash {
+                return Result::Ok(self.world.code(address))
+            }
+        }
+        Result::Err(SourceError::Unavailable)
+    }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> { Result::Ok(self.world.block_hash(number)) }
 }

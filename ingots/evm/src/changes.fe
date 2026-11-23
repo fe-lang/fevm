@@ -16,6 +16,10 @@ pub struct AccountBefore {
     pub balance: Option<u256>,
     pub nonce: Option<u256>,
     pub code: Option<Option<u256>>,
+    /// Settlement deleted it, a touched account left empty, while a lazy
+    /// world's source held storage of it the world had not read (`STORED`):
+    /// undo marks it so again, so that its storage is read from the source.
+    pub stored: bool,
     // Its slots are among the block's: settlement deleted them with it.
     storage_kept: bool,
 }
@@ -72,7 +76,8 @@ impl BlockChanges {
         if lookup.found { return Option::Some(lookup.value) }
         let at = self.accounts.len()
         let account = AccountBefore {
-            address, existed, balance: Option::None, nonce: Option::None, code: Option::None, storage_kept: false,
+            address, existed, balance: Option::None, nonce: Option::None, code: Option::None, stored: false,
+            storage_kept: false,
         }
         if self.accounts.try_push(account).is_err() { return Option::None }
         if !self.positions.try_insert(address, at) {
@@ -155,6 +160,15 @@ impl BlockChanges {
         true
     }
 
+    /// Notes that settlement deleted `address`, a touched account left empty
+    /// whose record `keep` made, and whether the source held storage of it
+    /// the world had not read.
+    pub(ingot) fn deleted(mut self, _ address: u256, stored: bool) {
+        let lookup = self.positions.get(address)
+        core::assert(lookup.found)
+        if stored { self.accounts[lookup.value].stored = true }
+    }
+
     /// Keeps `hash`, the hash of block `number` before the block, unless the
     /// block wrote it before; false if the changes cannot grow.
     pub(ingot) fn keep_block_hash(mut self, _ number: u256, _ hash: u256) -> bool {
@@ -179,6 +193,7 @@ impl BlockChanges {
                 continue
             }
             core::assert(world.ensure_account(address))
+            if account.stored { world.restore_stored(address) }
             if let Option::Some(balance) = account.balance { core::assert(world.set_balance(address, balance)) }
             if let Option::Some(nonce) = account.nonce { core::assert(world.set_nonce(address, nonce)) }
             match account.code {

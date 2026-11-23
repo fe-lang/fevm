@@ -1,10 +1,11 @@
 use ingot::fork::{Amsterdam, Fork, Osaka}
-use core::MemVec
+use core::{MemVec, Result}
 use ingot::access::AccessRecorder
 use ingot::changes::BlockChanges
 use ingot::processor::{Capacity, Receipt, TxRequest, Withdrawal, apply, checked, system_call, withdraw}
 use ingot::source::StateSource
 use ingot::state::WorldState
+use ingot::status::OK
 use ingot::trace::Tracer
 use ingot::transaction::Transaction
 use ingot::types::{BlockEnv, Config, ExecutionResult, InputData}
@@ -14,8 +15,8 @@ use ingot::vm::Buffers
 /// the allocations they reuse: the journal, a transaction's tables, and the
 /// memory, stacks and frames of finished calls. Each transaction runs by the
 /// rules of the fork `config` selects, in the block the host passes with it.
-/// Between transactions the host reads the world and writes it directly.
-/// A world over a lazy source holds only what it has read from it.
+/// Between transactions the host reads the world and writes a complete one
+/// directly. A world over a lazy source holds only what it has read from it.
 pub struct Evm<S: StateSource = ()> { tx: Transaction<S>, config: Config }
 
 impl Evm<()> {
@@ -24,6 +25,8 @@ impl Evm<()> {
         Self { tx: Transaction::new(world, sender: 0, destination: 0, coinbase: 0, config, buffers: Buffers::new()), config }
     }
 
+    /// The world, for a host's own writes between transactions.
+    pub fn world_mut(mut self) -> mut WorldState { self.tx.world_mut() }
     /// Replaces the world.
     pub fn set_world(mut self, _ world: own WorldState) {
         let _ = core::mem::replace(mut self.tx.world_mut(), world)
@@ -46,7 +49,6 @@ impl<S: StateSource> Evm<S> {
     pub fn set_config(mut self, _ config: Config) { self.config = config }
 
     pub fn world(self) -> ref WorldState { self.tx.world() }
-    pub fn world_mut(mut self) -> mut WorldState { self.tx.world_mut() }
 
     /// The source the world reads what it does not hold from.
     pub fn source(self) -> ref S { self.tx.source() }
@@ -59,13 +61,15 @@ impl<S: StateSource> Evm<S> {
     }
 
     /// The includability checks, in specification order: VALID, or the first
-    /// that fails.
-    pub fn validate(self, _ request: TxRequest, _ block: BlockEnv) -> i32 {
+    /// that fails; or the host status that stopped them, such as a lazy
+    /// source's that cannot give the sender's account.
+    pub fn validate(mut self, _ request: TxRequest, _ block: BlockEnv) -> Result<i32, i32> {
         let available = Capacity::of(block, self.config)
-        match self.config.fork {
-            Fork::Osaka => checked<Osaka>(self.tx.world(), request, block, self.config, available).invalid,
-            Fork::Amsterdam => checked<Amsterdam>(self.tx.world(), request, block, self.config, available).invalid,
+        let checked = match self.config.fork {
+            Fork::Osaka => checked<Osaka>(mut self.tx, request, block, self.config, available),
+            Fork::Amsterdam => checked<Amsterdam>(mut self.tx, request, block, self.config, available),
         }
+        if checked.status != OK { Result::Err(checked.status) } else { Result::Ok(checked.invalid) }
     }
 
     /// Validates and executes one transaction. A valid one pays for gas, runs
@@ -97,6 +101,10 @@ impl<S: StateSource> Evm<S> {
         self.tx.access().set_recording(recording)
         receipt
     }
+
+    /// The transaction state, for `Block`'s loads and its writes to the
+    /// world, over any source.
+    pub(ingot) fn transaction(mut self) -> mut Transaction<S> { mut self.tx }
 
     /// The recorder of the block's access list (EIP-7928).
     pub(ingot) fn access(mut self) -> mut AccessRecorder { self.tx.access() }

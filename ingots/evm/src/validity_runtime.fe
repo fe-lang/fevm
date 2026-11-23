@@ -77,11 +77,11 @@ fn first(_ request: TxRequest, _ block: BlockEnv, max_blobs: u64, osaka: i32, am
     var config = Config::osaka()
     config.blob_schedule.max = max_blobs
     var evm = Evm::new(world, config)
-    let by_osaka = evm.validate(request, block)
+    let by_osaka = evm.validate(request, block).unwrap()
     config = Config::amsterdam()
     config.blob_schedule.max = max_blobs
     evm.set_config(config)
-    by_osaka == osaka && evm.validate(request, block) == amsterdam
+    by_osaka == osaka && evm.validate(request, block).unwrap() == amsterdam
 }
 
 #[test]

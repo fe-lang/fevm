@@ -186,7 +186,8 @@ impl<S: StateSource> Block<S> {
     // is among the block's changes.
     fn set_block_hash(mut self, _ number: u256, _ hash: u256) {
         let before = self.evm.world().block_hash(number)
-        if !self.evm.changes().keep_block_hash(number, before) || !self.evm.world_mut().set_block_hash(number, hash) {
+        if !self.evm.changes().keep_block_hash(number, before)
+            || !self.evm.transaction().state_mut().set_block_hash(number, hash) {
             self.fail(BlockError::Host(ERR_HOST_ALLOCATION))
         }
     }
@@ -257,7 +258,10 @@ impl<S: StateSource> Block<S> {
 
     // The requests a request contract's system call returns.
     fn collect_requests(mut self, _ requests: mut MemVec<MemBuffer>, kind: u8, from: u256) {
-        if self.evm.world().code_size(from) == 0 { return self.fail(BlockError::RequestContractMissing) }
+        var loaded = self.evm.transaction().load_account(from)
+        if loaded == OK { loaded = self.evm.transaction().load_code(from) }
+        if loaded != OK { return self.fail(BlockError::Host(loaded)) }
+        if self.evm.transaction().code_size(from) == 0 { return self.fail(BlockError::RequestContractMissing) }
         let result = self.system_call(from, InputData::new(MemBuffer::empty(), status: OK))
         if result.status != OK { return self.fail(BlockError::RequestCallFailed) }
         self.add_request(mut requests, kind, result.output.span())
@@ -297,7 +301,7 @@ impl<S: StateSource> Block<S> {
         let changes = block.evm.take_changes()
         let output = match block.failure {
             Option::Some(error) => {
-                changes.undo(mut block.evm.world_mut())
+                changes.undo(mut block.evm.transaction().state_mut())
                 Result::Err(error)
             },
             Option::None => Result::Ok(BlockOutput {
@@ -313,7 +317,7 @@ impl<S: StateSource> Block<S> {
     pub fn abandon(own self) -> Evm<S> {
         var evm = self.evm
         evm.access().stop()
-        evm.take_changes().undo(mut evm.world_mut())
+        evm.take_changes().undo(mut evm.transaction().state_mut())
         evm
     }
 }

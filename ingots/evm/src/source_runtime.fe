@@ -1,0 +1,225 @@
+// A world over a lazy source: what it loads, and where.
+use core::{MemSpan, Option, Result}
+use ingot::address::create_address
+use ingot::evm::Evm
+use ingot::processor::{TX_LEGACY, TxEnv, TxRequest}
+use ingot::source::{AccountState, SourceError, StateSource, WorldSource}
+use ingot::state::{StorageKey, WorldState, designator}
+use ingot::status::{ERR_OUT_OF_GAS, ERR_STATE_UNAVAILABLE, OK, VALID}
+use ingot::types::{BlockEnv, Config, InputData, default_block_env, empty_bytes}
+
+const SENDER: u256 = 0x1000
+const COINBASE: u256 = 0xc0
+const CONTRACT: u256 = 0xaa
+
+/// A source over a complete world that counts what it is asked, and cannot
+/// tell the account `refused`.
+pub(ingot) struct TestSource {
+    source: WorldSource,
+    refused: Option<u256>,
+    pub accounts: u64,
+    pub slots: u64,
+    pub codes: u64,
+    pub hashes: u64,
+}
+
+impl TestSource {
+    pub(ingot) fn new(_ world: own WorldState, refused: Option<u256>) -> Self {
+        TestSource { source: WorldSource::new(world), refused, accounts: 0, slots: 0, codes: 0, hashes: 0 }
+    }
+}
+
+impl StateSource for TestSource {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        self.accounts += 1
+        if self.refused == Option::Some(address) { Result::Err(SourceError::Unavailable) }
+        else { self.source.account(address) }
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
+        self.slots += 1
+        self.source.slot(address, slot)
+    }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
+        self.codes += 1
+        self.source.code(hash)
+    }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> {
+        self.hashes += 1
+        self.source.block_hash(number)
+    }
+}
+
+// A funded sender and a coinbase that is a contract.
+fn world() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000_000_000))
+    core::assert(world.set_code(address: COINBASE, code: [0x00 as u8]) == OK)
+    world
+}
+
+fn block() -> BlockEnv {
+    var block = default_block_env()
+    block.coinbase = COINBASE
+    block.number = 300
+    block.gaslimit = 30_000_000
+    block.chainid = 1
+    block.basefee = 1
+    block
+}
+
+// An EVM over `world` that cannot read the account `refused`.
+pub(ingot) fn lazy(_ world: own WorldState, refused: Option<u256>) -> Evm<TestSource> {
+    Evm<TestSource>::over(TestSource::new(world, refused), Config::osaka())
+}
+
+// A call of `value` from `sender` to `to`, with nonce `nonce`, `gas_limit`
+// and a tip of one.
+fn call(sender: u256, to: u256, nonce: u256, gas_limit: u64, value: u256) -> TxRequest {
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender, to, creates: false, nonce, gas_limit, gas_price: 2,
+        max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value,
+    }
+    TxRequest::new(env, data: empty_bytes())
+}
+
+fn loaded(_ world: WorldState, _ address: u256) -> bool { world.loaded().contains(address) }
+
+fn slot_loaded(_ world: WorldState, _ address: u256, _ slot: u256) -> bool {
+    world.loaded_slots().contains(StorageKey { address, slot })
+}
+
+#[test]
+fn lazy_transfer_loads_its_accounts_and_no_code() {
+    var world = world()
+    core::assert(world.set_balance(0xbb, 5) && world.set_balance(0xcc, 7) && world.storage_store(0xcc, 1, 9))
+    var evm = lazy(world, refused: Option::None)
+    var request = call(sender: SENDER, to: 0xbb, nonce: 0, gas_limit: 50_000, value: 1)
+    // An access-list entry loads nothing until used.
+    core::assert(request.add_access_account(0xcc) && request.add_access_key(address: 0xcc, slot: 1))
+    var tracer = ()
+    let receipt = evm.transact(request, block(), mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.gas_used == 25_300)
+    let (world, source) = evm.into_parts()
+    core::assert(loaded(world, SENDER) && loaded(world, 0xbb) && loaded(world, COINBASE) && !loaded(world, 0xcc))
+    core::assert(world.loaded().len() == 3 && world.loaded_slots().len() == 0)
+    core::assert(world.balance(0xbb) == 6 && world.balance(COINBASE) == 25_300 && world.nonce(SENDER) == 1)
+    // The coinbase is paid, and its code is not read.
+    core::assert(world.has_code(COINBASE) && !world.code_known(COINBASE))
+    core::assert(source.accounts == 3 && source.slots == 0 && source.codes == 0)
+}
+
+#[test]
+fn lazy_slot_is_asked_once_and_only_of_stored_storage() {
+    var world = world()
+    // SLOAD 1; SLOAD 2; ADD; PUSH1 3; SSTORE; SLOAD 1; POP.
+    let sum: [u8; 15] = [0x60, 0x01, 0x54, 0x60, 0x02, 0x54, 0x01, 0x60, 0x03, 0x55, 0x60, 0x01, 0x54, 0x50, 0x00]
+    core::assert(world.set_code(address: CONTRACT, code: sum) == OK && world.storage_store(CONTRACT, 1, 5))
+    // SLOAD 1; PUSH0; SSTORE.
+    core::assert(world.set_code(address: 0xab, code: [0x60 as u8, 0x01, 0x54, 0x5f, 0x55]) == OK)
+    var evm = lazy(world, refused: Option::None)
+    var tracer = ()
+    core::assert(evm.transact(call(sender: SENDER, to: CONTRACT, nonce: 0, gas_limit: 100_000, value: 0), block(),
+                              mut tracer).status == OK)
+    core::assert(evm.world().storage_load(CONTRACT, 3) == 5 && evm.source().slots == 3)
+    // A contract without storage in the source reads zero without asking.
+    core::assert(evm.transact(call(sender: SENDER, to: 0xab, nonce: 1, gas_limit: 100_000, value: 0), block(),
+                              mut tracer).status == OK)
+    let (world, source) = evm.into_parts()
+    core::assert(source.slots == 3 && slot_loaded(world, 0xab, 0) && slot_loaded(world, 0xab, 1))
+    for slot in [1 as u256, 2, 3] { core::assert(slot_loaded(world, CONTRACT, slot)) }
+}
+
+#[test]
+fn lazy_slot_of_an_account_the_block_made_is_zero_without_asking() {
+    // Initcode that returns SLOAD 1; POP; STOP as the contract's code.
+    let initcode: [u8; 13] = [0x64, 0x60, 0x01, 0x54, 0x50, 0x00, 0x5f, 0x52, 0x60, 0x05, 0x60, 0x1b, 0xf3]
+    var evm = lazy(world(), refused: Option::None)
+    var create = call(sender: SENDER, to: 0, nonce: 0, gas_limit: 200_000, value: 0).env
+    create.creates = true
+    let request = TxRequest::new(create, data: InputData::copy_from(initcode, offset: 0, len: 13))
+    var tracer = ()
+    let receipt = evm.transact(request, block(), mut tracer)
+    let made = create_address(sender: SENDER, nonce: 0)
+    core::assert(receipt.status == OK && receipt.created == Option::Some(made))
+    core::assert(evm.transact(call(sender: SENDER, to: made, nonce: 1, gas_limit: 100_000, value: 0), block(),
+                              mut tracer).status == OK)
+    let (world, source) = evm.into_parts()
+    core::assert(slot_loaded(world, made, 1) && source.slots == 0)
+}
+
+#[test]
+fn lazy_world_keeps_a_deleted_account_absent() {
+    var world = world()
+    // An empty account with storage (EIP-7610), which a touch deletes (EIP-161).
+    core::assert(world.ensure_account(0xee) && world.storage_store(0xee, 1, 7))
+    var evm = lazy(world, refused: Option::None)
+    var tracer = ()
+    core::assert(evm.transact(call(sender: SENDER, to: 0xee, nonce: 0, gas_limit: 50_000, value: 0), block(),
+                              mut tracer).status == OK)
+    core::assert(!evm.world().exists(0xee) && !evm.world().has_storage(0xee) && loaded(evm.world(), 0xee))
+    let asked = evm.source().accounts
+    core::assert(evm.transact(call(sender: SENDER, to: 0xee, nonce: 1, gas_limit: 50_000, value: 0), block(),
+                              mut tracer).status == OK)
+    core::assert(!evm.world().exists(0xee) && evm.source().accounts == asked)
+}
+
+#[test]
+fn lazy_access_out_of_gas_loads_nothing() {
+    var world = world()
+    // PUSH1 0xee; BALANCE.
+    core::assert(world.set_code(address: CONTRACT, code: [0x60 as u8, 0xee, 0x31]) == OK)
+    var evm = lazy(world, refused: Option::None)
+    var tracer = ()
+    let receipt = evm.transact(call(sender: SENDER, to: CONTRACT, nonce: 0, gas_limit: 22_000, value: 0), block(),
+                               mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == ERR_OUT_OF_GAS && !loaded(evm.world(), 0xee))
+}
+
+#[test]
+fn lazy_source_failure_ends_the_transaction_and_changes_nothing() {
+    var world = world()
+    // PUSH1 1; PUSH0; SSTORE; PUSH1 0xee; BALANCE.
+    core::assert(world.set_code(address: CONTRACT, code: [0x60 as u8, 0x01, 0x5f, 0x55, 0x60, 0xee, 0x31]) == OK)
+    core::assert(world.set_balance(0xdd, 1_000_000_000))
+    var evm = lazy(world, refused: Option::Some(0xee))
+    var tracer = ()
+    let receipt = evm.transact(call(sender: SENDER, to: CONTRACT, nonce: 0, gas_limit: 100_000, value: 3), block(),
+                               mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == ERR_STATE_UNAVAILABLE && receipt.gas_used == 0)
+    core::assert(evm.world().nonce(SENDER) == 0 && evm.world().balance(SENDER) == 1_000_000_000_000)
+    core::assert(evm.world().balance(CONTRACT) == 0 && evm.world().storage_load(CONTRACT, 0) == 0)
+    // A sender the source cannot tell stops validation.
+    let refused = call(sender: 0xee, to: CONTRACT, nonce: 0, gas_limit: 100_000, value: 0)
+    core::assert(evm.validate(refused, block()).err() == Option::Some(ERR_STATE_UNAVAILABLE))
+    let receipt = evm.transact(refused, block(), mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == ERR_STATE_UNAVAILABLE)
+    core::assert(evm.validate(call(sender: 0xdd, to: CONTRACT, nonce: 0, gas_limit: 100_000, value: 0), block())
+        .unwrap() == VALID)
+}
+
+#[test]
+fn lazy_world_reads_code_only_for_its_bytes() {
+    var world = world()
+    core::assert(world.set_code(address: 0xa1, code: [0x00 as u8]) == OK)
+    core::assert(world.set_code(address: 0xa2, code: [0x00 as u8, 0x00]) == OK)
+    core::assert(world.set_code(address: 0xd0, code: designator(0xde)) == OK)
+    core::assert(world.set_code(address: 0xde, code: [0x00 as u8]) == OK)
+    // EXTCODEHASH of 0xa1; EXTCODESIZE of 0xa2, stored in slot 0; a CALL of
+    // one wei to 0xd0, which the contract cannot pay.
+    let code: [u8; 24] = [
+        0x60, 0xa1, 0x3f, 0x50, 0x60, 0xa2, 0x3b, 0x5f, 0x55,
+        0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0x01, 0x60, 0xd0, 0x61, 0xff, 0xff, 0xf1, 0x50, 0x00, 0x00,
+    ]
+    core::assert(world.set_code(address: CONTRACT, code) == OK)
+    var evm = lazy(world, refused: Option::None)
+    var tracer = ()
+    core::assert(evm.transact(call(sender: SENDER, to: CONTRACT, nonce: 0, gas_limit: 200_000, value: 0), block(),
+                              mut tracer).status == OK)
+    let (world, source) = evm.into_parts()
+    core::assert(world.storage_load(CONTRACT, 0) == 2)
+    core::assert(world.has_code(0xa1) && !world.code_known(0xa1) && world.code_known(0xa2))
+    // The delegation is read; the delegate, whose call fails its balance
+    // check, is accessed but its code is not read.
+    core::assert(world.code_known(0xd0) && loaded(world, 0xde) && !world.code_known(0xde))
+    core::assert(source.codes == 3)
+}

@@ -87,9 +87,11 @@ let balance = evm.world().balance(address)
 ```
 
 `transact` runs one transaction and keeps its changes; `simulate` runs it the
-same way and keeps none; `validate` only checks that it could be included.
-Between transactions a host reads the world with `world()` and writes it with
-`world_mut()`; `set_world` and `into_world` replace it and take it back.
+same way and keeps none; `validate` only checks that it could be included,
+and gives the validity code, or as an error the host status that stopped the
+checks. Between transactions a host reads the world with `world()` and writes
+it with `world_mut()`; `set_world` and `into_world` replace it and take it
+back.
 
 - `WorldState` holds accounts, code, storage and block hashes. Set up accounts
   with `set_balance`, `set_nonce`, `set_code` and `storage_store`, and block
@@ -121,7 +123,17 @@ priority fee, and deletes self-destructed new accounts and touched empty
 accounts. The receipt has the status, gas used and refunded, the gas it adds
 to the block's totals (from Amsterdam, execution gas before refunds and state
 gas apart), the created contract's address, the output and the logs. A host failure (allocation,
-balance overflow) undoes the transaction and reports that status.
+balance overflow, unavailable state) undoes the transaction and reports that status.
+
+`Evm::new` holds a complete world. `Evm<S>::over(source, config)` starts from
+an empty one and reads the state from `source`, a `StateSource`, where the
+specification first reads it: an account once its access is paid for, a slot
+at SLOAD or SSTORE, code only where its bytes are needed, and a block hash at
+BLOCKHASH. The world keeps what it read and has no `world_mut()`;
+`source()`, `source_mut()` and `into_parts()` reach the source, and
+`Block<S>::begin` runs a block over it. A source that cannot tell fails the
+execution with `state_unavailable`. `WorldSource` serves a complete world as
+a source, for tests.
 
 ### Blocks
 
@@ -175,7 +187,7 @@ undo the block:
 
 ```fe
 let Result::Ok(output) = finished else { return }
-for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code
+for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code, .stored
 for slot in output.changes.slots() {}         // slot.address, .slot, .value
 output.changes.undo(mut evm.world_mut())      // the world as it was before `begin`
 ```

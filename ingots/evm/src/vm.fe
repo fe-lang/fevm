@@ -581,6 +581,11 @@ impl Vm {
                 self.fault(ERR_OUT_OF_GAS)
                 return
             }
+            let loaded = state.load_slot(address: self.call.address, slot)
+            if loaded != OK {
+                self.fault(loaded)
+                return
+            }
             let charge = state.storage_charge<F>(address: self.call.address, slot, value)
             // The charge read the slot, which a block's access list notes
             // even if the gas for it runs out.
@@ -627,6 +632,8 @@ impl Vm {
         }
         self.fault(state.access_account(address, warm))
         if !self.ok() || !self.expand_memory(plan.size) || len == 0 { return }
+        let loaded = state.load_code(address)
+        if loaded != OK { return self.fault(loaded) }
         let code = state.code(address)
         let size = code.len() as u256
         let available = if source < size { size - source } else { 0 }
@@ -674,7 +681,9 @@ impl Vm {
         if self.ok() {
             let warm = state.account_is_warm(address)
             if self.charge((account_access<F>(warm) + if op == 0x3b { F::CODE_READ } else { 0 }) as u128) {
-                self.fault(state.access_account(address, warm))
+                // EXTCODESIZE reads the code too.
+                let accessed = state.access_account(address, warm)
+                self.fault(if op == 0x3b && accessed == OK { state.load_code(address) } else { accessed })
                 if self.ok() {
                     let value = if op == 0x31 { state.balance(address) }
                         else if op == 0x3b { state.code_size(address) as u256 }
@@ -770,9 +779,15 @@ impl Vm {
                         0x40 => {
                             let number = self.pop()
                             if !self.ok() { break }
-                            let hash = if number < self.block.number && self.block.number - number <= 256 {
-                                state.block_hash(number)
-                            } else { 0 }
+                            var hash: u256 = 0
+                            if number < self.block.number && self.block.number - number <= 256 {
+                                let loaded = state.load_block_hash(number)
+                                if loaded != OK {
+                                    self.fault(loaded)
+                                    break
+                                }
+                                hash = state.block_hash(number)
+                            }
                             if !self.pushed(hash) { break }
                         },
                         0x47 => if !self.pushed(state.balance(self.call.address)) { break },

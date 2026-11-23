@@ -1,10 +1,12 @@
-use core::{MemSpan, MemVec, Option, Result}
+use core::{MemVec, Option, Result}
+use ingot::address::create_address
 use ingot::block::{Block, BlockError}
 use ingot::evm::Evm
 use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
-use ingot::source::{AccountState, SourceError, StateSource}
+use ingot::source::StateSource
+use ingot::source_runtime::{TestSource, lazy}
 use ingot::state::{WorldState, designator}
-use ingot::status::{INVALID_GAS_LIMIT, OK, VALID}
+use ingot::status::{ERR_STATE_UNAVAILABLE, INVALID_GAS_LIMIT, OK, VALID}
 use ingot::transaction::SYSTEM_ADDRESS
 use ingot::types::{BlockEnv, Config, ExecutionResult, InputData, default_block_env, empty_bytes}
 
@@ -94,44 +96,187 @@ fn block_calls_the_system_contracts_and_counts_gas() {
     core::assert(output.requests_hash == 0xed9cc51c743ff9c6e05af21e3ec738ce754013738cca2a60ddc0a6a38bb84859)
 }
 
-// A lazy source that knows nothing and counts what it is asked.
-struct CountingSource { asked: u64 }
-
-impl StateSource for CountingSource {
-    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
-        self.asked += 1
-        Result::Err(SourceError::Unavailable)
-    }
-    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
-        self.asked += 1
-        Result::Err(SourceError::Unavailable)
-    }
-    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
-        self.asked += 1
-        Result::Err(SourceError::Unavailable)
-    }
-    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> {
-        self.asked += 1
-        Result::Err(SourceError::Unavailable)
-    }
-}
-
 #[test]
 fn block_runs_over_a_lazy_source() {
-    var evm = Evm<CountingSource>::over(CountingSource { asked: 0 }, Config::osaka())
-    core::assert(evm.world_mut().set_balance(SENDER, 1_000_000_000_000))
-    core::assert(evm.world_mut().set_code(address: WITHDRAWAL_REQUESTS, code: [0x00 as u8]) == OK)
-    core::assert(evm.world_mut().set_code(address: CONSOLIDATION_REQUESTS, code: [0x00 as u8]) == OK)
-    var block = Block<CountingSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var world = world()
+    // A coinbase and a withdrawal recipient that are contracts.
+    core::assert(world.set_code(address: 0xc0, code: [0x00 as u8]) == OK)
+    core::assert(world.set_code(address: 0xdd, code: [0x00 as u8]) == OK)
+    let evm = lazy(world, refused: Option::None)
+    var env = env()
+    env.coinbase = 0xc0
+    var block = Block<TestSource>::begin(evm, env, parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    core::assert(block.world().storage_load(BEACON_ROOTS, 0) == 0x5678)
+    core::assert(block.world().storage_load(HISTORY_STORAGE, 0) == 0x1234)
     var tracer = ()
     let receipt = block.transact(transfer(nonce: 0, gas_limit: 50_000), mut tracer)
     core::assert(receipt.invalid == VALID && receipt.status == OK && receipt.gas_used == 21_000)
-    let (evm, finished) = block.finish(MemVec::new())
-    core::assert(finished.is_ok())
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    let (evm, finished) = block.finish(withdrawals)
+    let Result::Ok(output) = finished else { return core::assert(false) }
+    core::assert(output.requests.len() == 1 && output.requests[0][1] == 0xab)
     let (world, source) = evm.into_parts()
-    core::assert(world.balance(0xbb) == 1 && world.nonce(SENDER) == 1)
-    // Nothing loads from the source yet.
-    core::assert(source.asked == 0)
+    core::assert(world.balance(0xbb) == 1 && world.nonce(SENDER) == 1 && world.balance(0xdd) == 3_000_000_000)
+    // The system and request contracts' code is read; the coinbase and the
+    // recipient are paid without it.
+    for address in [BEACON_ROOTS, HISTORY_STORAGE, WITHDRAWAL_REQUESTS, CONSOLIDATION_REQUESTS] {
+        core::assert(world.code_known(address))
+    }
+    core::assert(!world.code_known(0xc0) && !world.code_known(0xdd) && source.codes == 4)
+    // The system contracts have no storage in the source, so it is not asked.
+    core::assert(source.slots == 0 && source.hashes == 0)
+}
+
+#[test]
+fn lazy_block_reads_the_block_hashes_it_lacks() {
+    var world = world()
+    core::assert(world.set_block_hash(297, 0x77))
+    // BLOCKHASH of 297 and of the parent, 299, stored in slots 0 and 1.
+    let code: [u8; 13] = [0x61, 0x01, 0x29, 0x40, 0x5f, 0x55, 0x61, 0x01, 0x2b, 0x40, 0x60, 0x01, 0x55]
+    core::assert(world.set_code(address: 0xbb, code) == OK)
+    let evm = lazy(world, refused: Option::None)
+    var block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    core::assert(block.transact(transfer(nonce: 0, gas_limit: 100_000), mut tracer).status == OK)
+    core::assert(block.world().storage_load(0xbb, 0) == 0x77 && block.world().storage_load(0xbb, 1) == 0x1234)
+    let (evm, _) = block.finish(MemVec::new())
+    // `begin` wrote the parent's hash.
+    core::assert(evm.source().hashes == 1)
+}
+
+#[test]
+fn lazy_block_fails_where_its_source_cannot_tell() {
+    let evm = lazy(world(), refused: Option::Some(BEACON_ROOTS))
+    let block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    core::assert(match block.failure() {
+        Option::Some(BlockError::Host(status)) => status == ERR_STATE_UNAVAILABLE,
+        _ => false,
+    })
+    let evm = lazy(world(), refused: Option::Some(CONSOLIDATION_REQUESTS))
+    let block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    let (evm, finished) = block.finish(withdrawals)
+    core::assert(match finished {
+        Result::Err(BlockError::Host(status)) => status == ERR_STATE_UNAVAILABLE,
+        _ => false,
+    })
+    // `finish` undid the block.
+    core::assert(evm.world().balance(0xdd) == 0 && evm.world().storage_load(BEACON_ROOTS, 0) == 0)
+}
+
+#[test]
+fn lazy_block_undo_keeps_unread_storage_in_the_source() {
+    // 0xee is empty but has storage in the source (EIP-7610's legacy
+    // accounts). A call of no value touches it, and settlement deletes it
+    // without reading its storage; abandoning the block brings it back as
+    // the source holds it.
+    var world = world()
+    core::assert(world.storage_store(0xee, 1, 5))
+    var block = Block<TestSource>::begin(lazy(world, refused: Option::None), env(), parent_hash: 0x1234,
+                                         parent_beacon_block_root: 0x5678)
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: 0xee, creates: false, nonce: 0,
+        gas_limit: 50_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var tracer = ()
+    core::assert(block.transact(TxRequest::new(env, data: empty_bytes()), mut tracer).status == OK)
+    core::assert(block.world().loaded().contains(0xee) && !block.world().exists(0xee))
+    var evm = block.abandon()
+    core::assert(evm.world().exists(0xee) && evm.world().stored(0xee) && !evm.world().deployable(0xee))
+    let asked = evm.source().slots
+    core::assert(evm.transaction().load_slot(address: 0xee, slot: 1) == OK)
+    core::assert(evm.source().slots == asked + 1 && evm.world().storage_load(0xee, 1) == 5)
+}
+
+// A transaction of the sender's with `nonce`: a call of no value to `to`,
+// or a creation of `data` if `creates`.
+fn sends(nonce: u256, to: u256, creates: bool, _ data: own InputData) -> TxRequest {
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to, creates, nonce, gas_limit: 70_000,
+        gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    TxRequest::new(env, data)
+}
+
+#[test]
+fn lazy_block_undo_forgets_a_slot_resolved_after_a_deletion() {
+    // The sender's second transaction, a creation, lands where settlement
+    // deleted an empty account with storage in the source, and reads its
+    // slot 1, now zero without asking. Abandoning the block brings the
+    // account back, and slot 1 is asked of the source again.
+    let deleted = create_address(sender: SENDER, nonce: 1)
+    var world = world()
+    core::assert(world.storage_store(deleted, 1, 5))
+    var block = Block<TestSource>::begin(lazy(world, refused: Option::None), env(), parent_hash: 0x1234,
+                                         parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    let touch = sends(nonce: 0, to: deleted, creates: false, empty_bytes())
+    core::assert(block.transact(touch, mut tracer).status == OK)
+    // PUSH1 1; SLOAD; POP; STOP.
+    let initcode: [u8; 5] = [0x60, 0x01, 0x54, 0x50, 0x00]
+    let create = sends(nonce: 1, to: 0, creates: true, InputData::copy_from(initcode, offset: 0, len: 5))
+    core::assert(block.transact(create, mut tracer).status == OK)
+    core::assert(block.world().exists(deleted) && block.world().storage_load(deleted, 1) == 0)
+    var evm = block.abandon()
+    let asked = evm.source().slots
+    core::assert(evm.transaction().load_slot(address: deleted, slot: 1) == OK)
+    core::assert(evm.source().slots == asked + 1 && evm.world().storage_load(deleted, 1) == 5)
+}
+
+#[test]
+fn lazy_block_undo_rereads_a_slot_read_before_a_deletion() {
+    // No transaction reads a slot of an account without code before
+    // settlement deletes it, so the world reads slot 1 of 0xee between
+    // blocks. The block deletes 0xee, keeping slot 1 to undo; abandoning it
+    // restores the slot, and reading it again asks the source, which gives
+    // the same.
+    var world = world()
+    core::assert(world.storage_store(0xee, 1, 5))
+    var evm = lazy(world, refused: Option::None)
+    core::assert(evm.transaction().load_account(0xee) == OK)
+    core::assert(evm.transaction().load_slot(address: 0xee, slot: 1) == OK)
+    var block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    core::assert(block.transact(sends(nonce: 0, to: 0xee, creates: false, empty_bytes()), mut tracer).status == OK)
+    core::assert(!block.world().exists(0xee))
+    var evm = block.abandon()
+    core::assert(evm.world().storage_load(0xee, 1) == 5)
+    let asked = evm.source().slots
+    core::assert(evm.transaction().load_slot(address: 0xee, slot: 1) == OK)
+    core::assert(evm.source().slots == asked + 1 && evm.world().storage_load(0xee, 1) == 5)
+}
+
+// Runs a transfer and two withdrawals in an Amsterdam block on `evm`: its
+// access list's hash, and the `Evm`.
+fn amsterdam_block<S: StateSource>(_ evm: own Evm<S>) -> (u256, Evm<S>) {
+    var block = Block<S>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    var tracer = ()
+    core::assert(block.transact(transfer(nonce: 0, gas_limit: 50_000), mut tracer).invalid == VALID)
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    withdrawals.push(Withdrawal { address: 0xee, amount: 0 })
+    let (evm, finished) = block.finish(withdrawals)
+    let list = finished.unwrap().access_list.unwrap()
+    core::assert(list.items == 13)
+    (list.hash, evm)
+}
+
+#[test]
+fn lazy_amsterdam_block_lists_what_a_complete_one_does() {
+    let (complete, _) = amsterdam_block(Evm::new(amsterdam_world(), Config::amsterdam()))
+    let over = Evm<TestSource>::over(TestSource::new(amsterdam_world(), refused: Option::None), Config::amsterdam())
+    let (hash, evm) = amsterdam_block(over)
+    core::assert(hash == complete)
+    let (world, source) = evm.into_parts()
+    // The system calls run through `prepare_message`, and every request
+    // contract, the builder ones too, is read with its code.
+    for address in [BEACON_ROOTS, HISTORY_STORAGE, WITHDRAWAL_REQUESTS, CONSOLIDATION_REQUESTS, BUILDER_DEPOSIT_REQUESTS,
+                    BUILDER_EXIT_REQUESTS] {
+        core::assert(world.loaded().contains(address) && world.code_known(address))
+    }
+    core::assert(source.codes == 6 && world.storage_load(BEACON_ROOTS, 0) == 0x5678)
 }
 
 #[test]

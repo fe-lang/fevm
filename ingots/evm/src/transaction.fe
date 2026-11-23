@@ -4,7 +4,7 @@ use ingot::changes::BlockChanges
 use ingot::fork::Rules
 use ingot::logs::LogBuffer
 use ingot::source::StateSource
-use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATIC_WRITE, OK}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATE_UNAVAILABLE, ERR_STATIC_WRITE, OK}
 use ingot::journal::{Change, ChangeKind, Mark}
 use ingot::state::{Field, Sender, StorageKey, WorldState, WriteError, Written, address_word, designator}
 use ingot::types::{Config, Program}
@@ -75,6 +75,9 @@ impl Transaction<()> {
                buffers: own Buffers) -> Self {
         Transaction::on(state, source: (), sender, destination, coinbase, config, buffers)
     }
+
+    /// The state, for a host's own writes between transactions.
+    pub fn world_mut(mut self) -> mut WorldState { self.state_mut() }
 }
 
 impl<S: StateSource> Transaction<S> {
@@ -131,8 +134,9 @@ impl<S: StateSource> Transaction<S> {
     /// The state, between transactions.
     pub fn world(self) -> ref WorldState { ref self.state }
 
-    /// The state, for a host's own writes between transactions.
-    pub fn world_mut(mut self) -> mut WorldState {
+    /// The state between transactions, for the writes of a host of a
+    /// complete world, and of `Block` over any source.
+    pub(ingot) fn state_mut(mut self) -> mut WorldState {
         core::assert(self.depth == 0 && self.buffers.journal.len() == 0)
         mut self.state
     }
@@ -289,11 +293,14 @@ impl<S: StateSource> Transaction<S> {
         self.access_account(address, warm: false)
     }
 
-    /// An access of an account, once its gas is paid: warms it unless it is
-    /// `warm`, and notes the read while a block records its access list.
+    /// An access of an account, once its gas is paid: loads it, warms it
+    /// unless it is `warm`, and notes the read while a block records its
+    /// access list.
     pub fn access_account(mut self, _ address: u256, warm: bool) -> i32 {
         self.started = true
         let address = address_word(address)
+        let loaded = self.load_account(address)
+        if loaded != OK { return loaded }
         if self.access.recording() {
             let noted = self.note_read(address)
             if noted != OK { return noted }
@@ -303,14 +310,16 @@ impl<S: StateSource> Transaction<S> {
     }
 
     /// The first access of a slot (see `slot_access`), once its gas is known
-    /// to be affordable: warms it, and notes the read while a block records
-    /// its access list.
+    /// to be affordable: loads and warms it, and notes the read while a block
+    /// records its access list.
     pub fn warm_slot(mut self, address: u256, slot: u256) -> i32 {
         self.started = true
         let address = address_word(address)
         let key = StorageKey { address, slot }
         let known = self.buffers.warm_storage.get(key)
         if known.found && known.value { return OK }
+        let loaded = self.load_slot(address, slot)
+        if loaded != OK { return loaded }
         if !self.buffers.warm_storage.try_insert(key, true) { return ERR_HOST_ALLOCATION }
         if self.access.recording() { self.access.slot(address, slot) }
         if known.found { OK } else { self.journal(address, ChangeKind::WarmSlot { slot }) }
@@ -448,19 +457,135 @@ impl<S: StateSource> Transaction<S> {
         !self.is_static
     }
 
-    pub fn exists(self, _ address: u256) -> bool { self.state.exists(address) }
-    pub fn is_empty(self, _ address: u256) -> bool { self.state.is_empty(address) }
+    /// Reads the account of `address` from a lazy source, unless the world
+    /// has asked for it: where the specification first reads it.
+    pub fn load_account(mut self, _ address: u256) -> i32 {
+        if !S::LAZY { return OK }
+        let address = address_word(address)
+        if self.state.loaded().contains(address) { return OK }
+        match self.source.account(address) {
+            Result::Ok(account) => if self.state.add_loaded(address, account) { OK } else { ERR_HOST_ALLOCATION },
+            Result::Err(error) => error.status(),
+        }
+    }
+
+    /// Reads the code of `address`, a loaded account, from a lazy source,
+    /// unless the world holds it: where the specification needs its bytes.
+    /// The source gives code by the account's code hash, which the world
+    /// keeps.
+    pub fn load_code(mut self, _ address: u256) -> i32 {
+        if !S::LAZY { return OK }
+        self.assert_loaded(address)
+        if self.state.code_known(address) { return OK }
+        let hash = self.state.code_hash(address)
+        match self.source.code(hash) {
+            // An account with code has some: empty bytes cannot be its code.
+            Result::Ok(code) => if code.len() == 0 { ERR_STATE_UNAVAILABLE }
+                else { self.state.add_read_code(address, code) },
+            Result::Err(error) => error.status(),
+        }
+    }
+
+    /// Resolves slot `slot` of `address`, a loaded account, from a lazy
+    /// source, unless the world has: a slot of an account without storage in
+    /// the source is zero, and the source is not asked.
+    pub fn load_slot(mut self, address: u256, slot: u256) -> i32 {
+        if !S::LAZY { return OK }
+        let address = address_word(address)
+        if self.state.loaded_slots().contains(StorageKey { address, slot }) { return OK }
+        self.assert_loaded(address)
+        let value = if !self.state.stored(address) { 0 } else {
+            match self.source.slot(address, slot) {
+                Result::Ok(value) => value,
+                Result::Err(error) => return error.status(),
+            }
+        }
+        if self.state.add_loaded_slot(address, slot, value) { OK } else { ERR_HOST_ALLOCATION }
+    }
+
+    /// Reads the hash of block `number` from a lazy source, unless the world
+    /// has one.
+    pub fn load_block_hash(mut self, _ number: u256) -> i32 {
+        if !S::LAZY || self.state.block_hash(number) != 0 { return OK }
+        match self.source.block_hash(number) {
+            Result::Ok(hash) => if self.state.set_block_hash(number, hash) { OK } else { ERR_HOST_ALLOCATION },
+            Result::Err(error) => error.status(),
+        }
+    }
+
+    // In a lazy world, asserts that the world has loaded `address`.
+    fn assert_loaded(self, _ address: u256) {
+        if S::LAZY { core::assert(self.state.loaded().contains(address_word(address))) }
+    }
+
+    // In a lazy world, asserts that the world has loaded `address` and holds
+    // its code.
+    fn assert_code_known(self, _ address: u256) {
+        if S::LAZY {
+            core::assert(self.state.loaded().contains(address_word(address)) && self.state.code_known(address))
+        }
+    }
+
+    // In a lazy world, asserts that the world has resolved slot `slot` of
+    // `address`.
+    fn assert_slot_loaded(self, _ address: u256, _ slot: u256) {
+        if S::LAZY {
+            core::assert(self.state.loaded_slots().contains(StorageKey { address: address_word(address), slot }))
+        }
+    }
+
+    pub fn exists(self, _ address: u256) -> bool {
+        self.assert_loaded(address)
+        self.state.exists(address)
+    }
+    pub fn is_empty(self, _ address: u256) -> bool {
+        self.assert_loaded(address)
+        self.state.is_empty(address)
+    }
     // EIP-684/EIP-7610: creation needs an address without nonce, code or storage.
-    pub fn deployable(self, _ address: u256) -> bool { self.state.deployable(address) }
-    pub fn sender(self, _ address: u256) -> Sender { self.state.sender(address) }
-    pub fn code_size(self, _ address: u256) -> usize { self.state.code_size(address) }
-    pub fn code_hash(mut self, _ address: u256) -> u256 { self.state.code_hash(address) }
-    pub fn code(self, _ address: u256) -> ref MemSpan { self.state.code(address) }
-    pub fn delegate(self, _ address: u256) -> Option<u256> { self.state.delegate(address) }
-    pub fn program(self, _ address: u256) -> Program { self.state.program(address) }
-    pub fn balance(self, _ address: u256) -> u256 { self.state.balance(address) }
-    pub fn nonce(self, _ address: u256) -> u256 { self.state.nonce(address) }
+    pub fn deployable(self, _ address: u256) -> bool {
+        self.assert_loaded(address)
+        self.state.deployable(address)
+    }
+    pub fn sender(self, _ address: u256) -> Sender {
+        self.assert_loaded(address)
+        self.state.sender(address)
+    }
+    /// Whether `address` has code, which the world may not have read.
+    pub fn has_code(self, _ address: u256) -> bool {
+        self.assert_loaded(address)
+        self.state.has_code(address)
+    }
+    pub fn code_size(self, _ address: u256) -> usize {
+        self.assert_code_known(address)
+        self.state.code_size(address)
+    }
+    pub fn code_hash(mut self, _ address: u256) -> u256 {
+        self.assert_loaded(address)
+        self.state.code_hash(address)
+    }
+    pub fn code(self, _ address: u256) -> ref MemSpan {
+        self.assert_code_known(address)
+        self.state.code(address)
+    }
+    pub fn delegate(self, _ address: u256) -> Option<u256> {
+        self.assert_code_known(address)
+        self.state.delegate(address)
+    }
+    pub fn program(self, _ address: u256) -> Program {
+        self.assert_code_known(address)
+        self.state.program(address)
+    }
+    pub fn balance(self, _ address: u256) -> u256 {
+        self.assert_loaded(address)
+        self.state.balance(address)
+    }
+    pub fn nonce(self, _ address: u256) -> u256 {
+        self.assert_loaded(address)
+        self.state.nonce(address)
+    }
     pub fn storage_load(self, address: u256, slot: u256) -> u256 {
+        self.assert_slot_loaded(address, slot)
         self.state.storage_load(address, slot)
     }
     pub fn transient_load(self, address: u256, slot: u256) -> u256 {
@@ -494,16 +619,19 @@ impl<S: StateSource> Transaction<S> {
     pub fn set_balance(mut self, address: u256, value: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         self.journal_write(Field::Balance, address, self.state.replace(Field::Balance, address, value))
     }
     pub fn set_nonce(mut self, address: u256, value: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         self.journal_write(Field::Nonce, address, self.state.replace(Field::Nonce, address, value))
     }
     pub fn increment_nonce(mut self, _ address: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         self.journal_write(Field::Nonce, address, self.state.add(Field::Nonce, address, amount: 1))
     }
     /// Adds `amount` to the balance, touching the account; one past 2^256 is
@@ -511,12 +639,14 @@ impl<S: StateSource> Transaction<S> {
     pub fn credit(mut self, address: u256, amount: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         self.journal_write(Field::Balance, address, self.state.add(Field::Balance, address, amount))
     }
     /// Subtracts `amount`, which the balance must hold, touching the account.
     pub fn debit(mut self, address: u256, amount: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         self.journal_write(Field::Balance, address, self.state.subtract(Field::Balance, address, amount))
     }
     /// Sets a new contract's nonce to one and credits it `value`; one past
@@ -524,6 +654,7 @@ impl<S: StateSource> Transaction<S> {
     pub fn endow(mut self, address: u256, value: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
+        self.assert_loaded(address)
         match self.state.endow(address, amount: value) {
             Result::Ok(written) => self.journal(address, ChangeKind::Contract {
                 balance: written.previous, existed: written.existed,
@@ -537,6 +668,7 @@ impl<S: StateSource> Transaction<S> {
     pub fn charge(mut self, _ sender: u256, fee: u256) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(sender)
+        self.assert_loaded(address)
         match self.state.charge(address, fee) {
             Result::Ok(charged) => self.journal(address, ChangeKind::Sender {
                 nonce: charged.nonce, balance: charged.balance, existed: charged.existed,
@@ -547,9 +679,10 @@ impl<S: StateSource> Transaction<S> {
     // Contract deployment writes code to an account that has none (EIP-684).
     pub fn deploy_code(mut self, address: u256, code: MemSpan) -> i32 {
         if !self.writable() { return ERR_STATIC_WRITE }
+        let address = address_word(address)
+        self.assert_code_known(address)
         // Empty code leaves the account as it is, with nothing to undo.
         if code.len() == 0 { return OK }
-        let address = address_word(address)
         let existing = self.state.existing_code_len(address)
         core::assert(existing.unwrap_or(default: 0) == 0)
         // Journaled first: undoing a code write cannot fail, but code writes can.
@@ -565,6 +698,7 @@ impl<S: StateSource> Transaction<S> {
     pub fn delegate_code(mut self, address: u256, delegate: u256) -> i32 {
         self.started = true
         let address = address_word(address)
+        self.assert_code_known(address)
         let previous = self.state.delegate(address)
         core::assert(self.state.code_size(address) == 0 || previous.is_some())
         // Clearing no code changes nothing, and makes no account, with nothing to undo.
@@ -584,6 +718,7 @@ impl<S: StateSource> Transaction<S> {
         if !self.writable() { return ERR_STATIC_WRITE }
         let address = address_word(address)
         let key = StorageKey { address, slot }
+        // Reading the slot asserts that a lazy world has resolved it.
         let previous = self.storage_load(address, slot)
         // Capture even an original zero. This cache survives frame rollback and
         // precedes every persistent write, including direct host-side writes.
@@ -620,9 +755,9 @@ impl<S: StateSource> Transaction<S> {
 
     // End-of-transaction deletions, after every frame has closed and fees are
     // paid: self-destructed accounts created by this transaction, and touched
-    // accounts left empty. Each loses its code and storage; from EIP-8246 a
-    // self-destructed account keeps the ether it holds. These direct world
-    // updates are not journaled.
+    // accounts left empty, which the block's changes note. Each loses its
+    // code and storage; from EIP-8246 a self-destructed account keeps the
+    // ether it holds. These direct world updates are not journaled.
     pub fn settle<F: Rules>(mut self) {
         core::assert(self.depth == 0)
         // The journal holds the changes and marks that survived their frames.
@@ -631,7 +766,12 @@ impl<S: StateSource> Transaction<S> {
                 if F::SELFDESTRUCT_BURNS { self.state.remove_account(change.address) }
                 else { self.state.clear_keeping_balance(change.address) }
             }
-            if change.touches() { self.state.remove_if_empty(change.address) }
+            if change.touches() {
+                let stored = S::LAZY && self.state.stored(change.address)
+                if self.state.remove_if_empty(change.address) && self.changes.recording() {
+                    self.changes.deleted(change.address, stored)
+                }
+            }
         }
     }
 

@@ -248,7 +248,8 @@ impl Vm {
         let cold = !state.account_is_warm(code_address)
         let access = account_access<F>(warm: !cold) as u128
         if !self.charge(access + if has_value { F::CALL_VALUE as u128 } else { 0 }) { return Option::None }
-        let access_status = state.access_account(code_address, warm: !cold)
+        var access_status = state.access_account(code_address, warm: !cold)
+        if access_status == OK { access_status = state.load_code(code_address) }
         if access_status != OK {
             self.fault(access_status)
             return Option::None
@@ -256,11 +257,7 @@ impl Vm {
         // EIP-7702: a delegated account runs its delegate's code, whose access is charged too.
         let code = state.code(code_address)
         let delegate = delegation(code)
-        // A delegate that is a precompile runs nothing.
-        let runs_code = match delegate {
-            Option::Some(delegate) => !is_precompile(delegate) && state.code_size(delegate) != 0,
-            Option::None => code.len() != 0,
-        }
+        var runs_code = code.len() != 0
         if let Option::Some(delegate) = delegate {
             let warm = state.account_is_warm(delegate)
             if !self.charge(account_access<F>(warm) as u128) { return Option::None }
@@ -269,6 +266,8 @@ impl Vm {
                 self.fault(warmed)
                 return Option::None
             }
+            // A delegate that is a precompile runs nothing.
+            runs_code = !is_precompile(delegate) && state.has_code(delegate)
         }
         // A CALL of value to an empty account creates it, for 25,000 gas or
         // from EIP-8037 state gas, which the call's failure refills.
@@ -327,7 +326,14 @@ impl Vm {
             self.push(1)
             return Option::None
         }
-        let program = state.program(delegate.unwrap_or(default: code_address))
+        let runner = delegate.unwrap_or(default: code_address)
+        let read = state.load_code(runner)
+        if read != OK {
+            self.fault(read)
+            state.revert(checkpoint)
+            return Option::None
+        }
+        let program = state.program(runner)
         if program.status != OK {
             self.fault(program.status)
             state.revert(checkpoint)

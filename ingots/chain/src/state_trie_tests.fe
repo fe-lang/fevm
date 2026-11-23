@@ -329,7 +329,7 @@ fn differential(seed: u256, batches: usize, accounts: usize, slots: usize, size:
             } else if change == 12 {
                 world.clear_keeping_balance(address)
             } else if change == 13 {
-                world.remove_if_empty(address)
+                let _ = world.remove_if_empty(address)
             } else if change == 14 {
                 core::assert(world.ensure_account(address))
             } else {
