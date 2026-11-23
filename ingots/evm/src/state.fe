@@ -3,10 +3,19 @@ use core::default::Default
 use swisstable::{Lookup, SwissKey, SwissTable, hash_u256}
 use ingot::constants::MAX_U256
 use keccak::{ByteSource, keccak256_word}
+use ingot::source::AccountState
 use ingot::status::{ERR_BALANCE_OVERFLOW, ERR_HOST_ALLOCATION, OK}
 use ingot::types::{Program, jumpdest_map_len, mark_jumpdests}
 
 pub const EMPTY_CODE_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+/// The root of the empty trie: keccak256 of the empty string's RLP.
+pub const EMPTY_ROOT: u256 = 0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
+
+// Bits of an account's flags. `STORED`: the source holds storage of the
+// account, which the world has not all read. `HAS_CODE`: the account has
+// code, which the world holds unless its length is zero.
+const STORED: u8 = 1
+const HAS_CODE: u8 = 2
 
 // An account's record. Absent accounts read as zero with no code.
 struct Account {
@@ -20,6 +29,7 @@ struct Account {
     // Nonzero storage slots, so deployability and deletion need not scan
     // the storage table.
     storage_slots: u64,
+    flags: u8,
 }
 impl Copy for Account {}
 
@@ -97,7 +107,7 @@ pub struct AccountEntry {
 pub struct StorageEntry { pub occupied: bool, pub address: u256, pub slot: u256, pub value: u256 }
 
 /// What validating a sender reads from its account.
-pub struct Sender { pub nonce: u256, pub balance: u256, pub code_len: usize }
+pub struct Sender { pub nonce: u256, pub balance: u256, pub has_code: bool }
 
 /// A sender's nonce and balance before `charge`, and whether its account
 /// existed.
@@ -157,6 +167,11 @@ pub struct WorldState {
     dead_code: usize,
     storage: SwissTable<StorageKey, u256>,
     block_hashes: SwissTable<u256, u256>,
+    // Over a lazy source, every address the world has asked of it, present or
+    // absent, and every slot it has resolved, some without asking. Empty for a
+    // complete world.
+    loaded: SwissTable<u256, bool>,
+    loaded_slots: SwissTable<StorageKey, bool>,
 }
 
 impl WorldState {
@@ -168,6 +183,8 @@ impl WorldState {
             dead_code: 0,
             storage: SwissTable<StorageKey, u256>::empty(),
             block_hashes: SwissTable<u256, u256>::empty(),
+            loaded: SwissTable<u256, bool>::empty(),
+            loaded_slots: SwissTable<StorageKey, bool>::empty(),
         }
     }
     /// A copy of the world, which a host can keep to restore later; none if
@@ -179,8 +196,12 @@ impl WorldState {
         for account in self.accounts { accounts.push(account) }
         let storage = copy_table(self.storage)?
         let block_hashes = copy_table(self.block_hashes)?
+        let loaded = copy_table(self.loaded)?
+        let loaded_slots = copy_table(self.loaded_slots)?
         let code = MemBuffer::try_from_span(self.code.span())?
-        Option::Some(WorldState { index, accounts, code, dead_code: self.dead_code, storage, block_hashes })
+        Option::Some(WorldState {
+            index, accounts, code, dead_code: self.dead_code, storage, block_hashes, loaded, loaded_slots,
+        })
     }
 
     // The position of the record of `address`, an address word, made if it has
@@ -194,6 +215,7 @@ impl WorldState {
         let at = self.accounts.len()
         let account = Account {
             address, balance: 0, nonce: 0, code_hash: EMPTY_CODE_HASH, code_offset: 0, code_len: 0, storage_slots: 0,
+            flags: 0,
         }
         if self.accounts.try_push(account).is_err() { return Option::None }
         if !self.index.try_insert(address, at) {
@@ -224,7 +246,7 @@ impl WorldState {
     // EIP-161 emptiness of the record at `position`: zero balance and nonce, and no code.
     fn empty_at(self, _ position: usize) -> bool {
         let account = ref self.accounts[position]
-        account.balance == 0 && account.nonce == 0 && account.code_len == 0
+        account.balance == 0 && account.nonce == 0 && account.flags & HAS_CODE == 0
     }
     // EIP-161 emptiness. Absent accounts are empty.
     pub fn is_empty(self, _ address: u256) -> bool {
@@ -258,6 +280,7 @@ impl WorldState {
         if keep_balance && account.balance != 0 {
             account.nonce = 0
             account.storage_slots = 0
+            account.flags &= ~STORED
         } else {
             let _ = self.remove_record(address)
         }
@@ -277,7 +300,7 @@ impl WorldState {
         let lookup = self.index.get(address_word(address))
         if !lookup.found { return true }
         let account = ref self.accounts[lookup.value]
-        account.nonce == 0 && account.code_len == 0 && account.storage_slots == 0
+        account.nonce == 0 && account.flags & (HAS_CODE | STORED) == 0 && account.storage_slots == 0
     }
     /// The length of the code of `address`, if it has a record.
     pub fn existing_code_len(self, _ address: u256) -> Option<usize> {
@@ -286,7 +309,22 @@ impl WorldState {
     }
     pub fn has_storage(self, _ address: u256) -> bool {
         let lookup = self.index.get(address_word(address))
-        lookup.found && self.accounts[lookup.value].storage_slots != 0
+        if !lookup.found { return false }
+        let account = ref self.accounts[lookup.value]
+        account.storage_slots != 0 || account.flags & STORED != 0
+    }
+    /// Whether `address` has code, read or not.
+    pub fn has_code(self, _ address: u256) -> bool {
+        let lookup = self.index.get(address_word(address))
+        lookup.found && self.accounts[lookup.value].flags & HAS_CODE != 0
+    }
+    /// Whether the world holds the code of `address`: it has none, or the
+    /// world has read it.
+    pub fn code_known(self, _ address: u256) -> bool {
+        let lookup = self.index.get(address_word(address))
+        if !lookup.found { return true }
+        let account = ref self.accounts[lookup.value]
+        account.flags & HAS_CODE == 0 || account.code_len != 0
     }
     /// The number of accounts, which `account_at` visits in no particular order.
     pub fn account_count(self) -> usize { self.accounts.len() }
@@ -326,9 +364,9 @@ impl WorldState {
     }
     pub fn sender(self, _ address: u256) -> Sender {
         let lookup = self.index.get(address_word(address))
-        if !lookup.found { return Sender { nonce: 0, balance: 0, code_len: 0 } }
+        if !lookup.found { return Sender { nonce: 0, balance: 0, has_code: false } }
         let account = ref self.accounts[lookup.value]
-        Sender { nonce: account.nonce, balance: account.balance, code_len: account.code_len }
+        Sender { nonce: account.nonce, balance: account.balance, has_code: account.flags & HAS_CODE != 0 }
     }
     /// Sets `field` of `address`; an absent account stays absent for zero.
     pub fn replace(mut self, _ field: Field, _ address: u256, _ value: u256) -> Result<WriteError, Written> {
@@ -419,7 +457,9 @@ impl WorldState {
         let lookup = self.index.get(address_word(address))
         if !lookup.found || self.empty_at(lookup.value) { return 0 }
         let account = self.accounts[lookup.value]
-        if account.code_hash != 0 { return account.code_hash }
+        // Zero is the hash of code `set_code_unhashed` set; code the world
+        // has not read keeps the hash its source gave.
+        if account.code_hash != 0 || account.code_len == 0 { return account.code_hash }
         let hash = keccak256_word(self.code.slice(offset: account.code_offset + 64, len: account.code_len))
         self.accounts[lookup.value].code_hash = hash
         hash
@@ -456,6 +496,18 @@ impl WorldState {
     // a SELFDESTRUCT removes in its creating transaction never can be.
     pub fn set_code_unhashed<T: ByteSource>(mut self, address: u256, code: T) -> i32 {
         self.store_code(address, code, hashed: false)
+    }
+    /// Adds `code`, which a source gave for the hash of the code of
+    /// `address`, a loaded account with code the world has not read.
+    pub(ingot) fn add_read_code(mut self, _ address: u256, _ code: MemSpan) -> i32 {
+        let lookup = self.index.get(address_word(address))
+        core::assert(lookup.found && self.accounts[lookup.value].flags & HAS_CODE != 0
+            && self.accounts[lookup.value].code_len == 0)
+        let hash = self.accounts[lookup.value].code_hash
+        let stored = self.store_code(address, code, hashed: false)
+        // Storing code moves no record.
+        if stored == OK { self.accounts[lookup.value].code_hash = hash }
+        stored
     }
     fn store_code<T: ByteSource>(mut self, address: u256, code: T, hashed: bool) -> i32 {
         let address = address_word(address)
@@ -511,6 +563,7 @@ impl WorldState {
         account.code_offset = old_size
         account.code_len = len
         account.code_hash = if len == 0 { EMPTY_CODE_HASH } else if hashed { keccak256_word(code) } else { 0 }
+        account.flags = if len == 0 { account.flags & STORED } else { account.flags | HAS_CODE }
         if self.dead_code > self.code.len() - self.dead_code { self.compact_code() }
         OK
     }
@@ -572,6 +625,47 @@ impl WorldState {
             return true
         }
         self.block_hashes.try_insert(number, hash)
+    }
+
+    /// The addresses a world over a lazy source has asked of it, present or
+    /// absent.
+    pub fn loaded(self) -> ref SwissTable<u256, bool> { ref self.loaded }
+    /// The slots a world over a lazy source has resolved.
+    pub fn loaded_slots(self) -> ref SwissTable<StorageKey, bool> { ref self.loaded_slots }
+    /// Adds `account`, what a source holds at `address`, an address word the
+    /// world has not asked of it; false, changing nothing, if the world
+    /// cannot grow.
+    pub(ingot) fn add_loaded(mut self, _ address: u256, _ account: Option<AccountState>) -> bool {
+        if !self.loaded.try_insert(address, true) { return false }
+        let Option::Some(state) = account else { return true }
+        let Option::Some(at) = self.add_record(address) else {
+            let _ = self.loaded.remove(address)
+            return false
+        }
+        let record = mut self.accounts[at]
+        record.balance = state.balance
+        record.nonce = state.nonce as u256
+        record.code_hash = state.code_hash
+        record.flags = (if state.storage_root != EMPTY_ROOT { STORED } else { 0 })
+            | (if state.code_hash != EMPTY_CODE_HASH { HAS_CODE } else { 0 })
+        true
+    }
+    /// Whether the source may hold storage of `address` that the world has
+    /// not read: the source gave its account with storage, and the world has
+    /// not deleted or cleared it since.
+    pub(ingot) fn stored(self, _ address: u256) -> bool {
+        let lookup = self.index.get(address_word(address))
+        lookup.found && self.accounts[lookup.value].flags & STORED != 0
+    }
+    /// Adds `value`, what slot `slot` of `address`, an address word, holds,
+    /// to a slot the world has not resolved; false, changing nothing, if the
+    /// world cannot grow.
+    pub(ingot) fn add_loaded_slot(mut self, _ address: u256, _ slot: u256, _ value: u256) -> bool {
+        let key = StorageKey { address, slot }
+        if !self.loaded_slots.try_insert(key, true) { return false }
+        if self.storage_store(address, slot, value) { return true }
+        let _ = self.loaded_slots.remove(key)
+        false
     }
 }
 
@@ -656,4 +750,31 @@ fn removing_an_account_keeps_the_others() {
     core::assert(seen == 0xbb + 0xcc && state.has_storage(0xcc) && state.storage_load(0xcc, 1) == 2)
     let copy = state.try_clone().unwrap()
     core::assert(copy.balance(0xcc) == 0xcc && copy.code_size(0xbb) == 2 && copy.account_count() == 2)
+}
+
+#[test]
+fn loaded_accounts_keep_what_the_world_has_not_read() {
+    var state = WorldState::empty()
+    let code = AccountState { nonce: 0, balance: 0, code_hash: 0x1234, storage_root: EMPTY_ROOT }
+    let stored = AccountState { nonce: 0, balance: 1, code_hash: EMPTY_CODE_HASH, storage_root: 0x5678 }
+    core::assert(state.add_loaded(0xaa, Option::Some(code)) && state.add_loaded(0xbb, Option::Some(stored)))
+    core::assert(state.add_loaded(0xcc, Option::None) && !state.exists(0xcc) && state.loaded().len() == 3)
+    // Code that is not read is still code.
+    core::assert(!state.is_empty(0xaa) && !state.deployable(0xaa) && state.code_hash(0xaa) == 0x1234)
+    core::assert(state.has_code(0xaa) && !state.code_known(0xaa) && state.sender(0xaa).has_code)
+    var read = MemBuffer::empty()
+    core::assert(read.try_reserve(2))
+    read.push(0x00)
+    read.push(0x01)
+    core::assert(state.add_read_code(0xaa, read.span()) == OK)
+    core::assert(state.code_known(0xaa) && state.code_size(0xaa) == 2 && state.code_hash(0xaa) == 0x1234)
+    // So is storage, until the account is cleared.
+    core::assert(state.stored(0xbb) && state.has_storage(0xbb) && !state.deployable(0xbb))
+    core::assert(state.add_loaded_slot(0xbb, 1, 9) && state.add_loaded_slot(0xbb, 2, 0))
+    core::assert(state.storage_load(0xbb, 1) == 9 && state.loaded_slots().len() == 2)
+    let copy = state.try_clone().unwrap()
+    core::assert(copy.loaded().len() == 3 && copy.loaded_slots().len() == 2)
+    state.clear_keeping_balance(0xbb)
+    core::assert(state.exists(0xbb) && !state.stored(0xbb) && !state.has_storage(0xbb))
+    core::assert(state.storage_load(0xbb, 1) == 0)
 }

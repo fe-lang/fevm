@@ -4,10 +4,10 @@ use core::{MemBuffer, MemVec, Option}
 use core::num::leading_zeros
 use core::ops::Index
 use fevm::WorldState
-use fevm::state::EMPTY_CODE_HASH
+use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
 use fevm_rlp::Encoder
 use keccak::keccak256_word
-use ingot::trie::{EMPTY_ROOT, hash, nibble, put_path}
+use ingot::trie::{hash, nibble, put_path}
 
 // A node as its parent holds it: its kind and its position in that kind's
 // arena.

@@ -4,12 +4,9 @@ use core::{MemBuffer, MemVec, Option}
 use core::num::leading_zeros
 use core::ops::Ord
 use fevm::{OK, WorldState}
-use fevm::state::EMPTY_CODE_HASH
+use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
 use fevm_rlp::{Decoder, Encoder}
 use keccak::{Keccak256, keccak256_word}
-
-/// The root of the empty trie: keccak256 of the empty string's RLP.
-pub const EMPTY_ROOT: u256 = 0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
 
 // A leaf: the first `nibbles` nibbles of `key`, which holds them from its
 // most significant, and its value, `len` bytes at `offset` of the values.

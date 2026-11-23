@@ -1,11 +1,11 @@
 use core::{MemBuffer, MemVec}
 use core::num::leading_zeros
 use fevm::{OK, WorldState}
-use fevm::state::StorageKey
+use fevm::state::{EMPTY_ROOT, StorageKey}
 use ingot::chain::Import
 use ingot::chain_tests::{BLOCK_STATE_ROOT, GENESIS_STATE_ROOT, genesis, genesis_world, valid}
 use ingot::state_trie::StateTrie
-use ingot::trie::{EMPTY_ROOT, hash, state_root}
+use ingot::trie::{hash, state_root}
 
 // Whether `trie` has the root `state_root` gives `world`, with the nodes of
 // a new trie of it.

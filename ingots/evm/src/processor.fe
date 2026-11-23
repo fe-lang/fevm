@@ -373,7 +373,7 @@ fn verdict<F: Rules>(_ world: WorldState, _ request: TxRequest, _ block: BlockEn
         Option::None => return INVALID_BALANCE,
     }
     // EIP-3607, except that an EIP-7702 delegated account may send.
-    if config.check_sender_code && account.code_len != 0 && world.delegate(sender).is_none() {
+    if config.check_sender_code && account.has_code && world.delegate(sender).is_none() {
         return INVALID_SENDER_CODE
     }
     VALID
