@@ -1,7 +1,7 @@
 // The opcode handlers: the `Cursor` they pass from one to the next, the
 // operations they run and the dispatch between them.
 use core::num::{IntWord, from_be, to_le}
-use core::ptr::{cast, offset_bytes}
+use core::ptr::{MemSlice, cast, offset_bytes}
 use ingot::memory::small_growth_cost
 use ingot::gas::base_cost
 use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
@@ -197,7 +197,10 @@ impl Vm {
     #[inline(always)]
     fn next<F: Rules, T: Tracer>(mut self, _ c: own Cursor<F>, _ tracer: mut T) {
         let op = c.read<u8>(0)
-        tracer.step(Step { pc: c.pc, op, gas: c.gas, stack_len: c.depth, memory_size: self.memory_size, depth: self.call_depth })
+        // The `depth` words below `top` are initialized, though `self.stack`'s
+        // length is stale while the handlers run.
+        tracer.step(Step { pc: c.pc, op, gas: c.gas, stack_len: c.depth, memory_size: self.memory_size, depth: self.call_depth },
+                    stack: unsafe { MemSlice::from_raw_parts(ptr: c.slot(c.depth), len: c.depth) })
         match op as i32 {
             0x00 => self.op_stop(c, mut tracer),
             0x04 => self.op_binary<0x04>(c, mut tracer),

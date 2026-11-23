@@ -1,12 +1,13 @@
 // Hooks for watching a transaction run, and a tracer that records them.
-use core::{MemBuffer, MemSpan, MemVec}
+use core::{MemBuffer, MemSlice, MemSpan, MemVec}
 
 /// Hooks that `transact` and `simulate` call as a transaction runs. Each hook
 /// does nothing by default. `()` keeps every default, so an untraced
 /// transaction compiles to no tracing code.
 pub trait Tracer {
-    /// Before each opcode runs.
-    fn step(mut self, _ step: Step) {}
+    /// Before each opcode and its own checks run, with the frame's stack, top
+    /// word last, which may hold fewer words than the opcode needs.
+    fn step(mut self, _ step: Step, stack: MemSlice<u256>) {}
     /// When a call or creation enters its frame, with its input: calldata, or
     /// initcode for a creation.
     fn enter(mut self, _ call: CallStart, input: MemSpan) {}
@@ -118,7 +119,7 @@ impl Trace {
 impl Tracer for Trace {
     // Out of line, so the traced opcode handlers stay small.
     #[inline(never)]
-    fn step(mut self, _ step: Step) {
+    fn step(mut self, _ step: Step, stack: MemSlice<u256>) {
         if self.record_steps && self.steps.try_push(step).is_err() { self.complete = false }
     }
 
