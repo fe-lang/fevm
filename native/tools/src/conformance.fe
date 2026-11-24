@@ -74,6 +74,9 @@ pub struct Options {
     // Whether `fevm_lazy` is the driver, which runs each state test again
     // over a lazy world.
     lazy: bool,
+    // Whether `fevm_lazy` is the driver and validates each block of a
+    // blockchain test statelessly too; it implies `lazy`.
+    stateless: bool,
 }
 
 impl Options {
@@ -88,12 +91,17 @@ impl Options {
         var timeout: u64 = 120
         var select: MemVec<Arg> = MemVec::new()
         var lazy = false
+        var stateless = false
         var i: usize = 2
         while i < args.count() {
             let name = args.get(i)
             i += 1
             if name == "--lazy" {
                 lazy = true
+                continue
+            }
+            if name == "--stateless" {
+                stateless = true
                 continue
             }
             if name == "--select" {
@@ -147,7 +155,10 @@ impl Options {
         }
         match (fixtures, out) {
             (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
-                Options { fe, executable, fixtures, out, level, jobs, timeout, select, forks, lazy },
+                Options {
+                    fe, executable, fixtures, out, level, jobs, timeout, select, forks, lazy: lazy || stateless,
+                    stateless,
+                },
             ),
             _ => Result::Err(format!("fevm_tools conformance needs --fixtures and --out")),
         }
@@ -854,8 +865,14 @@ fn case_count(_ test: Value, fork: usize, _ forks: MemVec<Arg>) -> usize {
 // A driver running a case, and the line of `cases.jsonl` it fills.
 struct Running { line: usize, case: Case, expect: Expected, started: Instant }
 
-// The outcomes counted overall, by network and by group.
-struct Tally { totals: [u64; 6], networks: HashMap<MemBuffer, [u64; 6]>, groups: HashMap<MemBuffer, [u64; 6]> }
+// The outcomes counted overall, by network and by group, and what the
+// stateless runs counted.
+struct Tally {
+    totals: [u64; 6],
+    networks: HashMap<MemBuffer, [u64; 6]>,
+    groups: HashMap<MemBuffer, [u64; 6]>,
+    stateless: blocks::Stateless,
+}
 
 impl Tally {
     fn count(mut self, _ file: MemSpan, _ network: MemSpan, _ outcome: usize) {
@@ -948,6 +965,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     report.set("dirty", Value::Bool(!changes.is_empty()))
     report.set("level", Value::string(options.level))
     report.set("lazy", Value::Bool(options.lazy))
+    report.set("stateless", Value::Bool(options.stateless))
     var select = Value::array()
     for ref part in options.select {
         select.push(Value::string(part))
@@ -989,7 +1007,9 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     let files = fixture_files(fixtures.span(), options.select)?
     let started = clock.instant()
     var lines: MemVec<MemBuffer> = MemVec::new()
-    var tally = Tally { totals: [0; 6], networks: HashMap::new(), groups: HashMap::new() }
+    var tally = Tally {
+        totals: [0; 6], networks: HashMap::new(), groups: HashMap::new(), stateless: blocks::Stateless::new(),
+    }
     var children: MemVec<Child> = MemVec::new()
     var running: MemVec<Running> = MemVec::new()
     // The next case is post `post` for fork `fork` of test `test` of `doc`,
@@ -1043,7 +1063,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
             let (expect, input) = if member.value.has("blocks") {
                 let expect = named(what, blocks::ChainExpect::of(member.value))?
                 let forks = blocks::forks(case.network.span()).unwrap()
-                (Expected::Chain(expect), named(what, blocks::encode(member.value, forks))?)
+                let input = named(what, blocks::encode(member.value, forks, stateless: options.stateless))?
+                (Expected::Chain(expect), input)
             } else {
                 let entry = ref member.value["post"][fork_name(fork)][case.index]
                 case.indexes = Option::Some(Indexes::of(entry))
@@ -1077,13 +1098,18 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let output = named(executable, proc.wait(children.swap_remove(index)))?
         let done = running.swap_remove(index)
         let took = clock.instant().duration_since(done.started)
-        let verdict = named(
-            path_case(done.case.file, done.case.name),
-            match done.expect {
-                Expected::Post(ref expect) => check(expect, output, timeout: options.timeout, lazy: options.lazy),
-                Expected::Chain(ref expect) => blocks::check(expect, output, timeout: options.timeout),
+        let what = path_case(done.case.file, done.case.name)
+        let verdict = match done.expect {
+            Expected::Post(ref expect) => {
+                named(what, check(expect, output, timeout: options.timeout, lazy: options.lazy))?
             },
-        )?
+            Expected::Chain(ref expect) => {
+                let (verdict, runs) = named(what, blocks::check(expect, output, timeout: options.timeout,
+                                                               stateless: options.stateless))?
+                tally.stateless.add(runs)
+                verdict
+            },
+        }
         tally.count(done.case.file.span(), done.case.network.span(), verdict.outcome)
         lines.set(done.line, done.case.row(verdict, took))
     }
@@ -1092,6 +1118,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     report.set("totals", counts_value(tally.totals))
     report.set("by_network", sorted_counts(tally.networks))
     report.set("groups", sorted_counts(tally.groups))
+    if options.stateless { report.set("stateless_runs", tally.stateless.value()) }
     var rows = MemBuffer::empty()
     for ref line in lines {
         rows.extend_from(line.span())

@@ -1,0 +1,269 @@
+// A blockchain test run statelessly: each block validated from a witness of
+// the state before it, which the complete chain, the oracle, gives.
+use core::{MemBuffer, MemSpan, MemVec, Option}
+use std::io::Stdout
+use keccak::keccak256_word
+use fevm::{BlockOutput, Receipt}
+use fevm::hex::write_hex_word
+use fevm::status::status_name
+use fevm_chain::{Chain, HostFailure, Import, InvalidBlock, Lack, Nodes, Verdict, Witness, validate}
+use fevm_conformance::{Reader, host_error}
+use fevm_conformance::blocks::{header_rlp, read_bytes, read_chain, reason, write_head, write_import}
+use ingot::same_receipt
+
+// The kinds of item a run leaves out of a witness, as indexes.
+const NODE: usize = 0
+const CODE: usize = 1
+const HEADER: usize = 2
+const KINDS: usize = 3
+
+// The headers BLOCKHASH reaches.
+const BLOCK_HASHES: usize = 256
+
+fn hex(_ word: u256) -> MemBuffer {
+    var text = MemBuffer::empty()
+    with (mut text) { write_hex_word(word) }
+    text
+}
+
+// An invalid block's reason, with the transaction it is about.
+fn invalid_name(_ invalid: InvalidBlock) -> MemBuffer {
+    let (name, index) = reason(invalid)
+    match index {
+        Option::Some(index) => format!(name, " (transaction ", index, ")"),
+        Option::None => name,
+    }
+}
+
+fn failure_name(_ failure: HostFailure) -> MemBuffer {
+    match failure {
+        HostFailure::Status(status) => format!("host ", status_name(status)),
+        HostFailure::BlobBaseFee => format!("blob base fee too large to compute"),
+    }
+}
+
+fn verdict_name(_ verdict: Verdict) -> MemBuffer {
+    match verdict {
+        Verdict::Valid(_) => format!("valid"),
+        Verdict::Invalid(invalid) => format!("invalid ", invalid_name(invalid)),
+        Verdict::Witness(lack) => match lack {
+            Lack::Header(hash) => format!("lacks header ", hex(hash)),
+            Lack::Node(hash) => format!("lacks node ", hex(hash)),
+            Lack::MalformedNode(hash) => format!("lacks node ", hex(hash), ", malformed"),
+            Lack::Code(hash) => format!("lacks code ", hex(hash)),
+        },
+        Verdict::Failed(failure) => failure_name(failure),
+    }
+}
+
+// The items of a kind in `witness`.
+fn items(_ witness: Witness, kind: usize) -> ref Nodes {
+    if kind == NODE { witness.nodes() } else if kind == CODE { witness.codes() } else { witness.headers() }
+}
+
+// Adds `item` of `kind` to `witness`.
+fn add(_ witness: mut Witness, kind: usize, _ item: MemSpan) {
+    core::assert(if kind == NODE { witness.node(item) } else if kind == CODE { witness.code(item) }
+        else { witness.header(item) })
+}
+
+// The witness of `chain`'s state, every node of its trie and every code of
+// its world, with `headers` from `from` on.
+fn complete(_ chain: mut Chain, _ headers: MemVec<MemBuffer>, from: usize) -> Witness {
+    var nodes = Nodes::new()
+    core::assert(chain.write_nodes(mut nodes))
+    var witness = Witness::new()
+    for at in 0..nodes.len() { add(mut witness, kind: NODE, nodes.node(at)) }
+    let world = ref chain.world()
+    for position in 0..world.account_count() {
+        let address = world.account_at(position).address
+        if world.has_code(address) { add(mut witness, kind: CODE, world.code(address)) }
+    }
+    for index in from..headers.len() { add(mut witness, kind: HEADER, headers[index].span()) }
+    witness
+}
+
+// The items of `witness` that a validation read, but for the one of each
+// kind at the position `without` gives.
+fn used(_ witness: Witness, without: [usize; 3]) -> Witness {
+    var cut = Witness::new()
+    for kind in 0..KINDS {
+        let items = ref items(witness, kind)
+        for at in 0..items.len() {
+            if items.used(at) && at != without[kind] { add(mut cut, kind, items.node(at)) }
+        }
+    }
+    cut
+}
+
+// Whether the receipts and outputs of two runs of a block are the same.
+fn same_body(_ a: MemVec<Receipt>, _ b: MemVec<Receipt>, _ output: BlockOutput, _ other: BlockOutput) -> bool {
+    if a.len() != b.len() || output.requests.len() != other.requests.len() { return false }
+    for index in 0..a.len() {
+        if !same_receipt(a[index], b[index]) { return false }
+    }
+    for index in 0..output.requests.len() {
+        if output.requests[index].span() != other.requests[index].span() { return false }
+    }
+    let lists = match output.access_list {
+        Option::Some(ref list) => match other.access_list {
+            Option::Some(ref theirs) => list.hash == theirs.hash && list.rlp.span() == theirs.rlp.span(),
+            Option::None => false,
+        },
+        Option::None => other.access_list.is_none(),
+    }
+    lists && output.gas_used == other.gas_used && output.blob_gas_used == other.blob_gas_used
+        && output.logs_bloom.words == other.logs_bloom.words && output.requests_hash == other.requests_hash
+}
+
+// How `verdict` disagrees with `import`, the chain's verdict on the same
+// block, which has the hash `hash` if it is valid; none if it agrees.
+fn disagreement(_ import: Import, _ verdict: Verdict, hash: u256) -> Option<MemBuffer> {
+    let (oracle, agrees) = match import {
+        Import::Valid(ref imported) => (format!("valid"), match verdict {
+            Verdict::Valid(ref validated) => validated.header.hash == hash
+                && same_body(imported.receipts, validated.receipts, imported.output, validated.output),
+            _ => false,
+        }),
+        Import::Invalid(invalid) => (format!("invalid ", invalid_name(invalid)), match verdict {
+            Verdict::Invalid(other) => invalid_name(invalid) == invalid_name(other),
+            _ => false,
+        }),
+        Import::Failed(failure) => (failure_name(failure), false),
+    }
+    if agrees { Option::None } else { Option::Some(format!(verdict_name(verdict), "; the chain's: ", oracle)) }
+}
+
+// Whether `verdict` is that the witness lacks the item of `kind` whose hash
+// is `hash`.
+fn lacks(_ verdict: Verdict, kind: usize, hash: u256) -> bool {
+    let Verdict::Witness(lack) = verdict else { return false }
+    match lack {
+        Lack::Node(lacked) => kind == NODE && lacked == hash,
+        Lack::Code(lacked) => kind == CODE && lacked == hash,
+        Lack::Header(lacked) => kind == HEADER && lacked == hash,
+        _ => false,
+    }
+}
+
+fn kind_name(_ kind: usize) -> String<6> {
+    if kind == NODE { "node" } else if kind == CODE { "code" } else { "header" }
+}
+
+fn write_counts(_ counts: [u64; 3]) uses (text: mut MemBuffer) {
+    "[".fmt(mut text)
+    for kind in 0..KINDS {
+        if kind != 0 { ",".fmt(mut text) }
+        counts[kind].fmt(mut text)
+    }
+    "]".fmt(mut text)
+}
+
+/// Runs a blockchain test as `fevm_conformance` runs it, its chain the
+/// oracle, and validates each block it judges from a witness of the chain's
+/// state before it: every node of its trie, every code and the headers of
+/// the head and the 255 blocks before it. `validate` must give the chain's
+/// verdict over the whole witness, the same block hash, receipts and output
+/// if valid, and the same reason if invalid; then the same again over what
+/// that used; then without one used node, without one used code and without
+/// one used header, each in its own run, `Verdict::Witness` lacking it. Each
+/// is chosen by the block RLP's hash; a run without one used is skipped.
+/// Adds `stateless`: the blocks validated, those that read an ancestor's
+/// header, the removal runs made and skipped, of a node, a code and a
+/// header, and each disagreement.
+pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
+    let (var chain, genesis) = match read_chain(mut reader) {
+        Result::Ok(chain) => chain,
+        Result::Err(status) => return status,
+    }
+    // The headers of the head and the blocks before it, the head's last.
+    var headers: MemVec<MemBuffer> = MemVec::new()
+    headers.push(genesis)
+    var validated: u64 = 0
+    var ancestors: u64 = 0
+    var made = [0 as u64; 3]
+    var skipped = [0 as u64; 3]
+    var problems: MemVec<MemBuffer> = MemVec::new()
+    var tracer = ()
+    var text = MemBuffer::empty()
+    with (mut text) {
+        "{\"blocks\":[".fmt(mut text)
+        let blocks: usize = reader.count().downcast_truncate()
+        for number in 0..blocks {
+            let rlp = read_bytes(mut reader)
+            if number != 0 { ",".fmt(mut text) }
+            let from = if headers.len() > BLOCK_HASHES { headers.len() - BLOCK_HASHES } else { 0 }
+            var witness = complete(mut chain, headers, from)
+            let parent_hash = chain.head().hash
+            let import = chain.import(rlp.span(), mut tracer)
+            let failed = match import {
+                Import::Failed(_) => true,
+                _ => false,
+            }
+            if !failed {
+                validated += 1
+                let hash = chain.head().hash
+                let place = format!("block ", number, ": ")
+                let verdict = validate(rlp.span(), parent_hash, mut witness, schedule: chain.schedule(),
+                                       chain_id: chain.chain_id(), mut tracer)
+                if let Option::Some(problem) = disagreement(import, verdict, hash) {
+                    problems.push(format!(place, "whole witness: ", problem))
+                }
+                var cut = used(witness, without: [usize::max(); 3])
+                let verdict = validate(rlp.span(), parent_hash, mut cut, schedule: chain.schedule(),
+                                       chain_id: chain.chain_id(), mut tracer)
+                if let Option::Some(problem) = disagreement(import, verdict, hash) {
+                    problems.push(format!(place, "used witness: ", problem))
+                }
+                let choice = keccak256_word(rlp.span())
+                for kind in 0..KINDS {
+                    let items = ref items(witness, kind)
+                    var candidates: MemVec<usize> = MemVec::new()
+                    for at in 0..items.len() {
+                        if items.used(at) { candidates.push(at) }
+                    }
+                    // More than the parent's header: an ancestor's.
+                    if kind == HEADER && candidates.len() > 1 { ancestors += 1 }
+                    if candidates.is_empty() {
+                        skipped[kind] += 1
+                        continue
+                    }
+                    made[kind] += 1
+                    let removed = candidates[(choice % candidates.len() as u256).downcast_truncate()]
+                    var without = [usize::max(); 3]
+                    without[kind] = removed
+                    var lacking = used(witness, without)
+                    let verdict = validate(rlp.span(), parent_hash, mut lacking, schedule: chain.schedule(),
+                                           chain_id: chain.chain_id(), mut tracer)
+                    let item = keccak256_word(items.node(removed))
+                    if !lacks(verdict, kind, hash: item) {
+                        let name = kind_name(kind)
+                        problems.push(format!(place, "without ", name, " ", hex(item), ": ", verdict_name(verdict)))
+                    }
+                }
+            }
+            if let Import::Valid(_) = import { headers.push(header_rlp(rlp.span())) }
+            if let Result::Err(status) = write_import(import, number) { return status }
+        }
+        core::assert(reader.read_all())
+        write_head(chain)
+        ",\"stateless\":{\"blocks\":".fmt(mut text)
+        validated.fmt(mut text)
+        ",\"ancestors\":".fmt(mut text)
+        ancestors.fmt(mut text)
+        ",\"removals\":".fmt(mut text)
+        write_counts(made)
+        ",\"skipped\":".fmt(mut text)
+        write_counts(skipped)
+        ",\"problems\":[".fmt(mut text)
+        for index in 0..problems.len() {
+            if index != 0 { ",".fmt(mut text) }
+            "\"".fmt(mut text)
+            problems[index].fmt(mut text)
+            "\"".fmt(mut text)
+        }
+        "]}}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}

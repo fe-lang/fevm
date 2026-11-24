@@ -45,7 +45,8 @@ did not load, unless the slot's account was loaded and is gone. A case with
 any of them, or without `lazy`, fails, and a load the lazy world missed
 fails fevm's assertions and crashes the driver. `fevm_conformance` itself
 instantiates only the complete world, so the benchmark runner times it
-unchanged. Blockchain tests run as without `--lazy`.
+unchanged. Blockchain tests run as without `--lazy`; `--stateless`, below,
+runs them statelessly too.
 
 A case passes when the transaction's validity matches `expectException`, the
 receipt's logs hash matches, the gas used and success match the fixture's
@@ -132,3 +133,38 @@ the final accounts; or `genesis` if the pre-state is not the genesis
 header's. A host failure (an allocation failure, a balance overflow) is no
 verdict on a block: the driver prints only `host_error`, and the test's
 outcome is `host_error`.
+
+### Stateless
+
+`--stateless` builds and runs `fevm_lazy`, and has it validate each block of
+a blockchain test statelessly beside the import, with the complete `Chain`
+as the oracle. It implies `--lazy`, so state tests in the same run run
+lazily. Before importing a block the driver takes the chain's state as a
+witness: every node of its trie (`Chain::write_nodes`), every code of its
+world, and the headers of the head and the 255 blocks before it, which the
+driver keeps itself. After the import, `validate` runs over:
+
+1. the whole witness, and must give the chain's verdict: `Valid` with the
+   same block hash, receipts and output (gas used, blob gas used, logs
+   bloom, requests and their hash, access list), or `Invalid` with the same
+   reason;
+2. only what the first run used, and must give the same;
+3. that without one used node, without one used code, and without one used
+   header, each in its own run, and must give `Verdict::Witness` lacking
+   just that item. Each is the one at the position the keccak256 of the
+   block's RLP gives, modulo the count used, so a run is reproducible. The
+   headers used are the parent's and the ancestors' a BLOCKHASH reached; a
+   run with none used, such as for a block whose header is invalid, is
+   skipped and counted.
+
+The driver adds `stateless`: the blocks validated, which must be every block
+it judged, those that read an ancestor's header, the removal runs made and
+skipped, each by kind (node, code, header), and each disagreement, which
+fails the test, as does a missing `stateless`. `results.json` sums the
+counts in `stateless_runs`. The witnesses come from fevm's own reads, so the
+run cannot find a load that asks for more than other clients' witnesses
+give; it finds a missed or misplaced load, a trie or chain fault, and a lack
+classified as a verdict. All 44,932 tests of `tests@v21.0.3` pass: 56,165
+blocks validated, of which 72 read an ancestor's header; 51,602 runs without
+a node and as many without a code (4,563 of each skipped), and 56,163
+without a header (2 skipped).

@@ -10,7 +10,7 @@ use fevm_rlp::Decoder
 use ingot::header::{Header, HeaderError}
 use ingot::receipt::encode_receipt
 use ingot::schedule::Schedule
-use ingot::state_trie::{StateTrie, world_account}
+use ingot::state_trie::{Nodes, StateTrie, world_account}
 use ingot::transaction::{TxError, decode_transaction}
 use ingot::trie::Trie
 
@@ -266,6 +266,8 @@ impl Chain {
 
     pub fn head(self) -> ref Header { ref self.head }
     pub fn world(self) -> ref WorldState { self.evm.world() }
+    pub fn schedule(self) -> ref Schedule { ref self.schedule }
+    pub fn chain_id(self) -> u256 { self.chain_id }
 
     /// The state root of the head's world, from its trie. A trie that an
     /// allocation failed is rebuilt from the world here; none if that fails
@@ -277,6 +279,12 @@ impl Chain {
         self.trie = StateTrie::new(mut none)
         self.trie = StateTrie::new(mut self.evm.world_mut())
         self.trie.root().ok()
+    }
+
+    /// Adds to `nodes` each node of the head's state trie that is reached by
+    /// its hash: a witness of the whole state. False if an allocation fails.
+    pub fn write_nodes(mut self, _ nodes: mut Nodes) -> bool {
+        self.state_root().is_some() && self.trie.write_nodes(mut nodes)
     }
 
     /// Imports the block `rlp` encodes as the head's child, by the rules of

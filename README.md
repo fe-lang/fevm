@@ -20,7 +20,8 @@ The repo is a Fe workspace:
   blocks, or validates one from a witness
 - `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state and blockchain test drivers, and
-  `fevm_lazy`, which runs state tests again over a lazy world
+  `fevm_lazy`, which runs state tests again over a lazy world and validates
+  each block of a blockchain test statelessly beside its import
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,

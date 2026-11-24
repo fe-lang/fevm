@@ -8,10 +8,10 @@ use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 
 // Reads one case. Integers and lengths are big endian. A state test (version
 // 5) is the fork, the block, the pre-state accounts and the transaction; see
-// `encode` in native/tools/src/conformance.fe. A blockchain test (version 7)
-// is the chain ID, the fork schedule, the pre-state accounts, the genesis
-// header and the blocks' RLP; see native/tools/src/blocks.fe. `fevm_lazy`
-// reads cases with it too.
+// `encode` in native/tools/src/conformance.fe. A blockchain test (version 7,
+// or 8 for `fevm_lazy` to run statelessly too) is the chain ID, the fork
+// schedule, the pre-state accounts, the genesis header and the blocks' RLP;
+// see native/tools/src/blocks.fe. `fevm_lazy` reads cases with it too.
 pub struct Reader { data: MemBuffer, position: usize }
 
 impl Reader {
@@ -23,6 +23,10 @@ impl Reader {
     }
     /// Whether the case is a blockchain test, which `blocks::run` runs.
     pub fn blockchain_test(self) -> bool { self.data.len() != 0 && self.data[0] == 7 }
+    /// Whether the case is a blockchain test to run statelessly too.
+    pub fn stateless_test(self) -> bool { self.data.len() != 0 && self.data[0] == 8 }
+    /// Whether the whole case has been read.
+    pub fn read_all(self) -> bool { self.position == self.data.len() }
     fn word(mut self, bytes: u64) -> u256 {
         core::assert(bytes <= 32)
         var value: u256 = 0
@@ -32,7 +36,8 @@ impl Reader {
         self.position += bytes.downcast_truncate()
         value
     }
-    fn count(mut self) -> u64 { self.word(bytes: 4).downcast_unchecked() }
+    /// A count or length, in four bytes.
+    pub fn count(mut self) -> u64 { self.word(bytes: 4).downcast_unchecked() }
     fn u64(mut self) -> u64 { self.word(bytes: 8).downcast_unchecked() }
     fn input(mut self, len: u64) -> InputData {
         let input = InputData::copy_bytes(self.data.slice(offset: self.position, len: len.downcast_truncate()))

@@ -2,7 +2,8 @@
 // `fevm_conformance` runs it, then again over a world that reads the
 // pre-state from a `WorldSource`; the driver prints `fevm_conformance`'s
 // result with `lazy`, each way the second run differs. A blockchain test
-// runs as `fevm_conformance` runs it.
+// runs as `fevm_conformance` runs it, and one to run statelessly also has
+// each block validated from a witness (`stateless`).
 use core::{MemBuffer, MemVec, Option}
 use std::io::{Stdin, Stdout}
 use fevm::{Evm, Receipt, StorageKey, WorldSource, WorldState}
@@ -26,6 +27,14 @@ uses (text: mut MemBuffer)
         write_hex_word(slot)
     }
     "\"".fmt(mut text)
+}
+
+// Whether two runs of a transaction give the same receipt.
+fn same_receipt(_ a: Receipt, _ b: Receipt) -> bool {
+    a.invalid == b.invalid && a.status == b.status && a.gas_used == b.gas_used && a.gas_refunded == b.gas_refunded
+        && a.execution_gas_used == b.execution_gas_used && a.state_gas_used == b.state_gas_used
+        && a.cumulative_gas_used == b.cumulative_gas_used && a.created == b.created
+        && a.output.span() == b.output.span() && logs_hash(a.logs) == logs_hash(b.logs)
 }
 
 // Whether `address` is the same account in both worlds: present or absent,
@@ -56,11 +65,7 @@ uses (text: mut MemBuffer)
 {
     ",\"lazy\":[".fmt(mut text)
     var first = true
-    let same = receipt.invalid == lazy.invalid && receipt.status == lazy.status && receipt.gas_used == lazy.gas_used
-        && receipt.gas_refunded == lazy.gas_refunded && receipt.execution_gas_used == lazy.execution_gas_used
-        && receipt.state_gas_used == lazy.state_gas_used && receipt.created == lazy.created
-        && receipt.output.span() == lazy.output.span() && logs_hash(receipt.logs) == logs_hash(lazy.logs)
-    if !same {
+    if !same_receipt(receipt, lazy) {
         "\"receipt\"".fmt(mut text)
         first = false
     }
@@ -126,6 +131,7 @@ uses (text: mut MemBuffer)
 
 pub fn main() -> i32 uses (input: mut Stdin, out: mut Stdout) {
     var reader = Reader::stdin()
+    if reader.stateless_test() { return stateless::run(mut reader) }
     if reader.blockchain_test() { return blocks::run(mut reader) }
     let (block, config, world, request) = match read_state_test(mut reader) {
         Result::Ok(test) => test,

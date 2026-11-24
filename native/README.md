@@ -76,7 +76,8 @@ then the state tests again over a lazy world.
 The [conformance runner](conformance/README.md) runs execution-spec-tests
 Osaka and Amsterdam state tests through `Evm::transact`, and blockchain tests
 of Osaka, Amsterdam, their BPO forks and the transitions between them
-through `Chain::import`. It is not part of acceptance.
+through `Chain::import`, and with `--lazy` and `--stateless` the same over a
+lazy world and through `validate`. It is not part of acceptance.
 
 ## Resident memory
 

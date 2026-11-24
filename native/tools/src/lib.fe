@@ -54,7 +54,7 @@ fn usage() -> Result<MemBuffer, ()> {
             "[--jobs <count>] [--stage-timeout <seconds>] [--build-timeout <seconds>]\n",
             "       fevm_tools conformance --fe <compiler> | --executable <driver> --fixtures <state_tests> ",
             "--out <directory> [--level 0|1|2] [--jobs <count>] [--timeout <seconds>] [--select <part>...] ",
-            "[--lazy]\n",
+            "[--fork <fork>...] [--lazy] [--stateless]\n",
             "       fevm_tools bench --fe <compiler> | --executable <driver> --benchmarks <state_tests> ",
             "[--revm <runner>] [--evmone <runner>] [--fevm-only] [--out <directory>] [--level 0|1|2] ",
             "[--fork <fork>] [--target <seconds>] [--repeat <count>] [--select <part>...]\n",

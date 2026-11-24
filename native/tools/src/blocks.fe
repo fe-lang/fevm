@@ -84,12 +84,13 @@ fn put_fork(_ out: mut MemBuffer, _ test: Value, _ name: MemBuffer) -> Result<Me
 }
 
 // The driver's binary case format for importing the blocks of `test`, whose
-// network has `forks`: the chain ID, the genesis fork and each later one
-// with its activation timestamp, the pre-state, the genesis block's RLP and
-// each block's. Integers and lengths are big endian.
-pub fn encode(_ test: Value, _ forks: MemVec<(u64, MemBuffer)>) -> Result<MemBuffer, MemBuffer> {
+// network has `forks`, and if `stateless` validating each statelessly too:
+// the chain ID, the genesis fork and each later one with its activation
+// timestamp, the pre-state, the genesis block's RLP and each block's.
+// Integers and lengths are big endian.
+pub fn encode(_ test: Value, _ forks: MemVec<(u64, MemBuffer)>, stateless: bool) -> Result<MemBuffer, MemBuffer> {
     var out = MemBuffer::empty()
-    out.push(7)
+    out.push(if stateless { 8 } else { 7 })
     put(mut out, chain_id(test)?, 32)?
     put_fork(mut out, test, forks[0].1)?
     put_len(mut out, forks.len() - 1)?
@@ -261,19 +262,58 @@ impl ChainExpect {
     }
 }
 
-/// Judges the driver's output for a blockchain test.
-pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<MemBuffer, Verdict> {
+/// What the stateless runs of blockchain tests counted: the blocks
+/// validated, those that read an ancestor's header, and the runs without a
+/// node, a code and a header, made and skipped.
+pub struct Stateless { blocks: u64, ancestors: u64, made: [u64; 3], skipped: [u64; 3] }
+
+impl Copy for Stateless {}
+
+impl Stateless {
+    pub fn new() -> Self { Stateless { blocks: 0, ancestors: 0, made: [0; 3], skipped: [0; 3] } }
+
+    pub fn add(mut self, _ other: Stateless) {
+        self.blocks += other.blocks
+        self.ancestors += other.ancestors
+        for kind in 0..3 {
+            self.made[kind] += other.made[kind]
+            self.skipped[kind] += other.skipped[kind]
+        }
+    }
+
+    /// The counts, by name.
+    pub fn value(self) -> Value {
+        var value = Value::object()
+        value.set("blocks", Value::number(self.blocks))
+        value.set("ancestors", Value::number(self.ancestors))
+        for (name, counts) in [("removals", self.made), ("skipped", self.skipped)] {
+            var kinds = Value::object()
+            kinds.set("node", Value::number(counts[0]))
+            kinds.set("code", Value::number(counts[1]))
+            kinds.set("header", Value::number(counts[2]))
+            value.set(name, kinds)
+        }
+        value
+    }
+}
+
+/// Judges the driver's output for a blockchain test, which if `stateless`
+/// must report its stateless runs, each block validated, with what they
+/// counted.
+pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64, stateless: bool)
+    -> Result<MemBuffer, (Verdict, Stateless)> {
+    var runs = Stateless::new()
     let result = match driver_result(output, timeout) {
         Result::Ok(result) => result,
-        Result::Err(verdict) => return Result::Ok(verdict),
+        Result::Err(verdict) => return Result::Ok((verdict, runs)),
     }
     var verdict = Verdict::new(FAILED)
     if let Option::Some(ref genesis) = result.get("genesis") {
-        return Result::Ok(verdict.with(format!("genesis: ", genesis.text())))
+        return Result::Ok((verdict.with(format!("genesis: ", genesis.text())), runs))
     }
     let blocks = ref result["blocks"].items()
     if blocks.len() != expect.blocks.len() {
-        return Result::Ok(verdict.with(format!(blocks.len(), " blocks, expected ", expect.blocks.len())))
+        return Result::Ok((verdict.with(format!(blocks.len(), " blocks, expected ", expect.blocks.len())), runs))
     }
     for index in 0..blocks.len() {
         let block = ref blocks[index]
@@ -305,10 +345,28 @@ pub fn check(_ expect: ChainExpect, _ output: Output, timeout: u64) -> Result<Me
         verdict.problems.push(format!("head ", result["head"].text(), ", expected the last block hash"))
     }
     state_difference(expect.state, observed_state(result)?, mut verdict.problems)
-    if verdict.problems.is_empty() {
-        return Result::Ok(Verdict::new(PASSED))
+    match result.get("stateless") {
+        Option::Some(ref counted) => {
+            runs.blocks = counted["blocks"].as_u64().unwrap_or(default: 0)
+            runs.ancestors = counted["ancestors"].as_u64().unwrap_or(default: 0)
+            let judged: u64 = blocks.len().downcast_truncate()
+            if runs.blocks != judged {
+                verdict.problems.push(format!("stateless: ", runs.blocks, " blocks validated, of ", blocks.len()))
+            }
+            for kind in 0..3 {
+                runs.made[kind] = counted["removals"][kind].as_u64().unwrap_or(default: 0)
+                runs.skipped[kind] = counted["skipped"][kind].as_u64().unwrap_or(default: 0)
+            }
+            for ref problem in counted["problems"].items() {
+                verdict.problems.push(format!("stateless: ", problem.text()))
+            }
+        },
+        Option::None => if stateless { verdict.problems.push(format!("no stateless run")) },
     }
-    Result::Ok(verdict)
+    if verdict.problems.is_empty() {
+        return Result::Ok((Verdict::new(PASSED), runs))
+    }
+    Result::Ok((verdict, runs))
 }
 
 #[test]
@@ -354,7 +412,7 @@ fn chain() -> ChainExpect {
 }
 
 fn chain_verdict(_ stdout: DynString) -> Verdict {
-    check(chain(), output(stdout, Status::Exited(0)), timeout: 1).unwrap()
+    check(chain(), output(stdout, Status::Exited(0)), timeout: 1, stateless: false).unwrap().0
 }
 
 #[test]
@@ -383,8 +441,27 @@ fn check_compares_blocks_the_head_and_the_post_state() {
     assert!(genesis.outcome == FAILED && genesis.problems[0].span() == root.span())
     // A host failure is no verdict on a block, even one expected to be invalid.
     let failed = output("{\"host_error\":\"block 1: host host_allocation\"}", Status::Exited(3))
-    let host = check(chain(), failed, timeout: 1).unwrap()
+    let (host, _) = check(chain(), failed, timeout: 1, stateless: false).unwrap()
     assert!(host.outcome == HOST_ERROR && host.problems[0] == "block 1: host host_allocation")
+}
+
+#[test]
+fn check_counts_and_reports_stateless_runs() {
+    let (passing, runs) = stateless_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"stateless\":{\"blocks\":3,\"ancestors\":1,\"removals\":[3,2,1],\"skipped\":[0,1,2],\"problems\":[]}}")
+    assert!(passing.outcome == PASSED && runs.blocks == 3 && runs.ancestors == 1 && runs.made[1] == 2)
+    assert!(runs.skipped[2] == 2)
+    let (failing, _) = stateless_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"stateless\":{\"blocks\":3,\"ancestors\":0,\"removals\":[3,2,1],\"skipped\":[0,1,2],\"problems\":[\"block 2: used witness: valid\"]}}")
+    assert!(failing.outcome == FAILED && failing.problems[0] == "stateless: block 2: used witness: valid")
+    // Every block the driver judged must be validated.
+    let (short, _) = stateless_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"stateless\":{\"blocks\":2,\"ancestors\":0,\"removals\":[2,2,2],\"skipped\":[0,0,0],\"problems\":[]}}")
+    assert!(short.outcome == FAILED && short.problems[0] == "stateless: 2 blocks validated, of 3")
+    // A stateless run must report, if only that nothing differs.
+    let (missing, _) = stateless_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[]}")
+    assert!(missing.outcome == FAILED && missing.problems[0] == "no stateless run")
+}
+
+fn stateless_verdict(_ stdout: DynString) -> (Verdict, Stateless) {
+    check(chain(), output(stdout, Status::Exited(0)), timeout: 1, stateless: true).unwrap()
 }
 
 #[test]
@@ -392,7 +469,7 @@ fn encode_writes_the_chain_format() {
     let source: DynString = "{\"network\":\"OsakaToBPO1AtTime15k\",\"config\":{\"chainid\":\"0x01\",\"blobSchedule\":{\"BPO1\":{\"target\":\"0x0a\",\"max\":\"0x0f\",\"baseFeeUpdateFraction\":\"0x7f5a51\"}}},\"pre\":{\"0x01\":{\"balance\":\"0x02\",\"nonce\":\"0x03\",\"code\":\"0x00\",\"storage\":{\"0x04\":\"0x05\"}}},\"genesisRLP\":\"0xc0\",\"blocks\":[{\"rlp\":\"0xc180\"}]}"
     let test = parse(source.span()).unwrap()
     let network: DynString = "OsakaToBPO1AtTime15k"
-    let encoded = encode(test, forks(network.span()).unwrap()).unwrap()
+    let encoded = encode(test, forks(network.span()).unwrap(), stateless: false).unwrap()
     // 7, chain 1; Osaka's rules and blobs; one later fork, at 15,000, with
     // Osaka's rules and BPO1's blobs; one account; the genesis; one block.
     let expected: DynString = "0x0700000000000000000000000000000000000000000000000000000000000000010000000000010000000000003a980001000000000000000a000000000000000f00000000007f5a51000000010000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000030000000100000000010000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000500000001c00000000100000002c180"
