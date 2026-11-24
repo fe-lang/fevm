@@ -140,6 +140,12 @@ jobs:
           native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe --lazy \
             --fixtures ~/eest/fixtures/state_tests --out native/out/conformance-lazy
 
+      - name: Stateless blockchain tests
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: |
+          native/out/tools/fevm_tools conformance --fe native/out/toolchain/bin/fe --stateless \
+            --fixtures ~/eest/fixtures/blockchain_tests --out native/out/blocks-stateless
+
       - name: Upload logs
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -154,4 +160,6 @@ jobs:
             native/out/blocks/cases.jsonl
             native/out/conformance-lazy/results.json
             native/out/conformance-lazy/cases.jsonl
+            native/out/blocks-stateless/results.json
+            native/out/blocks-stateless/cases.jsonl
           if-no-files-found: ignore

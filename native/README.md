@@ -69,7 +69,8 @@ platform is not a passing result.
 
 [CI](../.github/workflows/ci.yml) runs acceptance, the state tests and the
 blockchain tests on both hosts for every pull request and push to `main`,
-then the state tests again over a lazy world.
+then the state tests again over a lazy world and the blockchain tests
+statelessly.
 
 ## State and blockchain tests
 
