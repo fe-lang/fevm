@@ -20,6 +20,11 @@ pub struct AccountBefore {
     /// world's source held storage of it the world had not read (`STORED`):
     /// undo marks it so again, so that its storage is read from the source.
     pub stored: bool,
+    /// Settlement deleted it as a touched account left empty. A partial
+    /// world need not hold its slots, so whoever applies the block to a
+    /// state trie clears the account's storage there if it exists at the
+    /// end, before its slots.
+    pub cleared: bool,
     // Its slots are among the block's: settlement deleted them with it.
     storage_kept: bool,
 }
@@ -77,7 +82,7 @@ impl BlockChanges {
         let at = self.accounts.len()
         let account = AccountBefore {
             address, existed, balance: Option::None, nonce: Option::None, code: Option::None, stored: false,
-            storage_kept: false,
+            cleared: false, storage_kept: false,
         }
         if self.accounts.try_push(account).is_err() { return Option::None }
         if !self.positions.try_insert(address, at) {
@@ -161,12 +166,14 @@ impl BlockChanges {
     }
 
     /// Notes that settlement deleted `address`, a touched account left empty
-    /// whose record `keep` made, and whether the source held storage of it
-    /// the world had not read.
+    /// whose record `keep` made: marks it cleared, and whether the source
+    /// held storage of it the world had not read.
     pub(ingot) fn deleted(mut self, _ address: u256, stored: bool) {
         let lookup = self.positions.get(address)
         core::assert(lookup.found)
-        if stored { self.accounts[lookup.value].stored = true }
+        let account = mut self.accounts[lookup.value]
+        account.cleared = true
+        if stored { account.stored = true }
     }
 
     /// Keeps `hash`, the hash of block `number` before the block, unless the

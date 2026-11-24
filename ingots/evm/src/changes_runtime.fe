@@ -245,6 +245,10 @@ fn finished_block_lists_its_changes_and_undoes_them() {
         core::assert(lists(output.changes, before, after: world))
         // The simulated transaction's recipient is not among them.
         core::assert(!listed(output.changes, 0xcc) && listed(output.changes, COINBASE))
+        // Settlement deleted the two empty accounts, touched.
+        for account in output.changes.accounts() {
+            core::assert(account.cleared == (account.address == EMPTY || account.address == BARE))
+        }
         output.changes.undo(mut world)
         core::assert(same(world, before) && hashes_restored(world))
     }
@@ -292,6 +296,9 @@ fn created_and_destroyed_contracts_are_undone() {
         var world = evm.into_world()
         let Result::Ok(output) = finished else { return core::assert(false) }
         core::assert(lists(output.changes, before, after: world))
+        // Deleting a self-destructed account, made in its transaction with no
+        // storage before, does not mark it cleared.
+        for account in output.changes.accounts() { core::assert(!account.cleared) }
         output.changes.undo(mut world)
         core::assert(same(world, before) && hashes_restored(world))
     }

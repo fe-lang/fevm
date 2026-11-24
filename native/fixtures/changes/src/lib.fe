@@ -1,10 +1,12 @@
-use core::Option
+use core::{MemVec, Option}
 use fevm::{AccountBefore, Block, Config, Evm, TxEnv, TxRequest, WorldState, default_block_env, empty_bytes}
 use fevm::processor::TX_LEGACY
 use fevm::status::{ERR_HOST_ALLOCATION, OK, VALID}
 
 const SENDER: u256 = 0x1000
 const BALANCE: u256 = 1_000_000
+const EMPTY: u256 = 0xe0
+const CALLER: u256 = 0xca11
 
 // Relinked with the controlled allocator watching allocations of 7,168
 // bytes: the block's changes growing to 32 accounts of 224 bytes, when
@@ -40,5 +42,56 @@ pub fn main() -> i32 {
     core::assert(block.world().balance(SENDER) == BALANCE - sent)
     let world = block.abandon().into_world()
     core::assert(world.account_count() == 1 && world.balance(SENDER) == BALANCE && world.nonce(SENDER) == 0)
+    clears()
     0
+}
+
+// Then a block's transaction calls a contract that calls an empty account
+// with 40 slots without value, a touch, and stores 30 slots of its own.
+// Settlement deletes the empty account; the block's changes keep its slots,
+// growing to 64 of 96 bytes, 6,144, and then the contract's, growing to
+// 128, 12,288. Relinked with the allocator watching either size, failing it
+// fails the transaction as a host failure and undoes it: the account stays,
+// and its changes do not mark it cleared.
+fn clears() {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, BALANCE))
+    let stop: [u8; 1] = [0x00]
+    for address in [0x00000961ef480eb55e80d19ad83579a64c007002 as u256, 0x0000bbddc7ce488642fb579f8b00f3a590007251] {
+        core::assert(world.set_code(address, code: stop) == OK)
+    }
+    core::assert(world.ensure_account(EMPTY))
+    for slot in 0..40 { core::assert(world.storage_store(EMPTY, slot as u256, slot as u256 + 1)) }
+    // CALL(GAS, EMPTY, 0, 0, 0, 0, 0); POP; then for i from 30 down to 1,
+    // SSTORE(i, i): PUSH1 30; JUMPDEST; DUP1; DUP1; SSTORE; PUSH1 1; SWAP1;
+    // SUB; DUP1; PUSH1 12; JUMPI; STOP.
+    let code: [u8; 25] = [
+        0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x60, 0xe0, 0x5a, 0xf1, 0x50, 0x60, 30, 0x5b, 0x80, 0x80, 0x55, 0x60, 1,
+        0x90, 0x03, 0x80, 0x60, 12, 0x57, 0x00,
+    ]
+    core::assert(world.set_code(address: CALLER, code) == OK)
+    var env = default_block_env()
+    env.gaslimit = 30_000_000
+    env.chainid = 1
+    var block = Block::begin(Evm::new(world, Config::osaka()), env, parent_hash: 0, parent_beacon_block_root: 0)
+    let tx = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: CALLER, creates: false, nonce: 0,
+        gas_limit: 1_000_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var tracer = ()
+    let receipt = block.transact(TxRequest::new(tx, data: empty_bytes()), mut tracer)
+    let failed = receipt.status == ERR_HOST_ALLOCATION
+    core::assert(receipt.invalid == VALID && (receipt.status == OK || failed))
+    core::assert(block.world().exists(EMPTY) == failed)
+    core::assert(block.world().storage_load(EMPTY, 1) == if failed { 2 } else { 0 })
+    core::assert(block.world().storage_load(CALLER, 30) == if failed { 0 } else { 30 })
+    let (_, finished) = block.finish(MemVec::new())
+    var listed = false
+    for account in finished.unwrap().changes.accounts() {
+        if account.address == EMPTY {
+            core::assert(account.cleared != failed)
+            listed = true
+        }
+    }
+    core::assert(listed)
 }

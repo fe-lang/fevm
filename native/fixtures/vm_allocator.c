@@ -6,7 +6,8 @@
 // The accounts fixture uses all three settings for code replacement and release.
 // The calls fixture sets WATCH_SIZE to a boxed child frame's size to count
 // the boxes. The changes fixture watches a block's changes outgrowing 16
-// accounts.
+// accounts, and then 32 slots of a deleted account and 64 with a later
+// write's.
 #define _DEFAULT_SOURCE
 #include <stddef.h>
 #include <stdint.h>

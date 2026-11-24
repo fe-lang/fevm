@@ -188,7 +188,7 @@ undo the block:
 
 ```fe
 let Result::Ok(output) = finished else { return }
-for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code, .stored
+for account in output.changes.accounts() {}   // account.address, .existed, .balance, .nonce, .code, .stored, .cleared
 for slot in output.changes.slots() {}         // slot.address, .slot, .value
 output.changes.undo(mut evm.world_mut())      // the world as it was before `begin`
 ```

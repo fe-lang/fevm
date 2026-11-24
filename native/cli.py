@@ -187,21 +187,23 @@ def main():
                        '--report', '--report-out', changes_archive], timeout=args.build_timeout)
         changes.joinpath('build.log').write_bytes(log)
         artifacts(changes / 'fevm_changes', changes_archive, changes, object_name='fevm_changes.o')
-        # A block's changes grow to 32 accounts of 224 bytes once; fail it, or not.
-        for failure_at in [0, 1]:
-            controlled = changes / f'allocator-{failure_at}'
-            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', '-DWATCH_SIZE=7168',
+        # A block's changes grow to 32 accounts of 224 bytes once, and in a
+        # second block to 64 slots of 96 bytes, a deleted account's, then to
+        # 128 with a later write's; fail each, or not.
+        for watch, failure_at in [(7168, 0), (7168, 1), (6144, 0), (6144, 1), (12288, 0), (12288, 1)]:
+            controlled = changes / f'allocator-{watch}-{failure_at}'
+            command(['cc', '-O2', '-Wall', '-Wextra', '-Werror', f'-DFAIL_AT={failure_at}', f'-DWATCH_SIZE={watch}',
                      '-DSUCCESS_ALLOCS=1', ROOT / 'native/fixtures/vm_allocator.c', changes / 'fevm_changes.o',
                      '-o', controlled])
             result = subprocess.run([str(controlled)], capture_output=True, timeout=60)
             passed = result.returncode == 0 and not result.stdout and not result.stderr
-            row['checks'].append({'name': f'block-changes-allocator-{failure_at}', 'passed': passed,
+            row['checks'].append({'name': f'block-changes-allocator-{watch}-{failure_at}', 'passed': passed,
                                   'status': result.returncode,
                                   'stdout': result.stdout.decode(errors='replace'),
                                   'stderr': result.stderr.decode(errors='replace')})
             report.write_text(json.dumps(record, indent=2) + '\n')
             if not passed:
-                raise AssertionError(f'O{level} block changes allocation {failure_at}: {result!r}')
+                raise AssertionError(f'O{level} block changes allocation {watch} {failure_at}: {result!r}')
         # LOG0 owns a separate copy of its frame memory. Check both allocation
         # failures using the already compiled interpreter object.
         for failure_at in [0, 1, 2]:
