@@ -68,7 +68,8 @@ machines, which skips timing measurements. Run it on each host: an unexecuted
 platform is not a passing result.
 
 [CI](../.github/workflows/ci.yml) runs acceptance, the state tests and the
-blockchain tests on both hosts for every pull request and push to `main`.
+blockchain tests on both hosts for every pull request and push to `main`,
+then the state tests again over a lazy world.
 
 ## State and blockchain tests
 
