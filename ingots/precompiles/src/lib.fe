@@ -80,8 +80,8 @@ pub fn word_at<T: ByteSource>(_ input: T, offset: usize) -> u256 {
     value
 }
 
-/// The address whose secp256k1 key signed `hash` as (recovery_id, r, s), for a
-/// recovery id of 0 or 1 and 0 < r, s < n; none when no key recovers.
+/// The address whose secp256k1 key signed `hash` as (recovery_id, r, s); none
+/// unless the recovery id is 0 or 1 and 0 < r, s < n, and when no key recovers.
 pub fn recover_signer(hash: u256, recovery_id: u256, r: u256, s: u256) -> Option<u256> {
     let Option::Some(key) = secp256k1::recover(hash, recovery_id, r, s) else { return Option::None }
     var digest = Keccak256::new()
@@ -97,8 +97,7 @@ fn ecrecover<T: ByteSource>(_ input: T) -> Output {
     let v = word_at(input, offset: 32)
     let r = word_at(input, offset: 64)
     let s = word_at(input, offset: 96)
-    let malformed = (v != 27 && v != 28) || r == 0 || r >= secp256k1::N || s == 0 || s >= secp256k1::N
-    let signer = if malformed { Option::None } else { recover_signer(hash, recovery_id: v - 27, r, s) }
+    let signer = if v != 27 && v != 28 { Option::None } else { recover_signer(hash, recovery_id: v - 27, r, s) }
     match signer {
         Option::Some(address) => words([address], gas_used: 3000),
         Option::None => Output { status: SUCCESS, gas_used: 3000, output: MemBuffer::empty() },

@@ -52,7 +52,7 @@ pub fn mul<T: ByteSource>(_ input: T) -> Option<[u256; 2]> {
         Option::Some(point) => {
             let scalar = word_at(input, offset: 64)
             if point.is_infinity() || scalar == 0 { return Option::Some([0, 0]) }
-            Option::Some(encode(multiply_g1(point, scalar)))
+            Option::Some(encode(multiply_g1(x: point.x, y: point.y, scalar)))
         },
         Option::None => Option::None,
     }
@@ -73,7 +73,8 @@ pub fn pairing<T: ByteSource>(_ input: T) -> Option<bool> {
     }
     offset = 0
     while offset < len {
-        if !in_g2(g2_point(input, offset: offset + 64).unwrap()) { return Option::None }
+        let q = g2_point(input, offset: offset + 64).unwrap()
+        if !q.is_infinity() && !in_g2(x: q.x, y: q.y) { return Option::None }
         offset += 192
     }
     // Pairs with the identity contribute one; with none left, so does the product.
