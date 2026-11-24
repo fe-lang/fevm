@@ -1,6 +1,6 @@
 use core::{MemVec, Option, Result}
 use ingot::address::create_address
-use ingot::block::{Block, BlockError}
+use ingot::block::{Block, BlockError, BlockOutput}
 use ingot::evm::Evm
 use ingot::processor::{TX_LEGACY, TxEnv, TxRequest, Withdrawal}
 use ingot::source::StateSource
@@ -264,6 +264,51 @@ fn lazy_block_reads_no_request_contract_after_a_failed_one() {
     })
     core::assert(evm.world().loaded().contains(WITHDRAWAL_REQUESTS))
     core::assert(!evm.world().loaded().contains(CONSOLIDATION_REQUESTS))
+}
+
+// A block over a source refusing `refused`, in which a call to the deposit
+// contract logs a malformed deposit, and which credits a withdrawal to 0xdd:
+// how it finishes.
+fn malformed_deposit_block(refused: Option<u256>) -> Result<BlockError, BlockOutput> {
+    var world = world()
+    // PUSH32 the DepositEvent topic; PUSH0; PUSH0; LOG1: no data.
+    var code: [u8; 37] = [0; 37]
+    code[0] = 0x7f
+    let topic: u256 = 0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5
+    for index in 0..32 { code[1 + index] = (topic >> (8 * (31 - index)) as u256).downcast_truncate() }
+    code[33] = 0x5f
+    code[34] = 0x5f
+    code[35] = 0xa1
+    let deposits = Config::osaka().deposit_contract
+    core::assert(world.set_code(address: deposits, code) == OK)
+    let evm = lazy(world, refused)
+    var block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: deposits, creates: false, nonce: 0,
+        gas_limit: 50_000, gas_price: 1, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var tracer = ()
+    core::assert(block.transact(TxRequest::new(env, data: empty_bytes()), mut tracer).status == OK)
+    core::assert(match block.failure() {
+        Option::Some(BlockError::MalformedDeposit) => true,
+        _ => false,
+    })
+    var withdrawals: MemVec<Withdrawal> = MemVec::new()
+    withdrawals.push(Withdrawal { address: 0xdd, amount: 3 })
+    block.finish(withdrawals).1
+}
+
+#[test]
+fn block_credits_withdrawals_before_it_judges_deposits() {
+    core::assert(match malformed_deposit_block(refused: Option::None) {
+        Result::Err(BlockError::MalformedDeposit) => true,
+        _ => false,
+    })
+    // A source that cannot give the recipient fails the block first.
+    core::assert(match malformed_deposit_block(refused: Option::Some(0xdd)) {
+        Result::Err(BlockError::Host(status)) => status == ERR_STATE_UNAVAILABLE,
+        _ => false,
+    })
 }
 
 // Runs a transfer and two withdrawals in an Amsterdam block on `evm`: its

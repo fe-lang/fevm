@@ -279,7 +279,14 @@ impl<S: StateSource> Block<S> {
         var block = self
         block.evm.access().set_index(block.transactions + 1)
         let credited = block.evm.withdraw(withdrawals)
-        if credited != OK { block.fail(BlockError::Host(credited)) }
+        if credited != OK {
+            // The specification credits the withdrawals before it parses
+            // the deposits, so a host failure crediting them comes before a
+            // malformed deposit, which `failure` gives as the transaction
+            // logs it.
+            if let Option::Some(BlockError::MalformedDeposit) = block.failure { block.failure = Option::None }
+            block.fail(BlockError::Host(credited))
+        }
         var requests: MemVec<MemBuffer> = MemVec::new()
         let deposits = core::mem::replace(mut block.deposits, MemBuffer::empty())
         block.add_request(mut requests, kind: DEPOSIT_REQUEST, deposits.span())
