@@ -36,6 +36,8 @@ uses (args: Args, fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         accept::run(accept::Options::parse()?)
     } else if tool == "conformance" {
         conformance::run(conformance::Options::parse()?)
+    } else if tool == "witness" {
+        replay::run(replay::Options::parse()?)
     } else if tool == "bench" {
         bench::run(bench::Options::parse()?)
     } else if tool == "bench-fixtures" {
@@ -55,6 +57,8 @@ fn usage() -> Result<MemBuffer, ()> {
             "       fevm_tools conformance --fe <compiler> | --executable <driver> --fixtures <state_tests> ",
             "--out <directory> [--level 0|1|2] [--jobs <count>] [--timeout <seconds>] [--select <part>...] ",
             "[--fork <fork>...] [--lazy] [--stateless]\n",
+            "       fevm_tools witness --fe <compiler> | --executable <driver> --replay <directory>... ",
+            "--out <directory> [--level 0|1|2]\n",
             "       fevm_tools bench --fe <compiler> | --executable <driver> --benchmarks <state_tests> ",
             "[--revm <runner>] [--evmone <runner>] [--fevm-only] [--out <directory>] [--level 0|1|2] ",
             "[--fork <fork>] [--target <seconds>] [--repeat <count>] [--select <part>...]\n",

@@ -1,0 +1,743 @@
+// `fevm_tools witness`: a mainnet block validated by `validate` from another
+// client's proofs. A fevm-replay block directory (`fetch-block` and
+// `fetch-proofs`) becomes a witness case (version 9) for `fevm_lazy`: the
+// block's RLP rebuilt from `eth_getBlockByNumber`, the parent's header from
+// `proofs.json`, the nodes of the parent's `eth_getProof` proofs (`pre`)
+// with the collapse siblings derived from the block's own (`post`), the
+// codes the proofs and traces carry, and mainnet's fork schedule.
+use core::{HashMap, MemBuffer, MemSpan, MemVec, Option}
+use core::hash::keccak256_word
+use std::abi::DynString
+use std::env::{Arg, Args}
+use std::fs::Fs
+use std::io::Stdout
+use std::process::{Command, Input, Redirect, Spawn}
+use std::text
+use std::time::Clock
+use json::{Value, parse}
+use fevm_rlp::{Decoder, Encoder}
+use ingot::{host, named}
+use ingot::conformance::{build_driver, captured, driver_result, hex_bytes, number, put, put_len, to_hex}
+
+// Mainnet's forks from Osaka on: each one's activation timestamp and blob
+// schedule (target, max, update fraction), Osaka's being Prague's. From
+// go-ethereum's params/chainspecs/mainnet.json (osakaTime, bpo1Time,
+// bpo2Time, blobSchedule).
+const MAINNET: [(u64, u64, u64, u64); 3] = [
+    (1764798551, 6, 9, 5007716), (1765290071, 10, 15, 8346193), (1767747671, 14, 21, 11684671),
+]
+
+// The options that follow `witness`.
+pub struct Options {
+    fe: Option<Arg>,
+    executable: Option<Arg>,
+    replay: MemVec<Arg>,
+    out: Arg,
+    level: u8,
+}
+
+impl Options {
+    pub fn parse() -> Result<MemBuffer, Self> uses (args: Args) {
+        var fe: Option<Arg> = Option::None
+        var executable: Option<Arg> = Option::None
+        var replay: MemVec<Arg> = MemVec::new()
+        var out: Option<Arg> = Option::None
+        var level: u8 = 2
+        var i: usize = 2
+        while i < args.count() {
+            let name = args.get(i)
+            i += 1
+            if name == "--replay" {
+                while i < args.count() && !args.get(i).span().starts_with("--") {
+                    replay.push(args.get(i))
+                    i += 1
+                }
+                continue
+            }
+            if i == args.count() { return Result::Err(format!("option ", name, " needs a value")) }
+            let value = args.get(i)
+            i += 1
+            if name == "--fe" {
+                fe = Option::Some(value)
+            } else if name == "--executable" {
+                executable = Option::Some(value)
+            } else if name == "--out" {
+                out = Option::Some(value)
+            } else if name == "--level" && (value == "0" || value == "1" || value == "2") {
+                level = value.span()[0] - b'0'
+            } else {
+                return Result::Err(format!("bad option: ", name, " ", value))
+            }
+        }
+        if fe.is_some() == executable.is_some() {
+            return Result::Err(format!("fevm_tools witness needs one of --fe and --executable"))
+        }
+        match out {
+            Option::Some(out) => if replay.is_empty() {
+                Result::Err(format!("fevm_tools witness needs --replay"))
+            } else {
+                Result::Ok(Options { fe, executable, replay, out, level })
+            },
+            Option::None => Result::Err(format!("fevm_tools witness needs --out")),
+        }
+    }
+}
+
+fn put_fixed(_ rlp: mut Encoder, _ value: Value, _ len: usize) -> Result<MemBuffer, ()> {
+    let word = number(value)?
+    if len < 32 && word >> (len * 8) as u256 != 0 {
+        return Result::Err(format!(value.text(), " does not fit in ", len, " bytes"))
+    }
+    rlp.fixed(word, len)
+    Result::Ok(())
+}
+
+fn put_uint(_ rlp: mut Encoder, _ value: Value) -> Result<MemBuffer, ()> {
+    rlp.uint(number(value)?)
+    Result::Ok(())
+}
+
+fn put_bytes(_ rlp: mut Encoder, _ value: Value) -> Result<MemBuffer, ()> {
+    rlp.bytes(hex_bytes(value.text())?.span())
+    Result::Ok(())
+}
+
+// The RLP so far, which must be whole.
+fn finished(_ rlp: own Encoder) -> Result<MemBuffer, MemBuffer> {
+    match rlp.finish() {
+        Option::Some(bytes) => Result::Ok(bytes),
+        Option::None => Result::Err(format!("RLP allocation failed")),
+    }
+}
+
+// Whether `bytes` hash to `object`'s `hash`, or an error naming `what`.
+fn hashes(_ bytes: MemSpan, _ object: Value, what: DynString) -> Result<MemBuffer, ()> {
+    let hash = number(object["hash"])?
+    if keccak256_word(bytes) != hash {
+        return Result::Err(format!(what, " ", object["hash"].text(), " does not hash to it"))
+    }
+    Result::Ok(())
+}
+
+/// The RLP of `header` as `eth_getBlockByNumber` gives it: Osaka's 21 fields,
+/// so an Amsterdam header fails the check of its hash.
+pub fn header_rlp(_ header: Value) -> Result<MemBuffer, MemBuffer> {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    put_fixed(mut rlp, header["parentHash"], 32)?
+    put_fixed(mut rlp, header["sha3Uncles"], 32)?
+    put_fixed(mut rlp, header["miner"], 20)?
+    put_fixed(mut rlp, header["stateRoot"], 32)?
+    put_fixed(mut rlp, header["transactionsRoot"], 32)?
+    put_fixed(mut rlp, header["receiptsRoot"], 32)?
+    put_bytes(mut rlp, header["logsBloom"])?
+    put_uint(mut rlp, header["difficulty"])?
+    put_uint(mut rlp, header["number"])?
+    put_uint(mut rlp, header["gasLimit"])?
+    put_uint(mut rlp, header["gasUsed"])?
+    put_uint(mut rlp, header["timestamp"])?
+    put_bytes(mut rlp, header["extraData"])?
+    put_fixed(mut rlp, header["mixHash"], 32)?
+    put_fixed(mut rlp, header["nonce"], 8)?
+    put_uint(mut rlp, header["baseFeePerGas"])?
+    put_fixed(mut rlp, header["withdrawalsRoot"], 32)?
+    put_uint(mut rlp, header["blobGasUsed"])?
+    put_uint(mut rlp, header["excessBlobGas"])?
+    put_fixed(mut rlp, header["parentBeaconBlockRoot"], 32)?
+    put_fixed(mut rlp, header["requestsHash"], 32)?
+    rlp.end(list)
+    finished(rlp)
+}
+
+// A transaction's recipient: none for a creation.
+fn put_to(_ rlp: mut Encoder, _ tx: Value) -> Result<MemBuffer, ()> {
+    match tx.get("to") {
+        Option::Some(ref to) => if to.is_null() { rlp.fixed(0, len: 0) } else { put_fixed(mut rlp, to, 20)? },
+        Option::None => rlp.fixed(0, len: 0),
+    }
+    Result::Ok(())
+}
+
+// EIP-2930's access list: each address with its storage keys.
+fn put_access_list(_ rlp: mut Encoder, _ tx: Value) -> Result<MemBuffer, ()> {
+    let list = rlp.begin()
+    for ref entry in tx["accessList"].items() {
+        let item = rlp.begin()
+        put_fixed(mut rlp, entry["address"], 20)?
+        let keys = rlp.begin()
+        for ref key in entry["storageKeys"].items() { put_fixed(mut rlp, key, 32)? }
+        rlp.end(keys)
+        rlp.end(item)
+    }
+    rlp.end(list)
+    Result::Ok(())
+}
+
+// A typed transaction's signature: its y parity, or `v` without one or with
+// a null one.
+fn put_signature(_ rlp: mut Encoder, _ tx: Value) -> Result<MemBuffer, ()> {
+    if let Option::Some(ref parity) = tx.get("yParity") && !parity.is_null() { put_uint(mut rlp, parity)? }
+        else { put_uint(mut rlp, tx["v"])? }
+    put_uint(mut rlp, tx["r"])?
+    put_uint(mut rlp, tx["s"])
+}
+
+/// A transaction as a block carries it, as `eth_getBlockByNumber` gives it:
+/// a legacy one's RLP list, or a typed one's type byte and RLP payload
+/// (EIP-2718), with whether it is typed.
+pub fn transaction(_ tx: Value) -> Result<MemBuffer, (MemBuffer, bool)> {
+    let kind = number(tx["type"])?
+    if kind > 4 { return Result::Err(format!("transaction ", tx["hash"].text(), " has type ", kind)) }
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    if kind != 0 { put_uint(mut rlp, tx["chainId"])? }
+    put_uint(mut rlp, tx["nonce"])?
+    if kind < 2 {
+        put_uint(mut rlp, tx["gasPrice"])?
+    } else {
+        put_uint(mut rlp, tx["maxPriorityFeePerGas"])?
+        put_uint(mut rlp, tx["maxFeePerGas"])?
+    }
+    put_uint(mut rlp, tx["gas"])?
+    put_to(mut rlp, tx)?
+    put_uint(mut rlp, tx["value"])?
+    put_bytes(mut rlp, tx["input"])?
+    if kind == 0 {
+        put_uint(mut rlp, tx["v"])?
+        put_uint(mut rlp, tx["r"])?
+        put_uint(mut rlp, tx["s"])?
+    } else {
+        put_access_list(mut rlp, tx)?
+        if kind == 3 {
+            put_uint(mut rlp, tx["maxFeePerBlobGas"])?
+            let hashes = rlp.begin()
+            for ref hash in tx["blobVersionedHashes"].items() { put_fixed(mut rlp, hash, 32)? }
+            rlp.end(hashes)
+        }
+        if kind == 4 {
+            // EIP-7702: [chain ID, address, nonce, y parity, r, s].
+            let authorizations = rlp.begin()
+            for ref entry in tx["authorizationList"].items() {
+                let item = rlp.begin()
+                put_uint(mut rlp, entry["chainId"])?
+                put_fixed(mut rlp, entry["address"], 20)?
+                put_uint(mut rlp, entry["nonce"])?
+                put_signature(mut rlp, entry)?
+                rlp.end(item)
+            }
+            rlp.end(authorizations)
+        }
+        put_signature(mut rlp, tx)?
+    }
+    rlp.end(list)
+    let payload = finished(rlp)?
+    var bytes = MemBuffer::empty()
+    if kind != 0 { bytes.push(kind.downcast_truncate()) }
+    bytes.extend_from(payload.span())
+    Result::Ok((bytes, kind != 0))
+}
+
+/// The RLP of `block`, as `eth_getBlockByNumber` gives it with its
+/// transactions: its header, transactions, no ommers and withdrawals. The
+/// header and each transaction must hash to their `hash`.
+pub fn block_rlp(_ block: Value) -> Result<MemBuffer, MemBuffer> {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    let header = header_rlp(block)?
+    hashes(header.span(), block, what: "header")?
+    rlp.raw(header.span())
+    let transactions = rlp.begin()
+    for ref tx in block["transactions"].items() {
+        let (bytes, typed) = transaction(tx)?
+        hashes(bytes.span(), tx, what: "transaction")?
+        if typed { rlp.bytes(bytes.span()) } else { rlp.raw(bytes.span()) }
+    }
+    rlp.end(transactions)
+    if !block["uncles"].items().is_empty() { return Result::Err(format!("the block has ommers")) }
+    let ommers = rlp.begin()
+    rlp.end(ommers)
+    let withdrawals = rlp.begin()
+    for ref withdrawal in block["withdrawals"].items() {
+        let item = rlp.begin()
+        put_uint(mut rlp, withdrawal["index"])?
+        put_uint(mut rlp, withdrawal["validatorIndex"])?
+        put_fixed(mut rlp, withdrawal["address"], 20)?
+        put_uint(mut rlp, withdrawal["amount"])?
+        rlp.end(item)
+    }
+    rlp.end(withdrawals)
+    rlp.end(list)
+    finished(rlp)
+}
+
+// Appends a count and then each item with its length.
+fn put_items(_ out: mut MemBuffer, _ items: MemVec<MemBuffer>) -> Result<MemBuffer, ()> {
+    put_len(mut out, items.len())?
+    for ref item in items {
+        put_len(mut out, item.len())?
+        out.extend_from(item.span())
+    }
+    Result::Ok(())
+}
+
+// Appends the bytes of each hex string of `values`, which may be missing,
+// to `items`.
+fn add_hex(_ items: mut MemVec<MemBuffer>, _ values: Value) -> Result<MemBuffer, ()> {
+    for ref value in values.items() { items.push(hex_bytes(value.text())?) }
+    Result::Ok(())
+}
+
+// Adds to `derived` the nodes a deletion may need that `eth_getProof` cannot
+// name: when a branch is left with one child, that child moves up into its
+// place, and the child may be a leaf or an extension under keys no
+// transaction touched. The block's own proof of the deleted key (`post`)
+// ends at the child as it moved up, its path longer by the nibbles it rose.
+// So from each leaf or extension of `node`, a `post` proof's node, this
+// adds the same node with 1 up to all of its path's leading nibbles removed
+// (an extension keeps one), its path re-encoded with its hex-prefix flag and
+// its value or child unchanged; from any other node, nothing.
+fn derive(_ node: MemSpan, _ derived: mut MemVec<MemBuffer>) {
+    let (path, item, whole) = with (node) {
+        var decoder = Decoder::new()
+        let items = mut decoder.list()
+        let path = MemBuffer::from_span(items.bytes())
+        let item = MemBuffer::from_span(items.raw())
+        (path, item, decoder.finish())
+    }
+    // A flag above 3, or an even path's pad nibble set, is no hex-prefix path.
+    if !whole || path.len() == 0 || path[0] >> 4 > 3 || (path[0] & 0x10 == 0 && path[0] & 0xf != 0) { return }
+    let leaf = path[0] >> 4 >= 2
+    var nibbles: MemVec<u8> = MemVec::new()
+    if path[0] & 0x10 != 0 { nibbles.push(path[0] & 0xf) }
+    for index in 1..path.len() {
+        nibbles.push(path[index] >> 4)
+        nibbles.push(path[index] & 0xf)
+    }
+    let kept: usize = if leaf { 0 } else { 1 }
+    if nibbles.len() <= kept { return }
+    for removed in 1..nibbles.len() - kept + 1 {
+        let odd: u8 = ((nibbles.len() - removed) % 2).downcast_truncate()
+        var prefix = MemBuffer::empty()
+        prefix.push((if leaf { 2 } else { 0 } + odd) << 4 | if odd == 1 { nibbles[removed] } else { 0 })
+        var at = removed + odd as usize
+        while at < nibbles.len() {
+            prefix.push(nibbles[at] << 4 | nibbles[at + 1])
+            at += 2
+        }
+        var rlp = Encoder::new()
+        let list = rlp.begin()
+        rlp.bytes(prefix.span())
+        rlp.raw(item.span())
+        rlp.end(list)
+        if let Option::Some(bytes) = rlp.finish() { derived.push(bytes) }
+    }
+}
+
+/// The witness case of a fevm-replay block directory's files: the block
+/// (`block.json`), the chain ID (`chain.json`), the parent's header and
+/// proofs (`proofs.json`), the traces' accounts (`prestate.json`) and the
+/// EIP-7702 delegates' code (`delegates.json`), with how many nodes it
+/// derived. The nodes are those of every account and storage proof at the
+/// end of the parent (`pre`), and those `derive` gives from the block's own
+/// proofs (`post`), whose own nodes are left out. The codes are those of the
+/// proofs' system contracts, of every traced account and of the delegates;
+/// the headers the parent's alone. Integers and lengths are big endian.
+///
+/// Derived nodes cannot mislead: a witness's nodes are read by their hash,
+/// from the parent's state root down, so a string that is no node of the
+/// parent's state is never read.
+pub fn encode(_ block: Value, chain: Value, proofs: Value, prestate: Value, delegates: Value)
+    -> Result<MemBuffer, (MemBuffer, usize)> {
+    let timestamp = number(block["timestamp"])?
+    if timestamp < MAINNET[0].0 as u256 { return Result::Err(format!("fevm runs mainnet blocks from Osaka on")) }
+    let parent = ref proofs["parent"]
+    let parent_hash = number(parent["hash"])?
+    if number(block["parentHash"])? != parent_hash { return Result::Err(format!("the proofs are another block's")) }
+    // The schedule is mainnet's.
+    let chain_id = number(chain["result"])?
+    if chain_id != 1 { return Result::Err(format!("fevm_tools witness runs mainnet blocks, not chain ", chain_id)) }
+    var out = MemBuffer::empty()
+    out.push(9)
+    put(mut out, chain_id, 32)?
+    // Osaka, then each BPO fork, all by Osaka's rules.
+    for index in 0..3 {
+        let (time, target, max, fraction) = MAINNET[index]
+        if index == 1 { put_len(mut out, 2)? }
+        if index != 0 { put(mut out, time as u256, 8)? }
+        out.push(0)
+        out.push(1)
+        for value in [target, max, fraction] { put(mut out, value as u256, 8)? }
+    }
+    put(mut out, parent_hash, 32)?
+    let rlp = block_rlp(block)?
+    put_len(mut out, rlp.len())?
+    out.extend_from(rlp.span())
+    var nodes: MemVec<MemBuffer> = MemVec::new()
+    for ref account in proofs["pre"].items() {
+        add_hex(mut nodes, account["accountProof"])?
+        for ref slot in account["storageProof"].items() { add_hex(mut nodes, slot["proof"])? }
+    }
+    var derived: MemVec<MemBuffer> = MemVec::new()
+    for ref account in proofs["post"].items() {
+        for ref node in account["accountProof"].items() { derive(hex_bytes(node.text())?.span(), mut derived) }
+        for ref slot in account["storageProof"].items() {
+            for ref node in slot["proof"].items() { derive(hex_bytes(node.text())?.span(), mut derived) }
+        }
+    }
+    // The derived nodes that are no `pre` node, each once.
+    var held: HashMap<u256, bool> = HashMap::new()
+    for ref node in nodes { let _ = held.insert(keccak256_word(node.span()), true) }
+    var added: usize = 0
+    for ref node in derived {
+        let hash = keccak256_word(node.span())
+        if !held.contains_key(hash) {
+            let _ = held.insert(hash, true)
+            nodes.push(MemBuffer::from_span(node.span()))
+            added += 1
+        }
+    }
+    var codes: MemVec<MemBuffer> = MemVec::new()
+    if let Option::Some(ref system) = proofs.get("code") {
+        for ref member in system.members() { codes.push(hex_bytes(member.value.text())?) }
+    }
+    for ref traced in prestate["result"].items() {
+        for ref member in traced["result"].members() {
+            if let Option::Some(ref code) = member.value.get("code") { codes.push(hex_bytes(code.text())?) }
+        }
+    }
+    for ref member in delegates["delegates"].members() { codes.push(hex_bytes(member.value.text())?) }
+    let header = header_rlp(parent)?
+    hashes(header.span(), parent, what: "parent header")?
+    var headers: MemVec<MemBuffer> = MemVec::new()
+    headers.push(header)
+    put_items(mut out, nodes)?
+    put_items(mut out, codes)?
+    put_items(mut out, headers)?
+    Result::Ok((out, added))
+}
+
+// The JSON of file `name` of `directory`.
+fn read_json(_ directory: MemSpan, _ name: DynString) -> Result<MemBuffer, Value> uses (fs: Fs) {
+    let path = format!(directory, "/", name)
+    let source = named(path, fs.read(path))?
+    named(path, parse(source.span()))
+}
+
+/// Builds `fevm_lazy` unless given it, runs each directory's witness case
+/// through it, and reports each verdict in `results.json`: the block, the
+/// verdict and how many nodes, codes and headers the witness held and the
+/// validation read. Fails unless every block is valid.
+pub fn run(_ options: Options) -> Result<MemBuffer, ()>
+uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
+{
+    if fs.metadata(options.out).is_ok() { return Result::Err(format!(options.out, " already exists")) }
+    named(options.out, fs.create_dir_all(options.out))?
+    let dir = named(options.out, fs.canonicalize(options.out))?
+    var report = Value::object()
+    report.set("schema", Value::number(1 as u64))
+    report.set("host", Value::string(host()?))
+    report.set("revision", Value::string(captured("git", Command::new("git").arg("rev-parse").arg("HEAD"))?))
+    report.set("level", Value::string(options.level))
+    let executable = build_driver(options.fe, options.executable, "fevm_lazy", level: options.level, dir.span(),
+                                  mut report)?
+    var blocks = Value::array()
+    var invalid: usize = 0
+    for ref directory in options.replay {
+        let path = named(directory, fs.canonicalize(directory))?
+        let block = read_json(path.span(), "block.json")?
+        let result = ref block["result"]
+        let chain = read_json(path.span(), "chain.json")?
+        let proofs = read_json(path.span(), "proofs.json")?
+        let prestate = read_json(path.span(), "prestate.json")?
+        let delegates = read_json(path.span(), "delegates.json")?
+        let (case, derived) = named(path, encode(result, chain, proofs, prestate, delegates))?
+        let output = named(executable, proc.output(
+            Command::new(executable).stdin(Input::Bytes(case)).stdout(Redirect::Capture).stderr(Redirect::Capture),
+        ))?
+        var entry = match driver_result(output, timeout: 0) {
+            Result::Ok(verdict) => verdict,
+            Result::Err(failed) => {
+                var entry = Value::object()
+                entry.set("verdict", Value::string("failed"))
+                var problems = Value::array()
+                for ref problem in failed.problems { problems.push(Value::string(problem)) }
+                entry.set("problems", problems)
+                entry
+            },
+        }
+        entry.set("derived", Value::number(derived))
+        entry.set("directory", Value::string(path))
+        entry.set("number", Value::string(result["number"].text()))
+        entry.set("block", Value::string(result["hash"].text()))
+        let summary = format!(directory, " (", result["number"].text(), "): ", entry)
+        println!(summary)
+        if entry["verdict"].text() != "valid" { invalid += 1 }
+        blocks.push(entry)
+    }
+    report.set("blocks", blocks)
+    var text = MemBuffer::empty()
+    report.write_pretty(mut text, indent: 2)
+    text.push(b'\n')
+    let results = format!(dir, "/results.json")
+    named(results, fs.write(results, text.span()))?
+    if invalid != 0 { return Result::Err(format!(invalid, " of ", options.replay.len(), " blocks are not valid")) }
+    Result::Ok(())
+}
+
+fn sample(_ source: MemSpan) -> Value { parse(source).unwrap() }
+
+// Whether `tx` rebuilds to its hash, and is of type `kind`.
+fn rebuilds(_ tx: Value, kind: u8) -> bool {
+    let (bytes, typed) = transaction(tx).unwrap()
+    let first = bytes.span()[0]
+    typed == (kind != 0) && (if kind == 0 { first >= 0xc0 } else { first == kind })
+        && hashes(bytes.span(), tx, what: "transaction").is_ok()
+}
+
+// Mainnet block 0x19335e5's smallest transaction of each type, and its
+// smallest with an access list. No fixture has a type 1 (EIP-2930)
+// transaction, so that type is checked against no real hash.
+#[test]
+fn transaction_rebuilds_each_type_from_its_hash() {
+    assert!(rebuilds(sample("{\"type\":\"0x0\",\"chainId\":\"0x1\",\"nonce\":\"0xa0\",\"gasPrice\":\"0xb73ba62\",\"gas\":\"0x5208\",\"to\":\"0xf1ba8137932a2f7f8b3a2d37121f90f241795583\",\"value\":\"0x412c5f638da\",\"input\":\"0x\",\"r\":\"0x2c52ebd0dc815038491f080da6c1e8a7064257cf128e2e8f37fd1e91f7622f9e\",\"s\":\"0x21252f8c50bccc42172a66aa59dba5d4a6503f5357cf637d86f120d5194540b2\",\"v\":\"0x26\",\"hash\":\"0x474c58a4a0b5eef9b76757dd7310d013fa1e551a5de5edf2d9913195ab4d0b49\"}".span()), kind: 0) && rebuilds(sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0x0\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span()), kind: 2))
+    assert!(rebuilds(sample("{\"type\":\"0x3\",\"chainId\":\"0x1\",\"nonce\":\"0x11953\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0x12799843\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x0000000000000000000000000000000000ba7c4e\",\"value\":\"0x0\",\"accessList\":[],\"blobVersionedHashes\":[\"0x011a63c85b8fa4d72196f168859a50c08307a2160ecd8197581ee24a9105992d\",\"0x0153ab13054eb38228b97fdfb8350ef7d098c6a8469fe103be15d9a0b3956fd1\",\"0x0139234635248f11c264a30425b0139cbb185d467c1148952c9ca43c699454f5\",\"0x010b03a6af05c8e0fcfb2e6a6fcc6727fcfdb02bf12f21bb7bb150b8abb2cce4\",\"0x01f32448b6c9386f9064f825b27ca834045c844e9c879c42ac9acadfa4de31fa\",\"0x017c37adf9b10e0a9f3a6152499e8c617c63824e918f68c7fff766d37a1cb2bf\"],\"maxFeePerBlobGas\":\"0x77359400\",\"input\":\"0x\",\"r\":\"0x642e09356fed878554bf5b47292c5b3ffd2093eed0444d59eec561158ca4a9c9\",\"s\":\"0x2c8f6fd22f0fc55dc4814a6e7b739c5a97e768b1e9ced3879910fe1c8aaf0a43\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0x1ef05f69e5adddfb8377e28956576bf7eeb6f59a6b2c4f61e6ea72b9c3362793\"}".span()), kind: 3) && rebuilds(sample("{\"type\":\"0x4\",\"chainId\":\"0x1\",\"nonce\":\"0x24d90\",\"gas\":\"0x17700\",\"maxFeePerGas\":\"0xa29296b\",\"maxPriorityFeePerGas\":\"0x1\",\"to\":\"0x3ad10f1426d8320a5588250620de36415ba10df3\",\"value\":\"0x0\",\"accessList\":[],\"authorizationList\":[{\"chainId\":\"0x1\",\"address\":\"0x8a67b5020ee254ef48e3b6a04927f39baf7e408a\",\"nonce\":\"0xab075\",\"yParity\":\"0x0\",\"r\":\"0x68c4c3787d1ec3e1e648d7c789e14d4fb6d04d0078b4f2d18a09ec226854a5f3\",\"s\":\"0x7b4a174d0c56ba5b6ef77a885e5f4bcd1d1a485e54ea381582ad330359f97418\"}],\"input\":\"0x\",\"r\":\"0xbafcbf48e6764dcf4010586ff675776b6f56790ffb74a2cda738129bfb33bc0\",\"s\":\"0x226bccf2cb6e599984a6cf5554f8b224c6e7db1e7ffc88897deed513f0ff059f\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0x984e0e9e5f9274b49fe7f55952382b8e338977fe297a4c9a05dc826c294690ea\"}".span()), kind: 4))
+    assert!(rebuilds(sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0xd69\",\"gas\":\"0x12913a\",\"maxFeePerGas\":\"0xb73f011\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x5f5457685151b87cd029430a3f2508d528535e89\",\"value\":\"0x0\",\"accessList\":[{\"address\":\"0x514910771af9ca656af840dff83e8264ecf986ca\",\"storageKeys\":[\"0x9422ae262bd5bbe8254768a185116d59ff7f53e5e813d9c0ea3840cf28c230a0\",\"0xfc30267268469fb74fb55141b4bc1cc1e72bee03f41bba7adad148ee5ae0373f\",\"0x5f2f47ba7c03fe1be34d7ca63ef11d946c61e2178f61f47f60b8384fb0df1e22\",\"0x41d3137d35f129039037254c8ee82c8c512c8f6fafc5ca1c5116a50768a46ef9\",\"0xcc8f3a44275204d029bb33fd15473dadeda474c66ebff69c478ed1ff7ecd3e66\",\"0xb8cecedcfdc63fc9ebed21d452f2839826fb57245830de93af13ca31919b0f64\"]},{\"address\":\"0x3d38ba27974410679aff73abd096d7ba58870ead\",\"storageKeys\":[\"0x807532f7b08d9ea2405a30d9ea438442e518f01004f28dbea3173dc16e76275b\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbdc\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbd8\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbd9\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbda\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbdb\",\"0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103\",\"0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc\",\"0xad6f8124f6081c2622ab3a16acd47af73d52fe87b755c3f897263c58ba3fdbd7\"]},{\"address\":\"0x7d4e742018fb52e48b08be73d041c18b21de6fb5\",\"storageKeys\":[\"0xfb44bcdd0398172ec04229ecdf2731caab3b9195751a90735b5969e03b3bac03\",\"0x000000000000000000000000000000000000000000000000000000000000000b\",\"0xa31d6dcdaed7644d6a82449e32e74c34e8c78b6243e0c4dbfe7cdc76d26ae766\"]},{\"address\":\"0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45\",\"storageKeys\":[]},{\"address\":\"0x5d4f3c6fa16908609bac31ff148bd002aa6b8c83\",\"storageKeys\":[\"0x0000000000000000000000000000000000000000000000000000000000000004\",\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"0xd2a4bf440a0d5a667ef78ae84a763f3295d11aa1688031e6cb4946d1753ba64d\",\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"0x0000000000000000000000000000000000000000000000000000000000000000\"]},{\"address\":\"0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419\",\"storageKeys\":[\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"0x0000000000000000000000000000000000000000000000000000000000000005\"]},{\"address\":\"0xe296007fd2224651a463667c53cad1e3e182c294\",\"storageKeys\":[\"0x0000000000000000000000000000000000000000000000000000000000000007\",\"0x0000000000000000000000000000000000000000000000000000000000000006\"]},{\"address\":\"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\",\"storageKeys\":[\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"0x4ceb0d202fe187b81b176f8748343ce144222c1508304751ceca272407003c51\",\"0xba9d80d2f136bc428ecd4a0e5b6514cfa7f01c25a06e5c0121201c1d825a652b\",\"0x346d6129103119bda4778be3f74229f93cc22769d12dff732db1f95a4952902a\",\"0xb8aded9824b4a5dbf7d2681fe9caa8a4a0113904fb3f654a5a9feafeeb8ef898\",\"0x4ac36d9cc6ccf9f8f2422df73a2b9f785cb4a6b193a57116e1acd6031ba4c2a6\",\"0x2152d1f752d5b88a3178a813eda1508fbde034f11b826cc92dea66732e3d19a1\",\"0xb7663a786df2517de64a8637f417810a868efe479f0c2573b3639bf2bff5562c\"]},{\"address\":\"0x114c5f7f42fb75b7960aa3e4c327f53288360f58\",\"storageKeys\":[]},{\"address\":\"0xa6cc3c2531fdaa6ae1a3ca84c2855806728693e8\",\"storageKeys\":[\"0x000000000000000000000000000000000000000000000000000000000000004a\",\"0x2022855492fbe5b9e2d37c052aa7b78aabcb67707a5c2652ae89fe3a73dde9a2\",\"0xcec03b40efa19299b56529e3e6f29c8a4b740c89f67986624464a4330d2a51be\",\"0xaa82a06158a5ddcfd0b5afe840c876187a2dcfc1a61ee9195dd01b8862a103e9\",\"0x0000000000000000000000000000000000000000000000000000000000000046\",\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"0x2022855492fbe5b9e2d37c052aa7b78aabcb67707a5c2652ae89fe3a73dde9a3\",\"0xf0bc0015e2fff15c5ed9492e31d673b823fa2fc1f85916aaf4e6a14ea2691f15\",\"0xcec03b40efa19299b56529e3e6f29c8a4b740c89f67986624464a4330d2a51c0\",\"0xaa82a06158a5ddcfd0b5afe840c876187a2dcfc1a61ee9195dd01b8862a103eb\",\"0x0000000000000000000000000000000000000000000000000000000000000100\",\"0x0000000000000000000000000000000000000000000000000000000000000159\",\"0x0000000000000000000000000000000000000000000000000000000000000047\",\"0xf0bc0015e2fff15c5ed9492e31d673b823fa2fc1f85916aaf4e6a14ea2691f16\",\"0x000000000000000000000000000000000000000000000000000000000000004b\",\"0x0000000000000000000000000000000000000000000000000000000000000040\",\"0x0000000000000000000000000000000000000000000000000000000000000000\",\"0x2022855492fbe5b9e2d37c052aa7b78aabcb67707a5c2652ae89fe3a73dde9a4\",\"0x0000000000000000000000000000000000000000000000000000000000000049\",\"0xf0bc0015e2fff15c5ed9492e31d673b823fa2fc1f85916aaf4e6a14ea2691f18\",\"0xaa82a06158a5ddcfd0b5afe840c876187a2dcfc1a61ee9195dd01b8862a103ea\",\"0x000000000000000000000000000000000000000000000000000000000000015a\",\"0x000000000000000000000000000000000000000000000000000000000000001e\",\"0xcec03b40efa19299b56529e3e6f29c8a4b740c89f67986624464a4330d2a51bf\",\"0x0000000000000000000000000000000000000000000000000000000000000004\",\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"0x000000000000000000000000000000000000000000000000000000000000004c\",\"0x000000000000000000000000000000000000000000000000000000000000001f\",\"0x0000000000000000000000000000000000000000000000000000000000000036\",\"0x00000000000000000000000000000000000000000000000000000000000000ff\",\"0x0000000000000000000000000000000000000000000000000000000000000035\",\"0x0000000000000000000000000000000000000000000000000000000000000041\",\"0x2022855492fbe5b9e2d37c052aa7b78aabcb67707a5c2652ae89fe3a73dde9a1\",\"0xf0bc0015e2fff15c5ed9492e31d673b823fa2fc1f85916aaf4e6a14ea2691f17\"]},{\"address\":\"0xbeefc6b9d685993b02712d8de8afb29a31c3faf4\",\"storageKeys\":[\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d35\",\"0x33f3474918b6029a6ee1ddadabb94e779282bb7800e06a29437833898fd7a5ba\",\"0xcb5f2815b4ee54d235d5f787fc6377d5f7c0b494f863127930aacf5d8bdfba9e\",\"0x0fee40513968f97fab406f088d8e9d9cfe7c58a4160726078df74ba03dd14df3\",\"0x0fee40513968f97fab406f088d8e9d9cfe7c58a4160726078df74ba03dd14df4\",\"0xcb5f2815b4ee54d235d5f787fc6377d5f7c0b494f863127930aacf5d8bdfba9f\",\"0x09bc1ff50b765af7abf34174b01528997cca0bba2156c04dba5c89618025d1df\",\"0x09bc1ff50b765af7abf34174b01528997cca0bba2156c04dba5c89618025d1e0\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d31\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d32\",\"0x3e7daa83aecb88096d28124e139baceab7c43dddbe02bed4c7f20d62fd8d5d8e\",\"0x0000000000000000000000000000000000000000000000000000000000000067\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d2c\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d2d\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d2e\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d2f\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d30\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d34\",\"0x3e7daa83aecb88096d28124e139baceab7c43dddbe02bed4c7f20d62fd8d5d8f\",\"0x88de3b73d9fb58cf328bdae40b4fd88ba6afd5ec07f85ec0c648e7f85b480d33\"]},{\"address\":\"0x0000830df56616d58976a12d19d283b40e25beef\",\"storageKeys\":[\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8b\",\"0xcf81cdbc95f2fd0fff5258041768de1c8b7675e83c9fab5dd3872a5f65b39288\",\"0xcf81cdbc95f2fd0fff5258041768de1c8b7675e83c9fab5dd3872a5f65b39284\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8f\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a90\",\"0xcf81cdbc95f2fd0fff5258041768de1c8b7675e83c9fab5dd3872a5f65b39286\",\"0xcf81cdbc95f2fd0fff5258041768de1c8b7675e83c9fab5dd3872a5f65b39285\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a88\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a89\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8a\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8c\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8d\",\"0x3d2eb759f4b609a2cd00886ea3edf91979e2a1627b833c7558daff5d0c688a8e\",\"0xcf81cdbc95f2fd0fff5258041768de1c8b7675e83c9fab5dd3872a5f65b39287\",\"0x0000000000000000000000000000000000000000000000000000000000000066\",\"0x0000000000000000000000000000000000000000000000000000000000000067\"]},{\"address\":\"0xc1c6760f4317c711ded47678ba96fe487db91f91\",\"storageKeys\":[]},{\"address\":\"0xb1f10da39442089f6e216fd144ef6c2f19689170\",\"storageKeys\":[]},{\"address\":\"0x5f06a6b4ec76f620517b720c44fd4db16416ccb3\",\"storageKeys\":[\"0x0000000000000000000000000000000000000000000000000000000000000001\"]},{\"address\":\"0x427142d790bfe92cc51f600f53f713f503310e6b\",\"storageKeys\":[]},{\"address\":\"0x5f5457685151b87cd029430a3f2508d528535e89\",\"storageKeys\":[\"0x000000000000000000000000000000000000000000000000000000000000009b\",\"0x00000000000000000000000000000000000000000000000000000000000000d1\",\"0x00000000000000000000000000000000000000000000000000000000000000d5\",\"0x0000000000000000000000000000000000000000000000000000000000000097\",\"0x00000000000000000000000000000000000000000000000000000000000000d3\",\"0x0000000000000000000000000000000000000000000000000000000000000065\",\"0x000000000000000000000000000000000000000000000000000000000000009e\",\"0x00000000000000000000000000000000000000000000000000000000000000db\",\"0x00000000000000000000000000000000000000000000000000000000000000d4\",\"0x000000000000000000000000000000000000000000000000000000000000009a\",\"0x000000000000000000000000000000000000000000000000000000000000009c\",\"0x00000000000000000000000000000000000000000000000000000000000000d9\",\"0x00000000000000000000000000000000000000000000000000000000000000d6\",\"0x0000000000000000000000000000000000000000000000000000000000000099\",\"0x00000000000000000000000000000000000000000000000000000000000000da\",\"0x000000000000000000000000000000000000000000000000000000000000009d\"]}],\"input\":\"0x0e5c011e00000000000000000000000003d9964f4d93a24b58c0fc3a8df3474b59ba8557\",\"r\":\"0xa12dda241a394a0ff85e3d5daa9a8911d1dbf3fbbeb9e3f4b244c1fc368bf493\",\"s\":\"0x2dc5686a57874ab42afd3115a9534f873fcf99ec4f533b29fc1cf60e342a8cd0\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0x48d5d66a262e6e53c24896ea405dfeb64f3cb82ce5ef9a7b2ce12c580e27a990\"}".span()), kind: 2))
+    // Without a y parity, or with a null one, `v` is the parity.
+    assert!(rebuilds(sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0x0\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span()), kind: 2) && rebuilds(sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0x0\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"yParity\":null,\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span()), kind: 2))
+    // One field off, and the hash is another's.
+    let changed = sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0x1\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span())
+    assert!(hashes(transaction(changed).unwrap().0.span(), changed, what: "transaction").is_err())
+    assert!(transaction(sample("{\"type\":\"0x5\",\"chainId\":\"0x1\",\"nonce\":\"0x0\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span())).err().unwrap().span().ends_with(" has type 5"))
+}
+
+// Block 0x19335e5's parent, 0x19335e4, as `proofs.json` gives it.
+fn parent_header() -> Value {
+    sample("{\"parentHash\":\"0x086804158dbfdd5d9e569a38413133b505fd3a3a3393d4a3c1a2bd577d2183c0\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"miner\":\"0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97\",\"stateRoot\":\"0x550fda63748ec5276f03d0086e6a97c2a2fb09dca39347f6d0c78f95685a7a9b\",\"transactionsRoot\":\"0xb5816aef03c639598c8a05c08df472773aae913eec9cdeaf4a9d3fb18b36f560\",\"receiptsRoot\":\"0x5595c9d890fc69bd75897f1f53bf4b827e85b74a12ada1c2fccb7d69e54f747f\",\"logsBloom\":\"0xffb7b6f1ff7dbfffff57ffffbdd5bf9bdffc7ffef52fbfff3cffffdfffb3bdffacfd7bcffffafffff0fffffbefffabbfffe9dfddbddfedbbfffcbe8f6fedff9effffbdfde3f5f7daadadef6cfdff6faf5b7ed3fffdfe7ef7b9feffbffef77ffd7fddf537fbfedfc9efef2fe97f4fcebdfbfff43dfffeffef76fb7dbfffbfeefbffcb7f7ff7fbfffef2bfffff7ffef5dad5bdb7ad99dadc7fafffbfffdb7c7ffdcfddcff7ffff6bfdfbfbf5ffffcdf6d5fff7fafffffffb7af7ffb7f5d77fded7edef9ffffffbbbfedfdddffffffffdf9fbf79cf7f777f6ffff97df7ef87ffffefa1ffeffbdbe879dee78fdf6fbfff9efafffff7f7bfeffff7f9c75fff36ffd96\",\"difficulty\":\"0x0\",\"number\":\"0x19335e4\",\"gasLimit\":\"0x3938700\",\"gasUsed\":\"0x300d360\",\"timestamp\":\"0x6afa741f\",\"extraData\":\"0x546974616e2028746974616e6275696c6465722e78797a29\",\"mixHash\":\"0x757d28307284c06138f18314af3f678d64765aa9cbc8635812069162831a7e11\",\"nonce\":\"0x0000000000000000\",\"baseFeePerGas\":\"0x92961e8\",\"withdrawalsRoot\":\"0xd7c0ef4874fdc4aa9d83d90545f056e98bce938b19d3e2da186c38ae9ae39fcb\",\"blobGasUsed\":\"0x0\",\"excessBlobGas\":\"0xb1b48f0\",\"parentBeaconBlockRoot\":\"0x223b8ebd1a2fbbaea7d34cf256163d43c01191cf37fc77d812cd9a79f1a21694\",\"requestsHash\":\"0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"hash\":\"0x29e9d95e4d9697a7b8fa678c027796ac80b3b262f6509e38525e908df66ff6e6\"}".span())
+}
+
+#[test]
+fn header_rlp_rebuilds_an_osaka_header() {
+    let header = parent_header()
+    assert!(hashes(header_rlp(header).unwrap().span(), header, what: "header").is_ok())
+    // A field wider than its width is refused, not cut.
+    let wide = sample(format!(format!(header).span().slice(offset: 0, len: format!(header).len() - 1), ",\"miner\":\"0x010000000000000000000000000000000000000000\"}").span())
+    assert!(header_rlp(wide).err().unwrap() == "0x010000000000000000000000000000000000000000 does not fit in 20 bytes")
+}
+
+// The big-endian integer of the four bytes at `at` of `case`.
+fn length_at(_ case: MemBuffer, at: usize) -> usize {
+    var len: usize = 0
+    for byte in case.span().slice(offset: at, len: 4) { len = len << 8 | byte as usize }
+    len
+}
+
+// The items of a count at `at` in `case`, each with its length, and where
+// they end.
+fn items_at(_ case: MemBuffer, at: usize) -> (MemVec<MemBuffer>, usize) {
+    var next = at + 4
+    var items: MemVec<MemBuffer> = MemVec::new()
+    for _ in 0..length_at(case, at) {
+        let len = length_at(case, at: next)
+        items.push(MemBuffer::from_span(case.span().slice(offset: next + 4, len)))
+        next += 4 + len
+    }
+    (items, next)
+}
+
+// The `len` low bytes of `word`.
+fn low_bytes(_ word: u256, len: usize) -> MemBuffer {
+    var out = MemBuffer::empty()
+    out.extend_from_word(word, len)
+    out
+}
+
+// The RLP list of two strings, as a leaf or an extension is.
+fn two_items(_ first: MemBuffer, _ second: MemBuffer) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.bytes(first.span())
+    rlp.bytes(second.span())
+    rlp.end(list)
+    rlp.finish().unwrap()
+}
+
+// A legacy creation of the hand-made blocks, without its hash.
+fn creation_fields() -> DynString { "\"type\":\"0x0\",\"nonce\":\"0x1\",\"gasPrice\":\"0x2\",\"gas\":\"0x5208\",\"to\":null,\"value\":\"0x3\",\"input\":\"0x6000\",\"v\":\"0x1b\",\"r\":\"0x4\",\"s\":\"0x5\"" }
+
+// The header fields of a hand-made block 0x19335e5 at `timestamp` on
+// `parent_hash`.
+fn header_fields(_ timestamp: DynString, _ parent_hash: MemSpan) -> MemBuffer {
+    format!("\"parentHash\":\"", parent_hash, "\",\"sha3Uncles\":\"0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347\",\"miner\":\"0x01\",\"stateRoot\":\"0x02\",\"transactionsRoot\":\"0x03\",\"receiptsRoot\":\"0x04\",\"logsBloom\":\"", to_hex(MemBuffer::new(256).span()), "\",\"difficulty\":\"0x0\",\"number\":\"0x19335e5\",\"gasLimit\":\"0x3938700\",\"gasUsed\":\"0x5208\",\"timestamp\":\"", timestamp, "\",\"extraData\":\"0x\",\"mixHash\":\"0x05\",\"nonce\":\"0x0000000000000000\",\"baseFeePerGas\":\"0x7\",\"withdrawalsRoot\":\"0x06\",\"blobGasUsed\":\"0x0\",\"excessBlobGas\":\"0x0\",\"parentBeaconBlockRoot\":\"0x07\",\"requestsHash\":\"0x08\"")
+}
+
+// A hand-made block of `fields`, with its hash, its transactions the JSON
+// objects of `transactions` and its ommers `uncles`, and two withdrawals.
+fn hand_made(_ fields: MemBuffer, _ transactions: MemBuffer, _ uncles: DynString) -> Value {
+    let header = header_rlp(sample(format!("{", fields, "}").span())).unwrap()
+    sample(format!("{", fields, ",\"hash\":\"0x", text::hex(keccak256_word(header.span()), 32), "\",\"uncles\":", uncles, ",\"transactions\":[", transactions, "],\"withdrawals\":[{\"index\":\"0x1\",\"validatorIndex\":\"0x2\",\"address\":\"0x03\",\"amount\":\"0x4\"},{\"index\":\"0x5\",\"validatorIndex\":\"0x6\",\"address\":\"0x07\",\"amount\":\"0x8\"}]}").span())
+}
+
+// The legacy creation with its hash.
+fn creation() -> MemBuffer {
+    let (bytes, _) = transaction(sample(format!("{", creation_fields(), "}").span())).unwrap()
+    format!("{", creation_fields(), ",\"hash\":\"0x", text::hex(keccak256_word(bytes.span()), 32), "\"}")
+}
+
+#[test]
+fn block_rlp_holds_the_block_in_order() {
+    // The legacy creation, and block 0x19335e5's smallest EIP-1559 transfer.
+    let fields = header_fields("0x6b000000", parent_header()["hash"].text())
+    let header = header_rlp(sample(format!("{", fields, "}").span())).unwrap()
+    let dynamic = sample("{\"type\":\"0x2\",\"chainId\":\"0x1\",\"nonce\":\"0x0\",\"gas\":\"0x5208\",\"maxFeePerGas\":\"0xbc3a41f\",\"maxPriorityFeePerGas\":\"0x35af\",\"to\":\"0x253dd57300904225762960755b7662e6ae06492d\",\"value\":\"0x29e8af4ff32faa\",\"accessList\":[],\"input\":\"0x\",\"r\":\"0x64e3916551df79b8cf842e8d38a63dbd34bc9057075433c3ebc2047a47d12e2\",\"s\":\"0xa407140e7acd6ccc8c43a70432e42023ce711977448632c196410f2a36cf60a\",\"yParity\":\"0x0\",\"v\":\"0x0\",\"hash\":\"0xd99734e130a982eb89f113c963162f023cf412f29abf66ac3ef673f3429bd819\"}".span())
+    let rlp = block_rlp(hand_made(fields, format!(creation(), ",", dynamic), "[]")).unwrap()
+    let span = rlp.span()
+    with (span) {
+        var items = Decoder::new()
+        let body = mut items.list()
+        assert!(body.raw() == header.span())
+        let transactions = mut body.list()
+        // The legacy one as a list, whose recipient is the empty string.
+        assert!(transactions.is_list())
+        let legacy = transactions.raw()
+        with (legacy) {
+            var tx = Decoder::new()
+            let fields = mut tx.list()
+            assert!(fields.uint() == 1 && fields.uint() == 2 && fields.uint() == 0x5208)
+            let to = fields.raw()
+            assert!(to.len() == 1 && to[0] == 0x80)
+        }
+        // The typed one as a string of its type and payload.
+        assert!(!transactions.is_list())
+        let typed = transactions.bytes()
+        assert!(typed[0] == 2 && keccak256_word(typed) == number(dynamic["hash"]).unwrap() && transactions.is_empty())
+        assert!(body.list().is_empty())
+        let withdrawals = mut body.list()
+        for (index, validator, address, amount) in [(1 as u64, 2 as u64, 3 as u256, 4 as u64), (5, 6, 7, 8)] {
+            let withdrawal = mut withdrawals.list()
+            assert!(withdrawal.u64() == index && withdrawal.u64() == validator && withdrawal.fixed(20) == address)
+            assert!(withdrawal.u64() == amount && withdrawal.is_empty())
+        }
+        assert!(withdrawals.is_empty() && body.is_empty() && items.finish())
+    }
+    let ommers = hand_made(fields, creation(), "[\"0x01\"]")
+    assert!(block_rlp(ommers).err().unwrap() == "the block has ommers")
+}
+
+// What `derive` gives of `node`.
+fn derived_of(_ node: MemBuffer) -> MemVec<MemBuffer> {
+    var derived: MemVec<MemBuffer> = MemVec::new()
+    derive(node.span(), mut derived)
+    derived
+}
+
+#[test]
+fn derive_lifts_leaves_and_extensions() {
+    // A leaf of nibbles 7, 1, 3 and b, to an odd path, an even one, an odd
+    // one again, and no nibbles.
+    let value = low_bytes(u256::max(), len: 32)
+    let leaf = derived_of(two_items(low_bytes(0x20713b, len: 3), value))
+    assert!(leaf.len() == 4 && leaf[0] == two_items(low_bytes(0x313b, len: 2), value))
+    assert!(leaf[1] == two_items(low_bytes(0x203b, len: 2), value) && leaf[2] == two_items(low_bytes(0x3b, len: 1), value))
+    assert!(leaf[3] == two_items(low_bytes(0x20, len: 1), value))
+    // An extension of nibbles 1 to 4 keeps one: to an odd path, an even one
+    // and an odd one.
+    let child = low_bytes(0x22, len: 32)
+    let extension = derived_of(two_items(low_bytes(0x001234, len: 3), child))
+    assert!(extension.len() == 3 && extension[0] == two_items(low_bytes(0x1234, len: 2), child))
+    assert!(extension[1] == two_items(low_bytes(0x0034, len: 2), child) && extension[2] == two_items(low_bytes(0x14, len: 1), child))
+    // An extension over an inline branch keeps the branch a list.
+    var branch = Encoder::new()
+    let list = branch.begin()
+    for _ in 0..17 { branch.fixed(0, len: 0) }
+    branch.end(list)
+    let branch = branch.finish().unwrap()
+    var over = Encoder::new()
+    let list = over.begin()
+    over.bytes(low_bytes(0x0012, len: 2).span())
+    over.raw(branch.span())
+    over.end(list)
+    let inline = derived_of(over.finish().unwrap())
+    var expected = Encoder::new()
+    let list = expected.begin()
+    expected.bytes(low_bytes(0x12, len: 1).span())
+    expected.raw(branch.span())
+    expected.end(list)
+    assert!(inline.len() == 1 && inline[0] == expected.finish().unwrap())
+    // An even path with its pad nibble set, a branch and a string give none.
+    assert!(derived_of(two_items(low_bytes(0x0512, len: 2), child)).is_empty())
+    assert!(derived_of(two_items(low_bytes(0x2512, len: 2), value)).is_empty())
+    assert!(derived_of(branch).is_empty() && derived_of(low_bytes(0x8101, len: 2)).is_empty())
+}
+
+// A hand-made directory: a block of one legacy creation and two withdrawals
+// on block 0x19335e5's parent, proofs, traces and a delegate.
+#[test]
+fn encode_writes_the_witness_case() {
+    let parent = parent_header()
+    let block = hand_made(header_fields("0x6b000000", parent["hash"].text()), creation(), "[]")
+    // A storage branch whose children at 3 and e are leaves: the block
+    // clears e, and the leaf at 3 moves up a nibble. The post proof ends at
+    // it as it moved, `moved`; the branch names it as it stood, `sibling`.
+    // Another post leaf, `other`, shares the moved one's last nibbles, and
+    // a pre node is one of what they give.
+    let ones = low_bytes(u256::max(), len: 32)
+    let sibling = two_items(low_bytes(0x20713b, len: 3), ones)
+    let moved = two_items(low_bytes(0x33713b, len: 3), ones)
+    let other = two_items(low_bytes(0x20913b, len: 3), ones)
+    let known = two_items(low_bytes(0x3b, len: 1), ones)
+    var branch = Encoder::new()
+    let list = branch.begin()
+    for digit in 0..17 {
+        if digit == 3 { branch.fixed(keccak256_word(sibling.span()), len: 32) }
+            else if digit == 14 { branch.bytes(low_bytes(0x11, len: 32).span()) } else { branch.fixed(0, len: 0) }
+    }
+    branch.end(list)
+    let branch = branch.finish().unwrap()
+    // And an extension of nibbles 1 and 2 in a post proof, which may have
+    // risen one.
+    let extension = two_items(low_bytes(0x0012, len: 2), low_bytes(0x22, len: 32))
+    let risen = two_items(low_bytes(0x12, len: 1), low_bytes(0x22, len: 32))
+    let proofs = sample(format!("{\"parent\":", parent, ",\"pre\":[{\"accountProof\":[\"0x01\",\"0x0203\"],\"storageProof\":[{\"key\":\"0x0\",\"value\":\"0x1\",\"proof\":[\"0x04\",\"", to_hex(branch.span()), "\",\"", to_hex(known.span()), "\"]}]}],\"post\":[{\"accountProof\":[\"0x05\",\"", to_hex(extension.span()), "\"],\"storageProof\":[{\"key\":\"0x0\",\"value\":\"0x0\",\"proof\":[\"", to_hex(branch.span()), "\",\"", to_hex(moved.span()), "\"]},{\"key\":\"0x1\",\"value\":\"0x1\",\"proof\":[\"", to_hex(other.span()), "\"]}]}],\"code\":{\"0x01\":\"0x6000\"}}").span())
+    let prestate = sample("{\"result\":[{\"txHash\":\"0x01\",\"result\":{\"0x02\":{\"balance\":\"0x0\",\"code\":\"0x6001\"},\"0x03\":{\"balance\":\"0x1\"}}}]}".span())
+    let delegates = sample("{\"delegates\":{\"0x04\":\"0x6002\"}}".span())
+    let chain = sample("{\"result\":\"0x1\"}".span())
+    let (case, derived) = encode(block, chain, proofs, prestate, delegates).unwrap()
+    // Version 9, chain 1; Osaka with Prague's blobs, then BPO1 and BPO2 from
+    // their times; the parent's hash; the block.
+    let schedule: DynString = "0x09000000000000000000000000000000000000000000000000000000000000000100010000000000000006000000000000000900000000004c69640000000200000000693830570001000000000000000a000000000000000f00000000007f5a5100000000695db0570001000000000000000e00000000000000150000000000b24b3f"
+    assert!(to_hex(case.span().slice(offset: 0, len: 131)).span() == schedule.span())
+    assert!(case.span().slice(offset: 131, len: 32).read_word(0) == number(parent["hash"]).unwrap())
+    let len = length_at(case, at: 163)
+    assert!(case.span().slice(offset: 167, len) == block_rlp(block).unwrap().span())
+    let (nodes, at) = items_at(case, at: 167 + len)
+    let (codes, at) = items_at(case, at)
+    let (headers, at) = items_at(case, at)
+    // The pre proofs' 5 nodes and not the post's, then those derived, each
+    // once and none a pre node: the moved leaf with each of its 5 nibbles
+    // removed but the 3 known, the first the node the branch names, and
+    // `other`'s 4 all among them; the extension with its first.
+    assert!(nodes.len() == 5 + 5 && derived == 5 && nodes[1] == hex_bytes("0x0203".span()).unwrap())
+    var named_sibling = false
+    var found_risen = false
+    var copies: usize = 0
+    for ref node in nodes {
+        assert!(node != moved && node != extension && node != other)
+        named_sibling = named_sibling || keccak256_word(node.span()) == keccak256_word(sibling.span())
+        found_risen = found_risen || node == risen
+        if node == known { copies += 1 }
+    }
+    assert!(named_sibling && found_risen && copies == 1)
+    // Codes from the proofs, the traced accounts that have it and the
+    // delegates; the parent's header.
+    assert!(codes.len() == 3 && codes[2] == hex_bytes("0x6002".span()).unwrap() && headers.len() == 1)
+    assert!(at == case.len() && keccak256_word(headers[0].span()) == number(parent["hash"]).unwrap())
+    // The same block from before Osaka, on another parent, and the proofs of
+    // another chain.
+    let early = hand_made(header_fields("0x1", parent["hash"].text()), creation(), "[]")
+    assert!(encode(early, chain, proofs, prestate, delegates).err().unwrap() == "fevm runs mainnet blocks from Osaka on")
+    let orphan = hand_made(header_fields("0x6b000000", "0x01".span()), creation(), "[]")
+    assert!(encode(orphan, chain, proofs, prestate, delegates).err().unwrap() == "the proofs are another block's")
+    let sepolia = sample("{\"result\":\"0xaa36a7\"}".span())
+    let refused = encode(block, chain: sepolia, proofs, prestate, delegates).err().unwrap()
+    assert!(refused == "fevm_tools witness runs mainnet blocks, not chain 11155111")
+}

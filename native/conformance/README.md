@@ -168,3 +168,78 @@ classified as a verdict. All 44,932 tests of `tests@v21.0.3` pass: 56,165
 blocks validated, of which 72 read an ancestor's header; 51,602 runs without
 a node and as many without a code (4,563 of each skipped), and 56,163
 without a header (2 skipped).
+
+## Mainnet blocks from another client's proofs
+
+`fevm_tools witness` validates mainnet blocks with `validate` from what
+another client gives: a block directory of
+[fevm-replay](https://github.com/PugarHuda/fevm-replay)'s `fetch-block` and
+`fetch-proofs`, such as the two in its `fixtures/proven`:
+
+```sh
+mkdir -p native/out/replay && tar -xzf <fevm-replay>/fixtures/proven/0x19335e5.tar.gz -C native/out/replay
+native/out/tools/fevm_tools witness --fe native/out/toolchain/bin/fe \
+  --replay native/out/replay/0x19335e5 --out native/out/witness-run
+```
+
+`--replay` takes one or more directories; `--fe` builds `fevm_lazy`, or
+`--executable` reuses a built one, and `--level` sets its optimization
+level. For each directory the runner builds a witness case:
+
+- the block's RLP, rebuilt from `block.json` (`eth_getBlockByNumber` with
+  its transactions): the header, each transaction in its block form
+  (legacy, and EIP-2930, EIP-1559, blob and EIP-7702 ones as their type
+  byte and payload), no ommers and the withdrawals. The header must hash to
+  the block's hash and each transaction to its own; `validate` then checks
+  the transactions and withdrawals roots;
+- the parent's header, rebuilt from `proofs.json`'s `parent` and checked by
+  its hash, the only header, as the directory holds no ancestors;
+- as trie nodes, every node of the parent's account and storage proofs
+  (`pre`, EIP-1186), and the nodes derived from the block's own proofs
+  (`post`), below, whose own nodes are left out;
+- as codes, the system contracts' code in `proofs.json`, and every code in
+  the traces (`prestate.json`) and of the EIP-7702 delegates
+  (`delegates.json`);
+- mainnet's forks from Osaka, as go-ethereum's
+  `params/chainspecs/mainnet.json` gives them: Osaka from 1,764,798,551
+  with Prague's blobs (6, 9, 5,007,716), BPO1 from 1,765,290,071 (10, 15,
+  8,346,193) and BPO2 from 1,767,747,671 (14, 21, 11,684,671). A block
+  before Osaka is refused.
+
+The case (version 9) is the chain ID, the fork schedule as a blockchain
+test has it, the parent's hash, the block's RLP, and the nodes, codes and
+headers, each a count and then each item with its length. `fevm_lazy` runs
+`validate` once on it and prints the verdict: `valid` with the block's
+`hash`, `invalid` with its `reason` (and `transaction`), or `witness` with
+what it `lacks` (`header`, `node`, `malformed_node`, `code`) and its `hash`;
+then `nodes`, `codes` and `headers`, each how many the witness held and how
+many the validation read. A host failure prints only `host_error`.
+`results.json` lists each block with its verdict; the runner fails unless
+every block is valid.
+
+A deletion that leaves a branch with one child moves that child up into
+its place, and when the child is a leaf or an extension under keys no
+transaction touched, `eth_getProof` cannot name it: the parent's proofs
+lack it, and the block's own proof of the deleted key ends at it as it
+moved up, its path longer by the nibbles it rose. So from each leaf and
+extension of the `post` proofs the runner derives the same node with one up
+to all of its path's leading nibbles removed (an extension keeps one), its
+path re-encoded with its hex-prefix flag and its value or child unchanged,
+and adds those that are no `pre` node; `results.json` counts them as
+`derived`. That is sound whatever the derived nodes are: a witness's nodes
+are read by their hash, from the parent's state root down, so a string that
+is no node of the parent's state is never read. A sibling that is a branch
+cannot be derived: it stays where it is, under a new or longer extension,
+so the proof of the deleted key stops at that extension and never holds the
+branch. The trie must still read it to learn that it is a branch, so such a
+block lacks it (`Lack::Node`).
+
+Block `0x19335e5` of fevm-replay's `fixtures/proven` is valid this way, its
+hash `0x633b9cae…2ccd6`: of 39,462 nodes (2,969 from `pre`, 36,493
+derived) the validation read 2,973, all of `pre` and 4 derived, the
+siblings of the block's collapses, such as a USDC storage leaf the block's
+clearing of a slot pulls up; and 77 of 83 codes and the parent's header.
+Without the derived nodes it lacks that leaf as the changes go into the
+trie. Block `0x192f56b` cannot be validated from its directory: its proofs,
+fetched before fevm-replay proved the system contracts, hold none of them,
+so its first system call lacks the beacon roots contract's account.

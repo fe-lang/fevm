@@ -918,7 +918,7 @@ fn file_sha256(_ path: MemSpan) -> Result<MemBuffer, MemBuffer> uses (fs: Fs) {
 }
 
 // Runs `command` and returns what it wrote, without its trailing whitespace.
-fn captured(_ what: String<3>, _ command: own Command) -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
+pub fn captured(_ what: String<3>, _ command: own Command) -> Result<MemBuffer, MemBuffer> uses (proc: mut Spawn) {
     Result::Ok(trimmed(succeed(what, command.stdout(Redirect::Capture))?.stdout))
 }
 
@@ -930,6 +930,48 @@ fn default_jobs() -> Result<MemBuffer, u64> uses (proc: mut Spawn) {
         Option::None => 1,
     }
     Result::Ok(if count > 3 { count - 2 } else { 1 })
+}
+
+// The driver `driver` built with the compiler `fe` at `level` into `dir`'s
+// `build`, or the already built `executable`: its path. Notes in `report`
+// the compiler, the build's time and the driver's hash.
+pub fn build_driver(_ fe: Option<Arg>, _ executable: Option<Arg>, _ driver: DynString, level: u8, _ dir: MemSpan,
+                    _ report: mut Value) -> Result<MemBuffer, MemBuffer>
+uses (fs: mut Fs, proc: mut Spawn, clock: Clock)
+{
+    let executable = match fe {
+        Option::Some(ref fe) => {
+            let compiler = named(fe, fs.canonicalize(fe))?
+            report.set("compiler_sha256", Value::string(file_sha256(compiler.span())?))
+            report.set("compiler_version", Value::string(captured("fe", Command::new(compiler).arg("--version"))?))
+            let started = clock.instant()
+            let build = format!(dir, "/build")
+            succeed(
+                format!("fe build, see ", dir, "/build.log"),
+                Command::new(compiler)
+                    .arg("build")
+                    .arg(".")
+                    .arg("--ingot")
+                    .arg(driver)
+                    .arg("--backend")
+                    .arg("native")
+                    .arg("-O")
+                    .arg(level)
+                    .arg("--out-dir")
+                    .arg(build)
+                    .stdout(Redirect::File(format!(dir, "/build.log")))
+                    .stderr(Redirect::Stdout),
+            )?
+            report.set("build_seconds", seconds(clock.instant().duration_since(started)))
+            format!(build, "/", driver)
+        },
+        Option::None => match executable {
+            Option::Some(ref path) => named(path, fs.canonicalize(path))?,
+            Option::None => return Result::Err(format!("no driver to run")),
+        },
+    }
+    report.set("executable_sha256", Value::string(file_sha256(executable.span())?))
+    Result::Ok(executable)
 }
 
 // Builds the driver unless given one, runs every case of the fixtures for the
@@ -971,39 +1013,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         select.push(Value::string(part))
     }
     report.set("select", select)
-    let executable = match options.fe {
-        Option::Some(ref fe) => {
-            let compiler = named(fe, fs.canonicalize(fe))?
-            report.set("compiler_sha256", Value::string(file_sha256(compiler.span())?))
-            report.set("compiler_version", Value::string(captured("fe", Command::new(compiler).arg("--version"))?))
-            let started = clock.instant()
-            let build = format!(dir, "/build")
-            let driver: DynString = if options.lazy { "fevm_lazy" } else { "fevm_conformance" }
-            succeed(
-                format!("fe build, see ", dir, "/build.log"),
-                Command::new(compiler)
-                    .arg("build")
-                    .arg(".")
-                    .arg("--ingot")
-                    .arg(driver)
-                    .arg("--backend")
-                    .arg("native")
-                    .arg("-O")
-                    .arg(options.level)
-                    .arg("--out-dir")
-                    .arg(build)
-                    .stdout(Redirect::File(format!(dir, "/build.log")))
-                    .stderr(Redirect::Stdout),
-            )?
-            report.set("build_seconds", seconds(clock.instant().duration_since(started)))
-            format!(build, "/", driver)
-        },
-        Option::None => match options.executable {
-            Option::Some(ref path) => named(path, fs.canonicalize(path))?,
-            Option::None => return Result::Err(format!("no driver to run")),
-        },
-    }
-    report.set("executable_sha256", Value::string(file_sha256(executable.span())?))
+    let driver: DynString = if options.lazy { "fevm_lazy" } else { "fevm_conformance" }
+    let executable = build_driver(options.fe, options.executable, driver, level: options.level, dir.span(), mut report)?
     let files = fixture_files(fixtures.span(), options.select)?
     let started = clock.instant()
     var lines: MemVec<MemBuffer> = MemVec::new()
