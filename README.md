@@ -17,7 +17,7 @@ The repo is a Fe workspace:
 - `ingots/precompiles`: the precompiled contracts, which Amsterdam keeps
 - `ingots/rlp`: RLP encoding and strict decoding
 - `ingots/chain`: the chain layer, which decodes, validates and imports
-  blocks
+  blocks, or validates one from a witness
 - `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state and blockchain test drivers, and
   `fevm_lazy`, which runs state tests again over a lazy world
@@ -256,6 +256,44 @@ gives no root.
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks
 before Osaka are not implemented.
+
+### Stateless validation
+
+`validate` judges a block as `Chain::import` does, from the block, its
+parent's hash and a `Witness`, holding no other state:
+
+```fe
+var witness = Witness::new()
+witness.node(rlp)       // a node of the parent's state trie
+witness.code(code)      // the code of an account
+witness.header(rlp)     // the parent's header, or an ancestor's
+match validate(block_rlp, parent_hash, mut witness, schedule, chain_id: 1, mut tracer) {
+    Verdict::Valid(validated) => {},   // validated.header, .receipts, .output
+    Verdict::Invalid(reason) => {},    // the rule the block breaks, as `Chain::import` names it
+    Verdict::Witness(lack) => {},      // the witness cannot decide the block
+    Verdict::Failed(failure) => {},    // a host failure: no verdict
+}
+```
+
+A witness holds trie nodes, codes and headers, each by its keccak256, added
+in any order, extras allowed. `validate` checks the block's size and
+decoding, takes as its parent the header that hashes to `parent_hash`, and
+checks the block's header against it: a block whose own parent hash is
+another fails as it does in `Chain`. It runs the block over a world that
+reads the parent's state from the witness: accounts and slots from the
+partial state trie of the parent's state root, code by its hash, and for
+BLOCKHASH the hash of an older block by walking back from the parent, one
+header a block, only as far as asked. Of each ancestor it reads only the
+first field, its parent's hash, so an ancestor need not be an Osaka header.
+It then sets the block's changes in that trie and compares the roots and
+values with the header, sharing `Chain`'s code for each step. `Valid` means
+the block is valid if its parent is. A node, code or header the run needs
+and the witness lacks, or a malformed node, is `Verdict::Witness` with the
+first of them (`Lack`); an allocation failure is `Failed`. `validate`
+leaves each item it read marked in the witness: the nodes on the paths the
+block read or changed, the code it ran, the parent's header and the
+ancestors' a BLOCKHASH needed, so a host can cut a witness down to what a
+block used. It uses no file, process, network or clock.
 
 ### Forks
 

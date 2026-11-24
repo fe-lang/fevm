@@ -1,0 +1,661 @@
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
+use fevm::{Block, BlockError, Config, Evm, SourceError, StateSource, WorldState}
+use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
+use fevm::status::OK
+use fevm_rlp::{Decoder, Encoder}
+use keccak::keccak256_word
+use ingot::chain::InvalidBlock
+use ingot::header::{Header, HeaderError}
+use ingot::schedule::Schedule
+use ingot::state_trie::{Nodes, StateTrie, TrieFault}
+use ingot::trie::{hash, put_path, state_root}
+use ingot::witness::{Lack, Verdict, Witness, WitnessState, validate}
+
+// keccak256(rlp([])), the ommers hash of a block without ommers.
+const EMPTY_OMMERS_HASH: u256 = 0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347
+// SHA-256 of no bytes, the requests hash of a block without requests.
+const NO_REQUESTS_HASH: u256 = 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+const BEACON_ROOTS: u256 = 0x000f3df6d732807ef1319fb7b8bb8522d0beac02
+const HISTORY_STORAGE: u256 = 0x0000f90827f1c53a10cb7a02335b175320002935
+const WITHDRAWAL_REQUESTS: u256 = 0x00000961ef480eb55e80d19ad83579a64c007002
+const CONSOLIDATION_REQUESTS: u256 = 0x0000bbddc7ce488642fb579f8b00f3a590007251
+
+// The RLP of an Osaka header of block `number`, a valid child of the one
+// before without transactions, requests or withdrawals: a gas limit of
+// 30,000,000, none used, a base fee of 7, a timestamp of 12 a block, and its
+// parent's hash and its state root; zero or empty otherwise.
+fn osaka_header(parent_hash: u256, number: usize, state_root: u256) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.fixed(parent_hash, len: 32)
+    rlp.fixed(EMPTY_OMMERS_HASH, len: 32)
+    rlp.fixed(0, len: 20)
+    rlp.fixed(state_root, len: 32)
+    for root in [EMPTY_ROOT, EMPTY_ROOT] { rlp.fixed(root, len: 32) }
+    rlp.bytes(MemBuffer::new(256).span())
+    rlp.uint(0)
+    rlp.uint(number as u256)
+    rlp.uint(30_000_000)
+    rlp.uint(0)
+    rlp.uint(12 * number as u256 + 12)
+    rlp.bytes(MemBuffer::empty().span())
+    rlp.fixed(0, len: 32)
+    rlp.fixed(0, len: 8)
+    rlp.uint(7)
+    rlp.fixed(EMPTY_ROOT, len: 32)
+    rlp.uint(0)
+    rlp.uint(0)
+    rlp.fixed(0, len: 32)
+    rlp.fixed(NO_REQUESTS_HASH, len: 32)
+    rlp.end(list)
+    rlp.finish().unwrap()
+}
+
+// The RLP of a header that is not one of Osaka or later: its parent's hash
+// and its number.
+fn old_header(parent_hash: u256, number: usize) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.fixed(parent_hash, len: 32)
+    rlp.uint(number as u256)
+    rlp.end(list)
+    rlp.finish().unwrap()
+}
+
+// The headers of blocks 0 to `count` - 1, each the parent of the next: old
+// ones, then the last, an Osaka one with `state_root`.
+fn headers(count: usize, state_root: u256) -> MemVec<MemBuffer> {
+    var headers: MemVec<MemBuffer> = MemVec::new()
+    var parent_hash: u256 = 0
+    for number in 0..count {
+        let rlp = if number + 1 == count { osaka_header(parent_hash, number, state_root) }
+            else { old_header(parent_hash, number) }
+        parent_hash = keccak256_word(rlp.span())
+        headers.push(rlp)
+    }
+    headers
+}
+
+fn hash_of(_ headers: MemVec<MemBuffer>, _ number: usize) -> u256 { keccak256_word(headers[number].span()) }
+
+// Whether `nodes` marks as read exactly the headers of blocks from `from`
+// to before `to`, of `headers`.
+fn read(_ nodes: Nodes, _ headers: MemVec<MemBuffer>, from: usize, to: usize) -> bool {
+    var hashes: MemVec<u256> = MemVec::new()
+    for ref header in headers { hashes.push(keccak256_word(header.span())) }
+    for at in 0..nodes.len() {
+        let hash = keccak256_word(nodes.node(at))
+        var number = headers.len()
+        for index in 0..headers.len() {
+            if hashes[index] == hash { number = index }
+        }
+        if nodes.used(at) != (number >= from && number < to) { return false }
+    }
+    true
+}
+
+// The state after the last of `chain`, an empty one, with its headers but
+// for the one of block `without`, from the last to the first if
+// `backwards`, and `extras`.
+fn walker(_ chain: MemVec<MemBuffer>, without: usize, backwards: bool, _ extras: MemVec<MemBuffer>) -> WitnessState {
+    var nodes = Nodes::new()
+    for index in 0..chain.len() {
+        let at = if backwards { chain.len() - 1 - index } else { index }
+        if at != without { core::assert(nodes.add(chain[at].span())) }
+    }
+    for ref extra in extras { core::assert(nodes.add(extra.span())) }
+    let parent = Header::decode(chain[chain.len() - 1].span()).unwrap()
+    WitnessState::new(parent, Nodes::new(), codes: Nodes::new(), headers: nodes)
+}
+
+// Whether `state` gives `hash` for block `number`.
+fn gives(_ state: mut WitnessState, number: usize, hash: u256) -> bool {
+    match state.block_hash(number as u256) {
+        Result::Ok(given) => given == hash,
+        Result::Err(_) => false,
+    }
+}
+
+fn lacks_header(_ state: WitnessState, _ hash: u256) -> bool {
+    match state.lack() {
+        Option::Some(Lack::Header(lacked)) => lacked == hash,
+        _ => false,
+    }
+}
+
+#[test]
+fn witness_walks_back_to_block_zero() {
+    // Blocks 0 to 4: from the parent, 4, each header gives its parent's
+    // hash, down to block 0's, from block 1's header.
+    let chain = headers(count: 5, state_root: EMPTY_ROOT)
+    var state = walker(chain, without: 5, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 0, hash: hash_of(chain, 0)))
+    for number in 0..5 { core::assert(gives(mut state, number, hash: hash_of(chain, number))) }
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 1, to: 5))
+    // In any order, with extras, which are not read.
+    var extras: MemVec<MemBuffer> = MemVec::new()
+    extras.push(old_header(parent_hash: 1, number: 7))
+    extras.push(osaka_header(parent_hash: 2, number: 3, state_root: EMPTY_ROOT))
+    var state = walker(chain, without: 5, backwards: true, extras)
+    core::assert(gives(mut state, number: 0, hash: hash_of(chain, 0)) && state.lack().is_none())
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 1, to: 5))
+    // Of the genesis block's child, only the genesis block's own.
+    let genesis = headers(count: 1, state_root: EMPTY_ROOT)
+    var state = walker(genesis, without: 1, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 0, hash: hash_of(genesis, 0)))
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, genesis, from: 1, to: 1))
+}
+
+#[test]
+fn witness_walks_only_as_far_as_asked() {
+    let chain = headers(count: 6, state_root: EMPTY_ROOT)
+    // The parent's own hash reads nothing; block 3's reads the parent's
+    // header and block 4's.
+    var state = walker(chain, without: 6, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 5, hash: hash_of(chain, 5)))
+    core::assert(gives(mut state, number: 3, hash: hash_of(chain, 3)))
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 4, to: 6))
+    // A later, older request goes on from there.
+    var state = walker(chain, without: 6, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 3, hash: hash_of(chain, 3)))
+    core::assert(gives(mut state, number: 1, hash: hash_of(chain, 1)))
+    core::assert(gives(mut state, number: 4, hash: hash_of(chain, 4)))
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 2, to: 6))
+}
+
+#[test]
+fn witness_walk_reaches_256_blocks_back() {
+    // The child of block 255 reaches block 0.
+    let first = headers(count: 256, state_root: EMPTY_ROOT)
+    var state = walker(first, without: 256, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 0, hash: hash_of(first, 0)))
+    // The child of block 256 reaches block 1, and block 0's is zero, which
+    // reads nothing.
+    let second = headers(count: 257, state_root: EMPTY_ROOT)
+    var state = walker(second, without: 257, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 0, hash: 0))
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, second, from: 257, to: 257))
+    var state = walker(second, without: 257, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 1, hash: hash_of(second, 1)))
+    // The child of block 299 reaches blocks 44 to 299: block 45's header
+    // gives block 44's hash, and block 44's is not read. Block 43's, and
+    // the child's own, are zero.
+    let chain = headers(count: 300, state_root: EMPTY_ROOT)
+    var state = walker(chain, without: 300, backwards: false, MemVec::new())
+    core::assert(gives(mut state, number: 43, hash: 0) && gives(mut state, number: 300, hash: 0))
+    core::assert(gives(mut state, number: 44, hash: hash_of(chain, 44)) && state.lack().is_none())
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 45, to: 300))
+}
+
+#[test]
+fn witness_walk_lacks_a_missing_header() {
+    // Without block 2's header, block 3's gives block 2's hash, and block 1's
+    // lacks block 2's header.
+    let chain = headers(count: 6, state_root: EMPTY_ROOT)
+    var state = walker(chain, without: 2, backwards: true, MemVec::new())
+    core::assert(gives(mut state, number: 2, hash: hash_of(chain, 2)) && state.lack().is_none())
+    core::assert(unavailable(state.block_hash(1).err().unwrap()) && lacks_header(state, hash_of(chain, 2)))
+    let (_, _, walked) = state.into_parts()
+    core::assert(read(walked, chain, from: 3, to: 6))
+}
+
+#[test]
+fn witness_walk_lacks_a_malformed_header() {
+    // Block 2's header a string, and then a list whose first item is not a
+    // hash: neither gives block 1's hash.
+    var string = Encoder::new()
+    string.fixed(0x0102, len: 2)
+    var short = Encoder::new()
+    let list = short.begin()
+    short.fixed(0x0102, len: 2)
+    short.fixed(0, len: 32)
+    short.end(list)
+    for ref malformed in [string.finish().unwrap(), short.finish().unwrap()] {
+        var chain = headers(count: 2, state_root: EMPTY_ROOT)
+        let bad = keccak256_word(malformed.span())
+        chain.push(MemBuffer::from_span(malformed.span()))
+        let three = old_header(parent_hash: bad, number: 3)
+        let four = osaka_header(parent_hash: keccak256_word(three.span()), number: 4, state_root: EMPTY_ROOT)
+        chain.push(three)
+        chain.push(four)
+        var state = walker(chain, without: 5, backwards: false, MemVec::new())
+        core::assert(gives(mut state, number: 2, hash: bad) && state.lack().is_none())
+        core::assert(unavailable(state.block_hash(1).err().unwrap()) && lacks_header(state, bad))
+    }
+}
+
+// A world of two accounts: 0xa with a nonce, a balance, code and two slots,
+// and 0xb with a balance.
+fn world() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_nonce(0xa, 1) && world.set_balance(0xa, 5) && world.set_balance(0xb, 9))
+    core::assert(world.set_code(address: 0xa, code: code().span()) == OK)
+    core::assert(world.storage_store(0xa, 1, 7) && world.storage_store(0xa, 2, 8))
+    world
+}
+
+fn code() -> MemBuffer {
+    var code = MemBuffer::new(3)
+    code[0] = 0x60
+    code[2] = 0xff
+    code
+}
+
+// The nodes of `world`'s trie, and its root.
+fn nodes(_ world: mut WorldState) -> (Nodes, u256) {
+    var trie = StateTrie::new(mut world)
+    var nodes = Nodes::new()
+    core::assert(trie.write_nodes(mut nodes))
+    (nodes, trie.root().unwrap())
+}
+
+// The state of `world()` after an Osaka block 10, with its code and an extra
+// one, and the parent's header alone.
+fn witness_state() -> WitnessState {
+    var world = world()
+    let (nodes, root) = nodes(mut world)
+    var codes = Nodes::new()
+    core::assert(codes.add(code().span()) && codes.add(MemBuffer::new(5).span()))
+    let parent = osaka_header(parent_hash: 0x1234, number: 10, state_root: root)
+    var headers = Nodes::new()
+    core::assert(headers.add(parent.span()))
+    WitnessState::new(Header::decode(parent.span()).unwrap(), nodes, codes, headers)
+}
+
+fn unavailable(_ error: SourceError) -> bool {
+    match error {
+        SourceError::Unavailable => true,
+        SourceError::Allocation => false,
+    }
+}
+
+// Whether `state` cannot give the code of `hash`.
+fn code_unavailable(_ state: mut WitnessState, _ hash: u256) -> bool {
+    match state.code(hash) {
+        Result::Err(error) => unavailable(error),
+        Result::Ok(_) => false,
+    }
+}
+
+fn lacks_code(_ state: WitnessState, _ hash: u256) -> bool {
+    match state.lack() {
+        Option::Some(Lack::Code(lacked)) => lacked == hash,
+        _ => false,
+    }
+}
+
+fn lacks_node(_ state: WitnessState, _ hash: u256) -> bool {
+    match state.lack() {
+        Option::Some(Lack::Node(lacked)) => lacked == hash,
+        _ => false,
+    }
+}
+
+#[test]
+fn witness_state_reads_accounts_slots_codes_and_hashes() {
+    var state = witness_state()
+    let a = state.account(0xa).unwrap().unwrap()
+    core::assert(a.nonce == 1 && a.balance == 5 && a.code_hash == keccak256_word(code().span()))
+    core::assert(a.storage_root != EMPTY_ROOT)
+    let b = state.account(0xb).unwrap().unwrap()
+    core::assert(b.nonce == 0 && b.balance == 9 && b.code_hash == EMPTY_CODE_HASH && b.storage_root == EMPTY_ROOT)
+    core::assert(state.account(0xc).unwrap().is_none())
+    core::assert(state.slot(address: 0xa, slot: 1).unwrap() == 7 && state.slot(address: 0xa, slot: 2).unwrap() == 8)
+    core::assert(state.slot(address: 0xa, slot: 3).unwrap() == 0)
+    core::assert(state.code(hash: a.code_hash).unwrap() == code().span())
+    // Block 9's hash, which the parent's header gives.
+    core::assert(state.block_hash(9).unwrap() == 0x1234)
+    core::assert(state.lack().is_none())
+    // Each read marks what it read: the nodes on its paths, the code and the
+    // parent's header.
+    let (nodes, codes, headers) = state.into_parts()
+    var used: usize = 0
+    for at in 0..nodes.len() { if nodes.used(at) { used += 1 } }
+    core::assert(used == nodes.len())
+    core::assert(codes.used(0) && !codes.used(1) && headers.used(0))
+}
+
+#[test]
+fn witness_state_keeps_its_first_lack() {
+    var state = witness_state()
+    core::assert(code_unavailable(mut state, 0x1234) && lacks_code(state, 0x1234))
+    core::assert(unavailable(state.block_hash(8).err().unwrap()) && lacks_code(state, 0x1234))
+    // A header it lacks first: block 9's, for block 8's hash.
+    var state = witness_state()
+    core::assert(unavailable(state.block_hash(8).err().unwrap()) && lacks_header(state, 0x1234))
+    // Without its nodes, the root's, which the trie keeps lacking.
+    var world = world()
+    let (_, root) = nodes(mut world)
+    let parent = osaka_header(parent_hash: 0x1234, number: 10, state_root: root)
+    var state = WitnessState::new(Header::decode(parent.span()).unwrap(), Nodes::new(), codes: Nodes::new(),
+                                  headers: Nodes::new())
+    core::assert(unavailable(state.account(0xb).err().unwrap()) && lacks_node(state, root))
+    core::assert(unavailable(state.slot(address: 0xa, slot: 1).err().unwrap()) && lacks_node(state, root))
+    core::assert(code_unavailable(mut state, 0x1234) && lacks_node(state, root))
+}
+
+#[test]
+fn witness_state_tells_a_malformed_node_and_an_allocation_apart() {
+    // A root of three items, which no node has.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for _ in 0..3 { rlp.fixed(0, len: 32) }
+    rlp.end(list)
+    let malformed = rlp.finish().unwrap()
+    var nodes = Nodes::new()
+    core::assert(nodes.add(malformed.span()))
+    let root = keccak256_word(malformed.span())
+    let parent = osaka_header(parent_hash: 0, number: 1, state_root: root)
+    var state = WitnessState::new(Header::decode(parent.span()).unwrap(), nodes, codes: Nodes::new(),
+                                  headers: Nodes::new())
+    core::assert(unavailable(state.account(0xa).err().unwrap()))
+    core::assert(match state.lack() {
+        Option::Some(Lack::MalformedNode(hash)) => hash == root,
+        _ => false,
+    })
+    // An allocation failure is no lack.
+    var state = witness_state()
+    core::assert(!unavailable(state.faulted(TrieFault::Allocation)) && state.lack().is_none())
+    core::assert(unavailable(state.faulted(TrieFault::Missing(3))) && lacks_node(state, 3))
+}
+
+#[test]
+fn witness_holds_each_item_once() {
+    var witness = Witness::new()
+    core::assert(witness.node(code().span()) && witness.node(code().span()) && witness.nodes().len() == 1)
+    core::assert(witness.code(code().span()) && witness.code(MemBuffer::new(1).span()) && witness.codes().len() == 2)
+    core::assert(witness.header(code().span()) && witness.headers().len() == 1 && !witness.headers().used(0))
+}
+
+// The RLP of a block of `header` without transactions, ommers or
+// withdrawals.
+fn block(_ header: MemBuffer) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.raw(header.span())
+    for _ in 0..3 {
+        let empty = rlp.begin()
+        rlp.end(empty)
+    }
+    rlp.end(list)
+    rlp.finish().unwrap()
+}
+
+// Validates `rlp` as the child of `parent_hash` over `witness`, by Osaka's
+// rules.
+fn verdict(_ rlp: MemBuffer, parent_hash: u256, _ witness: mut Witness) -> Verdict {
+    var tracer = ()
+    validate(rlp.span(), parent_hash, mut witness, schedule: Schedule::new(Config::osaka()), chain_id: 1, mut tracer)
+}
+
+// A witness of `chain`'s headers and `world`'s nodes and codes, but for the
+// item that hashes to `without`.
+fn witness_of(_ chain: MemVec<MemBuffer>, _ world: mut WorldState, without: u256) -> Witness {
+    var witness = Witness::new()
+    for ref header in chain {
+        if keccak256_word(header.span()) != without { core::assert(witness.header(header.span())) }
+    }
+    let (nodes, _) = nodes(mut world)
+    for at in 0..nodes.len() {
+        if keccak256_word(nodes.node(at)) != without { core::assert(witness.node(nodes.node(at))) }
+    }
+    for position in 0..world.account_count() {
+        let code = world.code(world.account_at(position).address)
+        if code.len() != 0 && keccak256_word(code) != without { core::assert(witness.code(code)) }
+    }
+    witness
+}
+
+#[test]
+fn validate_finds_the_parent_among_the_headers() {
+    // A block on an empty state, which has no request contracts.
+    var empty = WorldState::empty()
+    let chain = headers(count: 4, state_root: EMPTY_ROOT)
+    let parent_hash = hash_of(chain, 3)
+    let child = block(osaka_header(parent_hash, number: 4, state_root: EMPTY_ROOT))
+    var witness = witness_of(chain, mut empty, without: 0)
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Invalid(InvalidBlock::Execution(BlockError::RequestContractMissing)) => true,
+        _ => false,
+    })
+    // The parent alone is read.
+    core::assert(read(witness.headers(), chain, from: 3, to: 4))
+    // Without the parent.
+    var witness = witness_of(chain, mut empty, without: parent_hash)
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::Header(hash)) => hash == parent_hash,
+        _ => false,
+    })
+    // A parent that is not an Osaka header.
+    var olds: MemVec<MemBuffer> = MemVec::new()
+    olds.push(old_header(parent_hash: 0, number: 3))
+    var witness = witness_of(olds, mut empty, without: 0)
+    let old_hash = hash_of(olds, 0)
+    let child = block(osaka_header(parent_hash: old_hash, number: 4, state_root: EMPTY_ROOT))
+    core::assert(match verdict(child, parent_hash: old_hash, mut witness) {
+        Verdict::Witness(Lack::Header(hash)) => hash == old_hash,
+        _ => false,
+    })
+    // A block whose parent is another.
+    var witness = witness_of(chain, mut empty, without: 0)
+    let orphan = block(osaka_header(parent_hash: 5, number: 4, state_root: EMPTY_ROOT))
+    core::assert(match verdict(orphan, parent_hash, mut witness) {
+        Verdict::Invalid(InvalidBlock::Header(HeaderError::ParentHash)) => true,
+        _ => false,
+    })
+}
+
+#[test]
+fn validate_lacks_the_parent_state_root() {
+    // The parent's state is `world()`'s, whose root node the witness lacks:
+    // the block's first system call lacks it.
+    var world = world()
+    let (_, root) = nodes(mut world)
+    let chain = headers(count: 2, state_root: root)
+    let parent_hash = hash_of(chain, 1)
+    var witness = witness_of(chain, mut world, without: root)
+    let child = block(osaka_header(parent_hash, number: 2, state_root: root))
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::Node(hash)) => hash == root,
+        _ => false,
+    })
+}
+
+// Code from its bytes.
+fn bytes<const N: usize>(_ code: [u8; N]) -> MemBuffer {
+    var buffer = MemBuffer::new(N)
+    for index in 0..N { buffer[index] = code[index] }
+    buffer
+}
+
+// The system and request contracts, each with its own code that stops, but
+// for the withdrawal request contract's, `requests`, and the consolidation
+// request contract's, `consolidations`, which has two slots: 0, which is 1,
+// and 1, which is 32 bytes of 0xab.
+fn system_world(_ requests: own MemBuffer, _ consolidations: own MemBuffer) -> WorldState {
+    var world = WorldState::empty()
+    let codes = [bytes([0x60 as u8, 0x01, 0x00]), bytes([0x60 as u8, 0x02, 0x00]), requests, consolidations]
+    let addresses = [BEACON_ROOTS, HISTORY_STORAGE, WITHDRAWAL_REQUESTS, CONSOLIDATION_REQUESTS]
+    for index in 0..4 {
+        core::assert(world.set_nonce(addresses[index], 1))
+        core::assert(world.set_code(address: addresses[index], code: codes[index].span()) == OK)
+    }
+    core::assert(world.storage_store(CONSOLIDATION_REQUESTS, 0, 1))
+    core::assert(world.storage_store(CONSOLIDATION_REQUESTS, 1, u256::max() / 255 * 0xab))
+    world
+}
+
+fn stops() -> MemBuffer { bytes([0x60 as u8, 0x03, 0x00]) }
+
+// The child of the last of `chain` on `world`, its state root what running
+// it gives, or one more if `wrong`.
+fn next_block(_ chain: MemVec<MemBuffer>, _ world: WorldState, wrong: bool) -> MemBuffer {
+    let number = chain.len()
+    let parent_hash = hash_of(chain, number - 1)
+    let header = Header::decode(osaka_header(parent_hash, number, state_root: 0).span()).unwrap()
+    let env = header.block_env(chain_id: 1, Config::osaka()).unwrap()
+    var world = world.try_clone().unwrap()
+    for index in 0..number { core::assert(world.set_block_hash(index as u256, hash_of(chain, index))) }
+    let begun = Block::begin(Evm::new(world, Config::osaka()), env, parent_hash, parent_beacon_block_root: 0)
+    let (evm, finished) = begun.finish(MemVec::new())
+    core::assert(finished.is_ok())
+    var post = evm.into_world()
+    let root = state_root(mut post).unwrap()
+    block(osaka_header(parent_hash, number, state_root: if wrong { root + 1 } else { root }))
+}
+
+// The chain of `count` blocks before the block, the last's state `world`'s.
+fn chain_on(count: usize, _ world: mut WorldState) -> MemVec<MemBuffer> {
+    var copy = world.try_clone().unwrap()
+    headers(count, state_root: state_root(mut copy).unwrap())
+}
+
+fn valid(_ verdict: Verdict, _ rlp: MemBuffer) -> bool {
+    match verdict {
+        Verdict::Valid(ref validated) => validated.header.hash == keccak256_word(header_of(rlp).span()),
+        _ => false,
+    }
+}
+
+// The header's RLP, the first item of the block `rlp`.
+fn header_of(_ rlp: MemBuffer) -> MemBuffer {
+    let span = rlp.span()
+    with (span) {
+        var items = Decoder::new()
+        MemBuffer::from_span(items.list().raw())
+    }
+}
+
+fn all_used(_ nodes: Nodes) -> bool {
+    for at in 0..nodes.len() {
+        if !nodes.used(at) { return false }
+    }
+    true
+}
+
+#[test]
+fn validate_accepts_a_block_without_transactions() {
+    var world = system_world(stops(), consolidations: stops())
+    let chain = chain_on(count: 4, mut world)
+    let parent_hash = hash_of(chain, 3)
+    let child = next_block(chain, world, wrong: false)
+    var witness = witness_of(chain, mut world, without: 0)
+    core::assert(valid(verdict(child, parent_hash, mut witness), child))
+    // Every code ran, every account was read, and no slot; of the headers,
+    // the parent's alone.
+    core::assert(all_used(witness.codes()) && read(witness.headers(), chain, from: 3, to: 4))
+    var unused: usize = 0
+    for at in 0..witness.nodes().len() { if !witness.nodes().used(at) { unused += 1 } }
+    // The consolidation request contract's storage: a branch and two leaves.
+    core::assert(unused == 3)
+    // With a wrong state root.
+    var witness = witness_of(chain, mut world, without: 0)
+    core::assert(match verdict(next_block(chain, world, wrong: true), parent_hash, mut witness) {
+        Verdict::Invalid(InvalidBlock::StateRoot) => true,
+        _ => false,
+    })
+    // Without the beacon root contract's code, which runs first.
+    let beacon = keccak256_word(bytes([0x60 as u8, 0x01, 0x00]).span())
+    var witness = witness_of(chain, mut world, without: beacon)
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::Code(hash)) => hash == beacon,
+        _ => false,
+    })
+}
+
+#[test]
+fn validate_walks_the_headers_for_blockhash() {
+    // PUSH1 3; NUMBER; SUB; BLOCKHASH; PUSH0; SSTORE: block 6 stores block
+    // 3's hash, which block 4's header gives.
+    var world = system_world(bytes([0x60 as u8, 0x03, 0x43, 0x03, 0x40, 0x5f, 0x55, 0x00]), consolidations: stops())
+    let chain = chain_on(count: 6, mut world)
+    let parent_hash = hash_of(chain, 5)
+    let child = next_block(chain, world, wrong: false)
+    var witness = witness_of(chain, mut world, without: 0)
+    core::assert(valid(verdict(child, parent_hash, mut witness), child))
+    core::assert(read(witness.headers(), chain, from: 4, to: 6))
+    var witness = witness_of(chain, mut world, without: hash_of(chain, 4))
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::Header(hash)) => hash == hash_of(chain, 4),
+        _ => false,
+    })
+    // BLOCKHASH of the parent, with the parent's header alone.
+    var world = system_world(bytes([0x60 as u8, 0x01, 0x43, 0x03, 0x40, 0x5f, 0x55, 0x00]), consolidations: stops())
+    let chain = chain_on(count: 6, mut world)
+    let child = next_block(chain, world, wrong: false)
+    var parent: MemVec<MemBuffer> = MemVec::new()
+    parent.push(MemBuffer::from_span(chain[5].span()))
+    var witness = witness_of(parent, mut world, without: 0)
+    core::assert(valid(verdict(child, parent_hash: hash_of(chain, 5), mut witness), child))
+}
+
+#[test]
+fn validate_lacks_a_sibling_while_applying_the_changes() {
+    // PUSH0; PUSH0; SSTORE: the consolidation request contract clears slot 0,
+    // and its storage's branch gives way to slot 1's leaf, which the run did
+    // not read.
+    var world = system_world(stops(), consolidations: bytes([0x5f as u8, 0x5f, 0x55, 0x00]))
+    let chain = chain_on(count: 2, mut world)
+    let parent_hash = hash_of(chain, 1)
+    let child = next_block(chain, world, wrong: false)
+    var witness = witness_of(chain, mut world, without: 0)
+    core::assert(valid(verdict(child, parent_hash, mut witness), child))
+    // The leaf holding 32 bytes of 0xab.
+    var sibling: u256 = 0
+    let nodes = ref witness.nodes()
+    for at in 0..nodes.len() {
+        let node = nodes.node(at)
+        var run: usize = 0
+        for byte in node {
+            run = if byte == 0xab { run + 1 } else { 0 }
+            if run == 32 { sibling = keccak256_word(node) }
+        }
+    }
+    core::assert(sibling != 0)
+    var witness = witness_of(chain, mut world, without: sibling)
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::Node(hash)) => hash == sibling,
+        _ => false,
+    })
+}
+
+#[test]
+fn validate_finds_a_nonce_past_2_64_malformed() {
+    // The parent's state is one account, the beacon roots contract's, with
+    // a nonce of 2^64: its leaf, the root, is malformed, which the block's
+    // first system call finds.
+    var value = Encoder::new()
+    let list = value.begin()
+    value.uint(1 << 64)
+    value.uint(0)
+    value.fixed(EMPTY_ROOT, len: 32)
+    value.fixed(keccak256_word(bytes([0x60 as u8, 0x01, 0x00]).span()), len: 32)
+    value.end(list)
+    let value = value.finish().unwrap()
+    var rlp = Encoder::new()
+    let leaf = rlp.begin()
+    var scratch = MemBuffer::new(33)
+    put_path(mut rlp, mut scratch, hash(BEACON_ROOTS, len: 20), from: 0, to: 64, leaf: true)
+    rlp.bytes(value.span())
+    rlp.end(leaf)
+    let node = rlp.finish().unwrap()
+    let root = keccak256_word(node.span())
+    let chain = headers(count: 2, state_root: root)
+    var witness = Witness::new()
+    for ref header in chain { core::assert(witness.header(header.span())) }
+    core::assert(witness.node(node.span()) && witness.code(bytes([0x60 as u8, 0x01, 0x00]).span()))
+    let parent_hash = hash_of(chain, 1)
+    let child = block(osaka_header(parent_hash, number: 2, state_root: root))
+    core::assert(match verdict(child, parent_hash, mut witness) {
+        Verdict::Witness(Lack::MalformedNode(hash)) => hash == root,
+        _ => false,
+    })
+}

@@ -98,13 +98,14 @@ pub enum TrieFault { Allocation, Missing(u256), Malformed(u256) }
 
 impl Copy for TrieFault {}
 
-// A node of `Nodes`: where its RLP is in the buffer, and whether a trie has
-// read it.
+// A node of `Nodes`: where its RLP is in the buffer, and whether it has been
+// read.
 struct Entry { offset: usize, len: usize, used: bool }
 impl Copy for Entry {}
 
 /// Trie nodes by keccak256 of their RLP, such as a witness's, each held
-/// once in one buffer and marked used when a trie reads it.
+/// once in one buffer and marked used when a trie reads it. A witness holds
+/// its codes and headers by their keccak256 in the same way.
 pub struct Nodes { bytes: MemBuffer, entries: MemVec<Entry>, index: SwissTable<u256, usize> }
 
 impl Nodes {
@@ -136,11 +137,11 @@ impl Nodes {
         self.bytes.slice(offset: entry.offset, len: entry.len)
     }
 
-    /// Whether a trie has read the node at `at`.
+    /// Whether the node at `at` has been read.
     pub fn used(self, _ at: usize) -> bool { self.entries[at].used }
 
-    // The position of the node of `hash`, marked used; none if none is held.
-    fn read(mut self, _ hash: u256) -> Option<usize> {
+    /// The position of the node of `hash`, marked used; none if none is held.
+    pub(ingot) fn read(mut self, _ hash: u256) -> Option<usize> {
         let lookup = self.index.get(hash)
         if !lookup.found { return Option::None }
         self.entries[lookup.value].used = true

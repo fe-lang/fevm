@@ -1,4 +1,5 @@
-// A chain of blocks on one world: importing a block from its RLP.
+// A chain of blocks on one world: importing a block from its RLP, and the
+// steps of it that validating one from a witness shares.
 use core::{MemSpan, MemVec, Option, Result}
 use fevm::{
     Block, BlockChanges, BlockEnv, BlockError, BlockOutput, Config, Evm, Receipt, StateSource, Withdrawal, WorldState,
@@ -16,7 +17,7 @@ use ingot::trie::Trie
 // EIP-7934: the longest block RLP, 10 MiB less a 2 MiB margin.
 const MAX_RLP_BLOCK_SIZE: usize = 8_388_608
 
-const ALLOCATION: HostFailure = HostFailure::Status(ERR_HOST_ALLOCATION)
+pub(ingot) const ALLOCATION: HostFailure = HostFailure::Status(ERR_HOST_ALLOCATION)
 
 /// Why a block is invalid: the first rule it breaks, in the order the
 /// specification checks them (`execute_block`).
@@ -85,8 +86,8 @@ fn next_transaction(_ transactions: mut Decoder) -> ref MemSpan uses (rlp: MemSp
 
 // The first value the header commits to that is not what the block gives, in
 // the specification's order (`execute_block`); none if all are.
-fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, state_root: u256, receipts_root: u256,
-            withdrawals_root: u256) -> Option<InvalidBlock> {
+pub(ingot) fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, state_root: u256,
+                       receipts_root: u256, withdrawals_root: u256) -> Option<InvalidBlock> {
     let access_list_hash = match output.access_list {
         Option::Some(ref list) => Option::Some(list.hash),
         Option::None => Option::None,
@@ -107,7 +108,7 @@ fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, st
 // transactions, which decode as they run: its header, its withdrawals with
 // their trie, and whether it has ommers; or why it is invalid, or an
 // allocation failure. Never `Valid`.
-fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Withdrawal>, Trie, bool)> {
+pub(ingot) fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Withdrawal>, Trie, bool)> {
     if rlp.len() > MAX_RLP_BLOCK_SIZE { return Result::Err(Import::Invalid(InvalidBlock::TooLarge)) }
     with (rlp) {
         var items = Decoder::new()
@@ -156,7 +157,7 @@ fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Withdrawal>, T
 // timestamp, once its header is checked against `parent` and it is checked
 // to have no ommers; or why it is invalid, or that its blob base fee is past
 // computing. Never `Valid`.
-fn checked_env(_ header: Header, _ parent: Header, _ config: Config, ommers: bool, chain_id: u256)
+pub(ingot) fn checked_env(_ header: Header, _ parent: Header, _ config: Config, ommers: bool, chain_id: u256)
     -> Result<Import, BlockEnv> {
     if let Result::Err(error) = header.validate(parent, config) {
         return Result::Err(Import::Invalid(InvalidBlock::Header(error)))
@@ -168,13 +169,13 @@ fn checked_env(_ header: Header, _ parent: Header, _ config: Config, ommers: boo
     }
 }
 
-// What a block's body gives once run: its receipts and output, and the
-// roots of its transactions, receipts and withdrawals, none if an
-// allocation failed.
-struct Ran {
-    receipts: MemVec<Receipt>,
-    output: BlockOutput,
-    roots: Option<(u256, u256, u256)>,
+/// What a block's body gives once run: its receipts and output, and the
+/// roots of its transactions, receipts and withdrawals, none if an
+/// allocation failed.
+pub(ingot) struct Ran {
+    pub(ingot) receipts: MemVec<Receipt>,
+    pub(ingot) output: BlockOutput,
+    pub(ingot) roots: Option<(u256, u256, u256)>,
 }
 
 // Runs the body of the block `header` heads, whose transactions are the
@@ -184,9 +185,9 @@ struct Ran {
 // requests. A host failure as the block begins stops it before its
 // transactions. Gives the `Evm` back with what the body gives; or, having
 // undone the block, why it is invalid or could not be run, never `Valid`.
-fn run<S: StateSource, T: Tracer>(_ evm: own Evm<S>, _ header: Header, _ env: BlockEnv,
-                                 _ withdrawals: own MemVec<Withdrawal>, _ withdrawals_trie: own Trie,
-                                 _ tracer: mut T) -> (Evm<S>, Result<Import, Ran>) uses (rlp: MemSpan) {
+pub(ingot) fn run<S: StateSource, T: Tracer>(_ evm: own Evm<S>, _ header: Header, _ env: BlockEnv,
+                                            _ withdrawals: own MemVec<Withdrawal>, _ withdrawals_trie: own Trie,
+                                            _ tracer: mut T) -> (Evm<S>, Result<Import, Ran>) uses (rlp: MemSpan) {
     var block = Block<S>::begin(evm, env, parent_hash: header.parent_hash,
                                 parent_beacon_block_root: header.parent_beacon_block_root)
     var transactions_trie = Trie::new()

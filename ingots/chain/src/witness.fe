@@ -1,0 +1,258 @@
+// Validating a block from its parent's hash and a witness of what it reads
+// of the state and the chain before it, holding no other state.
+use core::{MemSpan, MemVec, Option, Result}
+use fevm::{AccountState, BlockOutput, Evm, Receipt, SourceError, StateSource}
+use fevm::status::ERR_STATE_UNAVAILABLE
+use fevm::trace::Tracer
+use fevm_rlp::Decoder
+use ingot::chain::{
+    ALLOCATION, HostFailure, Import, InvalidBlock, checked_env, decode_block, mismatch, run, write_changes,
+}
+use ingot::header::{Header, HeaderError}
+use ingot::schedule::Schedule
+use ingot::state_trie::{Nodes, StateTrie, TrieFault}
+
+// BLOCKHASH reaches this many blocks back.
+const BLOCK_HASHES: u256 = 256
+
+/// What validating a block reads of the state and the chain before it: trie
+/// nodes by keccak256 of their RLP, reached from the parent's state root;
+/// codes by keccak256, reached from accounts; and headers by keccak256 of
+/// their RLP, reached from the parent's hash. They are added in any order,
+/// each is held once, and extras are allowed. Validation marks each it
+/// reads, so a witness can be cut down to what a block used.
+pub struct Witness { nodes: Nodes, codes: Nodes, headers: Nodes }
+
+impl Witness {
+    pub fn new() -> Self { Witness { nodes: Nodes::new(), codes: Nodes::new(), headers: Nodes::new() } }
+
+    /// Adds a trie node, its RLP; false if an allocation fails.
+    pub fn node(mut self, _ rlp: MemSpan) -> bool { self.nodes.add(rlp) }
+    /// Adds code; false if an allocation fails.
+    pub fn code(mut self, _ code: MemSpan) -> bool { self.codes.add(code) }
+    /// Adds a header, its RLP; false if an allocation fails.
+    pub fn header(mut self, _ rlp: MemSpan) -> bool { self.headers.add(rlp) }
+
+    /// The trie nodes, each marked if a validation read it.
+    pub fn nodes(self) -> ref Nodes { ref self.nodes }
+    /// The codes, each marked if a validation read it.
+    pub fn codes(self) -> ref Nodes { ref self.codes }
+    /// The headers, each marked if a validation read it.
+    pub fn headers(self) -> ref Nodes { ref self.headers }
+}
+
+/// The first thing a witness lacked to decide a block.
+pub enum Lack {
+    /// No header hashes to `parent_hash`, or to the hash of an ancestor
+    /// whose header a BLOCKHASH needed; or the one that does is malformed:
+    /// a parent that is not a header of Osaka or later, or an ancestor that
+    /// is not a list beginning with its parent's hash.
+    Header(u256),
+    /// The trie node of a hash.
+    Node(u256),
+    /// The trie node of a hash, which is malformed.
+    MalformedNode(u256),
+    /// The code of a hash.
+    Code(u256),
+}
+
+impl Copy for Lack {}
+
+/// The state a witness proves after the block `parent` heads, as a world
+/// reads it: accounts and slots from the partial state trie of the parent's
+/// state root over its nodes, code by its hash, and the hashes of the 256
+/// blocks before the parent's child from its headers. It walks back through
+/// the headers from the parent's only as far as a BLOCKHASH asks, reading
+/// one header for each block, and remembers how far it went. It keeps the
+/// first thing it lacked.
+pub(ingot) struct WitnessState {
+    trie: StateTrie,
+    codes: Nodes,
+    headers: Nodes,
+    // The parent's number and hash, and the hashes the walk has reached,
+    // the parent's first and each block's parent's after it.
+    number: u64,
+    hash: u256,
+    hashes: MemVec<u256>,
+    lack: Option<Lack>,
+}
+
+impl WitnessState {
+    /// The state after `parent`, over the trie nodes `nodes`, the codes
+    /// `codes` and the headers `headers`, which hold `parent`'s.
+    pub(ingot) fn new(_ parent: Header, _ nodes: own Nodes, codes: own Nodes, headers: own Nodes) -> Self {
+        WitnessState {
+            trie: StateTrie::partial(root: parent.state_root, nodes), codes, headers, number: parent.number,
+            hash: parent.hash, hashes: MemVec::new(), lack: Option::None,
+        }
+    }
+
+    /// The first thing the state lacked, if any.
+    pub(ingot) fn lack(self) -> Option<Lack> { self.lack }
+
+    /// The trie nodes, the codes and the headers, each marked if read.
+    pub(ingot) fn into_parts(own self) -> (Nodes, Nodes, Nodes) { (self.trie.into_nodes(), self.codes, self.headers) }
+
+    // Keeps `lack` unless the state lacked something before: unavailable.
+    fn lacks(mut self, _ lack: Lack) -> SourceError {
+        if self.lack.is_none() { self.lack = Option::Some(lack) }
+        SourceError::Unavailable
+    }
+
+    /// What the trie's `fault` makes of a read: an allocation failure, or
+    /// unavailable, keeping the node it lacked.
+    pub(ingot) fn faulted(mut self, _ fault: TrieFault) -> SourceError {
+        match fault {
+            TrieFault::Allocation => SourceError::Allocation,
+            TrieFault::Missing(hash) => self.lacks(Lack::Node(hash)),
+            TrieFault::Malformed(hash) => self.lacks(Lack::MalformedNode(hash)),
+        }
+    }
+}
+
+impl StateSource for WitnessState {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        match self.trie.account(address) {
+            Result::Ok(account) => Result::Ok(account),
+            Result::Err(fault) => Result::Err(self.faulted(fault)),
+        }
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
+        match self.trie.slot(address, slot) {
+            Result::Ok(value) => Result::Ok(value),
+            Result::Err(fault) => Result::Err(self.faulted(fault)),
+        }
+    }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
+        match self.codes.read(hash) {
+            Option::Some(at) => Result::Ok(self.codes.node(at)),
+            Option::None => Result::Err(self.lacks(Lack::Code(hash))),
+        }
+    }
+    /// Zero for a block outside the 256 before the parent's child, as
+    /// BLOCKHASH gives, which fevm does not ask.
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> {
+        let parent = self.number as u256
+        if number > parent || parent - number >= BLOCK_HASHES { return Result::Ok(0) }
+        let depth: usize = (parent - number).downcast_truncate()
+        while self.hashes.len() <= depth {
+            // The parent's hash, then each block's parent's, the first field
+            // of the header of the last reached.
+            let next = match self.hashes.last() {
+                Option::None => self.hash,
+                Option::Some(hash) => {
+                    let Option::Some(at) = self.headers.read(hash) else {
+                        return Result::Err(self.lacks(Lack::Header(hash)))
+                    }
+                    let rlp = self.headers.node(at)
+                    let first = with (rlp) {
+                        var items = Decoder::new()
+                        let fields = mut items.list()
+                        let item = fields.raw()
+                        if item.len() == 33 && item[0] == 0xa0 { Option::Some(item.read_word(1)) } else { Option::None }
+                    }
+                    let Option::Some(first) = first else { return Result::Err(self.lacks(Lack::Header(hash))) }
+                    first
+                },
+            }
+            if self.hashes.try_push(next).is_err() { return Result::Err(SourceError::Allocation) }
+        }
+        Result::Ok(self.hashes[depth])
+    }
+}
+
+/// A block valid if its parent is: its header, receipts and output.
+/// `output.changes` are the block's, but name only what the witness held.
+pub struct Validated { pub header: Header, pub receipts: MemVec<Receipt>, pub output: BlockOutput }
+
+/// What validating a block gives.
+pub enum Verdict {
+    /// The block is valid if the block `parent_hash` names is.
+    Valid(Validated),
+    /// The first rule the block breaks, as `Chain::import` names it.
+    Invalid(InvalidBlock),
+    /// The witness cannot decide the block.
+    Witness(Lack),
+    /// A host failure: no verdict.
+    Failed(HostFailure),
+}
+
+// The verdict on a block that importing rejects as `import`, given what the
+// witness first lacked: a source that could not tell is the witness's lack.
+fn rejected(_ import: Import, lack: Option<Lack>) -> Verdict {
+    match import {
+        Import::Invalid(reason) => Verdict::Invalid(reason),
+        Import::Failed(HostFailure::Status(status)) => {
+            if status == ERR_STATE_UNAVAILABLE && let Option::Some(lack) = lack { Verdict::Witness(lack) }
+                else { Verdict::Failed(HostFailure::Status(status)) }
+        },
+        Import::Failed(failure) => Verdict::Failed(failure),
+        // Never given for a rejected block.
+        Import::Valid(_) => Verdict::Failed(ALLOCATION),
+    }
+}
+
+/// Validates the block `rlp` encodes as the child of the block whose hash is
+/// `parent_hash`, from `witness` alone, by the rules of `schedule` in force
+/// at its timestamp on chain `chain_id`, as `Chain::import` imports it:
+/// checks its size and decoding, finds its parent among the witness's
+/// headers and checks its header against it, runs it over the state the
+/// witness proves of the parent's state root, which `tracer` sees, applies
+/// its changes to that state's trie, and compares what it gives with its
+/// header. The witness is left with what the validation read marked.
+pub fn validate<T: Tracer>(_ rlp: MemSpan, parent_hash: u256, _ witness: mut Witness, schedule: Schedule,
+                           chain_id: u256, _ tracer: mut T) -> Verdict {
+    let (header, withdrawals, withdrawals_trie, ommers) = match decode_block(rlp) {
+        Result::Ok(block) => block,
+        Result::Err(import) => return rejected(import, lack: Option::None),
+    }
+    let Option::Some(at) = witness.headers.read(parent_hash) else { return Verdict::Witness(Lack::Header(parent_hash)) }
+    let parent = match Header::decode(witness.headers.node(at)) {
+        Result::Ok(parent) => parent,
+        Result::Err(HeaderError::Allocation) => return Verdict::Failed(ALLOCATION),
+        Result::Err(_) => return Verdict::Witness(Lack::Header(parent_hash)),
+    }
+    let config = schedule.config_at(header.timestamp)
+    let env = match checked_env(header, parent, config, ommers, chain_id) {
+        Result::Ok(env) => env,
+        Result::Err(import) => return rejected(import, lack: Option::None),
+    }
+    let nodes = core::mem::replace(mut witness.nodes, Nodes::new())
+    let codes = core::mem::replace(mut witness.codes, Nodes::new())
+    let headers = core::mem::replace(mut witness.headers, Nodes::new())
+    let evm = Evm<WitnessState>::over(WitnessState::new(parent, nodes, codes, headers), config)
+    let (evm, ran) = with (rlp) { run(evm, header, env, withdrawals, withdrawals_trie, mut tracer) }
+    let (var world, var state) = evm.into_parts()
+    // Every read the source could not answer ends the run as a host
+    // failure, never with a verdict.
+    core::assert(state.lack.is_none() || match ran {
+        Result::Err(Import::Failed(_)) => true,
+        _ => false,
+    })
+    let verdict = match ran {
+        Result::Err(import) => rejected(import, lack: state.lack),
+        Result::Ok(ran) => {
+            write_changes(mut state.trie, mut world, ran.output.changes)
+            match (state.trie.root(), ran.roots) {
+                (Result::Err(fault), _) => match state.faulted(fault) {
+                    SourceError::Unavailable => Verdict::Witness(state.lack.unwrap()),
+                    SourceError::Allocation => Verdict::Failed(ALLOCATION),
+                },
+                (Result::Ok(state_root), Option::Some((transactions_root, receipts_root, withdrawals_root))) => {
+                    match mismatch(header, ran.output, transactions_root, state_root, receipts_root, withdrawals_root) {
+                        Option::Some(reason) => Verdict::Invalid(reason),
+                        Option::None => {
+                            Verdict::Valid(Validated { header, receipts: ran.receipts, output: ran.output })
+                        },
+                    }
+                },
+                (_, Option::None) => Verdict::Failed(ALLOCATION),
+            }
+        },
+    }
+    let (nodes, codes, headers) = state.into_parts()
+    witness.nodes = nodes
+    witness.codes = codes
+    witness.headers = headers
+    verdict
+}
