@@ -1,0 +1,94 @@
+// A witness case (version 9): a block, its parent's hash and a witness,
+// such as one read from another client's proofs, validated once. See
+// native/tools/src/replay.fe.
+use core::{MemBuffer, Option}
+use std::io::Stdout
+use fevm::hex::write_hex_word
+use fevm_chain::{Lack, Nodes, Verdict, Witness, validate}
+use fevm_conformance::{Reader, host_error}
+use fevm_conformance::blocks::{read_bytes, read_schedule, reason}
+use ingot::stateless::failure_name
+
+// Appends `"name":[held,used]` for a set of the witness.
+fn write_counts<const N: usize>(_ name: String<N>, _ items: Nodes) uses (text: mut MemBuffer) {
+    var used: usize = 0
+    for at in 0..items.len() { if items.used(at) { used += 1 } }
+    ",\"".fmt(mut text)
+    name.fmt(mut text)
+    "\":[".fmt(mut text)
+    items.len().fmt(mut text)
+    ",".fmt(mut text)
+    used.fmt(mut text)
+    "]".fmt(mut text)
+}
+
+/// Reads the chain ID, the fork schedule, the parent's hash, the block's RLP
+/// and the witness's nodes, codes and headers, each a count and then each
+/// item with its length; validates the block over the witness and prints
+/// the verdict: `valid` with the block's `hash`, `invalid` with the
+/// `reason` and the `transaction` it concerns, or `witness` with what it
+/// `lacks` and its `hash`; then how many `nodes`, `codes` and `headers`
+/// the witness held and the validation read. A host failure prints only
+/// `host_error`.
+pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
+    core::assert(reader.word(bytes: 1) == 9)
+    let (chain_id, schedule) = match read_schedule(mut reader) {
+        Result::Ok(read) => read,
+        Result::Err(status) => return status,
+    }
+    let parent_hash = reader.word(bytes: 32)
+    let rlp = read_bytes(mut reader)
+    var witness = Witness::new()
+    for kind in 0..3 {
+        let count: usize = reader.count().downcast_truncate()
+        for _ in 0..count {
+            let item = read_bytes(mut reader)
+            let added = if kind == 0 { witness.node(item.span()) } else if kind == 1 { witness.code(item.span()) }
+                else { witness.header(item.span()) }
+            if !added { return host_error("witness allocation failed") }
+        }
+    }
+    core::assert(reader.read_all())
+    var tracer = ()
+    let verdict = validate(rlp.span(), parent_hash, mut witness, schedule, chain_id, mut tracer)
+    var text = MemBuffer::empty()
+    with (mut text) {
+        match verdict {
+            Verdict::Valid(validated) => {
+                "{\"verdict\":\"valid\",\"hash\":\"".fmt(mut text)
+                write_hex_word(validated.header.hash)
+                "\"".fmt(mut text)
+            },
+            Verdict::Invalid(invalid) => {
+                let (name, index) = reason(invalid)
+                "{\"verdict\":\"invalid\",\"reason\":\"".fmt(mut text)
+                name.fmt(mut text)
+                "\"".fmt(mut text)
+                if let Option::Some(index) = index {
+                    ",\"transaction\":".fmt(mut text)
+                    index.fmt(mut text)
+                }
+            },
+            Verdict::Witness(lack) => {
+                let (kind, hash) = match lack {
+                    Lack::Header(hash) => ("header", hash),
+                    Lack::Node(hash) => ("node", hash),
+                    Lack::MalformedNode(hash) => ("malformed_node", hash),
+                    Lack::Code(hash) => ("code", hash),
+                }
+                "{\"verdict\":\"witness\",\"lacks\":\"".fmt(mut text)
+                kind.fmt(mut text)
+                "\",\"hash\":\"".fmt(mut text)
+                write_hex_word(hash)
+                "\"".fmt(mut text)
+            },
+            Verdict::Failed(failure) => return host_error(failure_name(failure)),
+        }
+        write_counts("nodes", witness.nodes())
+        write_counts("codes", witness.codes())
+        write_counts("headers", witness.headers())
+        "}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}

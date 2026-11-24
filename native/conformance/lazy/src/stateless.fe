@@ -35,7 +35,7 @@ fn invalid_name(_ invalid: InvalidBlock) -> MemBuffer {
     }
 }
 
-fn failure_name(_ failure: HostFailure) -> MemBuffer {
+pub(ingot) fn failure_name(_ failure: HostFailure) -> MemBuffer {
     match failure {
         HostFailure::Status(status) => format!("host ", status_name(status)),
         HostFailure::BlobBaseFee => format!("blob base fee too large to compute"),

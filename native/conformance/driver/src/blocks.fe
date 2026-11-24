@@ -97,13 +97,10 @@ pub fn reason(_ invalid: InvalidBlock) -> (MemBuffer, Option<usize>) {
     }
 }
 
-/// Reads a blockchain test's chain (version 7, or 8 to run it statelessly
-/// too) to its blocks: the chain at the genesis, and the genesis header's
-/// RLP. Or the driver's exit status, once it has printed that the pre-state
-/// is not the genesis header's, or a host failure.
-pub fn read_chain(_ reader: mut Reader) -> Result<i32, (Chain, MemBuffer)> uses (out: mut Stdout) {
-    let version = reader.word(bytes: 1)
-    core::assert(version == 7 || version == 8)
+/// Reads a case's chain ID and fork schedule: the genesis fork, and each
+/// later one with its activation timestamp. Or the driver's exit status, for
+/// a fork it does not know or a host failure, once it has printed that.
+pub fn read_schedule(_ reader: mut Reader) -> Result<i32, (u256, Schedule)> uses (out: mut Stdout) {
     let chain_id = reader.word(bytes: 32)
     let Option::Some(genesis_config) = read_config(mut reader) else { return Result::Err(2) }
     var schedule = Schedule::new(genesis_config)
@@ -113,6 +110,17 @@ pub fn read_chain(_ reader: mut Reader) -> Result<i32, (Chain, MemBuffer)> uses 
         let Option::Some(config) = read_config(mut reader) else { return Result::Err(2) }
         if !schedule.add(timestamp, config) { return Result::Err(host_error("schedule allocation failed")) }
     }
+    Result::Ok((chain_id, schedule))
+}
+
+/// Reads a blockchain test's chain (version 7, or 8 to run it statelessly
+/// too) to its blocks: the chain at the genesis, and the genesis header's
+/// RLP. Or the driver's exit status, once it has printed that the pre-state
+/// is not the genesis header's, or a host failure.
+pub fn read_chain(_ reader: mut Reader) -> Result<i32, (Chain, MemBuffer)> uses (out: mut Stdout) {
+    let version = reader.word(bytes: 1)
+    core::assert(version == 7 || version == 8)
+    let (chain_id, schedule) = read_schedule(mut reader)?
     var world = WorldState::empty()
     if !read_accounts(mut reader, mut world) { return Result::Err(host_error("pre-state allocation failed")) }
     let header = header_rlp(read_bytes(mut reader).span())

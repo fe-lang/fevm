@@ -3,7 +3,8 @@
 // pre-state from a `WorldSource`; the driver prints `fevm_conformance`'s
 // result with `lazy`, each way the second run differs. A blockchain test
 // runs as `fevm_conformance` runs it, and one to run statelessly also has
-// each block validated from a witness (`stateless`).
+// each block validated from a witness (`stateless`). A witness case is one
+// block validated from the witness it carries.
 use core::{MemBuffer, MemVec, Option}
 use std::io::{Stdin, Stdout}
 use fevm::{Evm, Receipt, StorageKey, WorldSource, WorldState}
@@ -131,6 +132,7 @@ uses (text: mut MemBuffer)
 
 pub fn main() -> i32 uses (input: mut Stdin, out: mut Stdout) {
     var reader = Reader::stdin()
+    if reader.witness_test() { return witness::run(mut reader) }
     if reader.stateless_test() { return stateless::run(mut reader) }
     if reader.blockchain_test() { return blocks::run(mut reader) }
     let (block, config, world, request) = match read_state_test(mut reader) {
