@@ -4,7 +4,7 @@ version = "0.1.0"
 
 [dependencies]
 keccak = { source = "https://github.com/fe-lang/keccak", rev = "345d5088de986fe54b23a6aaa3a33e1c349d0960" }
-curves = { source = "https://github.com/fe-lang/curves", rev = "12db0194d2354ff445c5f180b31c750ffb3b8242" }
+curves = { source = "https://github.com/fe-lang/curves", rev = "bb4e8b6cdfd6081fd95e5b428d3aa9ca96fc91b8" }
 fevm = true
 fevm_precompiles = true
 fevm_rlp = true
