@@ -1,11 +1,11 @@
 use core::{MemArray, MemBuffer, Option}
+use curves::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
+use curves::bls_field::{Field, Fp}
+use curves::bls_map::{map_to_g1, map_to_g2}
+use curves::bls_pairing::{final_exponentiation, miller_loop}
+use curves::bls_tower::{Fp12, Fp2}
 use keccak::ByteSource
 use ingot::{Output, SUCCESS, failure, host_allocation, word_at}
-use ingot::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
-use ingot::bls_field::{Field, Fp}
-use ingot::bls_map::{map_to_g1, map_to_g2}
-use ingot::bls_pairing::{final_exponentiation, miller_loop}
-use ingot::bls_tower::{Fp12, Fp2}
 
 // EIP-2537's BLS12-381 precompiles at 0x0b through 0x11. A field element is 64
 // big-endian bytes below p, so its top 16 bytes are zero; a G1 point is (x, y)

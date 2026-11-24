@@ -1,8 +1,8 @@
 use core::{MemArray, MemBuffer}
+use curves::bls_curve::{ORDER, Point, g1_generator, g2_generator}
+use curves::bls_field::{Field, Fp}
+use curves::bls_tower::Fp2
 use ingot::{FAILURE, SUCCESS, run}
-use ingot::bls_curve::{Affine, ORDER, Point, g1_generator, g2_generator, multiply_two, on_g1, on_g2}
-use ingot::bls_field::{Field, Fp}
-use ingot::bls_tower::Fp2
 
 fn append_fp(_ buffer: mut MemBuffer, _ value: Fp) {
     let start = buffer.len()
@@ -135,33 +135,6 @@ fn bls_rejects_malformed_input() {
 }
 
 #[test]
-fn bls_subgroup_checks_match_multiplication_by_the_order() {
-    let g1 = g1_generator()
-    let g2 = g2_generator()
-    for p in [g1, g1.double(), g1.multiply(0x1234567890abcdef).neg(), Point<Fp>::identity()] {
-        core::assert(p.in_subgroup() && p.multiply(ORDER).is_identity())
-    }
-    for q in [g2, g2.double(), g2.multiply(0x1234567890abcdef).neg(), Point<Fp2>::identity()] {
-        core::assert(q.in_subgroup() && q.multiply(ORDER).is_identity())
-    }
-    // Points of the curves outside the subgroups, at x = 4 and x = 1 + u.
-    let x1 = Fp::from_canonical([4, 0, 0, 0, 0, 0])
-    let y1 = x1.square().mul(x1).add(Fp::from_canonical([4, 0, 0, 0, 0, 0])).sqrt().unwrap()
-    core::assert(on_g1(x: x1, y: y1))
-    let p = Point { x: x1, y: y1, z: Fp::one() }
-    core::assert(!p.in_subgroup() && !p.multiply(ORDER).is_identity())
-    core::assert(!p.add(g1).in_subgroup() && !p.multiply(5).in_subgroup())
-    let one = Fp::one()
-    let x2 = Fp2::new(c0: one, c1: one)
-    let four = Fp::from_canonical([4, 0, 0, 0, 0, 0])
-    let y2 = x2.square().mul(x2).add(Fp2::new(c0: four, c1: four)).sqrt().unwrap()
-    core::assert(on_g2(x: x2, y: y2))
-    let q = Point { x: x2, y: y2, z: Fp2::one() }
-    core::assert(!q.in_subgroup() && !q.multiply(ORDER).is_identity())
-    core::assert(!q.add(g2).in_subgroup() && !q.multiply(5).in_subgroup())
-}
-
-#[test]
 fn bls_msm_matches_separate_multiplications() {
     let scalars: [u256; 8] = [
         0, 1, ORDER - 1, ORDER + 5, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
@@ -197,18 +170,5 @@ fn bls_msm_matches_separate_multiplications() {
         append_g2(mut want, expected)
         let output = run(address: 0x0e, input, gas: 1000000000)
         core::assert(output.status == SUCCESS && same(output.output, want))
-    }
-}
-
-#[test]
-fn bls_multiply_two_matches_separate_multiplications() {
-    let g = g1_generator()
-    let a = g.multiply(0x1234567890abcdef).to_affine()
-    let b = g.double().add(g).to_affine()
-    let large = ORDER - 1
-    for (p, q) in [(a, b), (a, Affine<Fp>::identity()), (b, b.neg()), (a, a)] {
-        for (s, t) in [(0, 0), (1, 0), (0, 1), (large, large), (large - 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a, 0xd201000000010000 * 0xd201000000010000 + 7)] {
-            core::assert(multiply_two(p, s, q, t).equals(p.multiply(s).add(q.multiply(t))))
-        }
     }
 }

@@ -10,8 +10,8 @@ use ingot::transaction::{SYSTEM_ADDRESS, Transaction}
 use ingot::trace::{CallEnd, CallStart, Tracer}
 use ingot::types::{BlockEnv, CallEnv, Config, ExecutionResult, InputData, Program, empty_bytes}
 use ingot::vm::{Vm, begin_create, run_precompile, spend, status_result, transfer}
+use curves::secp256k1::N as SECP256K1_N
 use fevm_precompiles::{is_precompile, recover_signer}
-use fevm_precompiles::secp256k1::N as SECP256K1_N
 use swisstable::SwissTable
 use ingot::status::{
     ERR_ADDRESS_COLLISION,

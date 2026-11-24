@@ -1,11 +1,9 @@
 use core::Option
+use curves::bls_curve::ORDER
+use curves::kzg::{decode_kzg_g1, verify_proof}
 use keccak::ByteSource
 use ingot::word_at
-use ingot::bls_curve::{Affine, ORDER, Point, decompress_g1, g1_generator, multiply_two}
-use ingot::bls_field::{Field, Fp}
-use ingot::bls_pairing::{final_exponentiation, miller_loop_lines}
 use ingot::hashes::sha256
-use ingot::kzg_lines::{NEG_G2_LINES, TAU_G2_LINES}
 
 /// EIP-4844 point evaluation input: versioned hash, z, y, commitment, proof.
 pub const INPUT_LEN: usize = 192
@@ -14,31 +12,14 @@ pub const FIELD_ELEMENTS_PER_BLOB: u256 = 4096
 /// The BLS12-381 scalar field order, BLS_MODULUS in EIP-4844.
 pub const BLS_MODULUS: u256 = ORDER
 
-/// KZG commitments and proofs: the encoded identity, or a valid compressed
-/// point in the prime-order subgroup (validate_kzg_g1 and KeyValidate).
-pub fn decode_kzg_g1<T: ByteSource>(_ source: T, offset: usize) -> Option<Affine<Fp>> {
-    let point = match decompress_g1(source, offset) {
-        Option::Some(point) => point,
-        Option::None => return Option::None,
-    }
-    if !point.infinity && !Point::from_affine(point).in_subgroup() { return Option::None }
-    Option::Some(point)
-}
-
-/// Verify the proof that the committed polynomial evaluates to y at z:
-/// e(C - [y]G1, -G2) * e(proof, [tau]G2 - [z]G2) == 1, computed as
-/// e(C - [y]G1 + [z]proof, -G2) * e(proof, [tau]G2) == 1, since
-/// e(proof, [-z]G2) = e([z]proof, -G2), which leaves both G2 points constant,
-/// so their Miller loop lines are precomputed. `input` is the 192-byte
-/// precompile input; the versioned hash must match the commitment.
+/// Verify the proof that the committed polynomial evaluates to y at z.
+/// `input` is the 192-byte precompile input; the versioned hash must match
+/// the commitment, and z and y must be below BLS_MODULUS.
 pub fn verify<T: ByteSource>(_ input: T) -> bool {
     core::assert(input.len() == INPUT_LEN)
     // The versioned hash is 0x01 followed by the commitment digest's last 31 bytes.
     let versioned = (1 << 248) | (sha256(input, offset: 96, len: 48) & ((1 << 248) - 1))
     if word_at(input, offset: 0) != versioned { return false }
-    let z = word_at(input, offset: 32)
-    let y = word_at(input, offset: 64)
-    if z >= BLS_MODULUS || y >= BLS_MODULUS { return false }
     let commitment = match decode_kzg_g1(input, offset: 96) {
         Option::Some(point) => point,
         Option::None => return false,
@@ -47,8 +28,5 @@ pub fn verify<T: ByteSource>(_ input: T) -> bool {
         Option::Some(point) => point,
         Option::None => return false,
     }
-    let generator = Affine { x: g1_generator().x, y: g1_generator().y, infinity: false }
-    let combined = multiply_two(generator.neg(), y, proof, z).add_affine(commitment).to_affine()
-    final_exponentiation(miller_loop_lines(combined, NEG_G2_LINES, proof, TAU_G2_LINES)).is_one()
+    verify_proof(commitment, z: word_at(input, offset: 32), y: word_at(input, offset: 64), proof)
 }
-

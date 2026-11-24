@@ -1,8 +1,5 @@
 use core::MemBuffer
 use ingot::{FAILURE, SUCCESS, run}
-use ingot::bn254::multiply_g1
-use ingot::bn254_curve::Point
-use ingot::bn254_field::{Field, Fp2, fp, fp_value}
 
 const G1_DOUBLE_X: u256 = 0x030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd3
 const G1_DOUBLE_Y: u256 = 0x15ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4
@@ -38,21 +35,6 @@ fn pair<const N: usize>(_ bytes: mut [u8; N], index: u64, x: u256, y: u256, g2: 
         put(mut bytes, offset: base + 64 + i * 32, value: g2[i.downcast_truncate()])
         i += 1
     }
-}
-
-#[test]
-fn bn254_field_arithmetic_round_trips() {
-    let a = fp(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
-    let b = fp(P_MINUS_TWO)
-    core::assert(fp_value(a) == 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef)
-    // (p - 2) * a = -2a and a * a^-1 = 1.
-    core::assert(b.mul(a).equals(a.double().neg()))
-    core::assert(a.mul(a.inverse()).equals(fp(1)))
-    core::assert(fp_value(b.add(fp(5))) == 3 && fp_value(fp(3).sub(fp(5))) == P_MINUS_TWO)
-    let x = Fp2 { c0: fp(3), c1: fp(4) }
-    core::assert(x.mul(x.inverse()).equals(Fp2::one()))
-    // (3 + 4u)^2 = -7 + 24u.
-    core::assert(x.square().equals(Fp2 { c0: fp(7).neg(), c1: fp(24) }))
 }
 
 #[test]
@@ -158,22 +140,4 @@ fn bn254_pairing_spans_chunks_and_checks_every_pair() {
     pair(mut unbalanced, index: 5, x: 1, y: 3, g2: G2)
     let invalid = run(address: 8, input: unbalanced, gas: 45000 + 34000 * 6)
     core::assert(invalid.status == FAILURE)
-}
-
-#[test]
-fn bn254_glv_multiplication_matches_double_and_add() {
-    let g = Point::affine(x: fp(1), y: fp(2))
-    let (x, y) = g.multiply(0x1234567890abcdef1234567890abcdef).to_affine()
-    let p = Point::affine(x, y)
-    let order = CURVE_ORDER
-    let max: u256 = 0
-    let max = max.wrapping_sub(1)
-    for point in [g, p] {
-        for scalar in [1, 2, 3, order - 1, order, order + 5, max, 0xb3c4d79d41a917585bfc41088d8daaa78b17ea66b99c90dd,
-                       0x2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80910, 1 << 200, (1 << 128) + 1] {
-            let expected = point.multiply(scalar % order)
-            let actual = multiply_g1(point, scalar)
-            core::assert(actual.equals(expected))
-        }
-    }
 }

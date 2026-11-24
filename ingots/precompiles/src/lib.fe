@@ -1,5 +1,6 @@
 use core::{MemBuffer, MemSpan, Option}
 use core::num::swap_bytes
+use curves::{p256, secp256k1}
 use keccak::{ByteSource, Keccak256}
 pub use hashes::{ripemd160, sha256}
 
