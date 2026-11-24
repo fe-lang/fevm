@@ -1,10 +1,10 @@
-use core::{MemBuffer, MemVec}
+use core::{MemBuffer, MemVec, Option}
 use core::num::leading_zeros
 use fevm::{OK, WorldState}
 use fevm::state::{EMPTY_ROOT, StorageKey}
 use ingot::chain::Import
 use ingot::chain_tests::{BLOCK_STATE_ROOT, GENESIS_STATE_ROOT, genesis, genesis_world, valid}
-use ingot::state_trie::StateTrie
+use ingot::state_trie::{StateTrie, world_account}
 use ingot::trie::{hash, state_root}
 
 // Whether `trie` has the root `state_root` gives `world`, with the nodes of
@@ -12,6 +12,16 @@ use ingot::trie::{hash, state_root}
 fn agrees(_ trie: mut StateTrie, _ world: mut WorldState) -> bool {
     let fresh = StateTrie::new(mut world)
     trie.root().unwrap() == state_root(mut world).unwrap() && trie.nodes() == fresh.nodes()
+}
+
+// Sets in `trie` the account of `address` as `world` holds it.
+fn reread_account(_ trie: mut StateTrie, _ world: mut WorldState, _ address: u256) {
+    trie.set_account(address, world_account(mut world, address))
+}
+
+// Sets in `trie` slot `slot` of `address` as `world` holds it.
+fn reread_slot(_ trie: mut StateTrie, _ world: WorldState, address: u256, slot: u256) {
+    trie.set_slot(address, slot, value: world.storage_load(address, slot))
 }
 
 // The first word from 1 on whose keccak256, of its low `len` bytes, shares
@@ -28,10 +38,11 @@ fn sharing(_ key: u256, nibbles: u256, len: usize) -> u256 {
 fn put(_ trie: mut StateTrie, _ world: mut WorldState, accounts: bool, word: u256, value: u256) -> bool {
     if accounts {
         if value == 0 { world.remove_account(word) } else { core::assert(world.set_balance(word, value)) }
-        trie.reread_account(mut world, word)
+        reread_account(mut trie, mut world, word)
     } else {
         core::assert(world.storage_store(1, word, value))
-        trie.reread_slot(mut world, address: 1, slot: word)
+        reread_account(mut trie, mut world, 1)
+        reread_slot(mut trie, world, address: 1, slot: word)
     }
     agrees(mut trie, mut world)
 }
@@ -97,13 +108,13 @@ fn state_trie_splits_leaves_and_collapses_branches() {
     var trie = StateTrie::new(mut world)
     core::assert(agrees(mut trie, mut world))
     core::assert(world.set_balance(2, 2))
-    trie.reread_account(mut world, 2)
+    reread_account(mut trie, mut world, 2)
     core::assert(agrees(mut trie, mut world))
     world.remove_account(2)
-    trie.reread_account(mut world, 2)
+    reread_account(mut trie, mut world, 2)
     core::assert(agrees(mut trie, mut world))
     world.remove_account(1)
-    trie.reread_account(mut world, 1)
+    reread_account(mut trie, mut world, 1)
     core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
 }
 
@@ -112,16 +123,16 @@ fn state_trie_roots_an_empty_world() {
     var world = WorldState::empty()
     var trie = StateTrie::new(mut world)
     core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
-    // Rereading what the world does not hold changes nothing.
-    trie.reread_account(mut world, 1)
-    trie.reread_slot(mut world, address: 1, slot: 2)
+    // Setting what the world does not hold changes nothing.
+    trie.set_account(1, Option::None)
+    trie.set_slot(address: 1, slot: 2, value: 0)
     core::assert(trie.root().unwrap() == EMPTY_ROOT && trie.nodes() == 0)
 }
 
 #[test]
 fn state_trie_follows_storage_alone() {
-    // An account whose storage changes and whose fields do not: rereading
-    // its slots alone changes its storage root.
+    // An account whose storage changes and whose fields do not: setting its
+    // slots alone changes its storage root.
     var world = WorldState::empty()
     let code: [u8; 1] = [0x00]
     core::assert(world.set_nonce(1, 1) && world.set_balance(1, 7) && world.set_code(address: 1, code) == OK)
@@ -129,23 +140,24 @@ fn state_trie_follows_storage_alone() {
     var trie = StateTrie::new(mut world)
     core::assert(agrees(mut trie, mut world))
     core::assert(world.storage_store(1, 1, 0x100) && world.storage_store(1, 3, 3) && world.storage_store(1, 2, 0))
-    for slot in [1 as u256, 2, 3] { trie.reread_slot(mut world, address: 1, slot) }
+    for slot in [1 as u256, 2, 3] { reread_slot(mut trie, world, address: 1, slot) }
     core::assert(agrees(mut trie, mut world))
     // The last slot removed leaves the empty storage root.
     core::assert(world.storage_store(1, 1, 0) && world.storage_store(1, 3, 0))
-    trie.reread_slot(mut world, address: 1, slot: 1)
-    trie.reread_slot(mut world, address: 1, slot: 3)
+    reread_slot(mut trie, world, address: 1, slot: 1)
+    reread_slot(mut trie, world, address: 1, slot: 3)
     core::assert(agrees(mut trie, mut world))
-    // A slot of an account the trie does not hold yet adds the account.
+    // A slot of a new account, set after the account.
     core::assert(world.storage_store(3, 1, 1))
-    trie.reread_slot(mut world, address: 3, slot: 1)
+    reread_account(mut trie, mut world, 3)
+    reread_slot(mut trie, world, address: 3, slot: 1)
     core::assert(agrees(mut trie, mut world))
-    // Removing an account removes its storage, and its slots, reread
-    // after, are already gone.
+    // Removing an account removes its storage, and its slots, set after,
+    // are already gone.
     world.remove_account(3)
-    trie.reread_account(mut world, 3)
+    reread_account(mut trie, mut world, 3)
     core::assert(agrees(mut trie, mut world))
-    trie.reread_slot(mut world, address: 3, slot: 1)
+    reread_slot(mut trie, world, address: 3, slot: 1)
     core::assert(agrees(mut trie, mut world))
 }
 
@@ -199,10 +211,10 @@ fn state_trie_embeds_nodes_under_32_bytes() {
     // The leaves of 30 bytes grow to 32 in place, hashed, and shrink back.
     for value in [0x80 as u256, 0x01] {
         core::assert(world.storage_store(addresses[0], firsts[0], value))
-        trie.reread_slot(mut world, address: addresses[0], slot: firsts[0])
+        reread_slot(mut trie, world, address: addresses[0], slot: firsts[0])
         core::assert(agrees(mut trie, mut world))
         core::assert(world.storage_store(addresses[0], seconds[0], value))
-        trie.reread_slot(mut world, address: addresses[0], slot: seconds[0])
+        reread_slot(mut trie, world, address: addresses[0], slot: seconds[0])
         core::assert(agrees(mut trie, mut world))
     }
     core::assert(trie.root().unwrap() == roots[0])
@@ -210,20 +222,20 @@ fn state_trie_embeds_nodes_under_32_bytes() {
         world = boundary_world(address: addresses[test], code: codes[test], len: lens[test], first: firsts[test],
                                second: seconds[test], value: values[test])
         for at in test - 1..test + 1 {
-            trie.reread_account(mut world, addresses[at])
-            trie.reread_slot(mut world, address: addresses[at], slot: firsts[at])
-            trie.reread_slot(mut world, address: addresses[at], slot: seconds[at])
+            reread_account(mut trie, mut world, addresses[at])
+            reread_slot(mut trie, world, address: addresses[at], slot: firsts[at])
+            reread_slot(mut trie, world, address: addresses[at], slot: seconds[at])
         }
         core::assert(trie.root().unwrap() == roots[test] && agrees(mut trie, mut world))
     }
 }
 
-// Rereads from `world` into `trie` every account and slot `keys` holds.
+// Sets in `trie` every account and slot `keys` holds as `world` holds it.
 fn reread_all(_ trie: mut StateTrie, _ world: mut WorldState, keys: WorldState) {
-    for position in 0..keys.account_count() { trie.reread_account(mut world, keys.account_at(position).address) }
+    for position in 0..keys.account_count() { reread_account(mut trie, mut world, keys.account_at(position).address) }
     for at in 0..keys.storage_slots() {
         let entry = keys.storage_at(at)
-        if entry.occupied { trie.reread_slot(mut world, address: entry.address, slot: entry.slot) }
+        if entry.occupied { reread_slot(mut trie, world, address: entry.address, slot: entry.slot) }
     }
 }
 
@@ -257,27 +269,26 @@ struct Changes { accounts: MemVec<u256>, slots: MemVec<StorageKey> }
 impl Changes {
     fn new() -> Self { Changes { accounts: MemVec::new(), slots: MemVec::new() } }
 
-    // Rereads them from `world` into `trie`, the slots first if `slots_first`.
-    fn reread(self, _ trie: mut StateTrie, _ world: mut WorldState, slots_first: bool) {
-        if slots_first { for key in self.slots { trie.reread_slot(mut world, address: key.address, slot: key.slot) } }
-        for address in self.accounts { trie.reread_account(mut world, address) }
-        if !slots_first { for key in self.slots { trie.reread_slot(mut world, address: key.address, slot: key.slot) } }
+    // Sets them in `trie` as `world` holds them, the accounts first.
+    fn reread(self, _ trie: mut StateTrie, _ world: mut WorldState) {
+        for address in self.accounts { reread_account(mut trie, mut world, address) }
+        for key in self.slots { reread_slot(mut trie, world, address: key.address, slot: key.slot) }
     }
 }
 
 // A deterministic pseudo-random sequence: keccak256 of the word before.
-struct Random { state: u256 }
+pub(ingot) struct Random { pub(ingot) state: u256 }
 
 impl Random {
-    fn word(mut self) -> u256 {
+    pub(ingot) fn word(mut self) -> u256 {
         self.state = hash(self.state, len: 32)
         self.state
     }
 
-    fn below(mut self, _ bound: usize) -> usize { (self.word() % bound as u256).downcast_truncate() }
+    pub(ingot) fn below(mut self, _ bound: usize) -> usize { (self.word() % bound as u256).downcast_truncate() }
 
     // A nonzero value of 1 to 32 bytes, for leaves of many lengths.
-    fn value(mut self) -> u256 {
+    pub(ingot) fn value(mut self) -> u256 {
         let value = self.word() >> (self.below(32) * 8) as u256
         if value == 0 { 1 } else { value }
     }
@@ -352,12 +363,11 @@ fn differential(seed: u256, batches: usize, accounts: usize, slots: usize, size:
                 changes.slots.push(StorageKey { address, slot })
             }
         }
-        let slots_first = random.below(2) == 0
-        changes.reread(mut trie, mut world, slots_first)
+        changes.reread(mut trie, mut world)
         core::assert(agrees(mut trie, mut world))
         if batch % 4 == 3 {
             world = before
-            changes.reread(mut trie, mut world, slots_first: !slots_first)
+            changes.reread(mut trie, mut world)
             core::assert(trie.root().unwrap() == root && agrees(mut trie, mut world))
         }
     }

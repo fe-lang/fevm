@@ -31,9 +31,9 @@ pub struct Trie { leaves: MemVec<Leaf>, values: Encoder, failed: bool }
 impl Trie {
     pub fn new() -> Self { Trie { leaves: MemVec::new(), values: Encoder::new(), failed: false } }
 
-    // The encoder for the value of a leaf at the first `nibbles` nibbles of
-    // `key`, which the trie adds after the encoder's last use.
-    fn leaf(mut self, _ key: u256, nibbles: usize) -> mut Encoder {
+    /// The encoder for the value of a leaf at the first `nibbles` nibbles of
+    /// `key`, which the trie adds after the encoder's last use.
+    pub(ingot) fn leaf(mut self, _ key: u256, nibbles: usize) -> mut Encoder {
         let offset = self.values.begin()
         yield mut self.values
         let leaf = Leaf { key, nibbles, offset, len: self.values.begin() - offset }

@@ -234,15 +234,24 @@ Either leaves the world and the head as they were: the chain undoes the
 block from its changes.
 
 The state root is kept incrementally. `Chain::new` builds the trie of the
-whole world once. After each block the chain rereads into it the accounts
-and slots the block's changes name, and the root rehashes only their
-paths; a block rejected after it ran is undone and its keys reread. The trie holds a
+whole world once. After each block the chain sets in it each account and
+slot the block's changes name, as the world holds it, and the root rehashes
+only their paths; a block rejected after it ran is undone and its keys set
+again. An account that settlement deleted and the block made again has its
+storage cleared in the trie first (`AccountBefore.cleared`). The trie holds a
 node for every account and slot of the world with its hash, besides the
 world itself: about 100 MB more for 100,000 accounts of 10 slots, a third of
 what that world takes. A trie that an allocation failed is rebuilt from the
 world before the next block. A host that keeps the state in its own storage
 would not use `Chain`, but `Block`, the changes it gives, and its own trie.
 `state_root(world)` computes the root of a whole world in one pass.
+
+`StateTrie::partial(root, nodes)` is the trie of a state root and a
+witness's nodes (`Nodes`, each held once by its hash and marked when read):
+each subtree it has not read is its hash, and a read or a change reads the
+nodes on its path, so it hashes only what changed. A node it needs and does
+not hold, or one that is malformed, is a `TrieFault`, after which the trie
+gives no root.
 
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks

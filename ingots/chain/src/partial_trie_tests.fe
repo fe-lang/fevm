@@ -1,0 +1,1086 @@
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
+use fevm::{AccountState, Block, Config, Evm, InputData, TxEnv, TxRequest, WorldState, default_block_env, empty_bytes}
+use fevm::address::create_address
+use fevm::processor::TX_LEGACY
+use fevm::status::{OK, VALID}
+use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
+use fevm_rlp::Encoder
+use keccak::keccak256_word
+use ingot::chain::write_changes
+use ingot::state_trie::{Nodes, StateTrie, TrieFault}
+use ingot::state_trie_tests::Random
+use ingot::trie::{Trie, hash, put_path, state_root}
+
+// A read or a change of a trie, by key: of an account, or of a slot of an
+// account.
+enum Op {
+    Account(u256),
+    Slot(u256, u256),
+    Set(u256, Option<AccountState>),
+    Clear(u256),
+    Store(u256, u256, u256),
+    Root,
+}
+impl Copy for Op {}
+
+// Applies `ops` to `trie`; what its reads and roots give, until one faults.
+fn apply(_ trie: mut StateTrie, _ ops: MemVec<Op>) -> MemVec<u256> {
+    var seen: MemVec<u256> = MemVec::new()
+    for op in ops {
+        match op {
+            Op::Account(key) => match trie.account_keyed(key) {
+                Result::Ok(Option::Some(state)) => {
+                    for word in [1 as u256, state.nonce as u256, state.balance, state.code_hash, state.storage_root] {
+                        seen.push(word)
+                    }
+                },
+                Result::Ok(Option::None) => seen.push(0),
+                Result::Err(_) => return seen,
+            },
+            Op::Slot(account, key) => match trie.slot_keyed(account, key) {
+                Result::Ok(value) => seen.push(value),
+                Result::Err(_) => return seen,
+            },
+            Op::Set(key, state) => trie.set_account_keyed(key, state),
+            Op::Clear(key) => trie.clear_storage_keyed(key),
+            Op::Store(account, key, value) => trie.set_slot_keyed(account, key, value),
+            Op::Root => match trie.root() {
+                Result::Ok(root) => seen.push(root),
+                Result::Err(_) => return seen,
+            },
+        }
+    }
+    seen
+}
+
+// Whether the first `len` words of `a` and `b` are the same.
+fn same(_ a: MemVec<u256>, _ b: MemVec<u256>, len: usize) -> bool {
+    if a.len() < len || b.len() < len { return false }
+    for index in 0..len {
+        if a[index] != b[index] { return false }
+    }
+    true
+}
+
+// The nodes a trie read of `nodes`, but for the one at `without`.
+fn used(_ nodes: Nodes, without: usize) -> Nodes {
+    var kept = Nodes::new()
+    for at in 0..nodes.len() {
+        if nodes.used(at) && at != without { core::assert(kept.add(nodes.node(at))) }
+    }
+    kept
+}
+
+// Applies `setup`, then `ops`, which end with a root, to a complete trie,
+// and `ops` to partial tries of the complete trie's nodes after `setup`:
+// over all of them, and over the ones the first partial trie reads, they
+// give what the complete trie gives; without one of those, every
+// `every`th in turn, they give the same until the trie faults on that one,
+// and then no root. The count of nodes read, and of nodes.
+fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize) {
+    var world = WorldState::empty()
+    var complete = StateTrie::new(mut world)
+    let _ = apply(mut complete, setup)
+    let root = complete.root().unwrap()
+    var nodes = Nodes::new()
+    core::assert(complete.write_nodes(mut nodes))
+    let expected = apply(mut complete, ops)
+    var partial = StateTrie::partial(root, nodes)
+    let seen = apply(mut partial, ops)
+    core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
+    let all = partial.into_nodes()
+    var partial = StateTrie::partial(root, used(all, without: usize::max()))
+    let seen = apply(mut partial, ops)
+    core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
+    var count: usize = 0
+    for at in 0..all.len() {
+        if !all.used(at) { continue }
+        count += 1
+        if (count - 1) % every != 0 { continue }
+        var partial = StateTrie::partial(root, used(all, without: at))
+        let seen = apply(mut partial, ops)
+        core::assert(seen.len() < expected.len() && same(seen, expected, len: seen.len()))
+        core::assert(match partial.root() {
+            Result::Err(TrieFault::Missing(hash)) => hash == keccak256_word(all.node(at)),
+            _ => false,
+        })
+    }
+    (count, all.len())
+}
+
+// The keys of the tests whose keys share their first 60 nibbles, those of
+// this, followed by four.
+const SHARED: u256 = 0xabcdef << 232
+
+// The key of account or slot `index`, below 256: a hash, or if `shared` one
+// that shares its first 60 nibbles with the others, and its first 62 with
+// those of odd indexes, whose last two nibbles are the index. An even
+// index's next two are the index and one, and its last two hashed.
+fn key(_ index: usize, shared: bool) -> u256 {
+    let word = hash(index as u256, len: 32)
+    if !shared { return word }
+    SHARED | if index % 2 == 1 { index as u256 } else { (index as u256 + 1) << 8 | word & 0xff }
+}
+
+// A key whose first `count` nibbles are `nibbles`, and the rest zero.
+fn path(_ nibbles: u256, count: usize) -> u256 { nibbles << ((64 - count) * 4) as u256 }
+
+fn state(_ random: mut Random) -> AccountState {
+    let nonce: u64 = random.below(3).downcast_truncate()
+    let balance = random.value()
+    let code_hash = if random.below(2) == 0 { EMPTY_CODE_HASH } else { random.word() }
+    AccountState { nonce, balance, code_hash, storage_root: 0 }
+}
+
+// An account of `balance`.
+fn funded(_ balance: u256) -> Option<AccountState> {
+    Option::Some(AccountState { nonce: 0, balance, code_hash: EMPTY_CODE_HASH, storage_root: 0 })
+}
+
+// Pseudo-random changes from `seed` to `accounts` accounts and their slots
+// of `slots` keys, at most 256 of each, keys sharing 60 nibbles if `shared`: a
+// setup of `setups` accounts with a few slots each, then `batches` batches
+// of up to `size` changes, each after reading an account and a slot and
+// before the root. The setup and the batches.
+fn script(seed: u256, shared: bool, accounts: usize, slots: usize, setups: usize, batches: usize, size: usize)
+    -> (MemVec<Op>, MemVec<Op>) {
+    var random = Random { state: seed }
+    var setup: MemVec<Op> = MemVec::new()
+    // A bit for each account that exists.
+    var exists: u256 = 0
+    for _ in 0..setups {
+        let index = random.below(accounts)
+        let account = key(index, shared)
+        setup.push(Op::Set(account, Option::Some(state(mut random))))
+        for _ in 0..random.below(5) {
+            setup.push(Op::Store(account, key(random.below(slots), shared), random.value()))
+        }
+        exists |= 1 << index as u256
+    }
+    var ops: MemVec<Op> = MemVec::new()
+    for _ in 0..batches {
+        ops.push(Op::Account(key(random.below(accounts), shared)))
+        ops.push(Op::Slot(key(random.below(accounts), shared), key(random.below(slots), shared)))
+        for _ in 0..1 + random.below(size) {
+            let index = random.below(accounts)
+            let account = key(index, shared)
+            let bit = 1 << index as u256
+            let slot = key(random.below(slots), shared)
+            let change = random.below(12)
+            if change < 3 {
+                ops.push(Op::Set(account, Option::Some(state(mut random))))
+                exists |= bit
+            } else if change == 3 {
+                ops.push(Op::Set(account, Option::None))
+                exists &= ~bit
+            } else if change < 8 {
+                if exists & bit == 0 {
+                    ops.push(Op::Set(account, Option::Some(state(mut random))))
+                    exists |= bit
+                }
+                ops.push(Op::Store(account, slot, random.value()))
+            } else if change < 10 {
+                ops.push(Op::Store(account, slot, 0))
+            } else if change == 10 {
+                ops.push(Op::Clear(account))
+            } else {
+                // Every slot removed, which collapses its storage trie.
+                for at in 0..slots { ops.push(Op::Store(account, key(at, shared), 0)) }
+            }
+        }
+        ops.push(Op::Root)
+    }
+    (setup, ops)
+}
+
+// Whether a partial trie follows `script`'s changes, reading some of its
+// nodes but not all.
+fn follows(_ script: own (MemVec<Op>, MemVec<Op>), every: usize) -> bool {
+    let (setup, ops) = script
+    let (used, held) = check(setup, ops, every)
+    used > 0 && used < held
+}
+
+#[test]
+fn partial_trie_follows_spread_keys() {
+    for seed in [1 as u256, 2, 3, 4] {
+        core::assert(follows(script(seed, shared: false, accounts: 96, slots: 16, setups: 300, batches: 100, size: 8),
+                             every: 1))
+    }
+}
+
+#[test]
+fn partial_trie_follows_keys_sharing_60_nibbles() {
+    // Inline leaves and branches, deep extensions and their merges.
+    for seed in [5 as u256, 6, 7, 8] {
+        core::assert(follows(script(seed, shared: true, accounts: 64, slots: 64, setups: 250, batches: 100, size: 8),
+                             every: 1))
+    }
+}
+
+#[test]
+fn partial_trie_follows_many_accounts() {
+    core::assert(follows(script(seed: 9, shared: false, accounts: 256, slots: 8, setups: 1000, batches: 40, size: 32),
+                         every: 1))
+}
+
+#[test]
+fn state_trie_roots_keys_sharing_60_nibbles() {
+    // The slots of one account, whose keys share their first 60 nibbles,
+    // set and removed at random: the storage root is the one `Trie` gives.
+    var random = Random { state: 10 }
+    var world = WorldState::empty()
+    var trie = StateTrie::new(mut world)
+    trie.set_account_keyed(0, funded(1))
+    var values: MemVec<u256> = MemVec::new()
+    for _ in 0..256 { values.push(0) }
+    for _ in 0..300 {
+        for _ in 0..1 + random.below(6) {
+            let index = random.below(256)
+            values[index] = if random.below(3) == 0 { 0 } else { random.value() }
+            trie.set_slot_keyed(account: 0, key: key(index, shared: true), value: values[index])
+        }
+        core::assert(trie.root().is_ok())
+        var slots = Trie::new()
+        for index in 0..256 {
+            if values[index] != 0 { slots.leaf(key(index, shared: true), nibbles: 64).uint(values[index]) }
+        }
+        core::assert(trie.account_keyed(0).unwrap().unwrap().storage_root == slots.root().unwrap())
+    }
+}
+
+// A setup of accounts at `keys`, each with balance one more than the last.
+fn accounts(_ keys: MemVec<u256>) -> MemVec<Op> {
+    var setup: MemVec<Op> = MemVec::new()
+    var balance: u256 = 1
+    for key in keys {
+        setup.push(Op::Set(key, funded(balance)))
+        balance += 1
+    }
+    setup
+}
+
+// Removing the first `count` of accounts `keys` in turn, then the root: the
+// nodes read.
+fn removing(_ keys: MemVec<u256>, count: usize) -> usize {
+    var ops: MemVec<Op> = MemVec::new()
+    for at in 0..count { ops.push(Op::Set(keys[at], Option::None)) }
+    ops.push(Op::Root)
+    check(accounts(keys), ops, every: 1).0
+}
+
+// The keys whose first `count` nibbles are each of `paths`.
+fn keyed<const N: usize>(_ paths: [u256; N], count: usize) -> MemVec<u256> {
+    var keys: MemVec<u256> = MemVec::new()
+    for nibbles in paths { keys.push(path(nibbles, count)) }
+    keys
+}
+
+#[test]
+fn partial_trie_collapses_onto_an_unread_sibling() {
+    // A removed account's branch is left with a stub, a leaf, an extension
+    // or a branch, which the trie reads, but not below it: the root branch
+    // or an extension's, the removed leaf and the sibling.
+    core::assert(removing(keyed([0x1, 0x2], count: 1), count: 1) == 3)
+    core::assert(removing(keyed([0xabc1, 0xabc2], count: 4), count: 1) == 4)
+    core::assert(removing(keyed([0x1000, 0x2ff1, 0x2ff2], count: 4), count: 1) == 3)
+    core::assert(removing(keyed([0xab1000, 0xab2ff1, 0xab2ff2], count: 6), count: 1) == 4)
+    core::assert(removing(keyed([0x10, 0x21, 0x22], count: 2), count: 1) == 3)
+    core::assert(removing(keyed([0xab10, 0xab21, 0xab22], count: 4), count: 1) == 4)
+}
+
+#[test]
+fn partial_trie_collapses_twice_before_its_root() {
+    // A branch below the root collapses onto a leaf it reads, then the root
+    // onto that leaf, moved; or the root loses one leaf, then collapses
+    // onto a branch it reads.
+    core::assert(removing(keyed([0x21, 0x10, 0x22], count: 2), count: 2) == 5)
+    core::assert(removing(keyed([0x1000, 0x3000, 0x2100, 0x2200], count: 4), count: 2) == 4)
+}
+
+// Removing the first of slots `low`, the low nibbles of keys sharing
+// SHARED's 60, of one account: the nodes read.
+fn removing_slot<const N: usize>(_ low: [u256; N]) -> usize {
+    let account = path(0x1, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    setup.push(Op::Set(account, funded(1)))
+    for nibbles in low { setup.push(Op::Store(account, SHARED | nibbles, 1)) }
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Store(account, SHARED | low[0], 0))
+    ops.push(Op::Root)
+    check(setup, ops, every: 1).0
+}
+
+#[test]
+fn partial_trie_collapses_onto_an_inline_sibling() {
+    // Of the account's leaf and the storage trie's nodes over 31 bytes: an
+    // extension of 63 nibbles over a branch of two leaves, all inline, which
+    // gives way to the one left.
+    core::assert(removing_slot([0x0001, 0x0002]) == 2)
+    // An extension of 60 over a branch of an inline leaf and an inline
+    // branch of two: the inline branch gives way to its leaf left, below
+    // the branch; or it is left, and with an extension of one nibble over
+    // it merges into the extension above.
+    core::assert(removing_slot([0x2100, 0x1000, 0x2200]) == 3)
+    core::assert(removing_slot([0x1000, 0x2100, 0x2200]) == 3)
+    // A hashed branch of a leaf and an inline branch below that branch,
+    // which an extension of one nibble over the inline branch replaces.
+    core::assert(removing_slot([0x2100, 0x1000, 0x2210, 0x2220]) == 4)
+    // An inline extension of one nibble over an inline branch, left by the
+    // branch above it: below the extension of 60, which it merges into, or
+    // below a branch.
+    core::assert(removing_slot([0x1000, 0x2210, 0x2220]) == 3)
+    core::assert(removing_slot([0x2100, 0x1000, 0x2201, 0x2202]) == 4)
+}
+
+#[test]
+fn partial_trie_proves_absence_at_an_extension() {
+    // Accounts below an extension of three nibbles: an account whose key
+    // leaves it at the second is absent, and added, with the extension's
+    // branch unread.
+    var ops: MemVec<Op> = MemVec::new()
+    let absent = path(0xab0, count: 3)
+    ops.push(Op::Account(absent))
+    ops.push(Op::Set(absent, funded(9)))
+    ops.push(Op::Root)
+    core::assert(check(accounts(keyed([0xabc1, 0xabc2], count: 4)), ops, every: 1).0 == 1)
+}
+
+#[test]
+fn partial_trie_shortens_an_extension_without_reading_its_child() {
+    // An account whose key leaves an extension of four nibbles at the
+    // third: the extension keeps its last nibble below a new branch, and
+    // its branch stays unread.
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Set(path(0xab0, count: 3), funded(9)))
+    ops.push(Op::Root)
+    core::assert(check(accounts(keyed([0xabcd1, 0xabcd2], count: 5)), ops, every: 1).0 == 1)
+}
+
+#[test]
+fn partial_trie_reads_one_storage_trie_under_several_accounts() {
+    // Three accounts with the same slots, so the same storage root, whose
+    // nodes the witness holds once. A change to one account's storage
+    // leaves the others'.
+    var setup: MemVec<Op> = MemVec::new()
+    var ops: MemVec<Op> = MemVec::new()
+    let slots = [hash(1, len: 32), hash(2, len: 32), hash(3, len: 32)]
+    for account in [hash(1, len: 20), hash(2, len: 20), hash(3, len: 20)] {
+        setup.push(Op::Set(account, funded(1)))
+        for slot in slots { setup.push(Op::Store(account, slot, slot >> 200)) }
+        ops.push(Op::Account(account))
+    }
+    ops.push(Op::Store(hash(1, len: 20), slots[0], 7))
+    ops.push(Op::Store(hash(2, len: 20), slots[1], 0))
+    for account in [hash(1, len: 20), hash(2, len: 20), hash(3, len: 20)] {
+        for slot in slots { ops.push(Op::Slot(account, slot)) }
+    }
+    ops.push(Op::Root)
+    core::assert(check(setup, ops, every: 1).0 > 3)
+    // The nodes of the three accounts' leaves and the trie above them, and
+    // of one storage trie.
+    var world = WorldState::empty()
+    var trie = StateTrie::new(mut world)
+    let _ = apply(mut trie, setup)
+    var nodes = Nodes::new()
+    core::assert(trie.write_nodes(mut nodes))
+    var bare = StateTrie::new(mut world)
+    for account in [hash(1, len: 20), hash(2, len: 20), hash(3, len: 20)] { bare.set_account_keyed(account, funded(1)) }
+    var bare_nodes = Nodes::new()
+    core::assert(bare.write_nodes(mut bare_nodes))
+    // One account's leaf, and its storage trie.
+    var one = StateTrie::new(mut world)
+    one.set_account_keyed(0, funded(1))
+    for slot in slots { one.set_slot_keyed(account: 0, key: slot, value: slot >> 200) }
+    var storage = Nodes::new()
+    core::assert(one.write_nodes(mut storage))
+    core::assert(nodes.len() == bare_nodes.len() + storage.len() - 1)
+}
+
+#[test]
+fn partial_trie_clears_storage_without_reading_it() {
+    let first = path(0x1, count: 1)
+    let second = path(0x2, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    for (account, balance) in [(first, 1 as u256), (second, 2)] {
+        setup.push(Op::Set(account, funded(balance)))
+        for slot in [1 as u256, 2, 3] { setup.push(Op::Store(account, hash(slot, len: 32), slot)) }
+    }
+    // The first account's storage goes, unread: the trie reads the root
+    // branch and the account's leaf. Its slots are then zero, and set again.
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Clear(first))
+    ops.push(Op::Account(first))
+    ops.push(Op::Slot(first, hash(1, len: 32)))
+    ops.push(Op::Root)
+    ops.push(Op::Store(first, hash(2, len: 32), 5))
+    ops.push(Op::Account(second))
+    ops.push(Op::Root)
+    core::assert(check(setup, ops, every: 1).0 == 3)
+    // In a complete trie, as a world without the slots gives it.
+    var world = WorldState::empty()
+    for address in [1 as u256, 2] {
+        core::assert(world.set_balance(address, 1))
+        for slot in [1 as u256, 2, 3] { core::assert(world.storage_store(address, slot, slot)) }
+    }
+    var trie = StateTrie::new(mut world)
+    trie.clear_storage(1)
+    trie.clear_storage(3)
+    for slot in [1 as u256, 2, 3] { core::assert(world.storage_store(1, slot, 0)) }
+    core::assert(trie.root().unwrap() == state_root(mut world).unwrap())
+    core::assert(trie.account(1).unwrap().unwrap().storage_root == EMPTY_ROOT)
+    core::assert(trie.slot(address: 1, slot: 2).unwrap() == 0)
+    core::assert(trie.account(1).unwrap().unwrap().balance == 1 && trie.account(3).unwrap().is_none())
+}
+
+#[test]
+fn partial_trie_of_no_nodes() {
+    // The empty root needs none; another, its node.
+    var empty = StateTrie::partial(root: EMPTY_ROOT, Nodes::new())
+    core::assert(empty.account(1).unwrap().is_none() && empty.root().unwrap() == EMPTY_ROOT)
+    empty.set_account(1, funded(1))
+    var world = WorldState::empty()
+    core::assert(world.set_balance(1, 1))
+    core::assert(empty.root().unwrap() == state_root(mut world).unwrap())
+    var missing = StateTrie::partial(root: 0x1234, Nodes::new())
+    core::assert(match missing.account(1) {
+        Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
+        _ => false,
+    })
+    // The fault is kept: changes change nothing and there is no root.
+    missing.set_account(1, Option::None)
+    core::assert(match missing.root() {
+        Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
+        _ => false,
+    })
+}
+
+// The RLP `rlp` holds.
+fn bytes(_ rlp: own Encoder) -> MemBuffer { rlp.finish().unwrap() }
+
+// The RLP of an account of one wei whose storage root is `root`.
+fn account_value(root: u256) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.uint(0)
+    rlp.uint(1)
+    rlp.fixed(root, len: 32)
+    rlp.fixed(EMPTY_CODE_HASH, len: 32)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// A leaf at `depth` of `key` whose value is the string `value`.
+fn leaf(_ key: u256, depth: usize, _ value: MemSpan) -> MemBuffer {
+    var rlp = Encoder::new()
+    var scratch = MemBuffer::new(33)
+    let list = rlp.begin()
+    put_path(mut rlp, mut scratch, key, from: depth, to: 64, leaf: true)
+    rlp.bytes(value)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// A node of two items: the string `path`, and `child`, encoded.
+fn pair(_ path: MemSpan, _ child: MemSpan) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.bytes(path)
+    rlp.raw(child)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// An extension at `depth` of `key`'s nibbles to `end` over the child
+// `child`, encoded.
+fn extension(_ key: u256, depth: usize, end: usize, _ child: MemSpan) -> MemBuffer {
+    var rlp = Encoder::new()
+    var scratch = MemBuffer::new(33)
+    let list = rlp.begin()
+    put_path(mut rlp, mut scratch, key, from: depth, to: end, leaf: false)
+    rlp.raw(child)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// A branch whose children are the hashes `children`, zero for none, and
+// whose value is the string `value`.
+fn branch(_ children: [u256; 16], _ value: MemSpan) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for child in children { if child == 0 { rlp.fixed(0, len: 0) } else { rlp.fixed(child, len: 32) } }
+    rlp.bytes(value)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// The reference of a hashed node, encoded.
+fn reference(_ node: MemBuffer) -> MemBuffer {
+    var rlp = Encoder::new()
+    rlp.fixed(keccak256_word(node.span()), len: 32)
+    bytes(rlp)
+}
+
+// `count` bytes of `byte`.
+fn filled(_ byte: u8, count: usize) -> MemBuffer {
+    var buffer = MemBuffer::new(count)
+    for index in 0..count { buffer[index] = byte }
+    buffer
+}
+
+const KEY: u256 = 0x1111111111111111111111111111111111111111111111111111111111111111
+const SLOT: u256 = 0x2222222222222222222222222222222222222222222222222222222222222222
+
+// Whether reading account KEY, and if `slot` its slot SLOT, from the trie
+// whose root is `nodes[0]` faults on `nodes[bad]` as malformed, and leaves
+// no root.
+fn rejects<const N: usize>(_ nodes: [MemBuffer; N], slot: bool, bad: usize) -> bool {
+    var held = Nodes::new()
+    for index in 0..N { core::assert(held.add(nodes[index].span())) }
+    var trie = StateTrie::partial(root: keccak256_word(nodes[0].span()), held)
+    let read = if slot { trie.slot_keyed(account: KEY, key: SLOT).err() } else { trie.account_keyed(KEY).err() }
+    let expected = keccak256_word(nodes[bad].span())
+    let rejected = match (read, trie.root()) {
+        (Option::Some(TrieFault::Malformed(hash)), Result::Err(TrieFault::Malformed(root))) => hash == expected
+            && root == expected,
+        _ => false,
+    }
+    // The nodes after the malformed one stay unread.
+    let held = trie.into_nodes()
+    for at in bad + 1..N {
+        if held.used(at) { return false }
+    }
+    rejected
+}
+
+// Whether the trie of account KEY with slot SLOT, whose storage root is
+// `storage`, rejects it.
+fn rejects_storage(_ storage: own MemBuffer) -> bool {
+    let account = leaf(KEY, depth: 0, account_value(root: keccak256_word(storage.span())).span())
+    rejects([account, storage], slot: true, bad: 1)
+}
+
+// Whether the trie of account KEY whose value is `value` rejects it.
+fn rejects_account(_ value: MemSpan) -> bool { rejects([leaf(KEY, depth: 0, value)], slot: false, bad: 0) }
+
+// Whether the trie of account KEY with slot SLOT whose value is `value`
+// rejects the slot's leaf.
+fn rejects_slot(_ value: MemSpan) -> bool { rejects_storage(leaf(SLOT, depth: 0, value)) }
+
+#[test]
+fn partial_trie_rejects_malformed_nodes() {
+    let value = account_value(root: EMPTY_ROOT)
+    let empty = filled(0, count: 0)
+    let hashes = [0x11 as u256, 0x22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // A good leaf: its account reads.
+    var good = Nodes::new()
+    core::assert(good.add(leaf(KEY, depth: 0, value.span()).span()))
+    var trie = StateTrie::partial(root: keccak256_word(leaf(KEY, depth: 0, value.span()).span()), good)
+    core::assert(trie.account_keyed(KEY).unwrap().unwrap().balance == 1)
+    // Trailing bytes.
+    var rlp = Encoder::new()
+    rlp.raw(leaf(KEY, depth: 0, value.span()).span())
+    rlp.fixed(0, len: 1)
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    // A list of three items, or none, and a string.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for _ in 0..3 { rlp.fixed(0, len: 0) }
+    rlp.end(list)
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.end(list)
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    var rlp = Encoder::new()
+    rlp.bytes(filled(0x11, count: 40).span())
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    // A branch with a value, or with one child.
+    core::assert(rejects([branch(hashes, filled(1, count: 1).span())], slot: false, bad: 0))
+    var one = hashes
+    one[1] = 0
+    core::assert(rejects([branch(one, empty.span())], slot: false, bad: 0))
+    // A branch's child of 31 bytes, of one, or a list of 32.
+    for ref child in [filled(0x11, count: 31), filled(0x05, count: 1)] {
+        var rlp = Encoder::new()
+        let list = rlp.begin()
+        rlp.bytes(child.span())
+        rlp.fixed(0x22, len: 32)
+        for _ in 0..15 { rlp.fixed(0, len: 0) }
+        rlp.end(list)
+        core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    }
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    let inner = rlp.begin()
+    for _ in 0..31 { rlp.fixed(0, len: 0) }
+    rlp.end(inner)
+    rlp.fixed(0x22, len: 32)
+    for _ in 0..15 { rlp.fixed(0, len: 0) }
+    rlp.end(list)
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    // A node under 32 bytes reached by its hash below the root.
+    let short = pair(filled(0x20, count: 1).span(), filled(1, count: 1).span())
+    var children = hashes
+    children[1] = keccak256_word(short.span())
+    core::assert(rejects([branch(children, empty.span()), short], slot: false, bad: 1))
+    // Paths: empty, with a flag of 4, with a pad nibble of 1, of 63 nibbles
+    // for a leaf at the root, and of 66.
+    var value_item = Encoder::new()
+    value_item.bytes(value.span())
+    let value_item = bytes(value_item)
+    core::assert(rejects([pair(empty.span(), value_item.span())], slot: false, bad: 0))
+    var path = filled(0x11, count: 33)
+    path[0] = 0x40
+    core::assert(rejects([pair(path.span(), value_item.span())], slot: false, bad: 0))
+    path[0] = 0x21
+    core::assert(rejects([pair(path.span(), value_item.span())], slot: false, bad: 0))
+    core::assert(rejects([leaf(KEY, depth: 1, value.span())], slot: false, bad: 0))
+    var long = filled(0x11, count: 34)
+    long[0] = 0x20
+    core::assert(rejects([pair(long.span(), value_item.span())], slot: false, bad: 0))
+    var longer = filled(0x11, count: 40)
+    longer[0] = 0x00
+    core::assert(rejects([pair(longer.span(), value_item.span())], slot: false, bad: 0))
+    // Paths of no nibbles at the root, a leaf's and an extension's.
+    core::assert(rejects([pair(filled(0x20, count: 1).span(), value_item.span())], slot: false, bad: 0))
+    core::assert(rejects([pair(filled(0, count: 1).span(), reference(leaf(KEY, depth: 1, value.span())).span())],
+                         slot: false, bad: 0))
+    // A leaf of one nibble at nibble 64, inline in a branch at 63 beside a
+    // good one, below an extension of 63.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for digit in 0..16 {
+        if digit == 2 {
+            rlp.raw(pair(filled(0x32, count: 1).span(), filled(1, count: 1).span()).span())
+        } else if digit == 3 {
+            rlp.raw(pair(filled(0x20, count: 1).span(), filled(1, count: 1).span()).span())
+        } else {
+            rlp.fixed(0, len: 0)
+        }
+    }
+    rlp.fixed(0, len: 0)
+    rlp.end(list)
+    core::assert(rejects_storage(extension(SLOT, depth: 0, end: 63, bytes(rlp).span())))
+    // Extensions: of no nibbles, reaching nibble 64, over nothing, over an
+    // inline leaf, and over a hashed leaf.
+    let child = reference(leaf(KEY, depth: 1, value.span()))
+    core::assert(rejects([pair(filled(0, count: 1).span(), child.span())], slot: false, bad: 0))
+    core::assert(rejects([extension(KEY, depth: 0, end: 64, child.span())], slot: false, bad: 0))
+    var nothing = Encoder::new()
+    nothing.fixed(0, len: 0)
+    core::assert(rejects([extension(KEY, depth: 0, end: 1, bytes(nothing).span())], slot: false, bad: 0))
+    let inline = leaf(SLOT, depth: 62, filled(1, count: 1).span())
+    core::assert(rejects_storage(extension(SLOT, depth: 0, end: 62, inline.span())))
+    let hashed = leaf(KEY, depth: 1, value.span())
+    core::assert(rejects([extension(KEY, depth: 0, end: 1, reference(hashed).span()), hashed], slot: false, bad: 1))
+    // A branch at nibble 64, below a good one at 63.
+    let bottom = branch(hashes, empty.span())
+    var above = [0 as u256; 16]
+    above[1] = keccak256_word(bottom.span())
+    above[2] = 0x33
+    let above = branch(above, empty.span())
+    let top = extension(KEY, depth: 0, end: 63, reference(above).span())
+    core::assert(rejects([top, above, bottom], slot: false, bad: 2))
+    // Accounts of three items or five, with a nonce of a leading zero or a
+    // storage root of 31 bytes, or a list, not a string, as the value.
+    for count in [3 as usize, 5] {
+        var rlp = Encoder::new()
+        let list = rlp.begin()
+        for _ in 0..count { rlp.fixed(EMPTY_ROOT, len: 32) }
+        rlp.end(list)
+        core::assert(rejects_account(bytes(rlp).span()))
+    }
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.bytes(filled(0, count: 2).span())
+    rlp.uint(1)
+    rlp.fixed(EMPTY_ROOT, len: 32)
+    rlp.fixed(EMPTY_CODE_HASH, len: 32)
+    rlp.end(list)
+    core::assert(rejects_account(bytes(rlp).span()))
+    // A nonce of 2^64, past EIP-2681's bound.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.uint(1 << 64)
+    rlp.uint(1)
+    rlp.fixed(EMPTY_ROOT, len: 32)
+    rlp.fixed(EMPTY_CODE_HASH, len: 32)
+    rlp.end(list)
+    core::assert(rejects_account(bytes(rlp).span()))
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    rlp.uint(0)
+    rlp.uint(1)
+    rlp.fixed(EMPTY_ROOT, len: 31)
+    rlp.fixed(EMPTY_CODE_HASH, len: 32)
+    rlp.end(list)
+    core::assert(rejects_account(bytes(rlp).span()))
+    var scratch = MemBuffer::new(33)
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    put_path(mut rlp, mut scratch, KEY, from: 0, to: 64, leaf: true)
+    rlp.raw(value.span())
+    rlp.end(list)
+    core::assert(rejects([bytes(rlp)], slot: false, bad: 0))
+    // Slots of zero, of a leading zero, and with a trailing byte.
+    let zero = filled(0x80, count: 1)
+    var padded = filled(0, count: 3)
+    padded[0] = 0x82
+    padded[2] = 1
+    let trailing = filled(1, count: 2)
+    for ref slot in [zero, padded, trailing] { core::assert(rejects_slot(slot.span())) }
+}
+
+// A branch of the hashes `children` and the encoded value `value`.
+fn branch_of(_ children: [u256; 16], _ value: MemSpan) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for child in children { if child == 0 { rlp.fixed(0, len: 0) } else { rlp.fixed(child, len: 32) } }
+    rlp.raw(value)
+    rlp.end(list)
+    bytes(rlp)
+}
+
+// A list of `count` empty strings.
+fn empties(_ count: usize) -> MemBuffer {
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for _ in 0..count { rlp.fixed(0, len: 0) }
+    rlp.end(list)
+    bytes(rlp)
+}
+
+#[test]
+fn partial_trie_rejects_malformed_extensions_and_branches() {
+    let empty = filled(0, count: 0)
+    let hashes = [0x11 as u256, 0x22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    // An extension over a hashed extension: that one, whose child, held or
+    // not, stays unread.
+    let deeper = branch(hashes, empty.span())
+    let inner = extension(KEY, depth: 1, end: 2, reference(deeper).span())
+    let top = extension(KEY, depth: 0, end: 1, reference(inner).span())
+    core::assert(rejects([top, inner], slot: false, bad: 1))
+    let inner = extension(KEY, depth: 1, end: 2, reference(deeper).span())
+    let top = extension(KEY, depth: 0, end: 1, reference(inner).span())
+    core::assert(rejects([top, inner, deeper], slot: false, bad: 1))
+    // An extension of 60 nibbles over an inline one of two, over an inline
+    // branch of two leaves.
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for digit in 0..16 {
+        if digit == 2 || digit == 3 {
+            let key = SLOT ^ (digit as u256 ^ 2)
+            rlp.raw(leaf(key, depth: 63, filled(1, count: 1).span()).span())
+        } else {
+            rlp.fixed(0, len: 0)
+        }
+    }
+    rlp.fixed(0, len: 0)
+    rlp.end(list)
+    let inline = extension(SLOT, depth: 60, end: 62, bytes(rlp).span())
+    core::assert(inline.len() < 32)
+    core::assert(rejects_storage(extension(SLOT, depth: 0, end: 60, inline.span())))
+    // An extension over a string of 31 bytes, or a list of 32.
+    var string = Encoder::new()
+    string.bytes(filled(0x11, count: 31).span())
+    core::assert(rejects([extension(KEY, depth: 0, end: 1, bytes(string).span())], slot: false, bad: 0))
+    let long = empties(31)
+    core::assert(long.len() == 32)
+    core::assert(rejects([extension(KEY, depth: 0, end: 1, long.span())], slot: false, bad: 0))
+    // A branch whose value is a list, and one with no children.
+    core::assert(rejects([branch_of(hashes, empties(0).span())], slot: false, bad: 0))
+    core::assert(rejects([branch([0 as u256; 16], empty.span())], slot: false, bad: 0))
+    // A malformed sibling of a removed account, read as its branch gives
+    // way: three strings of 32 bytes.
+    let removed = path(0x1, count: 1)
+    let gone = leaf(removed, depth: 1, account_value(root: EMPTY_ROOT).span())
+    var rlp = Encoder::new()
+    let list = rlp.begin()
+    for _ in 0..3 { rlp.fixed(EMPTY_ROOT, len: 32) }
+    rlp.end(list)
+    let sibling = bytes(rlp)
+    var children = [0 as u256; 16]
+    children[1] = keccak256_word(gone.span())
+    children[2] = keccak256_word(sibling.span())
+    let root = branch(children, empty.span())
+    var held = Nodes::new()
+    core::assert(held.add(root.span()) && held.add(gone.span()) && held.add(sibling.span()))
+    var trie = StateTrie::partial(root: keccak256_word(root.span()), held)
+    trie.set_account_keyed(removed, Option::None)
+    core::assert(match trie.root() {
+        Result::Err(TrieFault::Malformed(hash)) => hash == keccak256_word(sibling.span()),
+        _ => false,
+    })
+}
+
+#[test]
+fn partial_trie_keeps_its_first_fault() {
+    // Without the root's node: each read and `write_nodes` gives its fault.
+    var missing = StateTrie::partial(root: 0x1234, Nodes::new())
+    for _ in 0..2 {
+        core::assert(match missing.account(1) {
+            Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
+            _ => false,
+        })
+    }
+    core::assert(match missing.slot(address: 1, slot: 2) {
+        Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
+        _ => false,
+    })
+    var nodes = Nodes::new()
+    core::assert(!missing.write_nodes(mut nodes) && nodes.len() == 0)
+    // A root branch over a missing node and a malformed one: after the
+    // first fault, reading toward the second gives the first and reads
+    // nothing, and so does a change.
+    let malformed = empties(40)
+    var children = [0 as u256; 16]
+    children[1] = 0x5678
+    children[2] = keccak256_word(malformed.span())
+    let root = branch(children, filled(0, count: 0).span())
+    var held = Nodes::new()
+    core::assert(held.add(root.span()) && held.add(malformed.span()))
+    var trie = StateTrie::partial(root: keccak256_word(root.span()), held)
+    for key in [path(0x1, count: 1), path(0x2, count: 1)] {
+        core::assert(match trie.account_keyed(key) {
+            Result::Err(TrieFault::Missing(hash)) => hash == 0x5678,
+            _ => false,
+        })
+    }
+    trie.set_account_keyed(path(0x2, count: 1), Option::None)
+    core::assert(match trie.root() {
+        Result::Err(TrieFault::Missing(hash)) => hash == 0x5678,
+        _ => false,
+    })
+    core::assert(!trie.into_nodes().used(1))
+}
+
+const SENDER: u256 = 0x5e4d
+
+// An empty account with storage, which a touch deletes: where the
+// sender's second transaction, a creation, makes a contract.
+fn cleared() -> u256 { create_address(sender: SENDER, nonce: 1) }
+
+// A transaction of the sender's to the cleared account with `value`, or if
+// `creates` a creation there of `data`, which succeeds.
+fn sends(_ block: mut Block, nonce: u256, value: u256, creates: bool, _ data: own InputData) -> bool {
+    let env = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: if creates { 0 } else { cleared() }, creates,
+        nonce, gas_limit: 200_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value,
+    }
+    var tracer = ()
+    let receipt = block.transact(TxRequest::new(env, data), mut tracer)
+    receipt.invalid == VALID && receipt.status == OK
+}
+
+// The world before the block: the sender, the request contracts, the
+// cleared account with two slots, and accounts beside it.
+fn prestate() -> WorldState {
+    var world = WorldState::empty()
+    core::assert(world.set_balance(SENDER, 1_000_000))
+    let stop: [u8; 1] = [0x00]
+    for address in [0x00000961ef480eb55e80d19ad83579a64c007002 as u256, 0x0000bbddc7ce488642fb579f8b00f3a590007251] {
+        core::assert(world.set_code(address, code: stop) == OK)
+    }
+    core::assert(world.ensure_account(cleared()) && world.storage_store(cleared(), 1, 9))
+    core::assert(world.storage_store(cleared(), 2, 8))
+    for address in 1..40 { core::assert(world.set_balance(address as u256, 1)) }
+    world
+}
+
+// A block whose first transaction touches the cleared account, which
+// settlement deletes with its slots, followed if `remade` is 1 by one
+// sending it ether, which makes it again without them, and if 2 by a
+// creation there, which stores 5 in slot 1 and 7 in slot 3. The block's
+// changes go into a partial trie of the world before it without the
+// account's storage, which it does not read, and into a complete trie, as
+// `Chain` sets them, and are undone.
+fn clears(remade: usize) {
+    var env = default_block_env()
+    env.number = 1
+    env.gaslimit = 30_000_000
+    env.chainid = 1
+    var block = Block::begin(Evm::new(prestate(), Config::osaka()), env, parent_hash: 0, parent_beacon_block_root: 0)
+    core::assert(sends(mut block, nonce: 0, value: 0, creates: false, empty_bytes()))
+    if remade == 1 { core::assert(sends(mut block, nonce: 1, value: 5, creates: false, empty_bytes())) }
+    if remade == 2 {
+        // PUSH1 5; PUSH1 1; SSTORE; PUSH1 7; PUSH1 3; SSTORE; STOP.
+        let initcode: [u8; 11] = [0x60, 5, 0x60, 1, 0x55, 0x60, 7, 0x60, 3, 0x55, 0x00]
+        let data = InputData::copy_from(initcode, offset: 0, len: 11)
+        core::assert(sends(mut block, nonce: 1, value: 0, creates: true, data))
+    }
+    let (evm, finished) = block.finish(MemVec::new())
+    var world = evm.into_world()
+    let output = finished.unwrap()
+    let address = cleared()
+    core::assert(world.exists(address) == (remade != 0) && world.storage_load(address, 2) == 0)
+    core::assert(world.storage_load(address, 1) == if remade == 2 { 5 } else { 0 })
+    core::assert(world.storage_load(address, 3) == if remade == 2 { 7 } else { 0 })
+    var flagged = false
+    for account in output.changes.accounts() {
+        if account.address == address { flagged = account.cleared && account.existed }
+    }
+    core::assert(flagged)
+    var before = prestate()
+    var trie = StateTrie::new(mut before)
+    let root = trie.root().unwrap()
+    let storage_root = trie.account(address).unwrap().unwrap().storage_root
+    var nodes = Nodes::new()
+    core::assert(trie.write_nodes(mut nodes) && storage_root != EMPTY_ROOT)
+    var held = Nodes::new()
+    for at in 0..nodes.len() {
+        if keccak256_word(nodes.node(at)) != storage_root { core::assert(held.add(nodes.node(at))) }
+    }
+    var partial = StateTrie::partial(root, held)
+    write_changes(mut partial, mut world, output.changes)
+    let after = state_root(mut world).unwrap()
+    core::assert(partial.root().unwrap() == after)
+    write_changes(mut trie, mut world, output.changes)
+    core::assert(trie.root().unwrap() == after)
+    output.changes.undo(mut world)
+    write_changes(mut trie, mut world, output.changes)
+    core::assert(trie.root().unwrap() == root && root == state_root(mut world).unwrap())
+}
+
+#[test]
+fn trie_removes_a_deleted_account() {
+    clears(remade: 0)
+}
+
+#[test]
+fn trie_clears_a_deleted_account_made_again() {
+    clears(remade: 1)
+}
+
+#[test]
+fn trie_clears_a_deleted_account_made_again_with_slots() {
+    clears(remade: 2)
+}
+
+// Block 4,078,344 of Hoodi as a trie, of slots if `storage` and of
+// accounts if not: a branch with children at 2, 5, 7 and b loses those at
+// 5, 7 and b and gains one at 4, so that it ends with two. With the sets
+// before the removals the child at 2 is never read; in the other order the
+// branch passes through it alone, and reads it.
+fn sets_first(storage: bool) {
+    let owner = path(0xa, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    if storage { setup.push(Op::Set(owner, funded(1))) }
+    for digit in [0x2 as u256, 0x5, 0x7, 0xb] {
+        let key = path(digit, count: 1)
+        setup.push(if storage { Op::Store(owner, key, digit) } else { Op::Set(key, funded(digit)) })
+    }
+    let set = if storage { Op::Store(owner, path(0x4, count: 1), 4) } else { Op::Set(path(0x4, count: 1), funded(4)) }
+    var setting: MemVec<Op> = MemVec::new()
+    var removing: MemVec<Op> = MemVec::new()
+    setting.push(set)
+    for digit in [0x5 as u256, 0x7, 0xb] {
+        let key = path(digit, count: 1)
+        let removal = if storage { Op::Store(owner, key, 0) } else { Op::Set(key, Option::None) }
+        setting.push(removal)
+        removing.push(removal)
+    }
+    removing.push(set)
+    setting.push(Op::Root)
+    removing.push(Op::Root)
+    var world = WorldState::empty()
+    var complete = StateTrie::new(mut world)
+    let _ = apply(mut complete, setup)
+    let root = complete.root().unwrap()
+    var nodes = Nodes::new()
+    core::assert(complete.write_nodes(mut nodes))
+    let expected = apply(mut complete, setting)
+    var partial = StateTrie::partial(root, nodes)
+    let seen = apply(mut partial, setting)
+    core::assert(seen.len() == 1 && same(seen, expected, len: 1))
+    // One node unread, the child at 2, which the other order needs.
+    let all = partial.into_nodes()
+    var unread: usize = 0
+    var hash: u256 = 0
+    for at in 0..all.len() {
+        if !all.used(at) {
+            unread += 1
+            hash = keccak256_word(all.node(at))
+        }
+    }
+    core::assert(unread == 1)
+    var partial = StateTrie::partial(root, used(all, without: usize::max()))
+    let _ = apply(mut partial, removing)
+    core::assert(match partial.root() {
+        Result::Err(TrieFault::Missing(missing)) => missing == hash,
+        _ => false,
+    })
+}
+
+#[test]
+fn partial_trie_sets_slots_before_removing_them() {
+    sets_first(storage: true)
+}
+
+#[test]
+fn partial_trie_sets_accounts_before_removing_them() {
+    sets_first(storage: false)
+}
+
+// The first slot whose key's first nibble is `nibble`.
+fn slot_under(_ nibble: u256) -> u256 {
+    var slot: u256 = 0
+    while hash(slot, len: 32) >> 252 != nibble { slot += 1 }
+    slot
+}
+
+// What `write_changes` reads of the nodes of the world before a block in
+// which a contract with slots under 2, 5, 7 and b clears those under 5, 7
+// and b and sets one under 4, each `clears_first` or last: whether each node
+// was read.
+fn reads(clears_first: bool) -> MemVec<bool> {
+    let holder: u256 = 0xc0
+    var stores: MemVec<(u256, u8)> = MemVec::new()
+    if !clears_first { stores.push((slot_under(0x4), 1)) }
+    for digit in [0x5 as u256, 0x7, 0xb] { stores.push((slot_under(digit), 0)) }
+    if clears_first { stores.push((slot_under(0x4), 1)) }
+    // PUSH1 value; PUSH1 slot; SSTORE, for each, then STOP.
+    var code = MemBuffer::empty()
+    for (slot, value) in stores {
+        for byte in [0x60, value, 0x60, slot.downcast_truncate(), 0x55] { code.push(byte) }
+    }
+    code.push(0x00)
+    var world = prestate()
+    core::assert(world.set_code(address: holder, code: code.span()) == OK)
+    for digit in [0x2 as u256, 0x5, 0x7, 0xb] { core::assert(world.storage_store(holder, slot_under(digit), digit)) }
+    var before = world.try_clone().unwrap()
+    var env = default_block_env()
+    env.number = 1
+    env.gaslimit = 30_000_000
+    env.chainid = 1
+    var block = Block::begin(Evm::new(world, Config::osaka()), env, parent_hash: 0, parent_beacon_block_root: 0)
+    let tx = TxEnv {
+        kind: TX_LEGACY, chain_id: Option::Some(1), sender: SENDER, to: holder, creates: false, nonce: 0,
+        gas_limit: 200_000, gas_price: 0, max_priority_fee_per_gas: 0, max_fee_per_blob_gas: 0, value: 0,
+    }
+    var tracer = ()
+    let receipt = block.transact(TxRequest::new(tx, data: empty_bytes()), mut tracer)
+    core::assert(receipt.invalid == VALID && receipt.status == OK)
+    let (evm, finished) = block.finish(MemVec::new())
+    var world = evm.into_world()
+    let output = finished.unwrap()
+    var trie = StateTrie::new(mut before)
+    let root = trie.root().unwrap()
+    var nodes = Nodes::new()
+    core::assert(trie.write_nodes(mut nodes))
+    var partial = StateTrie::partial(root, nodes)
+    write_changes(mut partial, mut world, output.changes)
+    core::assert(partial.root().unwrap() == state_root(mut world).unwrap())
+    let nodes = partial.into_nodes()
+    var read: MemVec<bool> = MemVec::new()
+    for at in 0..nodes.len() { read.push(nodes.used(at)) }
+    read
+}
+
+#[test]
+fn write_changes_reads_the_same_in_any_order() {
+    let first = reads(clears_first: true)
+    let last = reads(clears_first: false)
+    core::assert(first.len() == last.len())
+    for at in 0..first.len() { core::assert(first[at] == last[at]) }
+}

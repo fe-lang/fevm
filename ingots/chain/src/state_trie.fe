@@ -1,17 +1,19 @@
 // The state trie held in memory with each node's hash, so that changing a
-// few accounts and slots rehashes only their paths.
-use core::{MemBuffer, MemVec, Option}
+// few accounts and slots rehashes only their paths. A partial trie holds
+// only what it has read of a witness's nodes.
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
 use core::num::leading_zeros
 use core::ops::Index
-use fevm::WorldState
+use fevm::{AccountState, WorldState}
 use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
-use fevm_rlp::Encoder
+use fevm_rlp::{Decoder, Encoder}
 use keccak::keccak256_word
+use swisstable::SwissTable
 use ingot::trie::{hash, nibble, put_path}
 
 // A node as its parent holds it: its kind and its position in that kind's
-// arena.
-enum Child { Empty, Leaf(u32), Account(u32), Extension(u32), Branch(u32) }
+// arena. `Hash` is a stub, a subtree known only by its hash.
+enum Child { Empty, Leaf(u32), Account(u32), Extension(u32), Branch(u32), Hash(u32) }
 impl Copy for Child {}
 
 impl Child {
@@ -25,7 +27,7 @@ impl Child {
 
 // Each node keeps its reference in its parent, `len` bytes: its hash, or
 // under 32 bytes its RLP, in the low bytes of `reference`. `len` is zero
-// while the node is stale.
+// while the node is stale. A stub's reference is its hash, never stale.
 
 // A slot: its key, keccak256 of the slot, and its value.
 struct Leaf { key: u256, value: u256, reference: u256, len: u8 }
@@ -35,7 +37,7 @@ impl Copy for Leaf {}
 // for an empty account's code, and the root node of its storage trie.
 struct Account {
     key: u256,
-    nonce: u256,
+    nonce: u64,
     balance: u256,
     code_hash: u256,
     reference: u256,
@@ -90,75 +92,202 @@ impl<T> Index<u32> for Arena<T> {
 // The count of leading nibbles `a` and `b` share.
 fn shared(_ a: u256, _ b: u256) -> usize { (leading_zeros(a ^ b) / 4).downcast_truncate() }
 
-/// The state trie of a world: the trie of its accounts, keyed by keccak256
-/// of the address, of `rlp([nonce, balance, storage_root, code_hash])`, and
-/// for each account the trie of its slots, keyed by keccak256 of the slot,
-/// of the value's RLP. Each node keeps its hash. After changing the world, a
-/// caller rereads each account and slot that changed, and the root rehashes
-/// only their paths. The trie depends only on what it holds, not on the
-/// order of the changes: rereading what a block changed after restoring the
-/// world undoes the block. An allocation that fails leaves the trie failed,
-/// without a root, until a new trie of the world replaces it.
+/// Why a trie has no root: an allocation failed, or the node of a hash it
+/// had to read is missing or malformed.
+pub enum TrieFault { Allocation, Missing(u256), Malformed(u256) }
+
+impl Copy for TrieFault {}
+
+// A node of `Nodes`: where its RLP is in the buffer, and whether a trie has
+// read it.
+struct Entry { offset: usize, len: usize, used: bool }
+impl Copy for Entry {}
+
+/// Trie nodes by keccak256 of their RLP, such as a witness's, each held
+/// once in one buffer and marked used when a trie reads it.
+pub struct Nodes { bytes: MemBuffer, entries: MemVec<Entry>, index: SwissTable<u256, usize> }
+
+impl Nodes {
+    pub fn new() -> Self {
+        Nodes { bytes: MemBuffer::empty(), entries: MemVec::new(), index: SwissTable<u256, usize>::empty() }
+    }
+
+    /// Adds `node`, unless one of the same hash is held; false if an
+    /// allocation fails.
+    pub fn add(mut self, _ node: MemSpan) -> bool {
+        let hash = keccak256_word(node)
+        if self.index.contains(hash) { return true }
+        let entry = Entry { offset: self.bytes.len(), len: node.len(), used: false }
+        if !self.bytes.try_reserve(node.len()) || !self.index.try_insert(hash, self.entries.len()) { return false }
+        if self.entries.try_push(entry).is_err() {
+            let _ = self.index.remove(hash)
+            return false
+        }
+        self.bytes.extend_from(node)
+        true
+    }
+
+    /// The count of nodes, each at a position from zero.
+    pub fn len(self) -> usize { self.entries.len() }
+
+    /// The RLP of the node at `at`.
+    pub fn node(self, _ at: usize) -> ref MemSpan {
+        let entry = self.entries[at]
+        self.bytes.slice(offset: entry.offset, len: entry.len)
+    }
+
+    /// Whether a trie has read the node at `at`.
+    pub fn used(self, _ at: usize) -> bool { self.entries[at].used }
+
+    // The position of the node of `hash`, marked used; none if none is held.
+    fn read(mut self, _ hash: u256) -> Option<usize> {
+        let lookup = self.index.get(hash)
+        if !lookup.found { return Option::None }
+        self.entries[lookup.value].used = true
+        Option::Some(lookup.value)
+    }
+}
+
+/// The account of `address` in `world` as a trie holds it, its storage root
+/// zero, which the trie does not take; none if it does not exist. Mutable for
+/// the code hash the world computes on first use.
+pub(ingot) fn world_account(_ world: mut WorldState, _ address: u256) -> Option<AccountState> {
+    if !world.exists(address) { return Option::None }
+    // Zero for an empty account, which has no code.
+    let code_hash = world.code_hash(address)
+    Option::Some(AccountState {
+        // A world's nonce is under 2^64 (EIP-2681).
+        nonce: world.nonce(address).downcast().unwrap(), balance: world.balance(address),
+        code_hash: if code_hash == 0 { EMPTY_CODE_HASH } else { code_hash }, storage_root: 0,
+    })
+}
+
+/// The state trie: the trie of the accounts, keyed by keccak256 of the
+/// address, of `rlp([nonce, balance, storage_root, code_hash])`, and for each
+/// account the trie of its slots, keyed by keccak256 of the slot, of the
+/// value's RLP. Each node keeps its hash. A complete trie holds a whole
+/// world. A partial one starts from a state root and the nodes of a witness,
+/// and holds each subtree it has not read as its hash: a read or a change
+/// resolves the nodes on its path, so the trie reads only the nodes it needs
+/// and never hashes what it has not changed. A caller sets each account and
+/// slot that changed, and the root rehashes only their paths. The trie
+/// depends only on what it holds, not on the order of the changes: setting
+/// what a block changed back undoes the block. The first fault, a failed
+/// allocation or a node missing or malformed, is kept: the trie then
+/// changes no more and has no root.
 pub struct StateTrie {
     root: Child,
     accounts: Arena<Account>,
     leaves: Arena<Leaf>,
     extensions: Arena<Extension>,
     branches: Arena<Branch>,
-    failed: bool,
+    // The hash of each stub.
+    stubs: Arena<u256>,
+    // What stubs resolve from: none for a complete trie.
+    nodes: Nodes,
+    fault: Option<TrieFault>,
 }
 
 impl StateTrie {
-    /// The trie of every account and slot in `world`; mutable for the code
-    /// hashes the world computes on first use.
-    pub fn new(_ world: mut WorldState) -> Self {
-        var trie = StateTrie {
+    // An empty trie over `nodes`.
+    fn over(_ nodes: own Nodes) -> Self {
+        StateTrie {
             root: Child::Empty,
             accounts: Arena::new(),
             leaves: Arena::new(),
             extensions: Arena::new(),
             branches: Arena::new(),
-            failed: false,
+            stubs: Arena::new(),
+            nodes,
+            fault: Option::None,
         }
+    }
+
+    /// The trie of every account and slot in `world`, whose nonces are under
+    /// 2^64; mutable for the code hashes the world computes on first use.
+    pub fn new(_ world: mut WorldState) -> Self {
+        var trie = StateTrie::over(Nodes::new())
         for position in 0..world.account_count() {
             let address = world.account_at(position).address
-            trie.reread_account(mut world, address)
+            trie.set_account(address, world_account(mut world, address))
         }
         for at in 0..world.storage_slots() {
             let entry = world.storage_at(at)
-            if entry.occupied { trie.reread_slot(mut world, address: entry.address, slot: entry.slot) }
+            if entry.occupied { trie.set_slot(address: entry.address, slot: entry.slot, value: entry.value) }
         }
         trie
     }
 
-    /// Rereads the account of `address` from `world`: adds it, updates it,
-    /// or if it no longer exists removes it with its storage.
-    pub fn reread_account(mut self, _ world: mut WorldState, _ address: u256) {
-        if !self.failed { self.failed = self.read_account(mut world, address).is_none() }
+    /// The trie of the state whose root is `root`, which reads its nodes from
+    /// `nodes` as it reaches them, each by its hash.
+    pub fn partial(root: u256, _ nodes: own Nodes) -> Self {
+        var trie = StateTrie::over(nodes)
+        if root != EMPTY_ROOT {
+            match trie.stubs.add(root) {
+                Option::Some(stub) => trie.root = Child::Hash(stub),
+                Option::None => trie.fault = Option::Some(TrieFault::Allocation),
+            }
+        }
+        trie
     }
 
-    /// Rereads slot `slot` of `address` from `world`: adds it, updates it, or
-    /// if it is zero removes it, and with it the account's storage root. An
-    /// account the trie does not hold is read first.
-    pub fn reread_slot(mut self, _ world: mut WorldState, address: u256, slot: u256) {
-        if !self.failed { self.failed = self.read_slot(mut world, address, slot).is_none() }
+    /// The nodes a partial trie reads from, with those it has read marked.
+    pub fn into_nodes(own self) -> Nodes { self.nodes }
+
+    /// The account of `address`, if it exists. Read before the changes go
+    /// in, while its storage root is not stale.
+    pub fn account(mut self, _ address: u256) -> Result<TrieFault, Option<AccountState>> {
+        self.account_keyed(hash(address, len: 20))
     }
 
-    /// The state root; none once an allocation has failed.
-    pub fn root(mut self) -> Option<u256> {
-        if self.failed { return Option::None }
+    /// Slot `slot` of `address`, zero if it does not exist.
+    pub fn slot(mut self, address: u256, slot: u256) -> Result<TrieFault, u256> {
+        self.slot_keyed(account: hash(address, len: 20), key: hash(slot, len: 32))
+    }
+
+    /// Sets the account of `address` to `state`, all but its storage root:
+    /// adds it with no storage, changes its fields, or for none removes it
+    /// with its storage. A removal that leaves a branch one child reads that
+    /// child, so a caller applying several changes sets before it removes.
+    pub fn set_account(mut self, _ address: u256, _ state: Option<AccountState>) {
+        self.set_account_keyed(hash(address, len: 20), state)
+    }
+
+    /// Removes the storage of the account of `address`, if the trie holds
+    /// it, leaving its fields.
+    pub fn clear_storage(mut self, _ address: u256) { self.clear_storage_keyed(hash(address, len: 20)) }
+
+    /// Sets slot `slot` of `address` to `value`, zero removing it. The
+    /// account must exist unless `value` is zero, which then changes nothing.
+    /// As for accounts, a caller applying several changes sets before it
+    /// removes.
+    pub fn set_slot(mut self, address: u256, slot: u256, value: u256) {
+        self.set_slot_keyed(account: hash(address, len: 20), key: hash(slot, len: 32), value)
+    }
+
+    /// The state root, or the trie's fault.
+    pub fn root(mut self) -> Result<TrieFault, u256> {
+        if let Option::Some(fault) = self.fault { return Result::Err(fault) }
         var rlp = Encoder::new()
         var value = Encoder::new()
-        let Option::Some(var path) = MemBuffer::try_new(33) else {
-            self.failed = true
-            return Option::None
+        if let Option::Some(var path) = MemBuffer::try_new(33) {
+            self.rehash(self.root, depth: 0, mut rlp, mut value, mut path)
+            if rlp.finish().is_some() && value.finish().is_some() { return Result::Ok(self.root_of(self.root)) }
         }
-        self.rehash(self.root, depth: 0, mut rlp, mut value, mut path)
-        if rlp.finish().is_none() || value.finish().is_none() {
-            self.failed = true
-            return Option::None
-        }
-        Option::Some(self.root_of(self.root))
+        self.failed()
+        Result::Err(self.fault.unwrap())
+    }
+
+    /// Adds to `nodes`, after rehashing, every node the trie holds that is
+    /// reached by its hash: each of 32 bytes or more, and the root of each
+    /// trie. False if the trie has a fault or an allocation fails.
+    pub fn write_nodes(mut self, _ nodes: mut Nodes) -> bool {
+        if self.root().is_err() { return false }
+        var rlp = Encoder::new()
+        var value = Encoder::new()
+        let Option::Some(var path) = MemBuffer::try_new(33) else { return false }
+        self.write(self.root, depth: 0, mut nodes, mut rlp, mut value, mut path) && rlp.finish().is_some()
+            && value.finish().is_some()
     }
 
     /// The nodes in use, which are those of a new trie of the same world.
@@ -166,57 +295,109 @@ impl StateTrie {
         self.accounts.len() + self.leaves.len() + self.extensions.len() + self.branches.len()
     }
 
-    // `reread_account`; none if an allocation fails.
-    fn read_account(mut self, _ world: mut WorldState, _ address: u256) -> Option<()> {
-        let key = hash(address, len: 20)
-        let found = self.find(self.root, key, depth: 0)
-        if !world.exists(address) {
-            if found.is_some() { self.root = self.remove(self.root, key, depth: 0)? }
+    /// `account` of the account whose key is `key`.
+    pub(ingot) fn account_keyed(mut self, _ key: u256) -> Result<TrieFault, Option<AccountState>> {
+        if self.fault.is_none() && let Option::Some(found) = self.open_account(key) {
+            let Option::Some(at) = found else { return Result::Ok(Option::None) }
+            let account = self.accounts[at]
+            core::assert(account.storage.is_empty() || self.reference(account.storage).1 != 0)
+            return Result::Ok(Option::Some(AccountState {
+                nonce: account.nonce, balance: account.balance, code_hash: account.code_hash,
+                storage_root: self.root_of(account.storage),
+            }))
+        }
+        self.failed()
+        Result::Err(self.fault.unwrap())
+    }
+
+    /// `slot` of the slot whose key is `key`, of the account whose key is
+    /// `account`.
+    pub(ingot) fn slot_keyed(mut self, account: u256, key: u256) -> Result<TrieFault, u256> {
+        if self.fault.is_none() && let Option::Some(found) = self.open_account(account) {
+            let Option::Some(at) = found else { return Result::Ok(0) }
+            if let Option::Some(leaf) = self.open_slot(at, key) {
+                return Result::Ok(if let Option::Some(leaf) = leaf { self.leaves[leaf].value } else { 0 })
+            }
+        }
+        self.failed()
+        Result::Err(self.fault.unwrap())
+    }
+
+    /// `set_account` of the account whose key is `key`.
+    pub(ingot) fn set_account_keyed(mut self, _ key: u256, _ state: Option<AccountState>) {
+        if self.fault.is_none() && self.write_account(key, state).is_none() { self.failed() }
+    }
+
+    /// `clear_storage` of the account whose key is `key`.
+    pub(ingot) fn clear_storage_keyed(mut self, _ key: u256) {
+        if self.fault.is_some() { return }
+        let Option::Some(found) = self.open_account(key) else { return self.failed() }
+        if let Option::Some(at) = found && !self.accounts[at].storage.is_empty() {
+            self.clear(self.accounts[at].storage)
+            self.accounts[at].storage = Child::Empty
+            self.touch(self.root, key, depth: 0)
+        }
+    }
+
+    /// `set_slot` of the slot whose key is `key`, of the account whose key is
+    /// `account`.
+    pub(ingot) fn set_slot_keyed(mut self, account: u256, key: u256, value: u256) {
+        if self.fault.is_none() && self.write_slot(account, key, value).is_none() { self.failed() }
+    }
+
+    // Keeps `fault` unless the trie has one: none, for the operation it fails.
+    fn fail<T>(mut self, _ fault: TrieFault) -> Option<T> {
+        if self.fault.is_none() { self.fault = Option::Some(fault) }
+        Option::None
+    }
+
+    // Keeps the fault of an operation that failed: an allocation's, unless
+    // it kept one of a node.
+    fn failed(mut self) { if self.fault.is_none() { self.fault = Option::Some(TrieFault::Allocation) } }
+
+    // `set_account_keyed`; none if a node is missing or malformed or an
+    // allocation fails.
+    fn write_account(mut self, _ key: u256, _ state: Option<AccountState>) -> Option<()> {
+        let found = self.open_account(key)?
+        let Option::Some(state) = state else {
+            if found.is_some() { self.root = self.remove(self.root, key, depth: 0, storage: false)? }
             return Option::Some(())
         }
-        // Zero for an empty account, which has no code.
-        let code_hash = world.code_hash(address)
-        let nonce = world.nonce(address)
-        let balance = world.balance(address)
-        let code_hash = if code_hash == 0 { EMPTY_CODE_HASH } else { code_hash }
         let Option::Some(at) = found else {
             let account = Account {
-                key, nonce, balance, code_hash, reference: 0, storage: Child::Empty, len: 0,
+                key, nonce: state.nonce, balance: state.balance, code_hash: state.code_hash, reference: 0,
+                storage: Child::Empty, len: 0,
             }
             let leaf = Child::Account(self.accounts.add(account)?)
             self.root = self.insert(self.root, leaf, key, depth: 0)?
             return Option::Some(())
         }
         let account = mut self.accounts[at]
-        if account.nonce == nonce && account.balance == balance && account.code_hash == code_hash {
+        if account.nonce == state.nonce && account.balance == state.balance && account.code_hash == state.code_hash {
             return Option::Some(())
         }
-        account.nonce = nonce
-        account.balance = balance
-        account.code_hash = code_hash
+        account.nonce = state.nonce
+        account.balance = state.balance
+        account.code_hash = state.code_hash
         self.touch(self.root, key, depth: 0)
         Option::Some(())
     }
 
-    // `reread_slot`; none if an allocation fails.
-    fn read_slot(mut self, _ world: mut WorldState, address: u256, slot: u256) -> Option<()> {
-        let value = world.storage_load(address, slot)
-        let account_key = hash(address, len: 20)
-        var found = self.find(self.root, account_key, depth: 0)
-        if found.is_none() {
-            // The world keeps no zero slots, and a slot's account exists.
-            if value == 0 { return Option::Some(()) }
-            self.read_account(mut world, address)?
-            found = self.find(self.root, account_key, depth: 0)
+    // `set_slot_keyed`; none if a node is missing or malformed or an
+    // allocation fails.
+    fn write_slot(mut self, account: u256, key: u256, value: u256) -> Option<()> {
+        let Option::Some(at) = self.open_account(account)? else {
+            // A caller sets the account of a slot first.
+            core::assert(value == 0)
+            return Option::Some(())
         }
-        let account = found.unwrap()
-        let storage = self.accounts[account].storage
-        let key = hash(slot, len: 32)
-        let storage = match self.find(storage, key, depth: 0) {
-            Option::Some(at) => {
-                if self.leaves[at].value == value { return Option::Some(()) }
-                if value == 0 { self.remove(storage, key, depth: 0)? } else {
-                    self.leaves[at].value = value
+        let found = self.open_slot(at, key)?
+        let storage = self.accounts[at].storage
+        let storage = match found {
+            Option::Some(leaf) => {
+                if self.leaves[leaf].value == value { return Option::Some(()) }
+                if value == 0 { self.remove(storage, key, depth: 0, storage: true)? } else {
+                    self.leaves[leaf].value = value
                     self.touch(storage, key, depth: 0)
                     storage
                 }
@@ -227,9 +408,195 @@ impl StateTrie {
                 self.insert(storage, leaf, key, depth: 0)?
             },
         }
-        self.accounts[account].storage = storage
-        self.touch(self.root, account_key, depth: 0)
+        self.accounts[at].storage = storage
+        self.touch(self.root, account, depth: 0)
         Option::Some(())
+    }
+
+    // Resolves the stubs on the path of `key` in the account trie, of which
+    // a complete trie has none, and gives the position of its account if it
+    // has one; none if a node is missing or malformed or an allocation fails.
+    fn open_account(mut self, _ key: u256) -> Option<Option<u32>> {
+        if self.stubs.len() != 0 { self.root = self.open(self.root, key, depth: 0, storage: false)? }
+        Option::Some(self.find(self.root, key, depth: 0))
+    }
+
+    // As `open_account`, for the slot of `key` in the storage of the account
+    // at `at`.
+    fn open_slot(mut self, _ at: u32, _ key: u256) -> Option<Option<u32>> {
+        if self.stubs.len() != 0 {
+            let storage = self.open(self.accounts[at].storage, key, depth: 0, storage: true)?
+            self.accounts[at].storage = storage
+        }
+        Option::Some(self.find(self.accounts[at].storage, key, depth: 0))
+    }
+
+    // The node in place of `node`, at `depth` of a storage trie if `storage`,
+    // with every stub on the path of `key` under it resolved; none if a node
+    // is missing or malformed or an allocation fails. It stops at an
+    // extension `key` leaves, whose child stays unread, so proving a key
+    // absent there needs no more.
+    fn open(mut self, _ node: Child, _ key: u256, depth: usize, storage: bool) -> Option<Child> {
+        match node {
+            Child::Hash(stub) => {
+                let node = self.resolve(stub, prefix: key, depth, storage)?
+                self.open(node, key, depth, storage)
+            },
+            Child::Branch(at) => {
+                let digit = nibble(key, depth)
+                let child = self.open(self.branches[at].children[digit], key, depth: depth + 1, storage)?
+                self.branches[at].children[digit] = child
+                Option::Some(node)
+            },
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                let end = extension.end as usize
+                if shared(extension.key, key) < end { return Option::Some(node) }
+                // A stub is read, and must be a branch, before the path goes on.
+                let child = match extension.child {
+                    Child::Hash(stub) => {
+                        let hash = self.stubs[stub]
+                        let child = self.resolve(stub, prefix: key, depth: end, storage)?
+                        let Child::Branch(_) = child else { return self.fail(TrieFault::Malformed(hash)) }
+                        child
+                    },
+                    _ => extension.child,
+                }
+                self.extensions[at].child = child
+                self.open(child, key, depth: end, storage)?
+                Option::Some(node)
+            },
+            _ => Option::Some(node),
+        }
+    }
+
+    // The node of `stub`, at `depth` of a storage trie if `storage`, below
+    // the first `depth` nibbles of `prefix`, read from the nodes, which
+    // releases the stub: the one place the trie reads a node. None if it is
+    // missing or malformed or an allocation fails.
+    fn resolve(mut self, _ stub: u32, prefix: u256, depth: usize, storage: bool) -> Option<Child> {
+        let hash = self.stubs[stub]
+        let Option::Some(at) = self.nodes.read(hash) else { return self.fail(TrieFault::Missing(hash)) }
+        let rlp = MemBuffer::try_from_span(self.nodes.node(at))?
+        // A node under 32 bytes is its parent's, not reached by its hash,
+        // unless it is a root.
+        if rlp.len() < 32 && depth != 0 { return self.fail(TrieFault::Malformed(hash)) }
+        let node = self.decode(rlp.span(), prefix, depth, storage, hash)?
+        self.stubs.release(stub)
+        Option::Some(node)
+    }
+
+    // The node `rlp` encodes, at `depth` of a storage trie if `storage`,
+    // below the first `depth` nibbles of `prefix`, with its key rebuilt and
+    // its reference cached: `hash`, or under 32 bytes below a root its RLP.
+    // Its inline children are decoded with it, and a hashed child, or an
+    // account's storage root, is a stub. None if it is not a node the trie
+    // can hold, which makes the node of `hash` malformed, or if an
+    // allocation fails.
+    fn decode(mut self, _ rlp: MemSpan, prefix: u256, depth: usize, storage: bool, hash: u256) -> Option<Child> {
+        let malformed = TrieFault::Malformed(hash)
+        var reference = hash
+        var len: u8 = 32
+        if rlp.len() < 32 && depth != 0 {
+            reference = 0
+            for index in 0..rlp.len() { reference = reference << 8 | rlp[index] as u256 }
+            len = rlp.len().downcast_truncate()
+        }
+        with (rlp) {
+            // Its items, counted to 18 at most.
+            var counter = Decoder::new()
+            let items = mut counter.list()
+            var count: usize = 0
+            while count < 18 && !items.is_empty() {
+                let _ = items.raw()
+                count += 1
+            }
+            var node = Decoder::new()
+            let items = mut node.list()
+            if count == 17 {
+                // A branch, below which keys of 64 nibbles have one at least.
+                if depth >= 64 { return self.fail(malformed) }
+                var children = [Child::Empty; 16]
+                var filled: usize = 0
+                for digit in 0..16 {
+                    if items.is_list() {
+                        let item = items.raw()
+                        if item.len() >= 32 { return self.fail(malformed) }
+                        let below = prefix ^ ((nibble(prefix, depth) ^ digit) as u256) << ((63 - depth) * 4) as u256
+                        children[digit] = self.decode(item, prefix: below, depth: depth + 1, storage, hash)?
+                    } else {
+                        let item = items.bytes()
+                        if item.len() == 32 {
+                            children[digit] = Child::Hash(self.stubs.add(item.read_word(0))?)
+                        } else if !item.is_empty() {
+                            return self.fail(malformed)
+                        }
+                    }
+                    if !children[digit].is_empty() { filled += 1 }
+                }
+                let valueless = items.bytes().is_empty()
+                if filled < 2 || !valueless || !node.finish() { return self.fail(malformed) }
+                return Option::Some(Child::Branch(self.branches.add(Branch { children, reference, len })?))
+            }
+            if count != 2 { return self.fail(malformed) }
+            // Its path, hex-prefix encoded: a flag nibble, 2 for a leaf and 1
+            // for an odd count of nibbles, then the first nibble if odd and a
+            // zero one if not, then the others. A leaf's ends at nibble 64,
+            // and an extension's has a nibble and ends before it.
+            let path = items.bytes()
+            if path.is_empty() || path.len() > 33 { return self.fail(malformed) }
+            let flag = path[0] >> 4
+            let odd = (flag & 1) as usize
+            let end = depth + (path.len() - 1) * 2 + odd
+            let leaf = flag >= 2
+            let ends = if leaf { end == 64 } else { end > depth && end < 64 }
+            if flag > 3 || (odd == 0 && path[0] & 0xf != 0) || !ends { return self.fail(malformed) }
+            var bits: u256 = if odd == 1 { (path[0] & 0xf) as u256 } else { 0 }
+            for index in 1..path.len() { bits = bits << 8 | path[index] as u256 }
+            let above = if depth == 0 { 0 } else { prefix & u256::max() << ((64 - depth) * 4) as u256 }
+            let key = above | bits << ((64 - end) * 4) as u256
+            if !leaf {
+                // An extension, over a branch.
+                let child = if items.is_list() {
+                    let item = items.raw()
+                    if item.len() >= 32 { return self.fail(malformed) }
+                    let child = self.decode(item, prefix: key, depth: end, storage, hash)?
+                    let Child::Branch(_) = child else { return self.fail(malformed) }
+                    child
+                } else {
+                    let item = items.bytes()
+                    if item.len() != 32 { return self.fail(malformed) }
+                    Child::Hash(self.stubs.add(item.read_word(0))?)
+                }
+                if !node.finish() { return self.fail(malformed) }
+                let extension = Extension { key, reference, child, end: end.downcast_truncate(), len }
+                return Option::Some(Child::Extension(self.extensions.add(extension)?))
+            }
+            // A leaf, whose value is a string of RLP.
+            let value = items.bytes()
+            if storage {
+                let slot = with (value) {
+                    var fields = Decoder::new()
+                    let slot = fields.uint()
+                    if fields.finish() { slot } else { 0 }
+                }
+                if slot == 0 || !node.finish() { return self.fail(malformed) }
+                return Option::Some(Child::Leaf(self.leaves.add(Leaf { key, value: slot, reference, len })?))
+            }
+            let (nonce, balance, root, code_hash, canonical) = with (value) {
+                var fields = Decoder::new()
+                let account = mut fields.list()
+                let nonce = account.u64()
+                let balance = account.uint()
+                let root = account.fixed(32)
+                let code_hash = account.fixed(32)
+                (nonce, balance, root, code_hash, fields.finish())
+            }
+            if !canonical || !node.finish() { return self.fail(malformed) }
+            let storage = if root == EMPTY_ROOT { Child::Empty } else { Child::Hash(self.stubs.add(root)?) }
+            let account = Account { key, nonce, balance, code_hash, reference, storage, len }
+            Option::Some(Child::Account(self.accounts.add(account)?))
+        }
     }
 
     // The position of the leaf of `key` under `node`, at `depth`, if it has
@@ -244,7 +611,7 @@ impl StateTrie {
             },
             Child::Leaf(at) => if self.leaves[at].key == key { Option::Some(at) } else { Option::None },
             Child::Account(at) => if self.accounts[at].key == key { Option::Some(at) } else { Option::None },
-            Child::Empty => Option::None,
+            _ => Option::None,
         }
     }
 
@@ -317,15 +684,16 @@ impl StateTrie {
         Option::Some(Child::Extension(self.extensions.add(extension)?))
     }
 
-    // The node in place of `node`, at `depth`, once the leaf of `key`, which
-    // is under it, is removed with its storage; none if an allocation fails.
-    // A branch left with one child gives way to it, and an extension over
-    // what is no longer a branch gives it its path.
-    fn remove(mut self, _ node: Child, _ key: u256, depth: usize) -> Option<Child> {
+    // The node in place of `node`, at `depth` of a storage trie if `storage`,
+    // once the leaf of `key`, which is under it, is removed with its
+    // storage; none if a node is missing or malformed or an allocation
+    // fails. A branch left with one child gives way to it, and an extension
+    // over what is no longer a branch gives it its path.
+    fn remove(mut self, _ node: Child, _ key: u256, depth: usize, storage: bool) -> Option<Child> {
         match node {
             Child::Branch(at) => {
                 let digit = nibble(key, depth)
-                let child = self.remove(self.branches[at].children[digit], key, depth: depth + 1)?
+                let child = self.remove(self.branches[at].children[digit], key, depth: depth + 1, storage)?
                 let branch = mut self.branches[at]
                 branch.children[digit] = child
                 branch.len = 0
@@ -340,19 +708,27 @@ impl StateTrie {
                 if count > 1 { return Option::Some(node) }
                 let child = branch.children[only]
                 self.branches.release(at)
+                // The removed key with the child's nibble here, whose first
+                // nibbles are the child's.
+                let key = key ^ ((nibble(key, depth) ^ only) as u256) << ((63 - depth) * 4) as u256
+                // A stub is read, for its kind decides what takes the
+                // branch's place.
+                let child = match child {
+                    Child::Hash(stub) => self.resolve(stub, prefix: key, depth: depth + 1, storage)?,
+                    _ => child,
+                }
                 let Child::Branch(_) = child else {
                     // A leaf or an extension, which moves up a nibble.
                     self.stale(child)
                     return Option::Some(child)
                 }
-                // An extension of the one nibble over the branch, with the
-                // removed key's nibbles before it.
-                let key = key ^ ((nibble(key, depth) ^ only) as u256) << ((63 - depth) * 4) as u256
+                // An extension of the one nibble over the branch.
                 let extension = Extension { key, reference: 0, child, end: (depth + 1).downcast_truncate(), len: 0 }
                 Option::Some(Child::Extension(self.extensions.add(extension)?))
             },
             Child::Extension(at) => {
-                let child = self.remove(self.extensions[at].child, key, depth: self.extensions[at].end as usize)?
+                let end = self.extensions[at].end as usize
+                let child = self.remove(self.extensions[at].child, key, depth: end, storage)?
                 let Child::Branch(_) = child else {
                     // A stale leaf or extension, which takes this one's path.
                     self.extensions.release(at)
@@ -387,6 +763,7 @@ impl StateTrie {
                 for child in children { self.clear(child) }
                 self.branches.release(at)
             },
+            Child::Hash(at) => self.stubs.release(at),
             Child::Empty => {},
         }
     }
@@ -424,7 +801,7 @@ impl StateTrie {
                 branch.reference = reference
                 branch.len = len
             },
-            Child::Empty => {},
+            _ => {},
         }
     }
 
@@ -436,6 +813,10 @@ impl StateTrie {
             Child::Account(at) => (self.accounts[at].reference, self.accounts[at].len as usize),
             Child::Extension(at) => (self.extensions[at].reference, self.extensions[at].len as usize),
             Child::Branch(at) => (self.branches[at].reference, self.branches[at].len as usize),
+            Child::Hash(at) => {
+                let hash = self.stubs[at]
+                (hash, 32)
+            },
             Child::Empty => (0, 0),
         }
     }
@@ -462,12 +843,9 @@ impl StateTrie {
         }
     }
 
-    // Caches the reference of `node`, at `depth`, and of each stale node
-    // under it: each node's RLP is made in `rlp`, a leaf's value in `value`,
-    // and paths in `path`.
-    fn rehash(mut self, _ node: Child, depth: usize, _ rlp: mut Encoder, _ value: mut Encoder,
-              _ path: mut MemBuffer) {
-        if node.is_empty() || self.reference(node).1 != 0 { return }
+    // Puts the RLP of `node`, at `depth`, whose children are not stale, in
+    // `rlp`, making a leaf's value in `value` and paths in `path`.
+    fn encode(self, _ node: Child, depth: usize, _ rlp: mut Encoder, _ value: mut Encoder, _ path: mut MemBuffer) {
         let start = rlp.begin()
         match node {
             Child::Leaf(at) => {
@@ -480,10 +858,9 @@ impl StateTrie {
             },
             Child::Account(at) => {
                 let account = self.accounts[at]
-                self.rehash(account.storage, depth: 0, mut rlp, mut value, mut path)
                 put_path(mut rlp, mut path, account.key, from: depth, to: 64, leaf: true)
                 let item = value.begin()
-                value.uint(account.nonce)
+                value.uint(account.nonce as u256)
                 value.uint(account.balance)
                 value.fixed(self.root_of(account.storage), len: 32)
                 value.fixed(account.code_hash, len: 32)
@@ -493,20 +870,39 @@ impl StateTrie {
             },
             Child::Extension(at) => {
                 let extension = self.extensions[at]
-                let end = extension.end as usize
-                self.rehash(extension.child, depth: end, mut rlp, mut value, mut path)
-                put_path(mut rlp, mut path, extension.key, from: depth, to: end, leaf: false)
+                put_path(mut rlp, mut path, extension.key, from: depth, to: extension.end as usize, leaf: false)
                 self.put_child(mut rlp, mut path, extension.child)
             },
             Child::Branch(at) => {
                 let children = self.branches[at].children
-                for child in children { self.rehash(child, depth: depth + 1, mut rlp, mut value, mut path) }
                 for child in children { self.put_child(mut rlp, mut path, child) }
                 rlp.fixed(0, len: 0)
             },
-            Child::Empty => {},
+            _ => {},
         }
         rlp.end(start)
+    }
+
+    // Caches the reference of `node`, at `depth`, and of each stale node
+    // under it: each node's RLP is made in `rlp`, a leaf's value in `value`,
+    // and paths in `path`.
+    fn rehash(mut self, _ node: Child, depth: usize, _ rlp: mut Encoder, _ value: mut Encoder,
+              _ path: mut MemBuffer) {
+        if node.is_empty() || self.reference(node).1 != 0 { return }
+        match node {
+            Child::Account(at) => self.rehash(self.accounts[at].storage, depth: 0, mut rlp, mut value, mut path),
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                self.rehash(extension.child, depth: extension.end as usize, mut rlp, mut value, mut path)
+            },
+            Child::Branch(at) => {
+                let children = self.branches[at].children
+                for child in children { self.rehash(child, depth: depth + 1, mut rlp, mut value, mut path) }
+            },
+            _ => {},
+        }
+        let start = rlp.begin()
+        self.encode(node, depth, mut rlp, mut value, mut path)
         let len = rlp.since(start).len()
         var reference: u256 = 0
         if len >= 32 {
@@ -516,5 +912,41 @@ impl StateTrie {
         }
         rlp.truncate(start)
         self.cache(node, reference, len: if len >= 32 { 32 } else { len.downcast_truncate() })
+    }
+
+    // Adds to `nodes` the RLP of `node`, at `depth`, which is not stale, if
+    // it is reached by its hash, and of each such node under it; false if an
+    // allocation fails.
+    fn write(self, _ node: Child, depth: usize, _ nodes: mut Nodes, _ rlp: mut Encoder, _ value: mut Encoder,
+             _ path: mut MemBuffer) -> bool {
+        match node {
+            // The trie holds no node of a stub.
+            Child::Empty | Child::Hash(_) => return true,
+            _ => {},
+        }
+        if depth == 0 || self.reference(node).1 == 32 {
+            let start = rlp.begin()
+            self.encode(node, depth, mut rlp, mut value, mut path)
+            let added = nodes.add(rlp.since(start))
+            rlp.truncate(start)
+            if !added { return false }
+        }
+        match node {
+            Child::Account(at) => {
+                self.write(self.accounts[at].storage, depth: 0, mut nodes, mut rlp, mut value, mut path)
+            },
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                self.write(extension.child, depth: extension.end as usize, mut nodes, mut rlp, mut value, mut path)
+            },
+            Child::Branch(at) => {
+                let children = self.branches[at].children
+                for child in children {
+                    if !self.write(child, depth: depth + 1, mut nodes, mut rlp, mut value, mut path) { return false }
+                }
+                true
+            },
+            _ => true,
+        }
     }
 }
