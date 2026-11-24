@@ -1,39 +1,57 @@
-// `fevm_tools witness`: a mainnet block validated by `validate` from another
-// client's proofs. A fevm-replay block directory (`fetch-block` and
-// `fetch-proofs`) becomes a witness case (version 9) for `fevm_lazy`: the
-// block's RLP rebuilt from `eth_getBlockByNumber`, the parent's header from
-// `proofs.json`, the nodes of the parent's `eth_getProof` proofs (`pre`)
-// with the collapse siblings derived from the block's own (`post`), the
-// codes the proofs and traces carry, and mainnet's fork schedule.
+// `fevm_tools witness`: blocks validated by `validate` from what another
+// client gives, each as a witness case (version 9) for `fevm_lazy`. Two
+// readers: a fevm-replay block directory (`fetch-block` and `fetch-proofs`)
+// gives the block's RLP rebuilt from `eth_getBlockByNumber`, the parent's
+// header from `proofs.json`, the nodes of the parent's `eth_getProof` proofs
+// (`pre`) with the collapse siblings derived from the block's own (`post`),
+// and the codes the proofs and traces carry; a directory of a raw block and
+// its `debug_executionWitness` gives the block and the witness as they are.
+// Each case has its chain's fork schedule.
 use core::{HashMap, MemBuffer, MemSpan, MemVec, Option}
 use core::hash::keccak256_word
 use std::abi::DynString
 use std::env::{Arg, Args}
 use std::fs::Fs
 use std::io::Stdout
-use std::process::{Command, Input, Redirect, Spawn}
+use std::process::{Child, Command, Input, Redirect, Spawn}
 use std::text
 use std::time::Clock
 use json::{Value, parse}
 use fevm_rlp::{Decoder, Encoder}
-use ingot::{host, named}
-use ingot::conformance::{build_driver, captured, driver_result, hex_bytes, number, put, put_len, to_hex}
+use ingot::{host, named, parse_u64, seconds}
+use ingot::conformance::{build_driver, captured, default_jobs, driver_result, hex_bytes, number, put, put_len, to_hex}
 
-// Mainnet's forks from Osaka on: each one's activation timestamp and blob
-// schedule (target, max, update fraction), Osaka's being Prague's. From
-// go-ethereum's params/chainspecs/mainnet.json (osakaTime, bpo1Time,
-// bpo2Time, blobSchedule).
-const MAINNET: [(u64, u64, u64, u64); 3] = [
-    (1764798551, 6, 9, 5007716), (1765290071, 10, 15, 8346193), (1767747671, 14, 21, 11684671),
-]
+// The forks from Osaka on of chain `chain_id`, if fevm has its schedule:
+// each one's activation timestamp and blob schedule (target, max, update
+// fraction), Osaka's being Prague's, all by Osaka's rules. Mainnet's (1)
+// from go-ethereum's params/chainspecs/mainnet.json (osakaTime, bpo1Time,
+// bpo2Time, blobSchedule), Hoodi's (560048) from reth v2.11.0's chain spec.
+fn schedule(_ chain_id: u256) -> Option<[(u64, u64, u64, u64); 3]> {
+    if chain_id == 1 {
+        return Option::Some([
+            (1764798551, 6, 9, 5007716), (1765290071, 10, 15, 8346193), (1767747671, 14, 21, 11684671),
+        ])
+    }
+    if chain_id == 560048 {
+        return Option::Some([
+            (1761677592, 6, 9, 5007716), (1762365720, 10, 15, 8346193), (1762955544, 14, 21, 11684671),
+        ])
+    }
+    Option::None
+}
 
 // The options that follow `witness`.
 pub struct Options {
     fe: Option<Arg>,
     executable: Option<Arg>,
+    // fevm-replay block directories.
     replay: MemVec<Arg>,
+    // Directories of a raw block and its execution witness, on `chain`.
+    executions: MemVec<Arg>,
+    chain: Option<u256>,
     out: Arg,
     level: u8,
+    jobs: Option<u64>,
 }
 
 impl Options {
@@ -41,15 +59,18 @@ impl Options {
         var fe: Option<Arg> = Option::None
         var executable: Option<Arg> = Option::None
         var replay: MemVec<Arg> = MemVec::new()
+        var executions: MemVec<Arg> = MemVec::new()
+        var chain: Option<u256> = Option::None
         var out: Option<Arg> = Option::None
         var level: u8 = 2
+        var jobs: Option<u64> = Option::None
         var i: usize = 2
         while i < args.count() {
             let name = args.get(i)
             i += 1
-            if name == "--replay" {
+            if name == "--replay" || name == "--execution-witness" {
                 while i < args.count() && !args.get(i).span().starts_with("--") {
-                    replay.push(args.get(i))
+                    if name == "--replay" { replay.push(args.get(i)) } else { executions.push(args.get(i)) }
                     i += 1
                 }
                 continue
@@ -65,6 +86,9 @@ impl Options {
                 out = Option::Some(value)
             } else if name == "--level" && (value == "0" || value == "1" || value == "2") {
                 level = value.span()[0] - b'0'
+            } else if (name == "--chain" || name == "--jobs") && parse_u64(value).unwrap_or(default: 0) != 0 {
+                let number = parse_u64(value).unwrap()
+                if name == "--chain" { chain = Option::Some(number as u256) } else { jobs = Option::Some(number) }
             } else {
                 return Result::Err(format!("bad option: ", name, " ", value))
             }
@@ -72,12 +96,14 @@ impl Options {
         if fe.is_some() == executable.is_some() {
             return Result::Err(format!("fevm_tools witness needs one of --fe and --executable"))
         }
+        if replay.is_empty() && executions.is_empty() {
+            return Result::Err(format!("fevm_tools witness needs --replay or --execution-witness"))
+        }
+        if !executions.is_empty() && chain.is_none() {
+            return Result::Err(format!("fevm_tools witness needs --chain for --execution-witness"))
+        }
         match out {
-            Option::Some(out) => if replay.is_empty() {
-                Result::Err(format!("fevm_tools witness needs --replay"))
-            } else {
-                Result::Ok(Options { fe, executable, replay, out, level })
-            },
+            Option::Some(out) => Result::Ok(Options { fe, executable, replay, executions, chain, out, level, jobs }),
             Option::None => Result::Err(format!("fevm_tools witness needs --out")),
         }
     }
@@ -270,6 +296,30 @@ pub fn block_rlp(_ block: Value) -> Result<MemBuffer, MemBuffer> {
     finished(rlp)
 }
 
+// Appends a witness case's version (9), the chain ID and the chain's fork
+// schedule, Osaka and then each BPO fork with its activation timestamp; an
+// error for a chain without one, or a block at `timestamp` before its
+// Osaka.
+fn put_head(_ out: mut MemBuffer, chain_id: u256, timestamp: u256) -> Result<MemBuffer, ()> {
+    let Option::Some(forks) = schedule(chain_id) else {
+        return Result::Err(format!("fevm_tools witness has no schedule for chain ", chain_id))
+    }
+    if timestamp < forks[0].0 as u256 {
+        return Result::Err(format!("fevm runs chain ", chain_id, "'s blocks from Osaka on"))
+    }
+    out.push(9)
+    put(mut out, chain_id, 32)?
+    for index in 0..3 {
+        let (time, target, max, fraction) = forks[index]
+        if index == 1 { put_len(mut out, 2)? }
+        if index != 0 { put(mut out, time as u256, 8)? }
+        out.push(0)
+        out.push(1)
+        for value in [target, max, fraction] { put(mut out, value as u256, 8)? }
+    }
+    Result::Ok(())
+}
+
 // Appends a count and then each item with its length.
 fn put_items(_ out: mut MemBuffer, _ items: MemVec<MemBuffer>) -> Result<MemBuffer, ()> {
     put_len(mut out, items.len())?
@@ -348,26 +398,11 @@ fn derive(_ node: MemSpan, _ derived: mut MemVec<MemBuffer>) {
 /// parent's state is never read.
 pub fn encode(_ block: Value, chain: Value, proofs: Value, prestate: Value, delegates: Value)
     -> Result<MemBuffer, (MemBuffer, usize)> {
-    let timestamp = number(block["timestamp"])?
-    if timestamp < MAINNET[0].0 as u256 { return Result::Err(format!("fevm runs mainnet blocks from Osaka on")) }
     let parent = ref proofs["parent"]
     let parent_hash = number(parent["hash"])?
     if number(block["parentHash"])? != parent_hash { return Result::Err(format!("the proofs are another block's")) }
-    // The schedule is mainnet's.
-    let chain_id = number(chain["result"])?
-    if chain_id != 1 { return Result::Err(format!("fevm_tools witness runs mainnet blocks, not chain ", chain_id)) }
     var out = MemBuffer::empty()
-    out.push(9)
-    put(mut out, chain_id, 32)?
-    // Osaka, then each BPO fork, all by Osaka's rules.
-    for index in 0..3 {
-        let (time, target, max, fraction) = MAINNET[index]
-        if index == 1 { put_len(mut out, 2)? }
-        if index != 0 { put(mut out, time as u256, 8)? }
-        out.push(0)
-        out.push(1)
-        for value in [target, max, fraction] { put(mut out, value as u256, 8)? }
-    }
+    put_head(mut out, chain_id: number(chain["result"])?, timestamp: number(block["timestamp"])?)?
     put(mut out, parent_hash, 32)?
     let rlp = block_rlp(block)?
     put_len(mut out, rlp.len())?
@@ -416,6 +451,47 @@ pub fn encode(_ block: Value, chain: Value, proofs: Value, prestate: Value, dele
     Result::Ok((out, added))
 }
 
+/// The witness case of a directory of a block on chain `chain_id`: its RLP
+/// (`raw.json`, `debug_getRawBlock`), whose header must hash to the block's
+/// hash (`block.json`, `eth_getBlockByNumber`), and the parent's hash from
+/// its header; and an execution witness as it is (`witness.json`,
+/// `debug_executionWitness`): its `state` nodes, `codes` and `headers`. A
+/// real witness carries the nodes a collapse needs, so none are derived.
+pub fn encode_execution_witness(_ raw: Value, _ block: Value, _ witness: Value, chain_id: u256)
+    -> Result<MemBuffer, MemBuffer> {
+    let rlp = hex_bytes(raw["result"].text())?
+    let span = rlp.span()
+    let header = with (span) {
+        var items = Decoder::new()
+        MemBuffer::from_span(items.list().raw())
+    }
+    let hash = number(block["result"]["hash"])?
+    if header.len() == 0 || keccak256_word(header.span()) != hash {
+        return Result::Err(format!("the raw block is not block ", block["result"]["hash"].text()))
+    }
+    // The parent's hash, its first field, and the timestamp, its twelfth.
+    let span = header.span()
+    let (parent_hash, timestamp) = with (span) {
+        var items = Decoder::new()
+        let fields = mut items.list()
+        let parent_hash = fields.fixed(32)
+        for _ in 0..10 { let _ = fields.raw() }
+        (parent_hash, fields.uint())
+    }
+    var out = MemBuffer::empty()
+    put_head(mut out, chain_id, timestamp)?
+    put(mut out, parent_hash, 32)?
+    put_len(mut out, rlp.len())?
+    out.extend_from(rlp.span())
+    let result = ref witness["result"]
+    for name in ["state", "codes", "headers"] {
+        var items: MemVec<MemBuffer> = MemVec::new()
+        add_hex(mut items, result[name])?
+        put_items(mut out, items)?
+    }
+    Result::Ok(out)
+}
+
 // The JSON of file `name` of `directory`.
 fn read_json(_ directory: MemSpan, _ name: DynString) -> Result<MemBuffer, Value> uses (fs: Fs) {
     let path = format!(directory, "/", name)
@@ -423,10 +499,28 @@ fn read_json(_ directory: MemSpan, _ name: DynString) -> Result<MemBuffer, Value
     named(path, parse(source.span()))
 }
 
+// A block to validate: its directory, number and hash, its case, and how
+// many nodes the reader derived, if it derives any.
+struct Job { path: MemBuffer, number: MemBuffer, hash: MemBuffer, case: MemBuffer, derived: Option<usize> }
+
+// The count and the sums of what the valid blocks' witnesses held and their
+// validation read, by set: nodes, codes, headers.
+fn add_counts(_ sums: mut [u64; 6], _ entry: Value) {
+    var index: usize = 0
+    for name in ["nodes", "codes", "headers"] {
+        for at in 0..2 {
+            sums[index] += entry[name][at].as_u64().unwrap_or(default: 0)
+            index += 1
+        }
+    }
+}
+
 /// Builds `fevm_lazy` unless given it, runs each directory's witness case
-/// through it, and reports each verdict in `results.json`: the block, the
-/// verdict and how many nodes, codes and headers the witness held and the
-/// validation read. Fails unless every block is valid.
+/// through it, `jobs` at once, and reports in `results.json` each block's
+/// verdict, how many nodes, codes and headers the witness held and the
+/// validation read, and the totals: the count of each verdict, and over the
+/// valid blocks what their witnesses held and read. Fails unless every
+/// block is valid.
 pub fn run(_ options: Options) -> Result<MemBuffer, ()>
 uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
 {
@@ -440,8 +534,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     report.set("level", Value::string(options.level))
     let executable = build_driver(options.fe, options.executable, "fevm_lazy", level: options.level, dir.span(),
                                   mut report)?
-    var blocks = Value::array()
-    var invalid: usize = 0
+    var jobs: MemVec<Job> = MemVec::new()
     for ref directory in options.replay {
         let path = named(directory, fs.canonicalize(directory))?
         let block = read_json(path.span(), "block.json")?
@@ -451,9 +544,45 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let prestate = read_json(path.span(), "prestate.json")?
         let delegates = read_json(path.span(), "delegates.json")?
         let (case, derived) = named(path, encode(result, chain, proofs, prestate, delegates))?
-        let output = named(executable, proc.output(
-            Command::new(executable).stdin(Input::Bytes(case)).stdout(Redirect::Capture).stderr(Redirect::Capture),
-        ))?
+        let number = MemBuffer::from_span(result["number"].text())
+        let hash = MemBuffer::from_span(result["hash"].text())
+        jobs.push(Job { path, number, hash, case, derived: Option::Some(derived) })
+    }
+    for ref directory in options.executions {
+        let path = named(directory, fs.canonicalize(directory))?
+        let block = read_json(path.span(), "block.json")?
+        let raw = read_json(path.span(), "raw.json")?
+        let witness = read_json(path.span(), "witness.json")?
+        let case = named(path, encode_execution_witness(raw, block, witness, chain_id: options.chain.unwrap()))?
+        let number = MemBuffer::from_span(block["result"]["number"].text())
+        let hash = MemBuffer::from_span(block["result"]["hash"].text())
+        jobs.push(Job { path, number, hash, case, derived: Option::None })
+    }
+    let parallel: usize = match options.jobs {
+        Option::Some(jobs) => jobs,
+        Option::None => default_jobs()?,
+    }
+        .downcast_truncate()
+    let started = clock.instant()
+    var entries: MemVec<Value> = MemVec::new()
+    for _ in 0..jobs.len() { entries.push(Value::object()) }
+    var children: MemVec<Child> = MemVec::new()
+    var running: MemVec<usize> = MemVec::new()
+    var next: usize = 0
+    while next < jobs.len() || !children.is_empty() {
+        if next < jobs.len() && children.len() < parallel {
+            let input = MemBuffer::from_span(jobs[next].case.span())
+            children.push(named(executable, proc.spawn(
+                Command::new(executable).stdin(Input::Bytes(input)).stdout(Redirect::Capture).stderr(Redirect::Capture),
+            ))?)
+            running.push(next)
+            next += 1
+            continue
+        }
+        let index = named(executable, proc.wait_any(mut children.as_slice()))?
+        let output = named(executable, proc.wait(children.swap_remove(index)))?
+        let at = running.swap_remove(index)
+        let job = ref jobs[at]
         var entry = match driver_result(output, timeout: 0) {
             Result::Ok(verdict) => verdict,
             Result::Err(failed) => {
@@ -465,22 +594,49 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 entry
             },
         }
-        entry.set("derived", Value::number(derived))
-        entry.set("directory", Value::string(path))
-        entry.set("number", Value::string(result["number"].text()))
-        entry.set("block", Value::string(result["hash"].text()))
-        let summary = format!(directory, " (", result["number"].text(), "): ", entry)
+        if let Option::Some(derived) = job.derived { entry.set("derived", Value::number(derived)) }
+        entry.set("directory", Value::string(job.path))
+        entry.set("number", Value::string(job.number))
+        entry.set("block", Value::string(job.hash))
+        let summary = format!(job.path, " (", job.number, "): ", entry["verdict"].text())
         println!(summary)
-        if entry["verdict"].text() != "valid" { invalid += 1 }
-        blocks.push(entry)
+        entries.set(at, entry)
     }
+    report.set("seconds", seconds(clock.instant().duration_since(started)))
+    // The count of each verdict, and what the valid blocks' witnesses held
+    // and read.
+    let names = ["valid", "invalid", "witness", "failed"]
+    var counts = [0 as u64; 4]
+    var sums = [0 as u64; 6]
+    var blocks = Value::array()
+    for index in 0..entries.len() {
+        let verdict = entries[index]["verdict"].text()
+        var kind: usize = 3
+        for at in 0..3 { if verdict == names[at] { kind = at } }
+        counts[kind] += 1
+        if kind == 0 { add_counts(mut sums, entries[index]) }
+        blocks.push(core::mem::replace(mut entries[index], Value::object()))
+    }
+    var totals = Value::object()
+    for at in 0..4 { totals.set(names[at], Value::number(counts[at])) }
+    var index: usize = 0
+    for name in ["nodes", "codes", "headers"] {
+        var pair = Value::array()
+        pair.push(Value::number(sums[index]))
+        pair.push(Value::number(sums[index + 1]))
+        totals.set(name, pair)
+        index += 2
+    }
+    println!(totals)
+    report.set("totals", totals)
     report.set("blocks", blocks)
     var text = MemBuffer::empty()
     report.write_pretty(mut text, indent: 2)
     text.push(b'\n')
     let results = format!(dir, "/results.json")
     named(results, fs.write(results, text.span()))?
-    if invalid != 0 { return Result::Err(format!(invalid, " of ", options.replay.len(), " blocks are not valid")) }
+    let invalid = counts[1] + counts[2] + counts[3]
+    if invalid != 0 { return Result::Err(format!(invalid, " of ", jobs.len(), " blocks are not valid")) }
     Result::Ok(())
 }
 
@@ -734,10 +890,47 @@ fn encode_writes_the_witness_case() {
     // The same block from before Osaka, on another parent, and the proofs of
     // another chain.
     let early = hand_made(header_fields("0x1", parent["hash"].text()), creation(), "[]")
-    assert!(encode(early, chain, proofs, prestate, delegates).err().unwrap() == "fevm runs mainnet blocks from Osaka on")
+    assert!(encode(early, chain, proofs, prestate, delegates).err().unwrap() == "fevm runs chain 1's blocks from Osaka on")
     let orphan = hand_made(header_fields("0x6b000000", "0x01".span()), creation(), "[]")
     assert!(encode(orphan, chain, proofs, prestate, delegates).err().unwrap() == "the proofs are another block's")
     let sepolia = sample("{\"result\":\"0xaa36a7\"}".span())
     let refused = encode(block, chain: sepolia, proofs, prestate, delegates).err().unwrap()
-    assert!(refused == "fevm_tools witness runs mainnet blocks, not chain 11155111")
+    assert!(refused == "fevm_tools witness has no schedule for chain 11155111")
+}
+
+// A hand-made directory of a raw block on Hoodi, its hash and an execution
+// witness.
+#[test]
+fn encode_execution_witness_takes_the_block_and_witness_as_they_are() {
+    let parent = parent_header()
+    let block = hand_made(header_fields("0x6b000000", parent["hash"].text()), creation(), "[]")
+    let rlp = block_rlp(block).unwrap()
+    let raw = sample(format!("{\"result\":\"", to_hex(rlp.span()), "\"}").span())
+    let hash = sample(format!("{\"result\":{\"number\":\"0x19335e5\",\"hash\":\"", block["hash"].text(), "\"}}").span())
+    let witness = sample("{\"result\":{\"state\":[\"0x01\",\"0x0203\"],\"codes\":[\"0x6000\"],\"keys\":[],\"headers\":[\"0x04\",\"0x05\"]}}".span())
+    let case = encode_execution_witness(raw, hash, witness, chain_id: 560048).unwrap()
+    // Version 9, chain 560048; Osaka with Prague's blobs, then BPO1 and BPO2
+    // from Hoodi's times; the parent's hash from the header; the block as
+    // given; the witness's items as given.
+    let schedule: DynString = "0x090000000000000000000000000000000000000000000000000000000000088bb000010000000000000006000000000000000900000000004c69640000000200000000690b91180001000000000000000a000000000000000f00000000007f5a5100000000691491180001000000000000000e00000000000000150000000000b24b3f"
+    assert!(to_hex(case.span().slice(offset: 0, len: 131)).span() == schedule.span())
+    assert!(case.span().slice(offset: 131, len: 32).read_word(0) == number(parent["hash"]).unwrap())
+    let len = length_at(case, at: 163)
+    assert!(case.span().slice(offset: 167, len) == rlp.span())
+    let (nodes, at) = items_at(case, at: 167 + len)
+    let (codes, at) = items_at(case, at)
+    let (headers, at) = items_at(case, at)
+    assert!(nodes.len() == 2 && nodes[1] == hex_bytes("0x0203".span()).unwrap() && codes.len() == 1)
+    assert!(headers.len() == 2 && headers[1] == hex_bytes("0x05".span()).unwrap() && at == case.len())
+    // The raw block of another hash, a chain without a schedule, and a block
+    // from before Hoodi's Osaka.
+    let other = sample("{\"result\":{\"number\":\"0x19335e5\",\"hash\":\"0x01\"}}".span())
+    assert!(encode_execution_witness(raw, other, witness, chain_id: 560048).err().unwrap() == "the raw block is not block 0x01")
+    let unknown = encode_execution_witness(raw, hash, witness, chain_id: 5).err().unwrap()
+    assert!(unknown == "fevm_tools witness has no schedule for chain 5")
+    let early = hand_made(header_fields("0x1", parent["hash"].text()), creation(), "[]")
+    let early_raw = sample(format!("{\"result\":\"", to_hex(block_rlp(early).unwrap().span()), "\"}").span())
+    let early_hash = sample(format!("{\"result\":{\"number\":\"0x19335e5\",\"hash\":\"", early["hash"].text(), "\"}}").span())
+    let refused = encode_execution_witness(early_raw, early_hash, witness, chain_id: 560048).err().unwrap()
+    assert!(refused == "fevm runs chain 560048's blocks from Osaka on")
 }

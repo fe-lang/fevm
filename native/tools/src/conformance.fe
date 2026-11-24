@@ -923,7 +923,7 @@ pub fn captured(_ what: String<3>, _ command: own Command) -> Result<MemBuffer, 
 }
 
 // Two fewer jobs than the host has processors, and at least one.
-fn default_jobs() -> Result<MemBuffer, u64> uses (proc: mut Spawn) {
+pub fn default_jobs() -> Result<MemBuffer, u64> uses (proc: mut Spawn) {
     let online = captured("cpu", Command::new("getconf").arg("_NPROCESSORS_ONLN"))?
     let count: u64 = match text::parse_uint(online.span()) {
         Option::Some(count) => count.downcast_truncate(),

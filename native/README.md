@@ -78,8 +78,9 @@ The [conformance runner](conformance/README.md) runs execution-spec-tests
 Osaka and Amsterdam state tests through `Evm::transact`, and blockchain tests
 of Osaka, Amsterdam, their BPO forks and the transitions between them
 through `Chain::import`, and with `--lazy` and `--stateless` the same over a
-lazy world and through `validate`; `fevm_tools witness` validates mainnet
-blocks from another client's proofs. It is not part of acceptance.
+lazy world and through `validate`; `fevm_tools witness` validates blocks
+from another client's proofs or execution witnesses. It is not part of
+acceptance.
 
 ## Resident memory
 

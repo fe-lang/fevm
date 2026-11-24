@@ -169,10 +169,10 @@ blocks validated, of which 72 read an ancestor's header; 51,602 runs without
 a node and as many without a code (4,563 of each skipped), and 56,163
 without a header (2 skipped).
 
-## Mainnet blocks from another client's proofs
+## Blocks from another client's witness
 
-`fevm_tools witness` validates mainnet blocks with `validate` from what
-another client gives: a block directory of
+`fevm_tools witness` validates blocks with `validate` from what another
+client gives: a block directory of
 [fevm-replay](https://github.com/PugarHuda/fevm-replay)'s `fetch-block` and
 `fetch-proofs`, such as the two in its `fixtures/proven`:
 
@@ -182,9 +182,12 @@ native/out/tools/fevm_tools witness --fe native/out/toolchain/bin/fe \
   --replay native/out/replay/0x19335e5 --out native/out/witness-run
 ```
 
-`--replay` takes one or more directories; `--fe` builds `fevm_lazy`, or
-`--executable` reuses a built one, and `--level` sets its optimization
-level. For each directory the runner builds a witness case:
+or a directory of a block and its execution witness, below. `--replay`
+takes one or more fevm-replay directories; `--fe` builds `fevm_lazy`, or
+`--executable` reuses a built one, `--level` sets its optimization level
+and `--jobs` how many blocks run at once (default: two fewer than the
+host's processors). For each fevm-replay directory the runner builds a
+witness case:
 
 - the block's RLP, rebuilt from `block.json` (`eth_getBlockByNumber` with
   its transactions): the header, each transaction in its block form
@@ -200,11 +203,14 @@ level. For each directory the runner builds a witness case:
 - as codes, the system contracts' code in `proofs.json`, and every code in
   the traces (`prestate.json`) and of the EIP-7702 delegates
   (`delegates.json`);
-- mainnet's forks from Osaka, as go-ethereum's
-  `params/chainspecs/mainnet.json` gives them: Osaka from 1,764,798,551
-  with Prague's blobs (6, 9, 5,007,716), BPO1 from 1,765,290,071 (10, 15,
-  8,346,193) and BPO2 from 1,767,747,671 (14, 21, 11,684,671). A block
-  before Osaka is refused.
+- the fork schedule of its chain (`chain.json`) from Osaka on. Mainnet's
+  is go-ethereum's `params/chainspecs/mainnet.json`: Osaka from
+  1,764,798,551 with Prague's blobs (6, 9, 5,007,716), BPO1 from
+  1,765,290,071 (10, 15, 8,346,193) and BPO2 from 1,767,747,671 (14, 21,
+  11,684,671). Hoodi's (chain 560,048) is reth v2.11.0's: Osaka from
+  1,761,677,592, BPO1 from 1,762,365,720 and BPO2 from 1,762,955,544, with
+  the same blobs. A chain without a schedule, or a block before its
+  chain's Osaka, is refused.
 
 The case (version 9) is the chain ID, the fork schedule as a blockchain
 test has it, the parent's hash, the block's RLP, and the nodes, codes and
@@ -214,8 +220,39 @@ headers, each a count and then each item with its length. `fevm_lazy` runs
 what it `lacks` (`header`, `node`, `malformed_node`, `code`) and its `hash`;
 then `nodes`, `codes` and `headers`, each how many the witness held and how
 many the validation read. A host failure prints only `host_error`.
-`results.json` lists each block with its verdict; the runner fails unless
+`results.json` lists each block with its verdict, and `totals` the count of
+each verdict and, over the valid blocks, how many nodes, codes and headers
+their witnesses held and their validation read; the runner fails unless
 every block is valid.
+
+`--execution-witness` takes directories of a block on the chain `--chain`
+names and its witness as a node gives them: the block's RLP (`raw.json`,
+`debug_getRawBlock`), its hash (`block.json`, `eth_getBlockByNumber`) and an
+execution witness (`witness.json`, `debug_executionWitness`). The case is
+the block as given, its header checked against the hash, the parent's hash
+from that header, and the witness's `state` nodes, `codes` and `headers` as
+they are. Such a witness carries the nodes a collapse needs, so none are
+derived, and one it lacks is a finding:
+
+```sh
+native/out/tools/fevm_tools witness --fe native/out/toolchain/bin/fe --chain 560048 \
+  --execution-witness native/out/witness-hoodi/* --out native/out/witness-hoodi-run
+```
+
+Over 96 consecutive Hoodi blocks, 4,078,315 to 4,078,410, with the
+witnesses ethrex v31.0.0 serves through ethpandaops' public endpoint
+(`native/out/scripts/fetch_witnesses.py` fetched them; they are not in the
+repository), all 96 are valid. Their validation read every node (41,286)
+and code (1,119) of their witnesses, and of 245 headers 237: each of the 8
+blocks whose BLOCKHASH reaches back holds the header of the oldest block it
+asks for, whose hash its child's header already gives. The run found that
+`Chain`'s trie updates set the slots in the order the block first changed
+them: block 4,078,344 clears three slots under a storage root's branch and
+sets a fourth, so the branch keeps two children, but after the three
+clearings the trie collapsed the branch onto its last child, which it had
+to read, before the fourth slot gave it a second child again; the witness,
+minimal for the end state, did not hold that child. `write_changes` now
+sets before it removes.
 
 A deletion that leaves a branch with one child moves that child up into
 its place, and when the child is a leaf or an extension under keys no
