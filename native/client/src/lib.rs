@@ -178,6 +178,7 @@ pub enum Status {
     InvalidImmediate,
     HostAllocation,
     BalanceOverflow,
+    StateUnavailable,
     Unknown(u8),
 }
 
@@ -199,6 +200,7 @@ impl Status {
             28 => Status::InvalidImmediate,
             21 => Status::HostAllocation,
             26 => Status::BalanceOverflow,
+            29 => Status::StateUnavailable,
             code => Status::Unknown(code),
         }
     }

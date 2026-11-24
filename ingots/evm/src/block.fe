@@ -52,8 +52,8 @@ pub enum BlockError {
     /// EIP-7928: the block's access list has more accounts and storage keys
     /// than its gas limit allows.
     AccessListTooLarge,
-    /// A host failure, with its status: an allocation, or a balance past
-    /// 2^256.
+    /// A host failure, with its status: an allocation, a balance past
+    /// 2^256, or state a lazy source cannot give.
     Host(i32),
 }
 

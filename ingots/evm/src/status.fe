@@ -27,6 +27,8 @@ pub const ERR_INVALID_IMMEDIATE: i32 = 28
 pub const ERR_HOST_ALLOCATION: i32 = 21
 // A transfer would overflow a 256-bit balance.
 pub const ERR_BALANCE_OVERFLOW: i32 = 26
+// A lazy world's state source cannot give state the execution reads.
+pub const ERR_STATE_UNAVAILABLE: i32 = 29
 
 pub fn exceptional(_ status: i32) -> bool {
     status == ERR_STACK_UNDERFLOW || status == ERR_STACK_OVERFLOW
@@ -59,6 +61,7 @@ pub fn status_name(_ status: i32) -> String<20> {
         ERR_INVALID_IMMEDIATE => "invalid_immediate",
         ERR_HOST_ALLOCATION => "host_allocation",
         ERR_BALANCE_OVERFLOW => "balance_overflow",
+        ERR_STATE_UNAVAILABLE => "state_unavailable",
         _ => "unknown",
     }
 }

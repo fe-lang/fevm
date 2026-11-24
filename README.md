@@ -296,7 +296,7 @@ tracer that records the steps, the calls or both; `fevm serve` uses it.
 | 15, 16, 17, 18 | `out_of_gas`, `invalid_jump`, `invalid_opcode`, `return_data_oob` | exceptional halt |
 | 23, 24, 25 | `static_write`, `code_prefix`, `precompile_failure` | exceptional halt |
 | 27 | `address_collision` | exceptional halt (creation transactions) |
-| 21, 26 | `host_allocation`, `balance_overflow` | host failure |
+| 21, 26, 29 | `host_allocation`, `balance_overflow`, `state_unavailable` | host failure |
 
 Exceptional halts consume all of a frame's gas. Host failures abort the whole
 execution; EVM code never sees them. Validity codes (`VALID` and

@@ -1,6 +1,7 @@
 // State sources: where a world that does not hold all of the state reads
 // the rest, and `()` for a world that does.
 use core::{MemSpan, Option, Result}
+use ingot::status::{ERR_HOST_ALLOCATION, ERR_STATE_UNAVAILABLE}
 
 /// Where a world reads the state it does not hold.
 pub trait StateSource {
@@ -17,6 +18,16 @@ pub trait StateSource {
 pub enum SourceError { Unavailable, Allocation }
 
 impl Copy for SourceError {}
+
+impl SourceError {
+    /// The host status that ends the execution that asked.
+    pub fn status(self) -> i32 {
+        match self {
+            SourceError::Unavailable => ERR_STATE_UNAVAILABLE,
+            SourceError::Allocation => ERR_HOST_ALLOCATION,
+        }
+    }
+}
 
 /// An account as a source or a trie holds it. Its nonce is under 2^64
 /// (EIP-2681).
