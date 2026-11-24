@@ -256,8 +256,11 @@ impl<S: StateSource> Block<S> {
         requests.push(request)
     }
 
-    // The requests a request contract's system call returns.
+    // The requests a request contract's system call returns, unless the
+    // block is already invalid, after which the specification reads no
+    // more of the state.
     fn collect_requests(mut self, _ requests: mut MemVec<MemBuffer>, kind: u8, from: u256) {
+        if self.failure.is_some() { return }
         var loaded = self.evm.transaction().load_account(from)
         if loaded == OK { loaded = self.evm.transaction().load_code(from) }
         if loaded != OK { return self.fail(BlockError::Host(loaded)) }

@@ -248,6 +248,24 @@ fn lazy_block_undo_rereads_a_slot_read_before_a_deletion() {
     core::assert(evm.source().slots == asked + 1 && evm.world().storage_load(0xee, 1) == 5)
 }
 
+#[test]
+fn lazy_block_reads_no_request_contract_after_a_failed_one() {
+    // PUSH0; PUSH0; REVERT: the withdrawal request contract fails, and the
+    // consolidation request contract is not read.
+    var world = world()
+    let reverts: [u8; 3] = [0x5f, 0x5f, 0xfd]
+    core::assert(world.set_code(address: WITHDRAWAL_REQUESTS, code: reverts) == OK)
+    let evm = lazy(world, refused: Option::None)
+    let block = Block<TestSource>::begin(evm, env(), parent_hash: 0x1234, parent_beacon_block_root: 0x5678)
+    let (evm, finished) = block.finish(MemVec::new())
+    core::assert(match finished {
+        Result::Err(BlockError::RequestCallFailed) => true,
+        _ => false,
+    })
+    core::assert(evm.world().loaded().contains(WITHDRAWAL_REQUESTS))
+    core::assert(!evm.world().loaded().contains(CONSOLIDATION_REQUESTS))
+}
+
 // Runs a transfer and two withdrawals in an Amsterdam block on `evm`: its
 // access list's hash, and the `Evm`.
 fn amsterdam_block<S: StateSource>(_ evm: own Evm<S>) -> (u256, Evm<S>) {
