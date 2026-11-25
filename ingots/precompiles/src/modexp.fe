@@ -1,10 +1,10 @@
 use core::{MemArray, MemBuffer, MemSlice, Option}
 use core::num::{leading_zeros, swap_bytes, to_be, trailing_zeros}
 use core::ptr::{cast, offset_bytes}
+use curves::montgomery::{adc, mac, sbb}
 use keccak::ByteSource
 use ingot::{FAILURE, Output, SUCCESS, host_allocation}
 use ingot::bignum::{Modulus, Montgomery, limb}
-use ingot::montgomery::{adc, mac, sbb}
 
 // Input bytes beyond the calldata read as zero (EIP-198 right padding).
 fn input_byte<T: ByteSource>(_ input: T, _ index: usize) -> u8 {

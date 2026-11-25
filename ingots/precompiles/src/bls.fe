@@ -1,11 +1,11 @@
 use core::{MemArray, MemBuffer, Option}
+use curves::bls_curve::{Affine, ORDER, Point, msm, multiply_g1, multiply_g2, on_g1, on_g2}
+use curves::bls_field::{Field, Fp}
+use curves::bls_map::{map_to_g1, map_to_g2}
+use curves::bls_pairing::{final_exponentiation, miller_loop}
+use curves::bls_tower::{Fp12, Fp2}
 use keccak::ByteSource
 use ingot::{Output, SUCCESS, failure, host_allocation, word_at}
-use ingot::bls_curve::{Affine, ORDER, Point, msm, on_g1, on_g2}
-use ingot::bls_field::{Field, Fp}
-use ingot::bls_map::{map_to_g1, map_to_g2}
-use ingot::bls_pairing::{final_exponentiation, miller_loop}
-use ingot::bls_tower::{Fp12, Fp2}
 
 // EIP-2537's BLS12-381 precompiles at 0x0b through 0x11. A field element is 64
 // big-endian bytes below p, so its top 16 bytes are zero; a G1 point is (x, y)
@@ -117,6 +117,8 @@ fn g1_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
         // The points have order r.
         scalars[i] = word_at(input, offset: 160 * i + 128) % ORDER
     }
+    // One pair is one multiplication; `g1_at` checked that the point is in G1.
+    if k == 1 { return g1_output(multiply_g1(Point::from_affine(points[0]), scalars[0]), gas_used: used) }
     let Option::Some(sum) = msm(points, scalars) else { return host_allocation(used) }
     g1_output(sum, gas_used: used)
 }
@@ -135,6 +137,8 @@ fn g2_msm<T: ByteSource>(_ input: T, gas: u64) -> Output {
         // The points have order r.
         scalars[i] = word_at(input, offset: 288 * i + 256) % ORDER
     }
+    // One pair is one multiplication; `g2_at` checked that the point is in G2.
+    if k == 1 { return g2_output(multiply_g2(Point::from_affine(points[0]), scalars[0]), gas_used: used) }
     let Option::Some(sum) = msm(points, scalars) else { return host_allocation(used) }
     g2_output(sum, gas_used: used)
 }

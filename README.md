@@ -30,7 +30,10 @@ The repo is a Fe workspace:
 
 The interpreter depends on [swisstable](https://github.com/fe-lang/swisstable)
 for growable hash tables and [keccak](https://github.com/fe-lang/keccak) for
-Keccak-256; `ingots/evm/fe.toml` pins both to Git revisions.
+Keccak-256; `ingots/evm/fe.toml` pins both to Git revisions. The precompiles'
+field, curve and pairing arithmetic is [curves](https://github.com/fe-lang/curves),
+pinned in `ingots/precompiles/fe.toml`; `ingots/precompiles` keeps their input
+encodings and gas.
 
 ## Building
 

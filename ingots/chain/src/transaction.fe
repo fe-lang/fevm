@@ -6,8 +6,8 @@ use keccak::{Keccak256, keccak256_word}
 use fevm::{Authorization, InputData, OK, TxEnv, TxRequest}
 use fevm::address::{rlp_integer_len, update_rlp_integer}
 use fevm::processor::{TX_ACCESS_LIST, TX_BLOB, TX_FEE_MARKET, TX_LEGACY, TX_SET_CODE}
+use curves::secp256k1::N
 use fevm_precompiles::recover_signer
-use fevm_precompiles::secp256k1::N
 use fevm_rlp::Decoder
 
 /// Why a transaction does not decode.
