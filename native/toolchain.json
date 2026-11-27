@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "fe_repository": "https://github.com/argotorg/fe",
-  "fe_revision": "6ccb3ca8e9ee95d255f86954980aa2e56e09acd9",
+  "fe_revision": "792a9c0c023476c1d4aa0ff288b129ee2cb84fa3",
   "sonatina_repository": "https://github.com/fe-lang/sonatina",
-  "sonatina_revision": "5632dd636689d983b5a5dc0190d3fddf4e3e7c71",
-  "cargo_lock_sha256": "5afdd515f1f6b5ac582fb15ad42d9b0f767254729c4941db44e4f6d5e244279a",
+  "sonatina_revision": "daca656deafba402682436079c91a3edc07af58f",
+  "cargo_lock_sha256": "dbd58fe45dae0388b6e60afa3cd43e6a38078206604f68a12d3ac5f3865858d6",
   "rust_version": "1.99.0",
   "features": [
     "cranelift"
   ],
-  "publication": "Fe master 6ccb3ca8e (argotorg/fe#1992); Sonatina main revision pinned by its Cargo.lock",
+  "publication": "Fe master 792a9c0c0 (argotorg/fe#2070); Sonatina main revision pinned by its Cargo.lock",
   "hosts": [
     "aarch64-apple-darwin",
     "x86_64-unknown-linux-gnu"
