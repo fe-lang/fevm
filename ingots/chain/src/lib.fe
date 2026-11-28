@@ -1,11 +1,14 @@
 // A chain of blocks over fevm: decoding blocks and their transactions,
 // validating headers against their parents, computing Merkle roots, and
-// importing blocks through `fevm::Block`, or validating one from a witness.
+// importing blocks through `fevm::Block`, or validating one from a witness;
+// and the steps of importing one, for a host that keeps the state itself.
 pub use transaction::{TxError, decode_transaction}
 pub use header::{Header, HeaderError, blob_base_fee}
 pub use schedule::Schedule
 pub use receipt::encode_receipt
 pub use trie::{Trie, state_root}
-pub use state_trie::{NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault}
-pub use chain::{Chain, HostFailure, Import, Imported, InvalidBlock}
+pub use state_trie::{NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault, world_account}
+pub use chain::{
+    Chain, HostFailure, Import, Imported, InvalidBlock, Ran, checked_env, decode_block, mismatch, run, write_changes,
+}
 pub use witness::{Lack, Validated, Verdict, Witness, validate}

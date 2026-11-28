@@ -84,10 +84,14 @@ fn next_transaction(_ transactions: mut Decoder) -> ref MemSpan uses (rlp: MemSp
     transactions.bytes()
 }
 
-// The first value the header commits to that is not what the block gives, in
-// the specification's order (`execute_block`); none if all are.
-pub(ingot) fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, state_root: u256,
-                       receipts_root: u256, withdrawals_root: u256) -> Option<InvalidBlock> {
+/// The first value `header` commits to that is not what its block gives, in
+/// the specification's order (`execute_block`): the block's `output` and the
+/// roots `run` gives in `Ran.roots`, and the state root the block's changes
+/// give in the trie of its parent's state (`write_changes`, then
+/// `StateTrie::root`). None if all are; the block is then valid if its
+/// parent is.
+pub fn mismatch(_ header: Header, _ output: BlockOutput, transactions_root: u256, state_root: u256,
+                receipts_root: u256, withdrawals_root: u256) -> Option<InvalidBlock> {
     let access_list_hash = match output.access_list {
         Option::Some(ref list) => Option::Some(list.hash),
         Option::None => Option::None,
@@ -104,11 +108,13 @@ pub(ingot) fn mismatch(_ header: Header, _ output: BlockOutput, transactions_roo
     Option::None
 }
 
-// A block's RLP, past EIP-7934's size limit and decoded but for its
-// transactions, which decode as they run: its header, its withdrawals with
-// their trie, and whether it has ommers; or why it is invalid, or an
-// allocation failure. Never `Valid`.
-pub(ingot) fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Withdrawal>, Trie, bool)> {
+/// The first step of importing the block `rlp` encodes: its size checked
+/// against EIP-7934's limit and the block decoded but for its transactions,
+/// which `run` decodes from the same `rlp` as it comes to each. Gives its
+/// header, its withdrawals with their trie, for `run`, and whether it has
+/// ommers, for `checked_env`; or why it is invalid, or an allocation
+/// failure. Never `Valid`. The header is not yet checked against a parent.
+pub fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Withdrawal>, Trie, bool)> {
     if rlp.len() > MAX_RLP_BLOCK_SIZE { return Result::Err(Import::Invalid(InvalidBlock::TooLarge)) }
     with (rlp) {
         var items = Decoder::new()
@@ -152,12 +158,13 @@ pub(ingot) fn decode_block(_ rlp: MemSpan) -> Result<Import, (Header, MemVec<Wit
     }
 }
 
-// The values for executing the block `header` heads, which has `ommers` or
-// none, on chain `chain_id` by `config`, the rules in force at its
-// timestamp, once its header is checked against `parent` and it is checked
-// to have no ommers; or why it is invalid, or that its blob base fee is past
-// computing. Never `Valid`.
-pub(ingot) fn checked_env(_ header: Header, _ parent: Header, _ config: Config, ommers: bool, chain_id: u256)
+/// The second step: the values for executing the block `header` heads, as
+/// `decode_block` gives it with `ommers`, on chain `chain_id` by `config`,
+/// the rules in force at its timestamp (`Schedule::config_at`), once its
+/// header is checked against its parent's, `parent`, and it is checked to
+/// have no ommers; or why it is invalid, or that its blob base fee is past
+/// computing. Never `Valid`. Nothing is read of the state.
+pub fn checked_env(_ header: Header, _ parent: Header, _ config: Config, ommers: bool, chain_id: u256)
     -> Result<Import, BlockEnv> {
     if let Result::Err(error) = header.validate(parent, config) {
         return Result::Err(Import::Invalid(InvalidBlock::Header(error)))
@@ -169,25 +176,31 @@ pub(ingot) fn checked_env(_ header: Header, _ parent: Header, _ config: Config, 
     }
 }
 
-/// What a block's body gives once run: its receipts and output, and the
-/// roots of its transactions, receipts and withdrawals, none if an
-/// allocation failed.
-pub(ingot) struct Ran {
-    pub(ingot) receipts: MemVec<Receipt>,
-    pub(ingot) output: BlockOutput,
-    pub(ingot) roots: Option<(u256, u256, u256)>,
+/// What a block's body gives once run: its receipts and output, whose
+/// `changes` go into the state trie (`write_changes`), and the roots of its
+/// transactions, receipts and withdrawals, in that order, for `mismatch`;
+/// none if an allocation failed, which is no verdict on the block.
+pub struct Ran {
+    pub receipts: MemVec<Receipt>,
+    pub output: BlockOutput,
+    pub roots: Option<(u256, u256, u256)>,
 }
 
-// Runs the body of the block `header` heads, whose transactions are the
-// second item of `rlp`, through `Block` on `evm`'s world, over any source:
-// its system calls, then its transactions, decoding each and recovering its
-// sender as it comes to it (`tracer` sees them run), then its withdrawals and
-// requests. A host failure as the block begins stops it before its
-// transactions. Gives the `Evm` back with what the body gives; or, having
-// undone the block, why it is invalid or could not be run, never `Valid`.
-pub(ingot) fn run<S: StateSource, T: Tracer>(_ evm: own Evm<S>, _ header: Header, _ env: BlockEnv,
-                                            _ withdrawals: own MemVec<Withdrawal>, _ withdrawals_trie: own Trie,
-                                            _ tracer: mut T) -> (Evm<S>, Result<Import, Ran>) uses (rlp: MemSpan) {
+/// The third step: runs the body of the block `header` heads, whose
+/// transactions are the second item of `rlp`, through `Block` on `evm`'s
+/// world, over any source: its system calls, then its transactions, decoding
+/// each and recovering its sender as it comes to it (`tracer` sees them run),
+/// then its withdrawals and requests. `evm` holds the state after the
+/// parent, or reads it from its source, and its config is the one
+/// `checked_env` was given; `env`, `withdrawals` and `withdrawals_trie` are
+/// what `checked_env` and `decode_block` gave. A host failure as the block
+/// begins stops it before its transactions. Gives the `Evm` back with what
+/// the body gives; or, having undone the block on the world, why it is
+/// invalid or could not be run, never `Valid`. A source that could not
+/// answer a read ends the run as `Failed` with its host status.
+pub fn run<S: StateSource, T: Tracer>(_ evm: own Evm<S>, _ header: Header, _ env: BlockEnv,
+                                     _ withdrawals: own MemVec<Withdrawal>, _ withdrawals_trie: own Trie,
+                                     _ tracer: mut T) -> (Evm<S>, Result<Import, Ran>) uses (rlp: MemSpan) {
     var block = Block<S>::begin(evm, env, parent_hash: header.parent_hash,
                                 parent_beacon_block_root: header.parent_beacon_block_root)
     var transactions_trie = Trie::new()
@@ -345,25 +358,28 @@ impl Chain {
     }
 }
 
-// Sets in `trie` each account and slot `changes` names as `world` holds it:
-// the accounts that exist at the end, then the removals of those that do
-// not, whose slots go with them and then change nothing; then the slots that
-// hold a value at the end, then the removals of those that do not. An
-// account settlement deleted that exists in `world` has its storage cleared
-// first, since its slots need not all be named: removing its leaf and
-// adding it again could collapse a branch the state still has, onto a
-// sibling a partial trie may not hold.
-//
-// Sets go before removals so that what the trie reads does not depend on
-// the order the block made its changes in. Once every set is done, the
-// children of any branch can only shrink, so a branch that is left with one
-// child during the removals either ends with that child, and then every
-// implementation must read it and a witness holds it, or loses it to a
-// later removal, and then a touched key lies under it and a witness holds
-// it. In the other order a branch can pass through one child and end with
-// two, and that read is this trie's alone.
-pub(ingot) fn write_changes<N: NodeSource>(_ trie: mut StateTrie<N>, _ world: mut WorldState,
-                                         _ changes: BlockChanges) {
+/// The fourth step: sets in `trie`, the trie of the parent's state, each
+/// account and slot `changes`, a block's (`Ran.output.changes`), names as
+/// `world`, the world `run` left (`Evm::into_parts`), holds it: the accounts
+/// that exist at the end, then the removals of those that do not, whose
+/// slots go with them and then change nothing; then the slots that hold a
+/// value at the end, then the removals of those that do not. An account
+/// settlement deleted that exists in `world` (`AccountBefore.cleared`) has
+/// its storage cleared first, since its slots need not all be named:
+/// removing its leaf and adding it again could collapse a branch the state
+/// still has, onto a sibling a partial trie may not hold. Then
+/// `StateTrie::root` gives the state root for `mismatch`, or the trie's
+/// fault.
+///
+/// Sets go before removals so that what the trie reads does not depend on
+/// the order the block made its changes in. Once every set is done, the
+/// children of any branch can only shrink, so a branch that is left with one
+/// child during the removals either ends with that child, and then every
+/// implementation must read it and a witness holds it, or loses it to a
+/// later removal, and then a touched key lies under it and a witness holds
+/// it. In the other order a branch can pass through one child and end with
+/// two, and that read is this trie's alone.
+pub fn write_changes<N: NodeSource>(_ trie: mut StateTrie<N>, _ world: mut WorldState, _ changes: BlockChanges) {
     for removing in [false, true] {
         for account in changes.accounts() {
             if world.exists(account.address) == removing { continue }

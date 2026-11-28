@@ -1,12 +1,13 @@
-use core::MemBuffer
+use core::{MemBuffer, Option, Result}
 use std::text::decode_hex
-use fevm::{Config, WorldState}
+use fevm::{Config, Evm, WorldSource, WorldState}
 use fevm::status::{INVALID_CHAIN_ID, OK}
-use ingot::chain::{Chain, Import, InvalidBlock}
+use ingot::chain::{Chain, Import, InvalidBlock, checked_env, decode_block, mismatch, run, write_changes}
 use ingot::header::{Header, HeaderError}
 use ingot::schedule::Schedule
+use ingot::state_trie::{Nodes, StateTrie, world_account}
 use ingot::transaction::TxError
-use ingot::trie::state_root
+use ingot::trie::{hash, state_root}
 
 // tests@v21.0.2 blockchain test for_osaka/prague/eip6110_deposits/
 // modified_contract/extra_logs.json, test_extra_logs[fork_Osaka-
@@ -189,4 +190,65 @@ fn chain_rejects_an_invalid_transaction() {
         _ => core::assert(false),
     }
     core::assert(at_genesis(mut chain))
+}
+
+#[test]
+fn import_steps_compose_as_a_host_composes_them() {
+    // The block over a world that reads the genesis state from a source,
+    // its changes set in a partial trie of the genesis state: the block's
+    // state root, and no value the header commits to differs.
+    var chain = genesis(chain_id: 1)
+    var nodes = Nodes::new()
+    core::assert(chain.write_nodes(mut nodes))
+    let rlp = valid()
+    let span = rlp.span()
+    let Result::Ok((header, withdrawals, withdrawals_trie, ommers)) = decode_block(span) else {
+        return core::assert(false)
+    }
+    let config = Config::osaka()
+    let Result::Ok(env) = checked_env(header, chain.head(), config, ommers, chain_id: 1) else {
+        return core::assert(false)
+    }
+    let evm = Evm<WorldSource>::over(WorldSource::new(genesis_world()), config)
+    var tracer = ()
+    let (evm, ran) = with (span) { run(evm, header, env, withdrawals, withdrawals_trie, mut tracer) }
+    let Result::Ok(ran) = ran else { return core::assert(false) }
+    let Option::Some((transactions_root, receipts_root, withdrawals_root)) = ran.roots else {
+        return core::assert(false)
+    }
+    let (var world, _) = evm.into_parts()
+    var trie = StateTrie<Nodes>::partial(root: GENESIS_STATE_ROOT, nodes)
+    write_changes(mut trie, mut world, ran.output.changes)
+    let state_root = trie.root().unwrap()
+    core::assert(state_root == BLOCK_STATE_ROOT)
+    core::assert(mismatch(header, ran.output, transactions_root, state_root, receipts_root, withdrawals_root).is_none())
+    // Undone in a partial trie of the state after it, by hashed keys as a
+    // store holds them: each account and slot it changed set as the genesis
+    // world holds it, sets before removals. The coinbase, which the block
+    // made, goes.
+    match chain.import(span, mut tracer) {
+        Import::Valid(_) => {},
+        _ => core::assert(false),
+    }
+    var after = Nodes::new()
+    core::assert(chain.write_nodes(mut after))
+    var before = genesis_world()
+    var undo = StateTrie<Nodes>::partial(root: BLOCK_STATE_ROOT, after)
+    var removed: usize = 0
+    for removing in [false, true] {
+        for account in ran.output.changes.accounts() {
+            if before.exists(account.address) == removing { continue }
+            if removing { removed += 1 }
+            undo.set_account_keyed(hash(account.address, len: 20), world_account(mut before, account.address))
+        }
+    }
+    for removing in [false, true] {
+        for slot in ran.output.changes.slots() {
+            let value = before.storage_load(slot.address, slot.slot)
+            if (value == 0) == removing {
+                undo.set_slot_keyed(account: hash(slot.address, len: 20), key: hash(slot.slot, len: 32), value)
+            }
+        }
+    }
+    core::assert(removed == 1 && undo.root().unwrap() == GENESIS_STATE_ROOT)
 }

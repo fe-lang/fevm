@@ -243,9 +243,17 @@ storage cleared in the trie first (`AccountBefore.cleared`). The trie holds a
 node for every account and slot of the world with its hash, besides the
 world itself: about 100 MB more for 100,000 accounts of 10 slots, a third of
 what that world takes. A trie that an allocation failed is rebuilt from the
-world before the next block. A host that keeps the state in its own storage
-would not use `Chain`, but `Block`, the changes it gives, and its own trie.
-`state_root(world)` computes the root of a whole world in one pass.
+world before the next block. `state_root(world)` computes the root of a
+whole world in one pass.
+
+A host that keeps the state in its own storage does not use `Chain`, but
+the steps `Chain::import` and `validate` share, in order: `decode_block`,
+`checked_env` against the parent's header, `run` on an `Evm` over the
+host's `StateSource`, `write_changes` into a partial trie of the parent's
+state over the host's `NodeSource`, `StateTrie::root`, and `mismatch`. The
+keyed setters (`set_account_keyed`, `set_slot_keyed`,
+`clear_storage_keyed`) take keccak256 of addresses and slots, as a store
+that holds no preimages has them.
 
 `StateTrie<N>::partial(root, source)` is the trie of a state root and a
 `NodeSource`, which gives the RLP of a node by where it stands (`NodePath`:

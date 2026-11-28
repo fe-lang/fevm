@@ -198,10 +198,12 @@ impl NodeSource for Nodes {
     }
 }
 
-/// The account of `address` in `world` as a trie holds it, its storage root
-/// zero, which the trie does not take; none if it does not exist. Mutable for
-/// the code hash the world computes on first use.
-pub(ingot) fn world_account(_ world: mut WorldState, _ address: u256) -> Option<AccountState> {
+/// The account of `address` in `world` as a trie holds it, for
+/// `StateTrie::set_account`: its storage root zero, which the trie does not
+/// take; none if it does not exist. Mutable for the code hash the world
+/// computes on first use. The world's nonce must be under 2^64, as a world a
+/// block ran on has it (EIP-2681).
+pub fn world_account(_ world: mut WorldState, _ address: u256) -> Option<AccountState> {
     if !world.exists(address) { return Option::None }
     // Zero for an empty account, which has no code.
     let code_hash = world.code_hash(address)
@@ -239,6 +241,10 @@ pub struct StateTrie<N: NodeSource = ()> {
 }
 
 impl StateTrie<()> {
+    /// An empty complete trie, to be filled by the keyed setters, as from a
+    /// store's flat tables, which hold no preimages.
+    pub fn empty() -> Self { StateTrie::over(()) }
+
     /// The trie of every account and slot in `world`, whose nonces are under
     /// 2^64; mutable for the code hashes the world computes on first use.
     pub fn new(_ world: mut WorldState) -> Self {
@@ -378,13 +384,18 @@ impl<N: NodeSource> StateTrie<N> {
         Result::Err(self.fault.unwrap())
     }
 
-    /// `set_account` of the account whose key is `key`.
-    pub(ingot) fn set_account_keyed(mut self, _ key: u256, _ state: Option<AccountState>) {
+    /// `set_account` of the account whose key is `key`, keccak256 of its
+    /// address, for a caller that holds accounts by that key, such as a store
+    /// undoing a block. As there, a caller applying several changes sets
+    /// before it removes.
+    pub fn set_account_keyed(mut self, _ key: u256, _ state: Option<AccountState>) {
         if self.fault.is_none() && self.write_account(key, state).is_none() { self.failed() }
     }
 
-    /// `clear_storage` of the account whose key is `key`.
-    pub(ingot) fn clear_storage_keyed(mut self, _ key: u256) {
+    /// `clear_storage` of the account whose key is `key`, keccak256 of its
+    /// address. A caller clears an account's storage before it sets any of
+    /// its slots.
+    pub fn clear_storage_keyed(mut self, _ key: u256) {
         if self.fault.is_some() { return }
         let Option::Some(found) = self.open_account(key) else { return self.failed() }
         if let Option::Some(at) = found && !self.accounts[at].storage.is_empty() {
@@ -394,9 +405,11 @@ impl<N: NodeSource> StateTrie<N> {
         }
     }
 
-    /// `set_slot` of the slot whose key is `key`, of the account whose key is
-    /// `account`.
-    pub(ingot) fn set_slot_keyed(mut self, account: u256, key: u256, value: u256) {
+    /// `set_slot` of the slot whose key is `key`, keccak256 of the slot, of
+    /// the account whose key is `account`, keccak256 of its address. As
+    /// there, the account is set first, and a caller applying several
+    /// changes sets before it removes.
+    pub fn set_slot_keyed(mut self, account: u256, key: u256, value: u256) {
         if self.fault.is_none() && self.write_slot(account, key, value).is_none() { self.failed() }
     }
 

@@ -392,3 +392,25 @@ fn state_trie_follows_a_world_of_many_slots() {
 fn state_trie_follows_a_world_of_many_accounts() {
     differential(seed: 4, batches: 200, accounts: 3000, slots: 4, size: 100)
 }
+
+#[test]
+fn state_trie_fills_an_empty_trie_by_hashed_keys() {
+    // The fixture's genesis world set account by account and slot by slot by
+    // their hashed keys, as from a store's flat tables, into an empty trie:
+    // the trie of the world.
+    var world = genesis_world()
+    var whole = StateTrie::new(mut world)
+    var keyed = StateTrie::empty()
+    for position in 0..world.account_count() {
+        let address = world.account_at(position).address
+        keyed.set_account_keyed(hash(address, len: 20), world_account(mut world, address))
+    }
+    for at in 0..world.storage_slots() {
+        let entry = world.storage_at(at)
+        if entry.occupied {
+            let (account, key) = (hash(entry.address, len: 20), hash(entry.slot, len: 32))
+            keyed.set_slot_keyed(account, key, value: entry.value)
+        }
+    }
+    core::assert(keyed.root().unwrap() == whole.root().unwrap() && whole.root().unwrap() == GENESIS_STATE_ROOT)
+}
