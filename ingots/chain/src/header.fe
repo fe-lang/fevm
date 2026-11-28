@@ -1,11 +1,12 @@
-// Block headers: decoding, validation against the parent by the rules in
-// force at a header's timestamp, and a block's values for execution.
+// Block headers: decoding and encoding, validation against the parent by the
+// rules in force at a header's timestamp, and a block's values for
+// execution.
 use core::{MemBuffer, MemSpan, Option, Result}
 use core::num::{checked_mul_div, mul_div}
 use keccak::keccak256_word
 use fevm::{BlockEnv, Bloom, Config, Fork}
 use fevm::processor::GAS_PER_BLOB
-use fevm_rlp::Decoder
+use fevm_rlp::{Decoder, Encoder}
 
 // keccak256(rlp([])), the ommers hash of a block without ommers.
 const EMPTY_OMMERS_HASH: u256 = 0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347
@@ -165,6 +166,43 @@ impl Header {
                 block_access_list_hash, slot_number, hash: keccak256_word(rlp),
             })
         }
+    }
+
+    /// The header's RLP, which `decode` decodes back to it: Osaka's 21
+    /// fields, then the block access list hash and the slot number, each if
+    /// the header has it, as Amsterdam's has both. `hash` is not encoded;
+    /// it is keccak256 of the encoding, as for a header made field by field,
+    /// such as a genesis header. The coinbase must be under 2^160, as
+    /// `decode` gives it. None if an allocation fails.
+    pub fn encode(self) -> Option<MemBuffer> {
+        core::assert(self.coinbase >> 160 == 0)
+        var rlp = Encoder::new()
+        let list = rlp.begin()
+        rlp.fixed(self.parent_hash, len: 32)
+        rlp.fixed(self.ommers_hash, len: 32)
+        rlp.fixed(self.coinbase, len: 20)
+        rlp.fixed(self.state_root, len: 32)
+        rlp.fixed(self.transactions_root, len: 32)
+        rlp.fixed(self.receipt_root, len: 32)
+        rlp.words(self.bloom.words)
+        rlp.uint(self.difficulty)
+        rlp.uint(self.number as u256)
+        rlp.uint(self.gas_limit as u256)
+        rlp.uint(self.gas_used as u256)
+        rlp.uint(self.timestamp as u256)
+        rlp.bytes(self.extra_data.span())
+        rlp.fixed(self.prev_randao, len: 32)
+        rlp.fixed(self.nonce as u256, len: 8)
+        rlp.uint(self.base_fee_per_gas)
+        rlp.fixed(self.withdrawals_root, len: 32)
+        rlp.uint(self.blob_gas_used as u256)
+        rlp.uint(self.excess_blob_gas as u256)
+        rlp.fixed(self.parent_beacon_block_root, len: 32)
+        rlp.fixed(self.requests_hash, len: 32)
+        if let Option::Some(hash) = self.block_access_list_hash { rlp.fixed(hash, len: 32) }
+        if let Option::Some(slot) = self.slot_number { rlp.uint(slot as u256) }
+        rlp.end(list)
+        rlp.finish()
     }
 
     /// Checks the header against its parent's by `config`, the rules in

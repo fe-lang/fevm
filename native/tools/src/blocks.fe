@@ -331,13 +331,14 @@ impl Stateless {
 
 /// What the runs of blockchain tests over a store of trie nodes counted:
 /// the blocks validated, the nodes the stores held at the start, the nodes
-/// read from them, and the puts, deletes and storage tries cleared applied.
-pub struct Paths { blocks: u64, stored: u64, reads: u64, puts: u64, deletes: u64, cleared: u64 }
+/// read from them, the puts, deletes and storage tries cleared applied, and
+/// the headers encoded again.
+pub struct Paths { blocks: u64, stored: u64, reads: u64, puts: u64, deletes: u64, cleared: u64, headers: u64 }
 
 impl Copy for Paths {}
 
 impl Paths {
-    pub fn new() -> Self { Paths { blocks: 0, stored: 0, reads: 0, puts: 0, deletes: 0, cleared: 0 } }
+    pub fn new() -> Self { Paths { blocks: 0, stored: 0, reads: 0, puts: 0, deletes: 0, cleared: 0, headers: 0 } }
 
     /// The counts in `counted`, the driver's `paths`.
     pub fn of(_ counted: Value) -> Self {
@@ -348,6 +349,7 @@ impl Paths {
             puts: counted["puts"].as_u64().unwrap_or(default: 0),
             deletes: counted["deletes"].as_u64().unwrap_or(default: 0),
             cleared: counted["cleared"].as_u64().unwrap_or(default: 0),
+            headers: counted["headers"].as_u64().unwrap_or(default: 0),
         }
     }
 
@@ -358,6 +360,7 @@ impl Paths {
         self.puts += other.puts
         self.deletes += other.deletes
         self.cleared += other.cleared
+        self.headers += other.headers
     }
 
     /// The counts, by name.
@@ -369,6 +372,7 @@ impl Paths {
         value.set("puts", Value::number(self.puts))
         value.set("deletes", Value::number(self.deletes))
         value.set("cleared", Value::number(self.cleared))
+        value.set("headers", Value::number(self.headers))
         value
     }
 }
@@ -559,10 +563,11 @@ fn stateless_verdict(_ stdout: DynString) -> (Verdict, Stateless) {
 
 #[test]
 fn check_counts_and_reports_runs_over_a_store() {
-    let passing = paths_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"paths\":{\"blocks\":3,\"stored\":9,\"reads\":7,\"puts\":4,\"deletes\":2,\"cleared\":1,\"problems\":[]}}")
+    let passing = paths_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"paths\":{\"blocks\":3,\"stored\":9,\"reads\":7,\"puts\":4,\"deletes\":2,\"cleared\":1,\"headers\":4,\"problems\":[]}}")
     assert!(passing.0.outcome == PASSED && passing.1.stored == 9 && passing.1.reads == 7 && passing.1.cleared == 1)
+    assert!(passing.1.headers == 4)
     assert!(passing.1.puts == 4 && passing.1.deletes == 2 && passing.1.blocks == 3)
-    let failing = paths_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"paths\":{\"blocks\":2,\"stored\":9,\"reads\":7,\"puts\":4,\"deletes\":2,\"cleared\":0,\"problems\":[\"block 1: the store has extra accounts 1 0x0\"]}}")
+    let failing = paths_verdict("{\"blocks\":[{\"valid\":true},{\"valid\":false,\"reason\":\"transaction.balance\",\"transaction\":0},{\"valid\":false,\"reason\":\"requests_hash\"}],\"head\":\"0x0a\",\"accounts\":[[\"0x01\",\"0x1\",\"0x0\",\"0x\"]],\"storage\":[],\"paths\":{\"blocks\":2,\"stored\":9,\"reads\":7,\"puts\":4,\"deletes\":2,\"cleared\":0,\"headers\":4,\"problems\":[\"block 1: the store has extra accounts 1 0x0\"]}}")
     assert!(failing.0.outcome == FAILED && failing.0.problems[0] == "paths: 2 blocks validated, of 3")
     assert!(failing.0.problems[1] == "paths: block 1: the store has extra accounts 1 0x0")
     // A run over a store must report, if only that nothing differs.

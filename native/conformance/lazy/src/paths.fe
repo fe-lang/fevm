@@ -18,7 +18,7 @@ use fevm_chain::{
 }
 use fevm_chain::run as run_block
 use fevm_conformance::Reader
-use fevm_conformance::blocks::{read_bytes, read_chain, write_head, write_import}
+use fevm_conformance::blocks::{header_rlp, read_bytes, read_chain, write_head, write_import}
 use ingot::stateless::{disagreement, verdict_name}
 
 const ALLOCATION: HostFailure = HostFailure::Status(ERR_HOST_ALLOCATION)
@@ -536,12 +536,20 @@ fn same_accounts(_ a: MemVec<(u256, Option<AccountState>)>, _ b: MemVec<(u256, O
 }
 
 // What the runs over a store counted: the blocks validated, the nodes the
-// store held at the start, the nodes read from it, and the puts, deletes
-// and storage tries cleared applied to it.
-struct Counts { blocks: usize, stored: usize, reads: u64, puts: usize, deletes: usize, cleared: usize }
+// store held at the start, the nodes read from it, the puts, deletes and
+// storage tries cleared applied to it, and the headers encoded again.
+struct Counts { blocks: usize, stored: usize, reads: u64, puts: usize, deletes: usize, cleared: usize, headers: usize }
 
 impl Counts {
-    fn new() -> Self { Counts { blocks: 0, stored: 0, reads: 0, puts: 0, deletes: 0, cleared: 0 } }
+    fn new() -> Self { Counts { blocks: 0, stored: 0, reads: 0, puts: 0, deletes: 0, cleared: 0, headers: 0 } }
+
+    // Checks that the header `rlp`, if it decodes, encodes back to it.
+    fn encode_again(mut self, _ rlp: MemSpan, _ problems: mut MemVec<MemBuffer>, place: MemBuffer) {
+        let Result::Ok(header) = Header::decode(rlp) else { return }
+        self.headers += 1
+        let encoded = header.encode().unwrap()
+        if encoded.span() != rlp { problems.push(format!(place, "the header encodes to another RLP")) }
+    }
 
     // Counts and applies `changes` to `store`; adds to `problems` the first
     // way they break what they promise.
@@ -567,6 +575,8 @@ impl Counts {
         self.deletes.fmt(mut text)
         ",\"cleared\":".fmt(mut text)
         self.cleared.fmt(mut text)
+        ",\"headers\":".fmt(mut text)
+        self.headers.fmt(mut text)
         ",\"problems\":[".fmt(mut text)
         for index in 0..problems.len() {
             if index != 0 { ",".fmt(mut text) }
@@ -601,10 +611,11 @@ fn expected(_ world: WorldState) -> Store {
 /// its cleared storage tries, then its deletes, then its puts. After every
 /// block the store must hold exactly the nodes of a new complete trie of
 /// the chain's world, each where it stands, and every node read from it
-/// must have had the hash asked for. Adds `paths`: the counts and each
-/// problem.
+/// must have had the hash asked for. Each header that decodes, the genesis's
+/// and each block's, must encode back to its RLP. Adds `paths`: the counts
+/// and each problem.
 pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
-    let (var chain, _) = match read_chain(mut reader) {
+    let (var chain, genesis) = match read_chain(mut reader) {
         Result::Ok(chain) => chain,
         Result::Err(status) => return status,
     }
@@ -612,6 +623,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
     var counts = Counts::new()
     counts.stored = store.len()
     var problems: MemVec<MemBuffer> = MemVec::new()
+    counts.encode_again(genesis.span(), mut problems, place: format!("genesis: "))
     var tracer = ()
     var text = MemBuffer::empty()
     with (mut text) {
@@ -633,6 +645,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
             store.mismatches += copy.mismatches
             let import = chain.import(rlp.span(), mut tracer)
             let place = format!("block ", number, ": ")
+            counts.encode_again(header_rlp(rlp.span()).span(), mut problems, place)
             let failed = match import {
                 Import::Failed(_) => true,
                 _ => false,

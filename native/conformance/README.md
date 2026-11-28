@@ -194,7 +194,9 @@ storage tries cleared, then the deletes, then the puts. It also reads each
 account the block's changes name from the trie after the root, by its hashed
 key (`account_keyed`), as a client writes it with its new storage root, and
 that must be the account a new complete trie of the chain's world holds;
-then it takes the store back out of the trie (`into_source`). After every block,
+then it takes the store back out of the trie (`into_source`). Each header
+that decodes, the genesis's and each block's, must encode back to its RLP
+(`Header::encode`). After every block,
 valid or not, the store must equal, place by place and byte by byte, the
 nodes of a new complete trie of the chain's world as the same reading gives
 them, and no node read from it may have had another hash than the one
@@ -202,13 +204,15 @@ asked for.
 
 The driver adds `paths`: the blocks validated, which must be every block it
 judged, the nodes the store held at the genesis, the nodes read from it,
-the puts, deletes and storage tries cleared applied, and each problem,
-which fails the test, as does a missing `paths`. `results.json` sums the
-counts in `paths_runs`. All 44,932 tests of `tests@v21.0.3` pass: 56,165
-blocks; 2,918,619 nodes stored at the genesis, 1,141,289 read, 662,803
-puts, 11,661 deletes and no storage trie cleared, which no test of these
-forks does (a storage trie is cleared only when settlement deletes an empty
-account with storage, which only a pre-state can hold).
+the puts, deletes and storage tries cleared applied, the headers encoded
+again, and each problem, which fails the test, as does a missing `paths`.
+`results.json` sums the counts in `paths_runs`. All 44,932 tests of
+`tests@v21.0.3` pass: 56,165 blocks; 2,918,619 nodes stored at the
+genesis, 1,141,289 read, 662,803 puts, 11,661 deletes and no storage trie
+cleared, which no test of these forks does (a storage trie is cleared only
+when settlement deletes an empty account with storage, which only a
+pre-state can hold); 101,097 headers, every genesis's and block's, encoded
+again.
 
 ## Blocks from another client's witness
 
