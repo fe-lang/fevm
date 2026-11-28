@@ -6,4 +6,6 @@ version = "0.1.0"
 fevm = true
 fevm_chain = true
 fevm_conformance = true
+fevm_rlp = true
 keccak = { source = "https://github.com/fe-lang/keccak", rev = "345d5088de986fe54b23a6aaa3a33e1c349d0960" }
+swisstable = { source = "https://github.com/fe-lang/swisstable", rev = "2de44c1918a2c98d1957e242d54b296af5e395c6" }

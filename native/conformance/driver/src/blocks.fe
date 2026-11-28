@@ -114,12 +114,13 @@ pub fn read_schedule(_ reader: mut Reader) -> Result<i32, (u256, Schedule)> uses
 }
 
 /// Reads a blockchain test's chain (version 7, or 8 to run it statelessly
-/// too) to its blocks: the chain at the genesis, and the genesis header's
-/// RLP. Or the driver's exit status, once it has printed that the pre-state
-/// is not the genesis header's, or a host failure.
+/// too, or 10 to run it over a store of trie nodes too) to its blocks: the
+/// chain at the genesis, and the genesis header's RLP. Or the driver's exit
+/// status, once it has printed that the pre-state is not the genesis
+/// header's, or a host failure.
 pub fn read_chain(_ reader: mut Reader) -> Result<i32, (Chain, MemBuffer)> uses (out: mut Stdout) {
     let version = reader.word(bytes: 1)
-    core::assert(version == 7 || version == 8)
+    core::assert(version == 7 || version == 8 || version == 10)
     let (chain_id, schedule) = read_schedule(mut reader)?
     var world = WorldState::empty()
     if !read_accounts(mut reader, mut world) { return Result::Err(host_error("pre-state allocation failed")) }

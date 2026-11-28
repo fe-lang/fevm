@@ -2,13 +2,14 @@
 // few accounts and slots rehashes only their paths. A partial trie holds
 // only what it has read of the nodes of a source, such as a witness's.
 use core::{MemBuffer, MemSpan, MemVec, Option, Result}
+use core::default::Default
 use core::num::leading_zeros
 use core::ops::Index
 use fevm::{AccountState, WorldState}
 use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
 use fevm_rlp::{Decoder, Encoder}
 use keccak::keccak256_word
-use swisstable::SwissTable
+use swisstable::{SwissKey, SwissTable, hash_u256}
 use ingot::trie::{hash, nibble, put_path}
 
 // A node as its parent holds it: its kind and its position in that kind's
@@ -35,6 +36,9 @@ impl Copy for Leaf {}
 
 // An account: keccak256 of its address, its fields, with `EMPTY_CODE_HASH`
 // for an empty account's code, and the root node of its storage trie.
+// `had_storage` is whether the source holds storage of it the trie has not
+// dropped: the account was read with a storage root other than the empty
+// one, and its storage has not been dropped whole since.
 struct Account {
     key: u256,
     nonce: u64,
@@ -43,6 +47,7 @@ struct Account {
     reference: u256,
     storage: Child,
     len: u8,
+    had_storage: bool,
 }
 impl Copy for Account {}
 
@@ -112,6 +117,26 @@ pub struct NodePath { pub owner: Option<u256>, pub depth: u8, pub path: u256 }
 
 impl Copy for NodePath {}
 
+impl Default for NodePath {
+    fn default() -> Self { NodePath { owner: Option::None, depth: 0, path: 0 } }
+}
+
+impl SwissKey for NodePath {
+    fn hash(self) -> u64 {
+        let owner = match self.owner {
+            Option::Some(key) => hash_u256(key),
+            Option::None => 0,
+        }
+        // A path's nibbles past its depth are zero, which leaves its low
+        // byte for the depth unless the depth is 63 or 64.
+        owner ^ hash_u256(self.path ^ self.depth as u256)
+    }
+
+    fn equals(self, _ other: NodePath) -> bool {
+        self.owner == other.owner && self.depth == other.depth && self.path == other.path
+    }
+}
+
 /// Why a source gives no node: it holds none there of the hash asked for,
 /// or it failed to read, for a reason it keeps.
 pub enum NodeError { Missing, Failed }
@@ -128,6 +153,68 @@ pub trait NodeSource {
     /// state the trie is of, and gives `Failed`.
     fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan>
 }
+
+/// What a trie's changes did to the nodes of its source, for a store that
+/// keeps each node where it stands (`NodePath`) and holds the state the trie
+/// was made at: the storage tries to clear, the places to delete and the
+/// nodes to put. A store applies them in that order. No account is cleared
+/// twice, no place is both deleted and put, and no place deleted is under a
+/// storage trie cleared.
+pub struct NodeChanges {
+    cleared: MemVec<u256>,
+    deletes: MemVec<NodePath>,
+    puts: MemVec<NodePath>,
+    // The RLP of each put, one after another, and where each ends.
+    nodes: MemBuffer,
+    ends: MemVec<usize>,
+}
+
+impl NodeChanges {
+    fn new() -> Self {
+        NodeChanges {
+            cleared: MemVec::new(), deletes: MemVec::new(), puts: MemVec::new(), nodes: MemBuffer::empty(),
+            ends: MemVec::new(),
+        }
+    }
+
+    // Adds a put of `rlp` at `at`; false if an allocation fails.
+    fn put(mut self, _ at: NodePath, _ rlp: MemSpan) -> bool {
+        if !self.nodes.try_reserve(rlp.len()) || self.puts.try_push(at).is_err()
+            || self.ends.try_push(self.nodes.len() + rlp.len()).is_err() {
+            return false
+        }
+        self.nodes.extend_from(rlp)
+        true
+    }
+
+    /// The keys of the accounts whose storage trie the store holds and the
+    /// trie dropped whole, by clearing it or removing the account: a store
+    /// deletes every node it holds under each, read by the trie or not, and
+    /// these are also exactly the accounts whose flat storage rows it deletes
+    /// by range. Never an account whose storage the trie itself made. The
+    /// trie's puts under the same key are the storage those accounts have
+    /// now. Each once, in the order the trie dropped them.
+    pub fn cleared(self) -> ref MemVec<u256> { ref self.cleared }
+
+    /// Each place at which the trie read a node and at which no node reached
+    /// by its hash stands now, in the order the trie read them.
+    pub fn deletes(self) -> ref MemVec<NodePath> { ref self.deletes }
+
+    /// Where each node to put stands, depth first from the root of the
+    /// account trie, an account's leaf before its storage trie and a
+    /// branch's children in the order of their nibbles.
+    pub fn puts(self) -> ref MemVec<NodePath> { ref self.puts }
+
+    /// The RLP of the node put at `puts()[put]`.
+    pub fn node(self, _ put: usize) -> ref MemSpan {
+        let start = if put == 0 { 0 } else { self.ends[put - 1] }
+        self.nodes.slice(offset: start, len: self.ends[put] - start)
+    }
+}
+
+// A node the trie read from its source: where it stood, and its hash.
+struct Resolved { at: NodePath, hash: u256 }
+impl Copy for Resolved {}
 
 /// The source of a complete trie, which has no stubs and never asks.
 impl NodeSource for () {
@@ -237,6 +324,15 @@ pub struct StateTrie<N: NodeSource = ()> {
     stubs: Arena<u256>,
     // What stubs resolve from: `()` for a complete trie, which has none.
     source: N,
+    // Each node read from the source, in the order read, for
+    // `changed_nodes`. A stub never moves: `insert` and `remove` move only
+    // nodes they have read, so each node the trie has not read stands where
+    // the source holds it. A node read may move, so where it stood is kept
+    // as it is read.
+    resolved: MemVec<Resolved>,
+    // The keys of the accounts whose storage the source holds and the trie
+    // dropped whole, each once: some of those nodes may be unread.
+    dropped: MemVec<u256>,
     fault: Option<TrieFault>,
 }
 
@@ -272,6 +368,8 @@ impl<N: NodeSource> StateTrie<N> {
             branches: Arena::new(),
             stubs: Arena::new(),
             source,
+            resolved: MemVec::new(),
+            dropped: MemVec::new(),
             fault: Option::None,
         }
     }
@@ -296,7 +394,9 @@ impl<N: NodeSource> StateTrie<N> {
     pub fn into_source(own self) -> N { self.source }
 
     /// The account of `address`, if it exists. Read before the changes go
-    /// in, while its storage root is not stale.
+    /// in, or after `root`, while its storage root is not stale: after `root`
+    /// it is the storage root the changes left, which a store keeps with the
+    /// account.
     pub fn account(mut self, _ address: u256) -> Result<TrieFault, Option<AccountState>> {
         self.account_keyed(hash(address, len: 20))
     }
@@ -351,13 +451,86 @@ impl<N: NodeSource> StateTrie<N> {
             && value.finish().is_some()
     }
 
+    /// What the changes made to the trie did to the nodes its source held,
+    /// for a store that keeps each node where it stands and holds the state
+    /// the trie was made at, after rehashing; or the trie's fault, or an
+    /// allocation fault if making them fails, which leaves the trie as it
+    /// was. Compared with what the trie read:
+    ///
+    /// - `cleared`: each account whose storage trie the store holds, as of the
+    ///   state the trie was made at, and the trie dropped whole, by clearing
+    ///   it or removing the account; never one whose storage the trie made.
+    ///   A store deletes all it holds of that storage trie, and the account's
+    ///   flat storage rows by range: the trie need not have read them, so it
+    ///   cannot name them. No delete is given under it, and every node of
+    ///   that account's storage now is a put.
+    /// - `deletes`: each other place at which the trie read a node and at
+    ///   which no node reached by its hash stands now: it was removed, it
+    ///   moved, or it is now inline in its parent.
+    /// - `puts`: each node reached by its hash, a trie's root or one of 32
+    ///   bytes or more, never one inline in its parent, that is not the node
+    ///   the trie read at the same place; its RLP. A node read and left as
+    ///   it was, or changed back, is not put, except under a storage trie
+    ///   cleared.
+    ///
+    /// A store applies the clears, then the deletes, then the puts. A place
+    /// whose node changed is only put. For a complete trie, which reads
+    /// nothing, every node is a put. The changes are against the store as it
+    /// was when the trie was made: a trie used for several blocks gives the
+    /// changes of all of them, as long as none was applied in between. A
+    /// caller that applies them makes a new trie over the store for the next
+    /// block, since a place this trie changes back to the node it read there
+    /// would not be put again.
+    pub fn changed_nodes(mut self) -> Result<TrieFault, NodeChanges> {
+        if let Result::Err(fault) = self.root() { return Result::Err(fault) }
+        var dropped = SwissTable<u256, bool>::empty()
+        var changes = NodeChanges::new()
+        for owner in self.dropped {
+            if !dropped.try_insert(owner, true) || changes.cleared.try_push(owner).is_err() {
+                return Result::Err(TrieFault::Allocation)
+            }
+        }
+        // The place of each node read but those under a storage trie
+        // cleared, which no longer compare with what stands now.
+        var index = SwissTable<NodePath, usize>::empty()
+        var kept: MemVec<bool> = MemVec::new()
+        if !index.try_reserve(self.resolved.len()) || !kept.try_reserve(self.resolved.len()) {
+            return Result::Err(TrieFault::Allocation)
+        }
+        for at in 0..self.resolved.len() {
+            let read = self.resolved[at].at
+            kept.push(false)
+            if let Option::Some(owner) = read.owner && dropped.contains(owner) { continue }
+            // A place is read at most once: its stub is made once, from the
+            // node above it.
+            core::assert(!index.contains(read))
+            index.insert(read, at)
+        }
+        var rlp = Encoder::new()
+        var value = Encoder::new()
+        let Option::Some(var path) = MemBuffer::try_new(33) else { return Result::Err(TrieFault::Allocation) }
+        let walked = self.put_changed(self.root, owner: Option::None, depth: 0, prefix: 0, index, mut kept,
+                                      mut changes, mut rlp, mut value, mut path)
+        if !walked || rlp.finish().is_none() || value.finish().is_none() { return Result::Err(TrieFault::Allocation) }
+        for at in 0..self.resolved.len() {
+            let read = self.resolved[at].at
+            if !kept[at] && index.contains(read) && changes.deletes.try_push(read).is_err() {
+                return Result::Err(TrieFault::Allocation)
+            }
+        }
+        Result::Ok(changes)
+    }
+
     /// The nodes in use, which are those of a new trie of the same world.
     pub(ingot) fn nodes(self) -> usize {
         self.accounts.len() + self.leaves.len() + self.extensions.len() + self.branches.len()
     }
 
-    /// `account` of the account whose key is `key`.
-    pub(ingot) fn account_keyed(mut self, _ key: u256) -> Result<TrieFault, Option<AccountState>> {
+    /// `account` of the account whose key is `key`, keccak256 of its
+    /// address, for a caller that holds accounts by that key: before the
+    /// changes go in, or after `root`, when its storage root is the one the
+    /// changes left.
+    pub fn account_keyed(mut self, _ key: u256) -> Result<TrieFault, Option<AccountState>> {
         if self.fault.is_none() && let Option::Some(found) = self.open_account(key) {
             let Option::Some(at) = found else { return Result::Ok(Option::None) }
             let account = self.accounts[at]
@@ -371,9 +544,11 @@ impl<N: NodeSource> StateTrie<N> {
         Result::Err(self.fault.unwrap())
     }
 
-    /// `slot` of the slot whose key is `key`, of the account whose key is
-    /// `account`.
-    pub(ingot) fn slot_keyed(mut self, account: u256, key: u256) -> Result<TrieFault, u256> {
+    /// `slot` of the slot whose key is `key`, keccak256 of the slot, of the
+    /// account whose key is `account`, keccak256 of its address, for a caller
+    /// that holds no preimages, which has no other way to read a slot of the
+    /// trie.
+    pub fn slot_keyed(mut self, account: u256, key: u256) -> Result<TrieFault, u256> {
         if self.fault.is_none() && let Option::Some(found) = self.open_account(account) {
             let Option::Some(at) = found else { return Result::Ok(0) }
             if let Option::Some(leaf) = self.open_slot(at, key) {
@@ -399,8 +574,7 @@ impl<N: NodeSource> StateTrie<N> {
         if self.fault.is_some() { return }
         let Option::Some(found) = self.open_account(key) else { return self.failed() }
         if let Option::Some(at) = found && !self.accounts[at].storage.is_empty() {
-            self.clear(self.accounts[at].storage)
-            self.accounts[at].storage = Child::Empty
+            if self.drop_storage(at).is_none() { return self.failed() }
             self.touch(self.root, key, depth: 0)
         }
     }
@@ -434,7 +608,7 @@ impl<N: NodeSource> StateTrie<N> {
         let Option::Some(at) = found else {
             let account = Account {
                 key, nonce: state.nonce, balance: state.balance, code_hash: state.code_hash, reference: 0,
-                storage: Child::Empty, len: 0,
+                storage: Child::Empty, len: 0, had_storage: false,
             }
             let leaf = Child::Account(self.accounts.add(account)?)
             self.root = self.insert(self.root, leaf, key, depth: 0)?
@@ -556,6 +730,7 @@ impl<N: NodeSource> StateTrie<N> {
         // unless it is a root.
         if rlp.len() < 32 && depth != 0 { return self.fail(TrieFault::Malformed(hash)) }
         let node = self.decode(rlp.span(), prefix, depth, storage: owner.is_some(), hash)?
+        if self.resolved.try_push(Resolved { at, hash }).is_err() { return Option::None }
         self.stubs.release(stub)
         Option::Some(node)
     }
@@ -667,7 +842,8 @@ impl<N: NodeSource> StateTrie<N> {
             }
             if !canonical || !node.finish() { return self.fail(malformed) }
             let storage = if root == EMPTY_ROOT { Child::Empty } else { Child::Hash(self.stubs.add(root)?) }
-            let account = Account { key, nonce, balance, code_hash, reference, storage, len }
+            let had_storage = root != EMPTY_ROOT
+            let account = Account { key, nonce, balance, code_hash, reference, storage, len, had_storage }
             Option::Some(Child::Account(self.accounts.add(account)?))
         }
     }
@@ -813,32 +989,48 @@ impl<N: NodeSource> StateTrie<N> {
                 Option::Some(node)
             },
             _ => {
-                self.clear(node)
+                self.clear(node)?
                 Option::Some(Child::Empty)
             },
         }
     }
 
-    // Releases `node` and every node under it.
-    fn clear(mut self, _ node: Child) {
+    // Releases `node` and every node under it; none if an allocation fails,
+    // which leaves an account it would drop the storage of as it was.
+    fn clear(mut self, _ node: Child) -> Option<()> {
         match node {
             Child::Leaf(at) => self.leaves.release(at),
             Child::Account(at) => {
-                self.clear(self.accounts[at].storage)
+                self.drop_storage(at)?
                 self.accounts.release(at)
             },
             Child::Extension(at) => {
-                self.clear(self.extensions[at].child)
+                self.clear(self.extensions[at].child)?
                 self.extensions.release(at)
             },
             Child::Branch(at) => {
                 let children = self.branches[at].children
-                for child in children { self.clear(child) }
+                for child in children { self.clear(child)? }
                 self.branches.release(at)
             },
             Child::Hash(at) => self.stubs.release(at),
             Child::Empty => {},
         }
+        Option::Some(())
+    }
+
+    // Releases the storage of the account at `at`, if any, and notes the
+    // account for `changed_nodes` if the source holds storage of it: once,
+    // since the storage the account has after is the trie's own. None if an
+    // allocation fails, which leaves the storage as it was.
+    fn drop_storage(mut self, _ at: u32) -> Option<()> {
+        let account = self.accounts[at]
+        if account.storage.is_empty() { return Option::Some(()) }
+        if account.had_storage && self.dropped.try_push(account.key).is_err() { return Option::None }
+        self.clear(account.storage)?
+        self.accounts[at].storage = Child::Empty
+        self.accounts[at].had_storage = false
+        Option::Some(())
     }
 
     // The key of a leaf.
@@ -1016,6 +1208,58 @@ impl<N: NodeSource> StateTrie<N> {
                 let children = self.branches[at].children
                 for child in children {
                     if !self.write(child, depth: depth + 1, mut nodes, mut rlp, mut value, mut path) { return false }
+                }
+                true
+            },
+            _ => true,
+        }
+    }
+
+    // Adds to `changes` the RLP of `node`, at `depth` of the trie of `owner`
+    // below the first `depth` nibbles of `prefix`, and of each node under it,
+    // that is reached by its hash and is not the node read at its place,
+    // which `index` gives; marks in `kept` each node read whose place such a
+    // node holds. None of them is stale. False if an allocation fails.
+    fn put_changed(self, _ node: Child, owner: Option<u256>, depth: usize, prefix: u256,
+                   _ index: SwissTable<NodePath, usize>, _ kept: mut MemVec<bool>, _ changes: mut NodeChanges,
+                   _ rlp: mut Encoder, _ value: mut Encoder, _ path: mut MemBuffer) -> bool {
+        match node {
+            // A stub stands where the source holds it.
+            Child::Empty | Child::Hash(_) => return true,
+            _ => {},
+        }
+        if depth == 0 || self.reference(node).1 == 32 {
+            let at = NodePath { owner, depth: depth.downcast_truncate(), path: above(prefix, depth) }
+            let read = index.get(at)
+            if read.found { kept[read.value] = true }
+            if !read.found || self.resolved[read.value].hash != self.root_of(node) {
+                let start = rlp.begin()
+                self.encode(node, depth, mut rlp, mut value, mut path)
+                let added = changes.put(at, rlp.since(start))
+                rlp.truncate(start)
+                if !added { return false }
+            }
+        }
+        match node {
+            Child::Account(at) => {
+                let account = self.accounts[at]
+                self.put_changed(account.storage, owner: Option::Some(account.key), depth: 0, prefix: 0, index,
+                                 mut kept, mut changes, mut rlp, mut value, mut path)
+            },
+            Child::Extension(at) => {
+                let extension = self.extensions[at]
+                self.put_changed(extension.child, owner, depth: extension.end as usize, prefix: extension.key, index,
+                                 mut kept, mut changes, mut rlp, mut value, mut path)
+            },
+            Child::Branch(at) => {
+                let children = self.branches[at].children
+                let above = above(prefix, depth)
+                for digit in 0..16 {
+                    let below = above | (digit as u256) << ((63 - depth) * 4) as u256
+                    if !self.put_changed(children[digit], owner, depth: depth + 1, prefix: below, index, mut kept,
+                                         mut changes, mut rlp, mut value, mut path) {
+                        return false
+                    }
                 }
                 true
             },

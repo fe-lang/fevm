@@ -7,7 +7,8 @@ use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
 use fevm_rlp::Encoder
 use keccak::keccak256_word
 use ingot::chain::write_changes
-use ingot::state_trie::{NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault}
+use swisstable::SwissTable
+use ingot::state_trie::{NodeChanges, NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault}
 use ingot::state_trie_tests::Random
 use ingot::trie::{Trie, hash, put_path, state_root}
 
@@ -76,58 +77,135 @@ fn same_place(_ a: NodePath, _ b: NodePath) -> bool { a.owner == b.owner && a.de
 // Nodes where they stand, as a store keyed by place holds them: a source
 // that checks each node's hash as it reads it, counts its reads, and fails
 // the read of the node of `failing`.
-struct Places { places: MemVec<NodePath>, nodes: MemVec<MemBuffer>, reads: usize, failing: u256 }
+struct Places { index: SwissTable<NodePath, usize>, nodes: MemVec<MemBuffer>, reads: usize, failing: u256 }
 
-impl NodeSource for Places {
-    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
-        if hash == self.failing { return Result::Err(NodeError::Failed) }
-        for index in 0..self.places.len() {
-            if same_place(self.places[index], at) {
-                if keccak256_word(self.nodes[index].span()) != hash { return Result::Err(NodeError::Failed) }
-                self.reads += 1
-                return Result::Ok(self.nodes[index].span())
-            }
+impl Places {
+    fn new() -> Self {
+        Places { index: SwissTable<NodePath, usize>::empty(), nodes: MemVec::new(), reads: 0, failing: 0 }
+    }
+
+    // Every node of `trie`, a complete trie, where it stands.
+    fn of(_ trie: mut StateTrie) -> Self {
+        let changes = trie.changed_nodes().unwrap()
+        core::assert(changes.cleared().is_empty() && changes.deletes().is_empty())
+        var places = Places::new()
+        places.apply(changes)
+        places
+    }
+
+    // Puts `rlp` at `at`, in place of any node there.
+    fn put(mut self, _ at: NodePath, _ rlp: MemSpan) {
+        let held = self.index.get(at)
+        if held.found {
+            self.nodes.set(held.value, MemBuffer::from_span(rlp))
+        } else {
+            self.index.insert(at, self.nodes.len())
+            self.nodes.push(MemBuffer::from_span(rlp))
         }
-        Result::Err(NodeError::Missing)
+    }
+
+    // Applies `changes` as a store does, its clears, then its deletes, then
+    // its puts, and checks what it promises: each account cleared once, and
+    // of one whose storage the store holds; each delete of a node the store
+    // holds, under no storage trie cleared; each put a root or a node reached
+    // by its hash, at no place deleted, and not the node the store holds
+    // there.
+    fn apply(mut self, _ changes: NodeChanges) {
+        var cleared = SwissTable<u256, bool>::empty()
+        for owner in changes.cleared() {
+            core::assert(!cleared.contains(owner))
+            cleared.insert(owner, true)
+            var under: MemVec<NodePath> = MemVec::new()
+            for slot in 0..self.index.capacity() {
+                let entry = self.index.entry(slot)
+                if entry.occupied && entry.key.owner == Option::Some(owner) { under.push(entry.key) }
+            }
+            core::assert(!under.is_empty())
+            for at in under { core::assert(self.index.remove(at)) }
+        }
+        var deleted = SwissTable<NodePath, bool>::empty()
+        for at in changes.deletes() {
+            if let Option::Some(owner) = at.owner { core::assert(!cleared.contains(owner)) }
+            core::assert(self.index.remove(at))
+            deleted.insert(at, true)
+        }
+        for put in 0..changes.puts().len() {
+            let at = changes.puts()[put]
+            let rlp = changes.node(put)
+            core::assert((at.depth == 0 || rlp.len() >= 32) && !deleted.contains(at))
+            let held = self.index.get(at)
+            core::assert(!held.found || self.nodes[held.value].span() != rlp)
+            self.put(at, rlp)
+        }
+    }
+
+    // Whether `other` holds the same nodes at the same places.
+    fn same(self, _ other: Places) -> bool {
+        if self.index.len() != other.index.len() { return false }
+        for slot in 0..self.index.capacity() {
+            let entry = self.index.entry(slot)
+            if !entry.occupied { continue }
+            let theirs = other.index.get(entry.key)
+            if !theirs.found || other.nodes[theirs.value].span() != self.nodes[entry.value].span() { return false }
+        }
+        true
     }
 }
 
-// Nodes by hash, which notes where each node it gives stands; no place is
-// asked for twice.
-struct Noting { nodes: Nodes, read: Places }
+impl NodeSource for Places {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        let held = self.index.get(at)
+        if !held.found { return Result::Err(NodeError::Missing) }
+        if hash == self.failing || keccak256_word(self.nodes[held.value].span()) != hash {
+            return Result::Err(NodeError::Failed)
+        }
+        self.reads += 1
+        Result::Ok(self.nodes[held.value].span())
+    }
+}
+
+// Nodes by hash, which notes where each node it gives stands, and in what
+// order; no place is asked for twice.
+struct Noting { nodes: Nodes, read: Places, order: MemVec<NodePath> }
 
 impl Noting {
-    fn new(_ nodes: own Nodes) -> Self {
-        Noting { nodes, read: Places { places: MemVec::new(), nodes: MemVec::new(), reads: 0, failing: 0 } }
-    }
+    fn new(_ nodes: own Nodes) -> Self { Noting { nodes, read: Places::new(), order: MemVec::new() } }
 }
 
 impl NodeSource for Noting {
     fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
         let Option::Some(position) = self.nodes.find(hash) else { return Result::Err(NodeError::Missing) }
-        for place in self.read.places { core::assert(!same_place(place, at)) }
-        self.read.places.push(at)
-        self.read.nodes.push(MemBuffer::from_span(self.nodes.node(position)))
+        core::assert(!self.read.index.contains(at))
+        self.read.put(at, self.nodes.node(position))
+        self.order.push(at)
         Result::Ok(self.nodes.node(position))
     }
 }
 
+// What `checked` found: the count of nodes read and of nodes, where each
+// read stands, in the order read, and the nodes the changes changed.
+struct Checked { read: usize, held: usize, places: MemVec<NodePath>, changes: NodeChanges }
+
 // Applies `setup`, then `ops`, which end with a root, to a complete trie,
 // and `ops` to partial tries of the complete trie's nodes after `setup`:
 // over all of them by hash, over the ones the first partial trie reads by
-// hash and where they stand, they give what the complete trie gives;
-// without one of those, every `every`th in turn, they give the same until
-// the trie faults on that one, and then no root. The count of nodes read,
-// and of nodes, and where each read stands: a node can stand in more than
-// one place, under several accounts with the same storage.
-fn checked(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize, MemVec<NodePath>) {
+// hash and where they stand, and over all of them where they stand, they
+// give what the complete trie gives; without one of those, every `every`th
+// in turn, they give the same until the trie faults on that one, and then
+// no root. The changes the trie over all of them where they stand gives,
+// applied to those, leave the nodes of the complete trie after `ops`. A node
+// can stand in more than one place, under several accounts with the same
+// storage.
+fn checked(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> Checked {
     var world = WorldState::empty()
     var complete = StateTrie::new(mut world)
     let _ = apply(mut complete, setup)
     let root = complete.root().unwrap()
     var nodes = Nodes::new()
     core::assert(complete.write_nodes(mut nodes))
+    let stored = Places::of(mut complete)
     let expected = apply(mut complete, ops)
+    let after = Places::of(mut complete)
     var partial = StateTrie<Noting>::partial(root, Noting::new(nodes))
     let seen = apply(mut partial, ops)
     core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
@@ -139,8 +217,14 @@ fn checked(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usiz
     var by_place = StateTrie<Places>::partial(root, noting.read)
     let seen = apply(mut by_place, ops)
     core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
-    let read = by_place.into_source()
-    core::assert(read.reads == read.places.len())
+    core::assert(by_place.into_source().reads == noting.order.len())
+    var store = StateTrie<Places>::partial(root, stored)
+    let seen = apply(mut store, ops)
+    core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
+    let changes = store.changed_nodes().unwrap()
+    var stored = store.into_source()
+    stored.apply(changes)
+    core::assert(stored.same(after))
     var count: usize = 0
     for at in 0..all.len() {
         if !all.used(at) { continue }
@@ -154,13 +238,13 @@ fn checked(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usiz
             _ => false,
         })
     }
-    (count, all.len(), read.places)
+    Checked { read: count, held: all.len(), places: noting.order, changes }
 }
 
 // `checked`'s counts of nodes read and of nodes.
 fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize) {
-    let (count, held, _) = checked(setup, ops, every)
-    (count, held)
+    let found = checked(setup, ops, every)
+    (found.read, found.held)
 }
 
 // The keys of the tests whose keys share their first 60 nibbles, those of
@@ -407,7 +491,7 @@ fn partial_trie_reads_nodes_where_they_stand() {
     var ops: MemVec<Op> = MemVec::new()
     ops.push(Op::Set(keys[0], Option::None))
     ops.push(Op::Root)
-    let (_, _, places) = checked(accounts(keys), ops, every: 1)
+    let places = checked(accounts(keys), ops, every: 1).places
     let none: Option<u256> = Option::None
     core::assert(at(places, [
         place(owner: none, depth: 0, path: 0), place(owner: none, depth: 1, path: path(0x1, count: 1)),
@@ -423,7 +507,7 @@ fn partial_trie_reads_nodes_where_they_stand() {
     var ops: MemVec<Op> = MemVec::new()
     ops.push(Op::Store(account, SHARED | 0x2100, 0))
     ops.push(Op::Root)
-    let (_, _, places) = checked(setup, ops, every: 1)
+    let places = checked(setup, ops, every: 1).places
     let owner = Option::Some(account)
     core::assert(at(places, [
         place(owner: none, depth: 0, path: 0), place(owner, depth: 0, path: 0), place(owner, depth: 60, path: SHARED),
@@ -461,6 +545,288 @@ fn partial_trie_keeps_a_failed_read() {
         Result::Err(TrieFault::Source(hash)) => hash == storage_root,
         _ => false,
     })
+}
+
+// Whether `changes` change nothing.
+fn none(_ changes: NodeChanges) -> bool {
+    changes.cleared().is_empty() && changes.deletes().is_empty() && changes.puts().is_empty()
+}
+
+// The first nibble of `key`, in place.
+fn first_nibble(_ key: u256) -> u256 { key >> 252 << 252 }
+
+#[test]
+fn changed_nodes_of_a_collapse_and_a_split() {
+    // The root branch loses the leaf at nibble 1 and collapses onto the
+    // extension at nibble 2, read, which moves to the root: the root is put,
+    // not deleted, and the two places below it are deleted. The branch below
+    // the extension, unread, stays.
+    let none_owner: Option<u256> = Option::None
+    let keys = keyed([0x1000, 0x2ff1, 0x2ff2], count: 4)
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Set(keys[0], Option::None))
+    ops.push(Op::Root)
+    let changes = checked(accounts(keys), ops, every: 1).changes
+    core::assert(changes.cleared().is_empty() && at(changes.puts(), [place(owner: none_owner, depth: 0, path: 0)]))
+    core::assert(at(changes.deletes(), [
+        place(owner: none_owner, depth: 1, path: path(0x1, count: 1)),
+        place(owner: none_owner, depth: 1, path: path(0x2, count: 1)),
+    ]))
+    // An account whose key leaves the root extension of four nibbles at the
+    // third splits it: an extension of two, a branch, the new leaf, and the
+    // rest of the extension, moved below the branch over its unread child.
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Set(path(0xab0, count: 3), funded(9)))
+    ops.push(Op::Root)
+    let changes = checked(accounts(keyed([0xabcd1, 0xabcd2], count: 5)), ops, every: 1).changes
+    core::assert(changes.cleared().is_empty() && changes.deletes().is_empty())
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner: none_owner, depth: 2, path: path(0xab, count: 2)),
+        place(owner: none_owner, depth: 3, path: path(0xab0, count: 3)),
+        place(owner: none_owner, depth: 3, path: path(0xabc, count: 3)),
+    ]))
+}
+
+// Two accounts at nibbles 1 and 2 of the root branch, each with two slots,
+// whose leaves are at nibbles b and 4 of a storage root branch.
+fn two_accounts() -> MemVec<Op> {
+    var setup: MemVec<Op> = MemVec::new()
+    for (account, balance) in [(path(0x1, count: 1), 1 as u256), (path(0x2, count: 1), 2)] {
+        setup.push(Op::Set(account, funded(balance)))
+        for slot in [1 as u256, 2] { setup.push(Op::Store(account, hash(slot, len: 32), slot)) }
+    }
+    setup
+}
+
+#[test]
+fn changed_nodes_of_an_emptied_storage_trie() {
+    // Both slots of the first account go: its storage root and both leaves,
+    // read, are deleted, and the account's leaf and the root are put.
+    let none_owner: Option<u256> = Option::None
+    let first = path(0x1, count: 1)
+    let (one, two) = (hash(1, len: 32), hash(2, len: 32))
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Store(first, one, 0))
+    ops.push(Op::Store(first, two, 0))
+    ops.push(Op::Root)
+    let changes = checked(two_accounts(), ops, every: 1).changes
+    let owner = Option::Some(first)
+    core::assert(changes.cleared().is_empty())
+    core::assert(at(changes.deletes(), [
+        place(owner, depth: 0, path: 0), place(owner, depth: 1, path: first_nibble(one)),
+        place(owner, depth: 1, path: first_nibble(two)),
+    ]))
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner: none_owner, depth: 1, path: first),
+    ]))
+}
+
+#[test]
+fn changed_nodes_of_a_removed_account() {
+    // The second account goes with its storage, of which one slot was read:
+    // its storage trie is cleared, with no delete under it; its leaf is
+    // deleted, and the first account's leaf moves up to the root, deleted
+    // where it was.
+    let none_owner: Option<u256> = Option::None
+    let (first, second) = (path(0x1, count: 1), path(0x2, count: 1))
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Slot(second, hash(1, len: 32)))
+    ops.push(Op::Set(second, Option::None))
+    ops.push(Op::Root)
+    let changes = checked(two_accounts(), ops, every: 1).changes
+    core::assert(changes.cleared().len() == 1 && changes.cleared()[0] == second)
+    core::assert(at(changes.deletes(), [
+        place(owner: none_owner, depth: 1, path: second), place(owner: none_owner, depth: 1, path: first),
+    ]))
+    core::assert(at(changes.puts(), [place(owner: none_owner, depth: 0, path: 0)]))
+    // Cleared in place and set again: cleared, and its new storage put.
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Slot(second, hash(1, len: 32)))
+    ops.push(Op::Clear(second))
+    ops.push(Op::Store(second, hash(1, len: 32), 1))
+    ops.push(Op::Root)
+    let changes = checked(two_accounts(), ops, every: 1).changes
+    core::assert(changes.cleared().len() == 1 && changes.cleared()[0] == second && changes.deletes().is_empty())
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner: none_owner, depth: 1, path: second),
+        place(owner: Option::Some(second), depth: 0, path: 0),
+    ]))
+    // Cleared, set and cleared again: cleared once, and nothing put under it.
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Clear(second))
+    ops.push(Op::Store(second, hash(1, len: 32), 1))
+    ops.push(Op::Clear(second))
+    ops.push(Op::Root)
+    let changes = checked(two_accounts(), ops, every: 1).changes
+    core::assert(changes.cleared().len() == 1 && changes.cleared()[0] == second && changes.deletes().is_empty())
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner: none_owner, depth: 1, path: second),
+    ]))
+}
+
+// Whether `changes` clear the storage of exactly `owners`, in order.
+fn clears_only<const N: usize>(_ changes: NodeChanges, _ owners: [u256; N]) -> bool {
+    if changes.cleared().len() != N { return false }
+    for index in 0..N {
+        if changes.cleared()[index] != owners[index] { return false }
+    }
+    true
+}
+
+// Whether `changes` put a node at `at`.
+fn puts_at(_ changes: NodeChanges, _ at: NodePath) -> bool {
+    for put in changes.puts() {
+        if same_place(put, at) { return true }
+    }
+    false
+}
+
+// An account at nibble 1 with one slot, beside one at nibble 2 without
+// storage.
+fn one_slot() -> MemVec<Op> {
+    var setup: MemVec<Op> = MemVec::new()
+    setup.push(Op::Set(path(0x1, count: 1), funded(1)))
+    setup.push(Op::Store(path(0x1, count: 1), hash(1, len: 32), 9))
+    setup.push(Op::Set(path(0x2, count: 1), funded(2)))
+    setup
+}
+
+#[test]
+fn changed_nodes_of_storage_made_again_as_it_was() {
+    // A one-slot storage trie, read, cleared and set again to the same
+    // slot: its root has the same hash at the same place, and must be put,
+    // since the store deletes the cleared storage trie whole. Likewise when
+    // the account is removed and made again.
+    let account = path(0x1, count: 1)
+    let slot = hash(1, len: 32)
+    let root = place(owner: Option::Some(account), depth: 0, path: 0)
+    for removes in [false, true] {
+        var ops: MemVec<Op> = MemVec::new()
+        ops.push(Op::Slot(account, slot))
+        if removes {
+            ops.push(Op::Set(account, Option::None))
+            ops.push(Op::Set(account, funded(1)))
+        } else {
+            ops.push(Op::Clear(account))
+        }
+        ops.push(Op::Store(account, slot, 9))
+        ops.push(Op::Root)
+        let changes = checked(one_slot(), ops, every: 1).changes
+        core::assert(clears_only(changes, [account]) && puts_at(changes, root) && changes.deletes().is_empty())
+    }
+}
+
+#[test]
+fn changed_nodes_clear_storage_read_whole() {
+    // The only account's storage, every node of it read before the clear,
+    // so that the trie holds no stub: still cleared.
+    let account = path(0x1, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    setup.push(Op::Set(account, funded(1)))
+    for slot in [1 as u256, 2] { setup.push(Op::Store(account, hash(slot, len: 32), slot)) }
+    var ops: MemVec<Op> = MemVec::new()
+    for slot in [1 as u256, 2] { ops.push(Op::Slot(account, hash(slot, len: 32))) }
+    ops.push(Op::Clear(account))
+    ops.push(Op::Root)
+    let changes = checked(setup, ops, every: 1).changes
+    core::assert(clears_only(changes, [account]) && changes.deletes().is_empty())
+}
+
+#[test]
+fn changed_nodes_never_clear_storage_the_trie_made() {
+    // A new account on a partial trie of other accounts, given a slot, then
+    // its storage cleared, or the account removed: the store holds none of
+    // it, so nothing is cleared.
+    let made = path(0x3, count: 1)
+    for removes in [false, true] {
+        var ops: MemVec<Op> = MemVec::new()
+        ops.push(Op::Set(made, funded(3)))
+        ops.push(Op::Store(made, hash(1, len: 32), 1))
+        ops.push(Op::Root)
+        ops.push(Op::Store(made, hash(2, len: 32), 2))
+        if removes { ops.push(Op::Set(made, Option::None)) } else { ops.push(Op::Clear(made)) }
+        ops.push(Op::Root)
+        core::assert(checked(two_accounts(), ops, every: 1).changes.cleared().is_empty())
+    }
+}
+
+#[test]
+fn changed_nodes_clear_one_of_two_same_storage_tries() {
+    // Two accounts with the same slots, so the same storage root: the first
+    // cleared or removed, the second's storage read and kept. Only the first
+    // is cleared, and the second's nodes stay.
+    let (first, second) = (path(0x1, count: 1), path(0x2, count: 1))
+    var setup: MemVec<Op> = MemVec::new()
+    for account in [first, second] {
+        setup.push(Op::Set(account, funded(1)))
+        for slot in [1 as u256, 2] { setup.push(Op::Store(account, hash(slot, len: 32), slot)) }
+    }
+    for removes in [false, true] {
+        var ops: MemVec<Op> = MemVec::new()
+        ops.push(Op::Slot(first, hash(1, len: 32)))
+        ops.push(Op::Slot(second, hash(1, len: 32)))
+        if removes { ops.push(Op::Set(first, Option::None)) } else { ops.push(Op::Clear(first)) }
+        ops.push(Op::Slot(second, hash(2, len: 32)))
+        ops.push(Op::Root)
+        core::assert(clears_only(checked(setup, ops, every: 1).changes, [first]))
+    }
+}
+
+#[test]
+fn changed_nodes_of_reads_alone_are_none() {
+    // Reads, a set of what is there, and a change set back change nothing.
+    let first = path(0x1, count: 1)
+    let (one, two) = (hash(1, len: 32), hash(2, len: 32))
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Account(first))
+    ops.push(Op::Slot(first, one))
+    ops.push(Op::Set(first, funded(1)))
+    ops.push(Op::Store(first, one, 1))
+    ops.push(Op::Store(first, two, 7))
+    ops.push(Op::Root)
+    ops.push(Op::Store(first, two, 2))
+    ops.push(Op::Root)
+    core::assert(none(checked(two_accounts(), ops, every: 1).changes))
+}
+
+// An account at nibble 1 with slots at nibbles 1 and 2 after 40 shared
+// nibbles: an extension of 40 over a branch of their two leaves, the first
+// of value `first` and the second of a 32-byte value.
+fn deep_slots(first: u256) -> MemVec<Op> {
+    let account = path(0x1, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    setup.push(Op::Set(account, funded(1)))
+    setup.push(Op::Store(account, path(0x1, count: 41), first))
+    setup.push(Op::Store(account, path(0x2, count: 41), 1 << 255))
+    setup
+}
+
+#[test]
+fn changed_nodes_of_a_leaf_inlined_and_hashed() {
+    // The first leaf's value shrinks to a byte, and the leaf, read, is now
+    // inline in its branch: deleted, and only the nodes above it put. Then
+    // the other way: an inline leaf grows past 31 bytes and is put.
+    let none_owner: Option<u256> = Option::None
+    let account = path(0x1, count: 1)
+    let owner = Option::Some(account)
+    let slot = path(0x1, count: 41)
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Store(account, slot, 1))
+    ops.push(Op::Root)
+    let changes = checked(deep_slots(first: 1 << 255), ops, every: 1).changes
+    core::assert(changes.cleared().is_empty() && at(changes.deletes(), [place(owner, depth: 41, path: slot)]))
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner, depth: 0, path: 0), place(owner, depth: 40, path: 0),
+    ]))
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Store(account, slot, 1 << 255))
+    ops.push(Op::Root)
+    let changes = checked(deep_slots(first: 1), ops, every: 1).changes
+    core::assert(changes.cleared().is_empty() && changes.deletes().is_empty())
+    core::assert(at(changes.puts(), [
+        place(owner: none_owner, depth: 0, path: 0), place(owner, depth: 0, path: 0), place(owner, depth: 40, path: 0),
+        place(owner, depth: 41, path: slot),
+    ]))
 }
 
 #[test]
@@ -1065,6 +1431,19 @@ fn clears(remade: usize) {
     write_changes(mut partial, mut world, output.changes)
     let after = state_root(mut world).unwrap()
     core::assert(partial.root().unwrap() == after)
+    // Over a store of every node before the block, where each stands: the
+    // account's storage is cleared, and the changes applied leave every node
+    // after.
+    var before_block = prestate()
+    var whole = StateTrie::new(mut before_block)
+    var stored = StateTrie<Places>::partial(root, Places::of(mut whole))
+    write_changes(mut stored, mut world, output.changes)
+    let changes = stored.changed_nodes().unwrap()
+    core::assert(clears_only(changes, [hash(address, len: 20)]))
+    var store = stored.into_source()
+    store.apply(changes)
+    var fresh = StateTrie::new(mut world)
+    core::assert(store.same(Places::of(mut fresh)))
     write_changes(mut trie, mut world, output.changes)
     core::assert(trie.root().unwrap() == after)
     output.changes.undo(mut world)

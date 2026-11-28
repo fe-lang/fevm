@@ -74,9 +74,9 @@ pub struct Options {
     // Whether `fevm_lazy` is the driver, which runs each state test again
     // over a lazy world.
     lazy: bool,
-    // Whether `fevm_lazy` is the driver and validates each block of a
-    // blockchain test statelessly too; it implies `lazy`.
-    stateless: bool,
+    // What `fevm_lazy` runs of each blockchain test beside its chain; any
+    // run but the chain's implies `lazy`.
+    run: blocks::ChainRun,
 }
 
 impl Options {
@@ -91,7 +91,7 @@ impl Options {
         var timeout: u64 = 120
         var select: MemVec<Arg> = MemVec::new()
         var lazy = false
-        var stateless = false
+        var run = blocks::ChainRun::Chain
         var i: usize = 2
         while i < args.count() {
             let name = args.get(i)
@@ -100,8 +100,9 @@ impl Options {
                 lazy = true
                 continue
             }
-            if name == "--stateless" {
-                stateless = true
+            if name == "--stateless" || name == "--paths" {
+                if !run.is_chain() { return Result::Err(format!("--stateless and --paths exclude each other")) }
+                run = if name == "--stateless" { blocks::ChainRun::Stateless } else { blocks::ChainRun::Paths }
                 continue
             }
             if name == "--select" {
@@ -156,8 +157,8 @@ impl Options {
         match (fixtures, out) {
             (Option::Some(fixtures), Option::Some(out)) => Result::Ok(
                 Options {
-                    fe, executable, fixtures, out, level, jobs, timeout, select, forks, lazy: lazy || stateless,
-                    stateless,
+                    fe, executable, fixtures, out, level, jobs, timeout, select, forks, lazy: lazy || !run.is_chain(),
+                    run,
                 },
             ),
             _ => Result::Err(format!("fevm_tools conformance needs --fixtures and --out")),
@@ -866,12 +867,13 @@ fn case_count(_ test: Value, fork: usize, _ forks: MemVec<Arg>) -> usize {
 struct Running { line: usize, case: Case, expect: Expected, started: Instant }
 
 // The outcomes counted overall, by network and by group, and what the
-// stateless runs counted.
+// stateless runs and the runs over a store counted.
 struct Tally {
     totals: [u64; 6],
     networks: HashMap<MemBuffer, [u64; 6]>,
     groups: HashMap<MemBuffer, [u64; 6]>,
     stateless: blocks::Stateless,
+    paths: blocks::Paths,
 }
 
 impl Tally {
@@ -1007,7 +1009,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     report.set("dirty", Value::Bool(!changes.is_empty()))
     report.set("level", Value::string(options.level))
     report.set("lazy", Value::Bool(options.lazy))
-    report.set("stateless", Value::Bool(options.stateless))
+    report.set("stateless", Value::Bool(options.run.is_stateless()))
+    if options.run.is_paths() { report.set("paths", Value::Bool(true)) }
     var select = Value::array()
     for ref part in options.select {
         select.push(Value::string(part))
@@ -1020,6 +1023,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     var lines: MemVec<MemBuffer> = MemVec::new()
     var tally = Tally {
         totals: [0; 6], networks: HashMap::new(), groups: HashMap::new(), stateless: blocks::Stateless::new(),
+        paths: blocks::Paths::new(),
     }
     var children: MemVec<Child> = MemVec::new()
     var running: MemVec<Running> = MemVec::new()
@@ -1074,7 +1078,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
             let (expect, input) = if member.value.has("blocks") {
                 let expect = named(what, blocks::ChainExpect::of(member.value))?
                 let forks = blocks::forks(case.network.span()).unwrap()
-                let input = named(what, blocks::encode(member.value, forks, stateless: options.stateless))?
+                let input = named(what, blocks::encode(member.value, forks, run: options.run))?
                 (Expected::Chain(expect), input)
             } else {
                 let entry = ref member.value["post"][fork_name(fork)][case.index]
@@ -1115,9 +1119,10 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 named(what, check(expect, output, timeout: options.timeout, lazy: options.lazy))?
             },
             Expected::Chain(ref expect) => {
-                let (verdict, runs) = named(what, blocks::check(expect, output, timeout: options.timeout,
-                                                               stateless: options.stateless))?
-                tally.stateless.add(runs)
+                let (verdict, stateless, paths) = named(what, blocks::check(expect, output, timeout: options.timeout,
+                                                                           run: options.run))?
+                tally.stateless.add(stateless)
+                tally.paths.add(paths)
                 verdict
             },
         }
@@ -1129,7 +1134,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     report.set("totals", counts_value(tally.totals))
     report.set("by_network", sorted_counts(tally.networks))
     report.set("groups", sorted_counts(tally.groups))
-    if options.stateless { report.set("stateless_runs", tally.stateless.value()) }
+    if options.run.is_stateless() { report.set("stateless_runs", tally.stateless.value()) }
+    if options.run.is_paths() { report.set("paths_runs", tally.paths.value()) }
     var rows = MemBuffer::empty()
     for ref line in lines {
         rows.extend_from(line.span())

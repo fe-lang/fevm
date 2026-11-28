@@ -45,8 +45,8 @@ did not load, unless the slot's account was loaded and is gone. A case with
 any of them, or without `lazy`, fails, and a load the lazy world missed
 fails fevm's assertions and crashes the driver. `fevm_conformance` itself
 instantiates only the complete world, so the benchmark runner times it
-unchanged. Blockchain tests run as without `--lazy`; `--stateless`, below,
-runs them statelessly too.
+unchanged. Blockchain tests run as without `--lazy`; `--stateless` and
+`--paths`, below, run them statelessly or over a store of trie nodes too.
 
 A case passes when the transaction's validity matches `expectException`, the
 receipt's logs hash matches, the gas used and success match the fixture's
@@ -169,6 +169,47 @@ blocks validated, of which 72 read an ancestor's header; 51,602 runs without
 a node and as many without a code (4,563 of each skipped), and 56,163
 without a header (2 skipped).
 
+### Over a store of trie nodes
+
+`--paths` builds and runs `fevm_lazy` too, and has it validate each block of
+a blockchain test as a client that keeps the state trie on disk would, with
+the complete `Chain` as the oracle. It excludes `--stateless`. The driver
+keeps a store of trie nodes keyed by where each stands (`NodePath`: the
+owner account's key for a storage trie, the depth and the path), as a
+client's tables hold them. It fills the store with the genesis state's
+nodes by a reading of their RLP of its own, from the root by hash, not
+`StateTrie`'s. For each block, before the import, it validates the block
+through `fevm_chain`'s steps (`decode_block`, `checked_env`, `run`,
+`write_changes`, `root`, `mismatch`) as a client does: the block runs over
+a state that reads accounts and slots through a partial `StateTrie` whose
+source is the store, which checks the hash of each node it gives, and code
+and block hashes from the chain's world before the block; the store is
+taken back from that state (`Evm::into_parts`, `into_source`), and the
+block's changes go into a new partial trie over it. A second run sets the
+changes in the trie the block was read through, as `validate` does, from a
+copy of the store, and its changed nodes must be the same. The verdict must be
+the chain's, with the same block hash, receipts and output if valid. For a
+valid block the driver applies `StateTrie::changed_nodes` to the store: the
+storage tries cleared, then the deletes, then the puts. It also reads each
+account the block's changes name from the trie after the root, by its hashed
+key (`account_keyed`), as a client writes it with its new storage root, and
+that must be the account a new complete trie of the chain's world holds;
+then it takes the store back out of the trie (`into_source`). After every block,
+valid or not, the store must equal, place by place and byte by byte, the
+nodes of a new complete trie of the chain's world as the same reading gives
+them, and no node read from it may have had another hash than the one
+asked for.
+
+The driver adds `paths`: the blocks validated, which must be every block it
+judged, the nodes the store held at the genesis, the nodes read from it,
+the puts, deletes and storage tries cleared applied, and each problem,
+which fails the test, as does a missing `paths`. `results.json` sums the
+counts in `paths_runs`. All 44,932 tests of `tests@v21.0.3` pass: 56,165
+blocks; 2,918,619 nodes stored at the genesis, 1,141,289 read, 662,803
+puts, 11,661 deletes and no storage trie cleared, which no test of these
+forks does (a storage trie is cleared only when settlement deletes an empty
+account with storage, which only a pre-state can hold).
+
 ## Blocks from another client's witness
 
 `fevm_tools witness` validates blocks with `validate` from what another
@@ -224,6 +265,18 @@ many the validation read. A host failure prints only `host_error`.
 each verdict and, over the valid blocks, how many nodes, codes and headers
 their witnesses held and their validation read; the runner fails unless
 every block is valid.
+
+With `--paths` the case is version 11, and `fevm_lazy` also puts the
+witness's nodes reached from the parent's state root in a store keyed by
+where each stands, by the same reading as for blockchain tests, and
+validates the block again through `fevm_chain`'s steps over a partial trie
+whose source is that store, with the witness's codes and headers. The
+verdict must be the witness's, and no node read may have had another hash.
+The witness holds only part of the state, so after a valid block the store
+cannot be compared with a whole state; instead every node in it, once the
+block's changed nodes are applied, must be reached from the block's state
+root through nodes it holds, each with the hash its parent names. It adds
+`paths` with the counts, and `totals` sums them; any problem fails the run.
 
 `--execution-witness` takes directories of a block on the chain `--chain`
 names and its witness as a node gives them: the block's RLP (`raw.json`,

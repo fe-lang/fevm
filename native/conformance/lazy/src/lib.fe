@@ -2,9 +2,10 @@
 // `fevm_conformance` runs it, then again over a world that reads the
 // pre-state from a `WorldSource`; the driver prints `fevm_conformance`'s
 // result with `lazy`, each way the second run differs. A blockchain test
-// runs as `fevm_conformance` runs it, and one to run statelessly also has
-// each block validated from a witness (`stateless`). A witness case is one
-// block validated from the witness it carries.
+// runs as `fevm_conformance` runs it, and may also have each block validated
+// from a witness (`stateless`) or over a store of trie nodes keyed by where
+// each stands (`paths`). A witness case is one block validated from the
+// witness it carries, and over such a store too if asked.
 use core::{MemBuffer, MemVec, Option}
 use std::io::{Stdin, Stdout}
 use fevm::{Evm, Receipt, StorageKey, WorldSource, WorldState}
@@ -134,6 +135,7 @@ pub fn main() -> i32 uses (input: mut Stdin, out: mut Stdout) {
     var reader = Reader::stdin()
     if reader.witness_test() { return witness::run(mut reader) }
     if reader.stateless_test() { return stateless::run(mut reader) }
+    if reader.paths_test() { return paths::run(mut reader) }
     if reader.blockchain_test() { return blocks::run(mut reader) }
     let (block, config, world, request) = match read_state_test(mut reader) {
         Result::Ok(test) => test,

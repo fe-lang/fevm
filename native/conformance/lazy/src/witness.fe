@@ -1,5 +1,6 @@
 // A witness case (version 9): a block, its parent's hash and a witness,
-// such as one read from another client's proofs, validated once. See
+// such as one read from another client's proofs, validated once; and in
+// version 11 over a store of the witness's nodes too (`paths`). See
 // native/tools/src/replay.fe.
 use core::{MemBuffer, Option}
 use std::io::Stdout
@@ -7,6 +8,7 @@ use fevm::hex::write_hex_word
 use fevm_chain::{Lack, Nodes, Verdict, Witness, validate}
 use fevm_conformance::{Reader, host_error}
 use fevm_conformance::blocks::{read_bytes, read_schedule, reason}
+use ingot::paths::{Hashed, check_witness}
 use ingot::stateless::failure_name
 
 // Appends `"name":[held,used]` for a set of the witness.
@@ -28,10 +30,12 @@ fn write_counts<const N: usize>(_ name: String<N>, _ items: Nodes) uses (text: m
 /// the verdict: `valid` with the block's `hash`, `invalid` with the
 /// `reason` and the `transaction` it concerns, or `witness` with what it
 /// `lacks` and its `hash`; then how many `nodes`, `codes` and `headers`
-/// the witness held and the validation read. A host failure prints only
+/// the witness held and the validation read; and in version 11 `paths`, as
+/// `paths::check_witness` gives it. A host failure prints only
 /// `host_error`.
 pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
-    core::assert(reader.word(bytes: 1) == 9)
+    let version = reader.word(bytes: 1)
+    core::assert(version == 9 || version == 11)
     let (chain_id, schedule) = match read_schedule(mut reader) {
         Result::Ok(read) => read,
         Result::Err(status) => return status,
@@ -39,6 +43,9 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
     let parent_hash = reader.word(bytes: 32)
     let rlp = read_bytes(mut reader)
     var witness = Witness::new()
+    var nodes = Hashed::new()
+    var codes = Hashed::new()
+    var headers = Hashed::new()
     for kind in 0..3 {
         let count: usize = reader.count().downcast_truncate()
         for _ in 0..count {
@@ -46,11 +53,19 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
             let added = if kind == 0 { witness.node(item.span()) } else if kind == 1 { witness.code(item.span()) }
                 else { witness.header(item.span()) }
             if !added { return host_error("witness allocation failed") }
+            if version == 11 {
+                if kind == 0 { nodes.add(item.span()) } else if kind == 1 { codes.add(item.span()) }
+                    else { headers.add(item.span()) }
+            }
         }
     }
     core::assert(reader.read_all())
     var tracer = ()
     let verdict = validate(rlp.span(), parent_hash, mut witness, schedule, chain_id, mut tracer)
+    var paths = MemBuffer::empty()
+    if version == 11 {
+        with (mut paths) { check_witness(rlp.span(), parent_hash, nodes, codes, headers, verdict, schedule, chain_id) }
+    }
     var text = MemBuffer::empty()
     with (mut text) {
         match verdict {
@@ -87,6 +102,7 @@ pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
         write_counts("nodes", witness.nodes())
         write_counts("codes", witness.codes())
         write_counts("headers", witness.headers())
+        paths.fmt(mut text)
         "}\n".fmt(mut text)
     }
     print!(text)

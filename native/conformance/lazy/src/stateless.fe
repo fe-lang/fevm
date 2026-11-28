@@ -42,7 +42,7 @@ pub(ingot) fn failure_name(_ failure: HostFailure) -> MemBuffer {
     }
 }
 
-fn verdict_name(_ verdict: Verdict) -> MemBuffer {
+pub(ingot) fn verdict_name(_ verdict: Verdict) -> MemBuffer {
     match verdict {
         Verdict::Valid(_) => format!("valid"),
         Verdict::Invalid(invalid) => format!("invalid ", invalid_name(invalid)),
@@ -118,7 +118,7 @@ fn same_body(_ a: MemVec<Receipt>, _ b: MemVec<Receipt>, _ output: BlockOutput, 
 
 // How `verdict` disagrees with `import`, the chain's verdict on the same
 // block, which has the hash `hash` if it is valid; none if it agrees.
-fn disagreement(_ import: Import, _ verdict: Verdict, hash: u256) -> Option<MemBuffer> {
+pub(ingot) fn disagreement(_ import: Import, _ verdict: Verdict, hash: u256) -> Option<MemBuffer> {
     let (oracle, agrees) = match import {
         Import::Valid(ref imported) => (format!("valid"), match verdict {
             Verdict::Valid(ref validated) => validated.header.hash == hash

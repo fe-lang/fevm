@@ -1,0 +1,775 @@
+// Blocks validated over a store of trie nodes keyed by where each stands, as
+// a client keeps them: a partial trie reads the parent's state from the
+// store, and the nodes the block changed go into it. A blockchain test
+// (version 10) checks the store against the complete chain after each block;
+// a witness case (version 11) puts the witness's nodes in a store first.
+use core::{MemBuffer, MemSpan, MemVec, Option, Result}
+use std::io::Stdout
+use keccak::{Keccak256, keccak256_word}
+use swisstable::SwissTable
+use fevm::{AccountState, BlockChanges, Evm, SourceError, StateSource, WorldSource, WorldState}
+use fevm::hex::write_hex_word
+use fevm::state::EMPTY_ROOT
+use fevm::status::{ERR_HOST_ALLOCATION, ERR_STATE_UNAVAILABLE}
+use fevm_rlp::Decoder
+use fevm_chain::{
+    HostFailure, Header, Import, Lack, NodeChanges, NodeError, NodePath, NodeSource, Nodes, Schedule, StateTrie,
+    TrieFault, Validated, Verdict, checked_env, decode_block, mismatch, write_changes,
+}
+use fevm_chain::run as run_block
+use fevm_conformance::Reader
+use fevm_conformance::blocks::{read_bytes, read_chain, write_head, write_import}
+use ingot::stateless::{disagreement, verdict_name}
+
+const ALLOCATION: HostFailure = HostFailure::Status(ERR_HOST_ALLOCATION)
+
+// The headers BLOCKHASH reaches.
+const BLOCK_HASHES: u256 = 256
+
+// Nodes by their hash, such as a witness's or a complete trie's: a source
+// that gives them wherever they stand.
+pub(ingot) struct Hashed { index: SwissTable<u256, usize>, nodes: MemVec<MemBuffer> }
+
+impl Hashed {
+    pub(ingot) fn new() -> Self { Hashed { index: SwissTable<u256, usize>::empty(), nodes: MemVec::new() } }
+
+    pub(ingot) fn add(mut self, _ node: MemSpan) {
+        let hash = keccak256_word(node)
+        if self.index.contains(hash) { return }
+        self.index.insert(hash, self.nodes.len())
+        self.nodes.push(MemBuffer::from_span(node))
+    }
+
+    fn of(_ nodes: Nodes) -> Self {
+        var hashed = Hashed::new()
+        for at in 0..nodes.len() { hashed.add(nodes.node(at)) }
+        hashed
+    }
+}
+
+impl NodeSource for Hashed {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        let held = self.index.get(hash)
+        if !held.found { return Result::Err(NodeError::Missing) }
+        Result::Ok(self.nodes[held.value].span())
+    }
+}
+
+// Nodes where they stand, as a client's tables keep them: a source that
+// checks the hash of each node it gives, and counts its reads and those whose
+// node had another hash.
+struct Store { index: SwissTable<NodePath, usize>, nodes: MemVec<MemBuffer>, reads: u64, mismatches: u64 }
+
+impl Store {
+    fn new() -> Self {
+        Store { index: SwissTable<NodePath, usize>::empty(), nodes: MemVec::new(), reads: 0, mismatches: 0 }
+    }
+
+    fn len(self) -> usize { self.index.len() }
+
+    // A store of the same nodes at the same places, with no reads counted.
+    fn copy(self) -> Self {
+        var copy = Store::new()
+        for slot in 0..self.index.capacity() {
+            let entry = self.index.entry(slot)
+            if entry.occupied { copy.put(entry.key, self.nodes[entry.value].span()) }
+        }
+        copy
+    }
+
+    // Puts `rlp` at `at`, in place of any node there.
+    fn put(mut self, _ at: NodePath, _ rlp: MemSpan) {
+        let held = self.index.get(at)
+        if held.found {
+            self.nodes.set(held.value, MemBuffer::from_span(rlp))
+        } else {
+            self.index.insert(at, self.nodes.len())
+            self.nodes.push(MemBuffer::from_span(rlp))
+        }
+    }
+
+    // Applies `changes` as a client does: deletes every node under each
+    // storage trie cleared, then deletes each place, then puts each node.
+    // The first way they break what they promise, if any: an account cleared
+    // twice, or whose storage the store does not hold; a delete of a place
+    // the store does not hold, or under a storage trie cleared; a put at a
+    // place deleted, of a node inline in its parent, or of the node the
+    // store already holds there.
+    // Only a store of the `whole` state must hold storage of each account
+    // cleared: a witness need not carry a storage trie the block drops unread.
+    fn apply(mut self, _ changes: NodeChanges, whole: bool) -> Option<MemBuffer> {
+        var broken: Option<MemBuffer> = Option::None
+        var cleared = SwissTable<u256, bool>::empty()
+        for owner in changes.cleared() {
+            if cleared.contains(owner) && broken.is_none() {
+                broken = Option::Some(format!("storage ", hex(owner), " cleared twice"))
+            }
+            cleared.insert(owner, true)
+            var under: MemVec<NodePath> = MemVec::new()
+            for slot in 0..self.index.capacity() {
+                let entry = self.index.entry(slot)
+                if entry.occupied && entry.key.owner == Option::Some(owner) { under.push(entry.key) }
+            }
+            if whole && under.is_empty() && broken.is_none() {
+                broken = Option::Some(format!("storage ", hex(owner), " cleared, which the store does not hold"))
+            }
+            for at in under { let _ = self.index.remove(at) }
+        }
+        var deleted = SwissTable<NodePath, bool>::empty()
+        for at in changes.deletes() {
+            let under = if let Option::Some(owner) = at.owner { cleared.contains(owner) } else { false }
+            if (under || !self.index.remove(at)) && broken.is_none() {
+                broken = Option::Some(format!("a delete of ", name(at), ", which the store does not hold"))
+            }
+            deleted.insert(at, true)
+        }
+        for put in 0..changes.puts().len() {
+            let at = changes.puts()[put]
+            let rlp = changes.node(put)
+            let held = self.index.get(at)
+            let same = held.found && self.nodes[held.value].span() == rlp
+            if (deleted.contains(at) || (at.depth != 0 && rlp.len() < 32) || same) && broken.is_none() {
+                broken = Option::Some(format!("a put at ", name(at), " deleted, inline or as it was"))
+            }
+            self.put(at, rlp)
+        }
+        broken
+    }
+
+    // The first way `self` differs from `expected`: a place that holds
+    // another node, one missing, or one too many.
+    fn difference(self, _ expected: Store) -> Option<MemBuffer> {
+        for slot in 0..expected.index.capacity() {
+            let entry = expected.index.entry(slot)
+            if !entry.occupied { continue }
+            let held = self.index.get(entry.key)
+            if !held.found { return Option::Some(format!("missing ", name(entry.key))) }
+            if self.nodes[held.value].span() != expected.nodes[entry.value].span() {
+                return Option::Some(format!("another node at ", name(entry.key)))
+            }
+        }
+        for slot in 0..self.index.capacity() {
+            let entry = self.index.entry(slot)
+            if entry.occupied && !expected.index.contains(entry.key) {
+                return Option::Some(format!("extra ", name(entry.key)))
+            }
+        }
+        Option::None
+    }
+}
+
+impl NodeSource for Store {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        let held = self.index.get(at)
+        if !held.found { return Result::Err(NodeError::Missing) }
+        self.reads += 1
+        if keccak256_word(self.nodes[held.value].span()) != hash {
+            self.mismatches += 1
+            return Result::Err(NodeError::Failed)
+        }
+        Result::Ok(self.nodes[held.value].span())
+    }
+}
+
+fn hex(_ word: u256) -> MemBuffer {
+    var text = MemBuffer::empty()
+    with (mut text) { write_hex_word(word) }
+    text
+}
+
+// A place, as `accounts 3 0x..` or `storage 0x.. 3 0x..`.
+fn name(_ at: NodePath) -> MemBuffer {
+    let trie = match at.owner {
+        Option::Some(owner) => format!("storage ", hex(owner)),
+        Option::None => format!("accounts"),
+    }
+    format!(trie, " ", at.depth, " ", hex(at.path))
+}
+
+// Puts in `store` the node of `hash` that `source` gives at depth `depth`
+// of the trie of `owner` under `path`, and each node below it that is
+// reached by its hash: a reading of the nodes' RLP of the driver's own, not
+// `StateTrie`'s. A node the source does not give is left out, with what is
+// below it.
+fn walk<N: NodeSource>(_ source: mut N, _ store: mut Store, hash: u256, owner: Option<u256>, depth: usize,
+                       path: u256) {
+    let at = NodePath { owner, depth: depth.downcast_truncate(), path }
+    let node = match source.read(at, hash) {
+        Result::Ok(node) => MemBuffer::from_span(node),
+        Result::Err(_) => return,
+    }
+    store.put(at, node.span())
+    descend(mut source, mut store, node.span(), owner, depth, path)
+}
+
+// Walks the children of `node`, at `depth` of the trie of `owner` under
+// `path`: a branch's, an extension's, or an account's storage trie.
+fn descend<N: NodeSource>(_ source: mut N, _ store: mut Store, _ node: MemSpan, owner: Option<u256>, depth: usize,
+                          path: u256) {
+    with (node) {
+        var counter = Decoder::new()
+        let items = mut counter.list()
+        var count: usize = 0
+        while !items.is_empty() {
+            let _ = items.raw()
+            count += 1
+        }
+        var decoder = Decoder::new()
+        let items = mut decoder.list()
+        // A malformed node is left out, with what is below it, as one that
+        // cannot be read is: the trie's own reading of it decides the block.
+        if (count == 17 && depth >= 64) || (count != 17 && count != 2) { return }
+        if count == 17 {
+            for digit in 0..16 {
+                let below = path | (digit as u256) << ((63 - depth) * 4) as u256
+                child(mut source, mut store, mut items, owner, depth: depth + 1, path: below)
+            }
+            return
+        }
+        // A hex-prefix path: the flag nibble, 2 for a leaf and 1 for an odd
+        // count, then the first nibble if odd, then the rest.
+        let prefix = items.bytes()
+        if prefix.is_empty() || prefix.len() > 33 { return }
+        let odd: usize = (prefix[0] >> 4 & 1) as usize
+        var bits: u256 = if odd == 1 { (prefix[0] & 0xf) as u256 } else { 0 }
+        for index in 1..prefix.len() { bits = bits << 8 | prefix[index] as u256 }
+        let end = depth + (prefix.len() - 1) * 2 + odd
+        if end > 64 || (prefix[0] >> 4 < 2 && end == depth) { return }
+        let key = if end == depth { path } else { path | bits << ((64 - end) * 4) as u256 }
+        if prefix[0] >> 4 < 2 { return child(mut source, mut store, mut items, owner, depth: end, path: key) }
+        // A slot's leaf, or an account's, whose storage root is its third
+        // field.
+        if owner.is_some() { return }
+        let value = items.bytes()
+        let root = with (value) {
+            var fields = Decoder::new()
+            let account = mut fields.list()
+            let _ = account.uint()
+            let _ = account.uint()
+            account.fixed(32)
+        }
+        if root != EMPTY_ROOT { walk(mut source, mut store, hash: root, owner: Option::Some(key), depth: 0, path: 0) }
+    }
+}
+
+// Walks the child the next of `items` is: inline, or reached by its hash.
+fn child<N: NodeSource>(_ source: mut N, _ store: mut Store, _ items: mut Decoder, owner: Option<u256>, depth: usize,
+                        path: u256) uses (rlp: MemSpan) {
+    if items.is_list() { return descend(mut source, mut store, items.raw(), owner, depth, path) }
+    let item = items.bytes()
+    if item.len() == 32 { walk(mut source, mut store, hash: item.read_word(0), owner, depth, path) }
+}
+
+// The nodes of the state of `root` that `source` gives, each where it stands.
+fn stored<N: NodeSource>(_ source: mut N, root: u256) -> Store {
+    var store = Store::new()
+    walk(mut source, mut store, hash: root, owner: Option::None, depth: 0, path: 0)
+    store
+}
+
+// Code by its hash, and the hashes of the blocks before a child of
+// `number`, for a witness case.
+struct Extras { codes: Hashed, number: u256, hashes: SwissTable<u256, u256> }
+
+impl Extras {
+    // The codes `codes`, and the hashes of the parent `parent` and of each
+    // block before it whose child's header `headers` holds, up to 256.
+    fn new(_ codes: own Hashed, _ parent: Header, _ headers: Hashed) -> Self {
+        var hashes = SwissTable<u256, u256>::empty()
+        var number = parent.number as u256
+        var hash = parent.hash
+        while true {
+            hashes.insert(number, hash)
+            let held = headers.index.get(hash)
+            if number == 0 || parent.number as u256 - number + 1 >= BLOCK_HASHES || !held.found { break }
+            let rlp = headers.nodes[held.value].span()
+            hash = with (rlp) {
+                var items = Decoder::new()
+                let fields = mut items.list()
+                fields.fixed(32)
+            }
+            number -= 1
+        }
+        Extras { codes, number: parent.number as u256, hashes }
+    }
+}
+
+impl StateSource for Extras {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        Result::Err(SourceError::Unavailable)
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> { Result::Err(SourceError::Unavailable) }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
+        let held = self.codes.index.get(hash)
+        if !held.found { return Result::Err(SourceError::Unavailable) }
+        Result::Ok(self.codes.nodes[held.value].span())
+    }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> {
+        if number > self.number || self.number - number >= BLOCK_HASHES { return Result::Ok(0) }
+        let held = self.hashes.get(number)
+        if !held.found { return Result::Err(SourceError::Unavailable) }
+        Result::Ok(held.value)
+    }
+}
+
+// The state after a block's parent as a client reads it: accounts and slots
+// from a partial trie over the store, code and block hashes from `rest`. It
+// keeps the trie's first fault; the store keeps why a read failed.
+struct Reading<S: StateSource> { trie: StateTrie<Store>, rest: S, fault: Option<TrieFault> }
+
+impl<S: StateSource> Reading<S> {
+    fn into_trie(own self) -> StateTrie<Store> { self.trie }
+
+    fn faulted(mut self, _ fault: TrieFault) -> SourceError {
+        if self.fault.is_none() { self.fault = Option::Some(fault) }
+        match fault {
+            TrieFault::Allocation => SourceError::Allocation,
+            _ => SourceError::Unavailable,
+        }
+    }
+}
+
+impl<S: StateSource> StateSource for Reading<S> {
+    fn account(mut self, _ address: u256) -> Result<SourceError, Option<AccountState>> {
+        match self.trie.account(address) {
+            Result::Ok(account) => Result::Ok(account),
+            Result::Err(fault) => Result::Err(self.faulted(fault)),
+        }
+    }
+    fn slot(mut self, address: u256, slot: u256) -> Result<SourceError, u256> {
+        match self.trie.slot(address, slot) {
+            Result::Ok(value) => Result::Ok(value),
+            Result::Err(fault) => Result::Err(self.faulted(fault)),
+        }
+    }
+    fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> { self.rest.code(hash) }
+    fn block_hash(mut self, _ number: u256) -> Result<SourceError, u256> { self.rest.block_hash(number) }
+}
+
+// What a trie's fault makes of a block: no verdict, or a node the store
+// lacks, or one it holds malformed or under another hash.
+fn faulted(_ fault: TrieFault) -> Verdict {
+    match fault {
+        TrieFault::Allocation => Verdict::Failed(ALLOCATION),
+        TrieFault::Missing(hash) => Verdict::Witness(Lack::Node(hash)),
+        TrieFault::Malformed(hash) => Verdict::Witness(Lack::MalformedNode(hash)),
+        TrieFault::Source(hash) => Verdict::Witness(Lack::Node(hash)),
+    }
+}
+
+// The verdict on a block the steps reject as `import`, given the trie's
+// first fault.
+fn rejected(_ import: Import, fault: Option<TrieFault>) -> Verdict {
+    match import {
+        Import::Invalid(reason) => Verdict::Invalid(reason),
+        Import::Failed(HostFailure::Status(status)) => {
+            if status == ERR_STATE_UNAVAILABLE && let Option::Some(fault) = fault { faulted(fault) }
+                else { Verdict::Failed(HostFailure::Status(status)) }
+        },
+        Import::Failed(failure) => Verdict::Failed(failure),
+        Import::Valid(_) => Verdict::Failed(ALLOCATION),
+    }
+}
+
+// What a valid block changed: the trie's nodes, each account its changes
+// name, by address, as the trie holds it after the root, and each slot they
+// name, by address and slot, with its value after.
+struct Changed {
+    nodes: NodeChanges,
+    accounts: MemVec<(u256, Option<AccountState>)>,
+    slots: MemVec<(u256, u256, u256)>,
+}
+
+// keccak256 of the low `len` bytes of `word`, a key a store keeps.
+fn hashed(_ word: u256, len: usize) -> u256 {
+    var digest = Keccak256::new()
+    digest.update_word(word, len)
+    digest.finish_word()
+}
+
+// Each address `changes` name, an account's or a slot's, with the account
+// `trie` holds after its root, read by its hashed key as a store keeps
+// accounts; or the trie's fault.
+fn accounts_of(_ trie: mut StateTrie<Store>, _ changes: BlockChanges)
+    -> Result<TrieFault, MemVec<(u256, Option<AccountState>)>> {
+    var addresses: MemVec<u256> = MemVec::new()
+    for account in changes.accounts() { addresses.push(account.address) }
+    for slot in changes.slots() { addresses.push(slot.address) }
+    var seen = SwissTable<u256, bool>::empty()
+    var accounts: MemVec<(u256, Option<AccountState>)> = MemVec::new()
+    for address in addresses {
+        if seen.contains(address) { continue }
+        seen.insert(address, true)
+        match trie.account_keyed(hashed(address, len: 20)) {
+            Result::Ok(state) => accounts.push((address, state)),
+            Result::Err(fault) => return Result::Err(fault),
+        }
+    }
+    Result::Ok(accounts)
+}
+
+// The first of `accounts` that a new complete trie of `world` does not hold
+// as it is given.
+fn account_difference(_ world: WorldState, _ accounts: MemVec<(u256, Option<AccountState>)>) -> Option<MemBuffer> {
+    var world = world.try_clone().unwrap()
+    var trie = StateTrie::new(mut world)
+    let _ = trie.root().unwrap()
+    for (address, state) in accounts {
+        let same = match (state, trie.account(address).unwrap()) {
+            (Option::Some(ours), Option::Some(theirs)) => ours.nonce == theirs.nonce && ours.balance == theirs.balance
+                && ours.code_hash == theirs.code_hash && ours.storage_root == theirs.storage_root,
+            (Option::None, Option::None) => true,
+            _ => false,
+        }
+        if !same { return Option::Some(format!("account ", hex(address), " after the root differs")) }
+    }
+    Option::None
+}
+
+// Validates the block `rlp` encodes as the child of `parent` by the rules
+// of `schedule` on chain `chain_id`, as a client imports it, through
+// `fevm_chain`'s steps: runs it over a state that reads accounts and slots
+// through a partial trie of the parent's state whose source is `store`, and
+// code and block hashes from `rest`; takes the store back; sets the block's
+// changes in a new partial trie over it, unless `shared`, when they go into
+// the trie the run read through as `validate` does; then the root, the
+// changed nodes and accounts from that trie, and the store taken back from
+// it. The verdict, the store, and for a valid block what it changed.
+fn validate_over<S: StateSource>(_ rlp: MemSpan, _ parent: Header, _ store: own Store, _ rest: own S,
+                                 schedule: Schedule, chain_id: u256, shared: bool)
+    -> (Verdict, Store, Option<Changed>) {
+    let (header, withdrawals, withdrawals_trie, ommers) = match decode_block(rlp) {
+        Result::Ok(block) => block,
+        Result::Err(import) => return (rejected(import, fault: Option::None), store, Option::None),
+    }
+    let config = schedule.config_at(header.timestamp)
+    let env = match checked_env(header, parent, config, ommers, chain_id) {
+        Result::Ok(env) => env,
+        Result::Err(import) => return (rejected(import, fault: Option::None), store, Option::None),
+    }
+    let trie = StateTrie<Store>::partial(root: parent.state_root, store)
+    let reading = Reading<S> { trie, rest, fault: Option::None }
+    let evm = Evm<Reading<S>>::over(reading, config)
+    var tracer = ()
+    let (evm, ran) = with (rlp) { run_block(evm, header, env, withdrawals, withdrawals_trie, mut tracer) }
+    let (var world, reading) = evm.into_parts()
+    let fault = reading.fault
+    let read = reading.into_trie()
+    var trie = if shared { read } else { StateTrie<Store>::partial(root: parent.state_root, read.into_source()) }
+    let (verdict, changes) = match ran {
+        Result::Err(import) => (rejected(import, fault), Option::None),
+        Result::Ok(ran) => {
+            write_changes(mut trie, mut world, ran.output.changes)
+            match (trie.root(), ran.roots) {
+                (Result::Err(fault), _) => (faulted(fault), Option::None),
+                (Result::Ok(state_root), Option::Some((transactions_root, receipts_root, withdrawals_root))) => {
+                    match mismatch(header, ran.output, transactions_root, state_root, receipts_root, withdrawals_root) {
+                        Option::Some(reason) => (Verdict::Invalid(reason), Option::None),
+                        Option::None => match (trie.changed_nodes(), accounts_of(mut trie, ran.output.changes)) {
+                            (Result::Ok(nodes), Result::Ok(accounts)) => {
+                                var slots: MemVec<(u256, u256, u256)> = MemVec::new()
+                                for slot in ran.output.changes.slots() {
+                                    slots.push((slot.address, slot.slot, world.storage_load(slot.address, slot.slot)))
+                                }
+                                let validated = Validated { header, receipts: ran.receipts, output: ran.output }
+                                (Verdict::Valid(validated), Option::Some(Changed { nodes, accounts, slots }))
+                            },
+                            (Result::Err(fault), _) => (faulted(fault), Option::None),
+                            (_, Result::Err(fault)) => (faulted(fault), Option::None),
+                        },
+                    }
+                },
+                (_, Option::None) => (Verdict::Failed(ALLOCATION), Option::None),
+            }
+        },
+    }
+    (verdict, trie.into_source(), changes)
+}
+
+// How the changes `shared` gives differ from `changes`, if they do: the
+// same storage tries cleared and puts, in the same order, and the same
+// deletes in any.
+fn changes_difference(_ changes: NodeChanges, _ shared: NodeChanges) -> Option<MemBuffer> {
+    let cleared = ref changes.cleared()
+    let puts = ref changes.puts()
+    let deletes = ref changes.deletes()
+    if cleared.len() != shared.cleared().len() || puts.len() != shared.puts().len()
+        || deletes.len() != shared.deletes().len() {
+        return Option::Some(format!("other counts"))
+    }
+    for at in 0..cleared.len() {
+        if cleared[at] != shared.cleared()[at] { return Option::Some(format!("another storage trie cleared")) }
+    }
+    for at in 0..puts.len() {
+        let other = shared.puts()[at]
+        if other.owner != puts[at].owner || other.depth != puts[at].depth || other.path != puts[at].path
+            || shared.node(at) != changes.node(at) {
+            return Option::Some(format!("another put at ", name(puts[at])))
+        }
+    }
+    var ours = SwissTable<NodePath, bool>::empty()
+    for at in deletes { ours.insert(at, true) }
+    var theirs = SwissTable<NodePath, bool>::empty()
+    for at in shared.deletes() { theirs.insert(at, true) }
+    if ours.len() != deletes.len() || theirs.len() != deletes.len() { return Option::Some(format!("a delete twice")) }
+    for at in deletes {
+        if !theirs.contains(at) { return Option::Some(format!("no delete of ", name(at))) }
+    }
+    Option::None
+}
+
+// Whether two runs read the same accounts after the root.
+fn same_accounts(_ a: MemVec<(u256, Option<AccountState>)>, _ b: MemVec<(u256, Option<AccountState>)>) -> bool {
+    if a.len() != b.len() { return false }
+    for index in 0..a.len() {
+        let (address, ours) = a[index]
+        let (other, theirs) = b[index]
+        let same = match (ours, theirs) {
+            (Option::Some(x), Option::Some(y)) => x.nonce == y.nonce && x.balance == y.balance
+                && x.code_hash == y.code_hash && x.storage_root == y.storage_root,
+            (Option::None, Option::None) => true,
+            _ => false,
+        }
+        if address != other || !same { return false }
+    }
+    true
+}
+
+// What the runs over a store counted: the blocks validated, the nodes the
+// store held at the start, the nodes read from it, and the puts, deletes
+// and storage tries cleared applied to it.
+struct Counts { blocks: usize, stored: usize, reads: u64, puts: usize, deletes: usize, cleared: usize }
+
+impl Counts {
+    fn new() -> Self { Counts { blocks: 0, stored: 0, reads: 0, puts: 0, deletes: 0, cleared: 0 } }
+
+    // Counts and applies `changes` to `store`; adds to `problems` the first
+    // way they break what they promise.
+    fn apply(mut self, _ store: mut Store, _ changes: NodeChanges, whole: bool, _ problems: mut MemVec<MemBuffer>,
+             place: MemBuffer) {
+        self.puts += changes.puts().len()
+        self.deletes += changes.deletes().len()
+        self.cleared += changes.cleared().len()
+        if let Option::Some(broken) = store.apply(changes, whole) { problems.push(format!(place, broken)) }
+    }
+
+    // Appends `,"paths":{...}` with the counts and `problems`.
+    fn write(self, _ problems: MemVec<MemBuffer>) uses (text: mut MemBuffer) {
+        ",\"paths\":{\"blocks\":".fmt(mut text)
+        self.blocks.fmt(mut text)
+        ",\"stored\":".fmt(mut text)
+        self.stored.fmt(mut text)
+        ",\"reads\":".fmt(mut text)
+        self.reads.fmt(mut text)
+        ",\"puts\":".fmt(mut text)
+        self.puts.fmt(mut text)
+        ",\"deletes\":".fmt(mut text)
+        self.deletes.fmt(mut text)
+        ",\"cleared\":".fmt(mut text)
+        self.cleared.fmt(mut text)
+        ",\"problems\":[".fmt(mut text)
+        for index in 0..problems.len() {
+            if index != 0 { ",".fmt(mut text) }
+            "\"".fmt(mut text)
+            problems[index].fmt(mut text)
+            "\"".fmt(mut text)
+        }
+        "]}".fmt(mut text)
+    }
+}
+
+// The nodes of the state of `world` where they stand, read from a new
+// complete trie of it.
+fn expected(_ world: WorldState) -> Store {
+    var world = world.try_clone().unwrap()
+    var trie = StateTrie::new(mut world)
+    var nodes = Nodes::new()
+    core::assert(trie.write_nodes(mut nodes))
+    let root = trie.root().unwrap()
+    var hashed = Hashed::of(nodes)
+    stored(mut hashed, root)
+}
+
+/// Runs a blockchain test as `fevm_conformance` runs it, its chain the
+/// oracle, with a store of the genesis state's trie nodes keyed by where
+/// each stands, as a client keeps them, filled from the chain's own trie by
+/// the driver's reading of their RLP. Each block the chain judges is
+/// validated through `fevm_chain`'s steps over a partial trie whose source is
+/// the store, with code and block hashes from the chain's world before it,
+/// and must get the chain's verdict, with the same block hash, receipts and
+/// output if valid; a valid block's changed nodes are applied to the store,
+/// its cleared storage tries, then its deletes, then its puts. After every
+/// block the store must hold exactly the nodes of a new complete trie of
+/// the chain's world, each where it stands, and every node read from it
+/// must have had the hash asked for. Adds `paths`: the counts and each
+/// problem.
+pub fn run(_ reader: mut Reader) -> i32 uses (out: mut Stdout) {
+    let (var chain, _) = match read_chain(mut reader) {
+        Result::Ok(chain) => chain,
+        Result::Err(status) => return status,
+    }
+    var store = expected(chain.world())
+    var counts = Counts::new()
+    counts.stored = store.len()
+    var problems: MemVec<MemBuffer> = MemVec::new()
+    var tracer = ()
+    var text = MemBuffer::empty()
+    with (mut text) {
+        "{\"blocks\":[".fmt(mut text)
+        let blocks: usize = reader.count().downcast_truncate()
+        for number in 0..blocks {
+            let rlp = read_bytes(mut reader)
+            if number != 0 { ",".fmt(mut text) }
+            let copy = store.copy()
+            let rest = WorldSource::new(chain.world().try_clone().unwrap())
+            let (verdict, back, changes) = validate_over(rlp.span(), chain.head(), store, rest,
+                                                         schedule: chain.schedule(), chain_id: chain.chain_id(),
+                                                         shared: false)
+            store = back
+            let rest = WorldSource::new(chain.world().try_clone().unwrap())
+            let (shared_verdict, copy, shared) = validate_over(rlp.span(), chain.head(), copy, rest,
+                                                               schedule: chain.schedule(), chain_id: chain.chain_id(),
+                                                               shared: true)
+            store.mismatches += copy.mismatches
+            let import = chain.import(rlp.span(), mut tracer)
+            let place = format!("block ", number, ": ")
+            let failed = match import {
+                Import::Failed(_) => true,
+                _ => false,
+            }
+            if !failed {
+                counts.blocks += 1
+                if let Option::Some(problem) = disagreement(import, verdict, hash: chain.head().hash) {
+                    problems.push(format!(place, problem))
+                }
+                if let Option::Some(problem) = disagreement(import, shared_verdict, hash: chain.head().hash) {
+                    problems.push(format!(place, "over the trie the run read, ", problem))
+                }
+                if let Import::Valid(_) = import && let Option::Some(changed) = changes {
+                    match shared {
+                        Option::Some(ref theirs) => {
+                            if let Option::Some(difference) = changes_difference(changed.nodes, theirs.nodes) {
+                                problems.push(format!(place, "over the trie the run read, ", difference))
+                            }
+                            if !same_accounts(changed.accounts, theirs.accounts) {
+                                problems.push(format!(place, "over the trie the run read, other accounts"))
+                            }
+                        },
+                        Option::None => problems.push(format!(place, "over the trie the run read, no changes")),
+                    }
+                    counts.apply(mut store, changed.nodes, whole: true, mut problems, place)
+                    if let Option::Some(difference) = account_difference(chain.world(), changed.accounts) {
+                        problems.push(format!(place, difference))
+                    }
+                }
+                if let Option::Some(difference) = store.difference(expected(chain.world())) {
+                    problems.push(format!(place, "the store has ", difference))
+                }
+            }
+            if store.mismatches != 0 {
+                problems.push(format!(place, store.mismatches, " nodes read under another hash"))
+                store.mismatches = 0
+            }
+            if let Result::Err(status) = write_import(import, number) { return status }
+        }
+        core::assert(reader.read_all())
+        write_head(chain)
+        counts.reads = store.reads
+        counts.write(problems)
+        "}\n".fmt(mut text)
+    }
+    print!(text)
+    0
+}
+
+/// For a witness case run as `witness::run` runs it, whose verdict over the
+/// witness is `witnessed`: the witness's `nodes` reached from the parent's
+/// state root put in a store where each stands, and the block validated
+/// through `fevm_chain`'s steps over a partial trie whose source is the
+/// store, with code from `codes` and block hashes from `headers`. The
+/// verdict must be the same, and every node read from the store must have
+/// had the hash asked for. The changed nodes, applied to the store, must
+/// keep what they promise, but for holding each storage trie cleared, which
+/// a witness need not carry. The witness holds only part of the state, so
+/// the store after a valid block is not compared with a whole state;
+/// instead every node in it must be reached from the block's state root
+/// through nodes it holds, each with the hash its parent names; so must
+/// every put; and a new partial trie at that root over the store must read
+/// every account and slot the block changed as the block left it.
+///
+/// It does not catch a missing put of a node the block moved without
+/// changing, such as a leaf pushed down by a new sibling, or an extension
+/// shortened over a branch the witness omits: the walk takes the missing
+/// node for one the witness does not carry, and the reads cover only what
+/// the block changed. The run over a blockchain test, whose store holds the
+/// whole state, catches both. Appends `paths`: the counts and each problem.
+pub(ingot) fn check_witness(_ rlp: MemSpan, parent_hash: u256, _ nodes: own Hashed, _ codes: own Hashed,
+                            _ headers: own Hashed, _ witnessed: Verdict, schedule: Schedule, chain_id: u256)
+uses (text: mut MemBuffer)
+{
+    var counts = Counts::new()
+    var problems: MemVec<MemBuffer> = MemVec::new()
+    let held = headers.index.get(parent_hash)
+    let parent = if held.found { Header::decode(headers.nodes[held.value].span()).ok() } else { Option::None }
+    let Option::Some(parent) = parent else {
+        problems.push(format!("no parent header"))
+        return counts.write(problems)
+    }
+    var nodes = nodes
+    let store = stored(mut nodes, root: parent.state_root)
+    counts.stored = store.len()
+    counts.blocks = 1
+    let rest = Extras::new(codes, parent, headers)
+    let (verdict, var store, changes) = validate_over(rlp, parent, store, rest, schedule, chain_id, shared: false)
+    let agrees = verdict_name(verdict) == verdict_name(witnessed) && match verdict {
+        Verdict::Valid(ref ours) => match witnessed {
+            Verdict::Valid(ref theirs) => ours.header.hash == theirs.header.hash,
+            _ => false,
+        },
+        _ => true,
+    }
+    if !agrees { problems.push(format!(verdict_name(verdict), "; over the witness: ", verdict_name(witnessed))) }
+    counts.reads = store.reads
+    if store.mismatches != 0 { problems.push(format!(store.mismatches, " nodes read under another hash")) }
+    if let Verdict::Valid(ref validated) = verdict && let Option::Some(changed) = changes {
+        counts.apply(mut store, changed.nodes, whole: false, mut problems, place: MemBuffer::empty())
+        let mismatches = store.mismatches
+        let reached = stored(mut store, root: validated.header.state_root)
+        if reached.len() != store.len() {
+            let unreached = store.len() - reached.len()
+            problems.push(format!(unreached, " nodes of the store not reached from the state root"))
+        }
+        for at in changed.nodes.puts() {
+            if !reached.index.contains(at) { problems.push(format!("a put at ", name(at), " not reached")) }
+        }
+        if store.mismatches != mismatches {
+            problems.push(format!(store.mismatches - mismatches, " nodes reached under another hash"))
+        }
+        // Every account and slot the block changed, read again by its hashed
+        // keys through a new partial trie of the block's state over the store.
+        var after = StateTrie<Store>::partial(root: validated.header.state_root, store)
+        for (address, state) in changed.accounts {
+            var one: MemVec<(u256, Option<AccountState>)> = MemVec::new()
+            match after.account_keyed(hashed(address, len: 20)) {
+                Result::Ok(read) => one.push((address, read)),
+                Result::Err(_) => problems.push(format!("account ", hex(address), " not read after the block")),
+            }
+            var given: MemVec<(u256, Option<AccountState>)> = MemVec::new()
+            given.push((address, state))
+            if one.len() == 1 && !same_accounts(one, given) {
+                problems.push(format!("account ", hex(address), " read after the block differs"))
+            }
+        }
+        for (address, slot, value) in changed.slots {
+            match after.slot_keyed(account: hashed(address, len: 20), key: hashed(slot, len: 32)) {
+                Result::Ok(read) => if read != value {
+                    problems.push(format!("slot ", hex(address), " ", hex(slot), " read after the block differs"))
+                },
+                Result::Err(_) => {
+                    problems.push(format!("slot ", hex(address), " ", hex(slot), " not read after the block"))
+                },
+            }
+        }
+    }
+    counts.write(problems)
+}

@@ -21,7 +21,8 @@ The repo is a Fe workspace:
 - `native/client`: a Rust client for `fevm serve`, the session mode
 - `native/conformance`: the Ethereum state and blockchain test drivers, and
   `fevm_lazy`, which runs state tests again over a lazy world and validates
-  each block of a blockchain test statelessly beside its import
+  each block of a blockchain test statelessly, or over a store of trie nodes
+  by path, beside its import
 - `native/differential`: frame and state comparisons against revm
 - `native/bench`: state-test benchmarks against revm and evmone
 - `native/soak`, `native/fixtures`, `native/arith`: resident-memory,
@@ -264,6 +265,24 @@ subtree the trie has not read is its hash, and a read or a change reads the
 nodes on its path, so it hashes only what changed. A node it needs and the
 source does not hold, one that is malformed, or a read the source fails, is
 a `TrieFault`, after which the trie gives no root.
+
+For a store that keeps trie nodes by path, `StateTrie::changed_nodes` gives,
+after the root, what the trie's changes did to the nodes its source held,
+in their order of application:
+
+- `cleared`: each account whose storage trie the store holds and the trie
+  dropped whole, by clearing it or removing the account, never one whose
+  storage the trie made. A store range-deletes the account's nodes and its
+  flat storage rows under its key, since the trie need not have read them.
+- `deletes`: each place it read a node at where no node reached by its hash
+  stands now.
+- `puts`: each node reached by its hash, a root or one of 32 bytes or more,
+  that is not the node read at its place.
+
+The trie records where each node stood as it reads it, since `insert` and
+`remove` move nodes; a subtree it never read never moves. The changes are
+against the store as it was when the trie was made, so a caller that applies
+them makes a new trie for the next block.
 
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks

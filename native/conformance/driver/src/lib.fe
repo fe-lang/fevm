@@ -9,10 +9,12 @@ use fevm::status::{VALID, invalid_name, is_evm_outcome, status_name}
 // Reads one case. Integers and lengths are big endian. A state test (version
 // 5) is the fork, the block, the pre-state accounts and the transaction; see
 // `encode` in native/tools/src/conformance.fe. A blockchain test (version 7,
-// or 8 for `fevm_lazy` to run statelessly too) is the chain ID, the fork
-// schedule, the pre-state accounts, the genesis header and the blocks' RLP;
-// see native/tools/src/blocks.fe. `fevm_lazy` reads cases with it too, and
-// a witness case (version 9), which only it runs; see its witness.fe.
+// or for `fevm_lazy` 8 to run statelessly too and 10 to run over a store of
+// trie nodes too) is the chain ID, the fork schedule, the pre-state
+// accounts, the genesis header and the blocks' RLP; see
+// native/tools/src/blocks.fe. `fevm_lazy` reads cases with it too, and a
+// witness case (version 9, or 11 to run over a store of trie nodes too),
+// which only it runs; see its witness.fe.
 pub struct Reader { data: MemBuffer, position: usize }
 
 impl Reader {
@@ -26,8 +28,11 @@ impl Reader {
     pub fn blockchain_test(self) -> bool { self.data.len() != 0 && self.data[0] == 7 }
     /// Whether the case is a blockchain test to run statelessly too.
     pub fn stateless_test(self) -> bool { self.data.len() != 0 && self.data[0] == 8 }
+    /// Whether the case is a blockchain test to run over a store of trie
+    /// nodes too.
+    pub fn paths_test(self) -> bool { self.data.len() != 0 && self.data[0] == 10 }
     /// Whether the case is a block and a witness to validate it from.
-    pub fn witness_test(self) -> bool { self.data.len() != 0 && self.data[0] == 9 }
+    pub fn witness_test(self) -> bool { self.data.len() != 0 && (self.data[0] == 9 || self.data[0] == 11) }
     /// Whether the whole case has been read.
     pub fn read_all(self) -> bool { self.position == self.data.len() }
     /// A big-endian integer of `bytes` bytes, at most 32.

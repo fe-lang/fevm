@@ -7,7 +7,7 @@ pub use header::{Header, HeaderError, blob_base_fee}
 pub use schedule::Schedule
 pub use receipt::encode_receipt
 pub use trie::{Trie, state_root}
-pub use state_trie::{NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault, world_account}
+pub use state_trie::{NodeChanges, NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault, world_account}
 pub use chain::{
     Chain, HostFailure, Import, Imported, InvalidBlock, Ran, checked_env, decode_block, mismatch, run, write_changes,
 }

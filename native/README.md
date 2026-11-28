@@ -69,16 +69,17 @@ platform is not a passing result.
 
 [CI](../.github/workflows/ci.yml) runs acceptance, the state tests and the
 blockchain tests on both hosts for every pull request and push to `main`,
-then the state tests again over a lazy world and the blockchain tests
-statelessly.
+then the state tests again over a lazy world, the blockchain tests
+statelessly, and the blockchain tests over a store of trie nodes by path.
 
 ## State and blockchain tests
 
 The [conformance runner](conformance/README.md) runs execution-spec-tests
 Osaka and Amsterdam state tests through `Evm::transact`, and blockchain tests
 of Osaka, Amsterdam, their BPO forks and the transitions between them
-through `Chain::import`, and with `--lazy` and `--stateless` the same over a
-lazy world and through `validate`; `fevm_tools witness` validates blocks
+through `Chain::import`, and with `--lazy`, `--stateless` and `--paths` the
+same over a lazy world, through `validate`, and over a store of trie nodes
+by path; `fevm_tools witness` validates blocks
 from another client's proofs or execution witnesses. It is not part of
 acceptance.
 

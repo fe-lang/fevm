@@ -6,7 +6,9 @@
 // (`pre`) with the collapse siblings derived from the block's own (`post`),
 // and the codes the proofs and traces carry; a directory of a raw block and
 // its `debug_executionWitness` gives the block and the witness as they are.
-// Each case has its chain's fork schedule.
+// Each case has its chain's fork schedule. With `--paths` the case is
+// version 11, and each block is validated over a store of the witness's
+// nodes keyed by where each stands too.
 use core::{HashMap, MemBuffer, MemSpan, MemVec, Option}
 use core::hash::keccak256_word
 use std::abi::DynString
@@ -19,6 +21,7 @@ use std::time::Clock
 use json::{Value, parse}
 use fevm_rlp::{Decoder, Encoder}
 use ingot::{host, named, parse_u64, seconds}
+use ingot::blocks::Paths
 use ingot::conformance::{build_driver, captured, default_jobs, driver_result, hex_bytes, number, put, put_len, to_hex}
 
 // The forks from Osaka on of chain `chain_id`, if fevm has its schedule:
@@ -52,6 +55,9 @@ pub struct Options {
     out: Arg,
     level: u8,
     jobs: Option<u64>,
+    // Whether each block is validated over a store of the witness's nodes
+    // too.
+    paths: bool,
 }
 
 impl Options {
@@ -64,10 +70,15 @@ impl Options {
         var out: Option<Arg> = Option::None
         var level: u8 = 2
         var jobs: Option<u64> = Option::None
+        var paths = false
         var i: usize = 2
         while i < args.count() {
             let name = args.get(i)
             i += 1
+            if name == "--paths" {
+                paths = true
+                continue
+            }
             if name == "--replay" || name == "--execution-witness" {
                 while i < args.count() && !args.get(i).span().starts_with("--") {
                     if name == "--replay" { replay.push(args.get(i)) } else { executions.push(args.get(i)) }
@@ -103,7 +114,9 @@ impl Options {
             return Result::Err(format!("fevm_tools witness needs --chain for --execution-witness"))
         }
         match out {
-            Option::Some(out) => Result::Ok(Options { fe, executable, replay, executions, chain, out, level, jobs }),
+            Option::Some(out) => {
+                Result::Ok(Options { fe, executable, replay, executions, chain, out, level, jobs, paths })
+            },
             Option::None => Result::Err(format!("fevm_tools witness needs --out")),
         }
     }
@@ -519,8 +532,9 @@ fn add_counts(_ sums: mut [u64; 6], _ entry: Value) {
 /// through it, `jobs` at once, and reports in `results.json` each block's
 /// verdict, how many nodes, codes and headers the witness held and the
 /// validation read, and the totals: the count of each verdict, and over the
-/// valid blocks what their witnesses held and read. Fails unless every
-/// block is valid.
+/// valid blocks what their witnesses held and read; with `paths`, what the
+/// runs over a store counted. Fails unless every block is valid, and with
+/// `paths` unless no run over a store found a problem.
 pub fn run(_ options: Options) -> Result<MemBuffer, ()>
 uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
 {
@@ -543,7 +557,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let proofs = read_json(path.span(), "proofs.json")?
         let prestate = read_json(path.span(), "prestate.json")?
         let delegates = read_json(path.span(), "delegates.json")?
-        let (case, derived) = named(path, encode(result, chain, proofs, prestate, delegates))?
+        let (var case, derived) = named(path, encode(result, chain, proofs, prestate, delegates))?
+        if options.paths { case[0] = 11 }
         let number = MemBuffer::from_span(result["number"].text())
         let hash = MemBuffer::from_span(result["hash"].text())
         jobs.push(Job { path, number, hash, case, derived: Option::Some(derived) })
@@ -553,7 +568,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         let block = read_json(path.span(), "block.json")?
         let raw = read_json(path.span(), "raw.json")?
         let witness = read_json(path.span(), "witness.json")?
-        let case = named(path, encode_execution_witness(raw, block, witness, chain_id: options.chain.unwrap()))?
+        var case = named(path, encode_execution_witness(raw, block, witness, chain_id: options.chain.unwrap()))?
+        if options.paths { case[0] = 11 }
         let number = MemBuffer::from_span(block["result"]["number"].text())
         let hash = MemBuffer::from_span(block["result"]["hash"].text())
         jobs.push(Job { path, number, hash, case, derived: Option::None })
@@ -569,6 +585,8 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     var children: MemVec<Child> = MemVec::new()
     var running: MemVec<usize> = MemVec::new()
     var next: usize = 0
+    var paths = Paths::new()
+    var path_problems: usize = 0
     while next < jobs.len() || !children.is_empty() {
         if next < jobs.len() && children.len() < parallel {
             let input = MemBuffer::from_span(jobs[next].case.span())
@@ -593,6 +611,21 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
                 entry.set("problems", problems)
                 entry
             },
+        }
+        if options.paths {
+            match entry.get("paths") {
+                Option::Some(ref counted) => {
+                    paths.add(Paths::of(counted))
+                    for ref problem in counted["problems"].items() {
+                        println!(format!(job.path, ": paths: ", problem.text()))
+                        path_problems += 1
+                    }
+                },
+                Option::None => {
+                    println!(format!(job.path, ": no paths run"))
+                    path_problems += 1
+                },
+            }
         }
         if let Option::Some(derived) = job.derived { entry.set("derived", Value::number(derived)) }
         entry.set("directory", Value::string(job.path))
@@ -627,6 +660,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
         totals.set(name, pair)
         index += 2
     }
+    if options.paths { totals.set("paths", paths.value()) }
     println!(totals)
     report.set("totals", totals)
     report.set("blocks", blocks)
@@ -637,6 +671,7 @@ uses (fs: mut Fs, proc: mut Spawn, clock: Clock, out: mut Stdout)
     named(results, fs.write(results, text.span()))?
     let invalid = counts[1] + counts[2] + counts[3]
     if invalid != 0 { return Result::Err(format!(invalid, " of ", jobs.len(), " blocks are not valid")) }
+    if path_problems != 0 { return Result::Err(format!(path_problems, " problems over a store")) }
     Result::Ok(())
 }
 
