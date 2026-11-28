@@ -247,12 +247,15 @@ world before the next block. A host that keeps the state in its own storage
 would not use `Chain`, but `Block`, the changes it gives, and its own trie.
 `state_root(world)` computes the root of a whole world in one pass.
 
-`StateTrie::partial(root, nodes)` is the trie of a state root and a
-witness's nodes (`Nodes`, each held once by its hash and marked when read):
-each subtree it has not read is its hash, and a read or a change reads the
-nodes on its path, so it hashes only what changed. A node it needs and does
-not hold, or one that is malformed, is a `TrieFault`, after which the trie
-gives no root.
+`StateTrie<N>::partial(root, source)` is the trie of a state root and a
+`NodeSource`, which gives the RLP of a node by where it stands (`NodePath`:
+the owner account's key for a storage trie, the depth and the path's
+nibbles) and its hash, and checks that hash: a witness's `Nodes`, each held
+once by its hash and marked when read, or a store keyed by path. Each
+subtree the trie has not read is its hash, and a read or a change reads the
+nodes on its path, so it hashes only what changed. A node it needs and the
+source does not hold, one that is malformed, or a read the source fails, is
+a `TrieFault`, after which the trie gives no root.
 
 The chain has one head: a block whose parent is not the head fails header
 validation, so side branches and reorganizations are left to a host. Forks

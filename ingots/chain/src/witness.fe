@@ -66,7 +66,7 @@ impl Copy for Lack {}
 /// one header for each block, and remembers how far it went. It keeps the
 /// first thing it lacked.
 pub(ingot) struct WitnessState {
-    trie: StateTrie,
+    trie: StateTrie<Nodes>,
     codes: Nodes,
     headers: Nodes,
     // The parent's number and hash, and the hashes the walk has reached,
@@ -82,7 +82,7 @@ impl WitnessState {
     /// `codes` and the headers `headers`, which hold `parent`'s.
     pub(ingot) fn new(_ parent: Header, _ nodes: own Nodes, codes: own Nodes, headers: own Nodes) -> Self {
         WitnessState {
-            trie: StateTrie::partial(root: parent.state_root, nodes), codes, headers, number: parent.number,
+            trie: StateTrie<Nodes>::partial(root: parent.state_root, nodes), codes, headers, number: parent.number,
             hash: parent.hash, hashes: MemVec::new(), lack: Option::None,
         }
     }
@@ -91,7 +91,7 @@ impl WitnessState {
     pub(ingot) fn lack(self) -> Option<Lack> { self.lack }
 
     /// The trie nodes, the codes and the headers, each marked if read.
-    pub(ingot) fn into_parts(own self) -> (Nodes, Nodes, Nodes) { (self.trie.into_nodes(), self.codes, self.headers) }
+    pub(ingot) fn into_parts(own self) -> (Nodes, Nodes, Nodes) { (self.trie.into_source(), self.codes, self.headers) }
 
     // Keeps `lack` unless the state lacked something before: unavailable.
     fn lacks(mut self, _ lack: Lack) -> SourceError {
@@ -106,6 +106,8 @@ impl WitnessState {
             TrieFault::Allocation => SourceError::Allocation,
             TrieFault::Missing(hash) => self.lacks(Lack::Node(hash)),
             TrieFault::Malformed(hash) => self.lacks(Lack::MalformedNode(hash)),
+            // `Nodes` never fails a read, so this is never given.
+            TrieFault::Source(hash) => self.lacks(Lack::Node(hash)),
         }
     }
 }
@@ -124,7 +126,7 @@ impl StateSource for WitnessState {
         }
     }
     fn code(mut self, hash: u256) -> Result<SourceError, ref MemSpan> {
-        match self.codes.read(hash) {
+        match self.codes.find(hash) {
             Option::Some(at) => Result::Ok(self.codes.node(at)),
             Option::None => Result::Err(self.lacks(Lack::Code(hash))),
         }
@@ -141,7 +143,7 @@ impl StateSource for WitnessState {
             let next = match self.hashes.last() {
                 Option::None => self.hash,
                 Option::Some(hash) => {
-                    let Option::Some(at) = self.headers.read(hash) else {
+                    let Option::Some(at) = self.headers.find(hash) else {
                         return Result::Err(self.lacks(Lack::Header(hash)))
                     }
                     let rlp = self.headers.node(at)
@@ -206,7 +208,7 @@ pub fn validate<T: Tracer>(_ rlp: MemSpan, parent_hash: u256, _ witness: mut Wit
         Result::Ok(block) => block,
         Result::Err(import) => return rejected(import, lack: Option::None),
     }
-    let Option::Some(at) = witness.headers.read(parent_hash) else { return Verdict::Witness(Lack::Header(parent_hash)) }
+    let Option::Some(at) = witness.headers.find(parent_hash) else { return Verdict::Witness(Lack::Header(parent_hash)) }
     let parent = match Header::decode(witness.headers.node(at)) {
         Result::Ok(parent) => parent,
         Result::Err(HeaderError::Allocation) => return Verdict::Failed(ALLOCATION),

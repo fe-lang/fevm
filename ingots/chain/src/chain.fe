@@ -10,7 +10,7 @@ use fevm_rlp::Decoder
 use ingot::header::{Header, HeaderError}
 use ingot::receipt::encode_receipt
 use ingot::schedule::Schedule
-use ingot::state_trie::{Nodes, StateTrie, world_account}
+use ingot::state_trie::{NodeSource, Nodes, StateTrie, world_account}
 use ingot::transaction::{TxError, decode_transaction}
 use ingot::trie::Trie
 
@@ -362,7 +362,8 @@ impl Chain {
 // later removal, and then a touched key lies under it and a witness holds
 // it. In the other order a branch can pass through one child and end with
 // two, and that read is this trie's alone.
-pub(ingot) fn write_changes(_ trie: mut StateTrie, _ world: mut WorldState, _ changes: BlockChanges) {
+pub(ingot) fn write_changes<N: NodeSource>(_ trie: mut StateTrie<N>, _ world: mut WorldState,
+                                         _ changes: BlockChanges) {
     for removing in [false, true] {
         for account in changes.accounts() {
             if world.exists(account.address) == removing { continue }

@@ -1,6 +1,6 @@
 // The state trie held in memory with each node's hash, so that changing a
 // few accounts and slots rehashes only their paths. A partial trie holds
-// only what it has read of a witness's nodes.
+// only what it has read of the nodes of a source, such as a witness's.
 use core::{MemBuffer, MemSpan, MemVec, Option, Result}
 use core::num::leading_zeros
 use core::ops::Index
@@ -92,11 +92,49 @@ impl<T> Index<u32> for Arena<T> {
 // The count of leading nibbles `a` and `b` share.
 fn shared(_ a: u256, _ b: u256) -> usize { (leading_zeros(a ^ b) / 4).downcast_truncate() }
 
+// The first `depth` nibbles of `key`, and the others zero.
+fn above(_ key: u256, _ depth: usize) -> u256 {
+    if depth == 0 { 0 } else { key & u256::max() << ((64 - depth) * 4) as u256 }
+}
+
 /// Why a trie has no root: an allocation failed, or the node of a hash it
-/// had to read is missing or malformed.
-pub enum TrieFault { Allocation, Missing(u256), Malformed(u256) }
+/// had to read is missing or malformed, or its source failed to read it, for
+/// a reason the source keeps.
+pub enum TrieFault { Allocation, Missing(u256), Malformed(u256), Source(u256) }
 
 impl Copy for TrieFault {}
+
+/// Where a node stands in the state trie: in the storage trie of the
+/// account whose key is `owner`, or for none in the account trie, `depth`
+/// nibbles below that trie's root, under the first `depth` nibbles of
+/// `path`, counted from its most significant; its other nibbles are zero.
+pub struct NodePath { pub owner: Option<u256>, pub depth: u8, pub path: u256 }
+
+impl Copy for NodePath {}
+
+/// Why a source gives no node: it holds none there of the hash asked for,
+/// or it failed to read, for a reason it keeps.
+pub enum NodeError { Missing, Failed }
+
+impl Copy for NodeError {}
+
+/// Where a partial trie reads each node it holds only as a hash, when it
+/// first reaches it. The trie asks once for each node, by where the node
+/// stands and its hash, so a source can keep nodes by either.
+pub trait NodeSource {
+    /// The RLP of the node at `at` whose keccak256 is `hash`. The source
+    /// checks the hash: the trie decodes what it is given and does not hash
+    /// it again. A source that holds another node at `at` does not hold the
+    /// state the trie is of, and gives `Failed`.
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan>
+}
+
+/// The source of a complete trie, which has no stubs and never asks.
+impl NodeSource for () {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        Result::Err(NodeError::Missing)
+    }
+}
 
 // A node of `Nodes`: where its RLP is in the buffer, and whether it has been
 // read.
@@ -141,11 +179,22 @@ impl Nodes {
     pub fn used(self, _ at: usize) -> bool { self.entries[at].used }
 
     /// The position of the node of `hash`, marked used; none if none is held.
-    pub(ingot) fn read(mut self, _ hash: u256) -> Option<usize> {
+    pub(ingot) fn find(mut self, _ hash: u256) -> Option<usize> {
         let lookup = self.index.get(hash)
         if !lookup.found { return Option::None }
         self.entries[lookup.value].used = true
         Option::Some(lookup.value)
+    }
+}
+
+/// Nodes by their hash, wherever they stand. A node's hash is its key, made
+/// as it is added, so a read checks nothing more.
+impl NodeSource for Nodes {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        match self.find(hash) {
+            Option::Some(position) => Result::Ok(self.node(position)),
+            Option::None => Result::Err(NodeError::Missing),
+        }
     }
 }
 
@@ -167,16 +216,16 @@ pub(ingot) fn world_account(_ world: mut WorldState, _ address: u256) -> Option<
 /// address, of `rlp([nonce, balance, storage_root, code_hash])`, and for each
 /// account the trie of its slots, keyed by keccak256 of the slot, of the
 /// value's RLP. Each node keeps its hash. A complete trie holds a whole
-/// world. A partial one starts from a state root and the nodes of a witness,
-/// and holds each subtree it has not read as its hash: a read or a change
-/// resolves the nodes on its path, so the trie reads only the nodes it needs
-/// and never hashes what it has not changed. A caller sets each account and
-/// slot that changed, and the root rehashes only their paths. The trie
-/// depends only on what it holds, not on the order of the changes: setting
-/// what a block changed back undoes the block. The first fault, a failed
-/// allocation or a node missing or malformed, is kept: the trie then
-/// changes no more and has no root.
-pub struct StateTrie {
+/// world. A partial one starts from a state root and a source of its nodes,
+/// such as a witness's, and holds each subtree it has not read as its hash:
+/// a read or a change resolves the nodes on its path, so the trie reads only
+/// the nodes it needs and never hashes what it has not changed. A caller
+/// sets each account and slot that changed, and the root rehashes only their
+/// paths. The trie depends only on what it holds, not on the order of the
+/// changes: setting what a block changed back undoes the block. The first
+/// fault, a failed allocation, a node missing or malformed, or a failed read
+/// of the source, is kept: the trie then changes no more and has no root.
+pub struct StateTrie<N: NodeSource = ()> {
     root: Child,
     accounts: Arena<Account>,
     leaves: Arena<Leaf>,
@@ -184,30 +233,16 @@ pub struct StateTrie {
     branches: Arena<Branch>,
     // The hash of each stub.
     stubs: Arena<u256>,
-    // What stubs resolve from: none for a complete trie.
-    nodes: Nodes,
+    // What stubs resolve from: `()` for a complete trie, which has none.
+    source: N,
     fault: Option<TrieFault>,
 }
 
-impl StateTrie {
-    // An empty trie over `nodes`.
-    fn over(_ nodes: own Nodes) -> Self {
-        StateTrie {
-            root: Child::Empty,
-            accounts: Arena::new(),
-            leaves: Arena::new(),
-            extensions: Arena::new(),
-            branches: Arena::new(),
-            stubs: Arena::new(),
-            nodes,
-            fault: Option::None,
-        }
-    }
-
+impl StateTrie<()> {
     /// The trie of every account and slot in `world`, whose nonces are under
     /// 2^64; mutable for the code hashes the world computes on first use.
     pub fn new(_ world: mut WorldState) -> Self {
-        var trie = StateTrie::over(Nodes::new())
+        var trie = StateTrie::over(())
         for position in 0..world.account_count() {
             let address = world.account_at(position).address
             trie.set_account(address, world_account(mut world, address))
@@ -218,11 +253,29 @@ impl StateTrie {
         }
         trie
     }
+}
+
+impl<N: NodeSource> StateTrie<N> {
+    // An empty trie over `source`.
+    fn over(_ source: own N) -> Self {
+        Self {
+            root: Child::Empty,
+            accounts: Arena::new(),
+            leaves: Arena::new(),
+            extensions: Arena::new(),
+            branches: Arena::new(),
+            stubs: Arena::new(),
+            source,
+            fault: Option::None,
+        }
+    }
 
     /// The trie of the state whose root is `root`, which reads its nodes from
-    /// `nodes` as it reaches them, each by its hash.
-    pub fn partial(root: u256, _ nodes: own Nodes) -> Self {
-        var trie = StateTrie::over(nodes)
+    /// `source` as it reaches them. A source other than `()` needs the type
+    /// argument, `StateTrie<N>::partial`: a path without it means the `()`
+    /// instantiation.
+    pub fn partial(root: u256, _ source: own N) -> Self {
+        var trie = Self::over(source)
         if root != EMPTY_ROOT {
             match trie.stubs.add(root) {
                 Option::Some(stub) => trie.root = Child::Hash(stub),
@@ -232,8 +285,9 @@ impl StateTrie {
         trie
     }
 
-    /// The nodes a partial trie reads from, with those it has read marked.
-    pub fn into_nodes(own self) -> Nodes { self.nodes }
+    /// The source a partial trie reads from, such as `Nodes` with those it
+    /// has read marked.
+    pub fn into_source(own self) -> N { self.source }
 
     /// The account of `address`, if it exists. Read before the changes go
     /// in, while its storage root is not stale.
@@ -353,15 +407,15 @@ impl StateTrie {
     }
 
     // Keeps the fault of an operation that failed: an allocation's, unless
-    // it kept one of a node.
+    // it kept one of a node or of the source.
     fn failed(mut self) { if self.fault.is_none() { self.fault = Option::Some(TrieFault::Allocation) } }
 
-    // `set_account_keyed`; none if a node is missing or malformed or an
-    // allocation fails.
+    // `set_account_keyed`; none if a node is missing or malformed, the
+    // source fails or an allocation fails.
     fn write_account(mut self, _ key: u256, _ state: Option<AccountState>) -> Option<()> {
         let found = self.open_account(key)?
         let Option::Some(state) = state else {
-            if found.is_some() { self.root = self.remove(self.root, key, depth: 0, storage: false)? }
+            if found.is_some() { self.root = self.remove(self.root, key, depth: 0, owner: Option::None)? }
             return Option::Some(())
         }
         let Option::Some(at) = found else {
@@ -384,8 +438,8 @@ impl StateTrie {
         Option::Some(())
     }
 
-    // `set_slot_keyed`; none if a node is missing or malformed or an
-    // allocation fails.
+    // `set_slot_keyed`; none if a node is missing or malformed, the source
+    // fails or an allocation fails.
     fn write_slot(mut self, account: u256, key: u256, value: u256) -> Option<()> {
         let Option::Some(at) = self.open_account(account)? else {
             // A caller sets the account of a slot first.
@@ -397,7 +451,7 @@ impl StateTrie {
         let storage = match found {
             Option::Some(leaf) => {
                 if self.leaves[leaf].value == value { return Option::Some(()) }
-                if value == 0 { self.remove(storage, key, depth: 0, storage: true)? } else {
+                if value == 0 { self.remove(storage, key, depth: 0, owner: Option::Some(account))? } else {
                     self.leaves[leaf].value = value
                     self.touch(storage, key, depth: 0)
                     storage
@@ -416,9 +470,10 @@ impl StateTrie {
 
     // Resolves the stubs on the path of `key` in the account trie, of which
     // a complete trie has none, and gives the position of its account if it
-    // has one; none if a node is missing or malformed or an allocation fails.
+    // has one; none if a node is missing or malformed, the source fails or an
+    // allocation fails.
     fn open_account(mut self, _ key: u256) -> Option<Option<u32>> {
-        if self.stubs.len() != 0 { self.root = self.open(self.root, key, depth: 0, storage: false)? }
+        if self.stubs.len() != 0 { self.root = self.open(self.root, key, depth: 0, owner: Option::None)? }
         Option::Some(self.find(self.root, key, depth: 0))
     }
 
@@ -426,26 +481,27 @@ impl StateTrie {
     // at `at`.
     fn open_slot(mut self, _ at: u32, _ key: u256) -> Option<Option<u32>> {
         if self.stubs.len() != 0 {
-            let storage = self.open(self.accounts[at].storage, key, depth: 0, storage: true)?
+            let account = self.accounts[at]
+            let storage = self.open(account.storage, key, depth: 0, owner: Option::Some(account.key))?
             self.accounts[at].storage = storage
         }
         Option::Some(self.find(self.accounts[at].storage, key, depth: 0))
     }
 
-    // The node in place of `node`, at `depth` of a storage trie if `storage`,
-    // with every stub on the path of `key` under it resolved; none if a node
-    // is missing or malformed or an allocation fails. It stops at an
-    // extension `key` leaves, whose child stays unread, so proving a key
+    // The node in place of `node`, at `depth` of the trie of `owner`, with
+    // every stub on the path of `key` under it resolved; none if a node is
+    // missing or malformed, the source fails or an allocation fails. It stops
+    // at an extension `key` leaves, whose child stays unread, so proving a key
     // absent there needs no more.
-    fn open(mut self, _ node: Child, _ key: u256, depth: usize, storage: bool) -> Option<Child> {
+    fn open(mut self, _ node: Child, _ key: u256, depth: usize, owner: Option<u256>) -> Option<Child> {
         match node {
             Child::Hash(stub) => {
-                let node = self.resolve(stub, prefix: key, depth, storage)?
-                self.open(node, key, depth, storage)
+                let node = self.resolve(stub, owner, prefix: key, depth)?
+                self.open(node, key, depth, owner)
             },
             Child::Branch(at) => {
                 let digit = nibble(key, depth)
-                let child = self.open(self.branches[at].children[digit], key, depth: depth + 1, storage)?
+                let child = self.open(self.branches[at].children[digit], key, depth: depth + 1, owner)?
                 self.branches[at].children[digit] = child
                 Option::Some(node)
             },
@@ -457,32 +513,36 @@ impl StateTrie {
                 let child = match extension.child {
                     Child::Hash(stub) => {
                         let hash = self.stubs[stub]
-                        let child = self.resolve(stub, prefix: key, depth: end, storage)?
+                        let child = self.resolve(stub, owner, prefix: key, depth: end)?
                         let Child::Branch(_) = child else { return self.fail(TrieFault::Malformed(hash)) }
                         child
                     },
                     _ => extension.child,
                 }
                 self.extensions[at].child = child
-                self.open(child, key, depth: end, storage)?
+                self.open(child, key, depth: end, owner)?
                 Option::Some(node)
             },
             _ => Option::Some(node),
         }
     }
 
-    // The node of `stub`, at `depth` of a storage trie if `storage`, below
-    // the first `depth` nibbles of `prefix`, read from the nodes, which
-    // releases the stub: the one place the trie reads a node. None if it is
-    // missing or malformed or an allocation fails.
-    fn resolve(mut self, _ stub: u32, prefix: u256, depth: usize, storage: bool) -> Option<Child> {
+    // The node of `stub`, at `depth` of the trie of `owner`, below the first
+    // `depth` nibbles of `prefix`, read from the source, which releases the
+    // stub: the one place the trie reads a node. None if it is missing or
+    // malformed, the source fails or an allocation fails.
+    fn resolve(mut self, _ stub: u32, owner: Option<u256>, prefix: u256, depth: usize) -> Option<Child> {
         let hash = self.stubs[stub]
-        let Option::Some(at) = self.nodes.read(hash) else { return self.fail(TrieFault::Missing(hash)) }
-        let rlp = MemBuffer::try_from_span(self.nodes.node(at))?
+        let at = NodePath { owner, depth: depth.downcast_truncate(), path: above(prefix, depth) }
+        let rlp = match self.source.read(at, hash) {
+            Result::Ok(rlp) => MemBuffer::try_from_span(rlp)?,
+            Result::Err(NodeError::Missing) => return self.fail(TrieFault::Missing(hash)),
+            Result::Err(NodeError::Failed) => return self.fail(TrieFault::Source(hash)),
+        }
         // A node under 32 bytes is its parent's, not reached by its hash,
         // unless it is a root.
         if rlp.len() < 32 && depth != 0 { return self.fail(TrieFault::Malformed(hash)) }
-        let node = self.decode(rlp.span(), prefix, depth, storage, hash)?
+        let node = self.decode(rlp.span(), prefix, depth, storage: owner.is_some(), hash)?
         self.stubs.release(stub)
         Option::Some(node)
     }
@@ -554,8 +614,7 @@ impl StateTrie {
             if flag > 3 || (odd == 0 && path[0] & 0xf != 0) || !ends { return self.fail(malformed) }
             var bits: u256 = if odd == 1 { (path[0] & 0xf) as u256 } else { 0 }
             for index in 1..path.len() { bits = bits << 8 | path[index] as u256 }
-            let above = if depth == 0 { 0 } else { prefix & u256::max() << ((64 - depth) * 4) as u256 }
-            let key = above | bits << ((64 - end) * 4) as u256
+            let key = above(prefix, depth) | bits << ((64 - end) * 4) as u256
             if !leaf {
                 // An extension, over a branch.
                 let child = if items.is_list() {
@@ -685,16 +744,16 @@ impl StateTrie {
         Option::Some(Child::Extension(self.extensions.add(extension)?))
     }
 
-    // The node in place of `node`, at `depth` of a storage trie if `storage`,
-    // once the leaf of `key`, which is under it, is removed with its
-    // storage; none if a node is missing or malformed or an allocation
+    // The node in place of `node`, at `depth` of the trie of `owner`, once
+    // the leaf of `key`, which is under it, is removed with its storage; none
+    // if a node is missing or malformed, the source fails or an allocation
     // fails. A branch left with one child gives way to it, and an extension
     // over what is no longer a branch gives it its path.
-    fn remove(mut self, _ node: Child, _ key: u256, depth: usize, storage: bool) -> Option<Child> {
+    fn remove(mut self, _ node: Child, _ key: u256, depth: usize, owner: Option<u256>) -> Option<Child> {
         match node {
             Child::Branch(at) => {
                 let digit = nibble(key, depth)
-                let child = self.remove(self.branches[at].children[digit], key, depth: depth + 1, storage)?
+                let child = self.remove(self.branches[at].children[digit], key, depth: depth + 1, owner)?
                 let branch = mut self.branches[at]
                 branch.children[digit] = child
                 branch.len = 0
@@ -715,7 +774,7 @@ impl StateTrie {
                 // A stub is read, for its kind decides what takes the
                 // branch's place.
                 let child = match child {
-                    Child::Hash(stub) => self.resolve(stub, prefix: key, depth: depth + 1, storage)?,
+                    Child::Hash(stub) => self.resolve(stub, owner, prefix: key, depth: depth + 1)?,
                     _ => child,
                 }
                 let Child::Branch(_) = child else {
@@ -729,7 +788,7 @@ impl StateTrie {
             },
             Child::Extension(at) => {
                 let end = self.extensions[at].end as usize
-                let child = self.remove(self.extensions[at].child, key, depth: end, storage)?
+                let child = self.remove(self.extensions[at].child, key, depth: end, owner)?
                 let Child::Branch(_) = child else {
                     // A stale leaf or extension, which takes this one's path.
                     self.extensions.release(at)

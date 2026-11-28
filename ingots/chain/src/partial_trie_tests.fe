@@ -7,7 +7,7 @@ use fevm::state::{EMPTY_CODE_HASH, EMPTY_ROOT}
 use fevm_rlp::Encoder
 use keccak::keccak256_word
 use ingot::chain::write_changes
-use ingot::state_trie::{Nodes, StateTrie, TrieFault}
+use ingot::state_trie::{NodeError, NodePath, NodeSource, Nodes, StateTrie, TrieFault}
 use ingot::state_trie_tests::Random
 use ingot::trie::{Trie, hash, put_path, state_root}
 
@@ -24,7 +24,7 @@ enum Op {
 impl Copy for Op {}
 
 // Applies `ops` to `trie`; what its reads and roots give, until one faults.
-fn apply(_ trie: mut StateTrie, _ ops: MemVec<Op>) -> MemVec<u256> {
+fn apply<N: NodeSource>(_ trie: mut StateTrie<N>, _ ops: MemVec<Op>) -> MemVec<u256> {
     var seen: MemVec<u256> = MemVec::new()
     for op in ops {
         match op {
@@ -71,13 +71,56 @@ fn used(_ nodes: Nodes, without: usize) -> Nodes {
     kept
 }
 
+fn same_place(_ a: NodePath, _ b: NodePath) -> bool { a.owner == b.owner && a.depth == b.depth && a.path == b.path }
+
+// Nodes where they stand, as a store keyed by place holds them: a source
+// that checks each node's hash as it reads it, counts its reads, and fails
+// the read of the node of `failing`.
+struct Places { places: MemVec<NodePath>, nodes: MemVec<MemBuffer>, reads: usize, failing: u256 }
+
+impl NodeSource for Places {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        if hash == self.failing { return Result::Err(NodeError::Failed) }
+        for index in 0..self.places.len() {
+            if same_place(self.places[index], at) {
+                if keccak256_word(self.nodes[index].span()) != hash { return Result::Err(NodeError::Failed) }
+                self.reads += 1
+                return Result::Ok(self.nodes[index].span())
+            }
+        }
+        Result::Err(NodeError::Missing)
+    }
+}
+
+// Nodes by hash, which notes where each node it gives stands; no place is
+// asked for twice.
+struct Noting { nodes: Nodes, read: Places }
+
+impl Noting {
+    fn new(_ nodes: own Nodes) -> Self {
+        Noting { nodes, read: Places { places: MemVec::new(), nodes: MemVec::new(), reads: 0, failing: 0 } }
+    }
+}
+
+impl NodeSource for Noting {
+    fn read(mut self, _ at: NodePath, hash: u256) -> Result<NodeError, ref MemSpan> {
+        let Option::Some(position) = self.nodes.find(hash) else { return Result::Err(NodeError::Missing) }
+        for place in self.read.places { core::assert(!same_place(place, at)) }
+        self.read.places.push(at)
+        self.read.nodes.push(MemBuffer::from_span(self.nodes.node(position)))
+        Result::Ok(self.nodes.node(position))
+    }
+}
+
 // Applies `setup`, then `ops`, which end with a root, to a complete trie,
 // and `ops` to partial tries of the complete trie's nodes after `setup`:
-// over all of them, and over the ones the first partial trie reads, they
-// give what the complete trie gives; without one of those, every
-// `every`th in turn, they give the same until the trie faults on that one,
-// and then no root. The count of nodes read, and of nodes.
-fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize) {
+// over all of them by hash, over the ones the first partial trie reads by
+// hash and where they stand, they give what the complete trie gives;
+// without one of those, every `every`th in turn, they give the same until
+// the trie faults on that one, and then no root. The count of nodes read,
+// and of nodes, and where each read stands: a node can stand in more than
+// one place, under several accounts with the same storage.
+fn checked(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize, MemVec<NodePath>) {
     var world = WorldState::empty()
     var complete = StateTrie::new(mut world)
     let _ = apply(mut complete, setup)
@@ -85,19 +128,25 @@ fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize)
     var nodes = Nodes::new()
     core::assert(complete.write_nodes(mut nodes))
     let expected = apply(mut complete, ops)
-    var partial = StateTrie::partial(root, nodes)
+    var partial = StateTrie<Noting>::partial(root, Noting::new(nodes))
     let seen = apply(mut partial, ops)
     core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
-    let all = partial.into_nodes()
-    var partial = StateTrie::partial(root, used(all, without: usize::max()))
+    let noting = partial.into_source()
+    let all = noting.nodes
+    var partial = StateTrie<Nodes>::partial(root, used(all, without: usize::max()))
     let seen = apply(mut partial, ops)
     core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
+    var by_place = StateTrie<Places>::partial(root, noting.read)
+    let seen = apply(mut by_place, ops)
+    core::assert(seen.len() == expected.len() && same(seen, expected, len: expected.len()))
+    let read = by_place.into_source()
+    core::assert(read.reads == read.places.len())
     var count: usize = 0
     for at in 0..all.len() {
         if !all.used(at) { continue }
         count += 1
         if (count - 1) % every != 0 { continue }
-        var partial = StateTrie::partial(root, used(all, without: at))
+        var partial = StateTrie<Nodes>::partial(root, used(all, without: at))
         let seen = apply(mut partial, ops)
         core::assert(seen.len() < expected.len() && same(seen, expected, len: seen.len()))
         core::assert(match partial.root() {
@@ -105,7 +154,13 @@ fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize)
             _ => false,
         })
     }
-    (count, all.len())
+    (count, all.len(), read.places)
+}
+
+// `checked`'s counts of nodes read and of nodes.
+fn check(_ setup: MemVec<Op>, _ ops: MemVec<Op>, every: usize) -> (usize, usize) {
+    let (count, held, _) = checked(setup, ops, every)
+    (count, held)
 }
 
 // The keys of the tests whose keys share their first 60 nibbles, those of
@@ -333,6 +388,81 @@ fn partial_trie_collapses_onto_an_inline_sibling() {
     core::assert(removing_slot([0x2100, 0x1000, 0x2201, 0x2202]) == 4)
 }
 
+fn place(owner: Option<u256>, depth: u8, path: u256) -> NodePath { NodePath { owner, depth, path } }
+
+// Whether `places` are `expected`, in order.
+fn at<const N: usize>(_ places: MemVec<NodePath>, _ expected: [NodePath; N]) -> bool {
+    if places.len() != N { return false }
+    for index in 0..N {
+        if !same_place(places[index], expected[index]) { return false }
+    }
+    true
+}
+
+#[test]
+fn partial_trie_reads_nodes_where_they_stand() {
+    // The root branch, the removed account's leaf below it at nibble 1, and
+    // the extension at nibble 2 that the branch collapses onto.
+    let keys = keyed([0x1000, 0x2ff1, 0x2ff2], count: 4)
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Set(keys[0], Option::None))
+    ops.push(Op::Root)
+    let (_, _, places) = checked(accounts(keys), ops, every: 1)
+    let none: Option<u256> = Option::None
+    core::assert(at(places, [
+        place(owner: none, depth: 0, path: 0), place(owner: none, depth: 1, path: path(0x1, count: 1)),
+        place(owner: none, depth: 1, path: path(0x2, count: 1)),
+    ]))
+    // The account's leaf, then in its storage trie the root, an extension of
+    // 60 nibbles, the branch below it, and the hashed branch at nibble 61
+    // over the removed slot's inline leaf.
+    let account = path(0x1, count: 1)
+    var setup: MemVec<Op> = MemVec::new()
+    setup.push(Op::Set(account, funded(1)))
+    for nibbles in [0x2100 as u256, 0x1000, 0x2210, 0x2220] { setup.push(Op::Store(account, SHARED | nibbles, 1)) }
+    var ops: MemVec<Op> = MemVec::new()
+    ops.push(Op::Store(account, SHARED | 0x2100, 0))
+    ops.push(Op::Root)
+    let (_, _, places) = checked(setup, ops, every: 1)
+    let owner = Option::Some(account)
+    core::assert(at(places, [
+        place(owner: none, depth: 0, path: 0), place(owner, depth: 0, path: 0), place(owner, depth: 60, path: SHARED),
+        place(owner, depth: 61, path: SHARED | 0x2000),
+    ]))
+}
+
+#[test]
+fn partial_trie_keeps_a_failed_read() {
+    // A source that fails to read an account's storage root: the account
+    // reads, its slot faults with the root's hash, and the fault is kept.
+    let account = path(0x1, count: 1)
+    let slot = hash(1, len: 32)
+    var world = WorldState::empty()
+    var complete = StateTrie::new(mut world)
+    complete.set_account_keyed(account, funded(1))
+    complete.set_slot_keyed(account, key: slot, value: 1)
+    complete.set_account_keyed(path(0x2, count: 1), funded(2))
+    let root = complete.root().unwrap()
+    let storage_root = complete.account_keyed(account).unwrap().unwrap().storage_root
+    var nodes = Nodes::new()
+    core::assert(complete.write_nodes(mut nodes))
+    var noting = StateTrie<Noting>::partial(root, Noting::new(nodes))
+    core::assert(noting.slot_keyed(account, key: slot).unwrap() == 1)
+    var places = noting.into_source().read
+    places.failing = storage_root
+    var trie = StateTrie<Places>::partial(root, places)
+    core::assert(trie.account_keyed(account).unwrap().unwrap().balance == 1)
+    core::assert(match trie.slot_keyed(account, key: slot) {
+        Result::Err(TrieFault::Source(hash)) => hash == storage_root,
+        _ => false,
+    })
+    trie.set_account_keyed(path(0x2, count: 1), Option::None)
+    core::assert(match trie.root() {
+        Result::Err(TrieFault::Source(hash)) => hash == storage_root,
+        _ => false,
+    })
+}
+
 #[test]
 fn partial_trie_proves_absence_at_an_extension() {
     // Accounts below an extension of three nibbles: an account whose key
@@ -436,13 +566,13 @@ fn partial_trie_clears_storage_without_reading_it() {
 #[test]
 fn partial_trie_of_no_nodes() {
     // The empty root needs none; another, its node.
-    var empty = StateTrie::partial(root: EMPTY_ROOT, Nodes::new())
+    var empty = StateTrie<Nodes>::partial(root: EMPTY_ROOT, Nodes::new())
     core::assert(empty.account(1).unwrap().is_none() && empty.root().unwrap() == EMPTY_ROOT)
     empty.set_account(1, funded(1))
     var world = WorldState::empty()
     core::assert(world.set_balance(1, 1))
     core::assert(empty.root().unwrap() == state_root(mut world).unwrap())
-    var missing = StateTrie::partial(root: 0x1234, Nodes::new())
+    var missing = StateTrie<Nodes>::partial(root: 0x1234, Nodes::new())
     core::assert(match missing.account(1) {
         Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
         _ => false,
@@ -537,7 +667,7 @@ const SLOT: u256 = 0x22222222222222222222222222222222222222222222222222222222222
 fn rejects<const N: usize>(_ nodes: [MemBuffer; N], slot: bool, bad: usize) -> bool {
     var held = Nodes::new()
     for index in 0..N { core::assert(held.add(nodes[index].span())) }
-    var trie = StateTrie::partial(root: keccak256_word(nodes[0].span()), held)
+    var trie = StateTrie<Nodes>::partial(root: keccak256_word(nodes[0].span()), held)
     let read = if slot { trie.slot_keyed(account: KEY, key: SLOT).err() } else { trie.account_keyed(KEY).err() }
     let expected = keccak256_word(nodes[bad].span())
     let rejected = match (read, trie.root()) {
@@ -546,7 +676,7 @@ fn rejects<const N: usize>(_ nodes: [MemBuffer; N], slot: bool, bad: usize) -> b
         _ => false,
     }
     // The nodes after the malformed one stay unread.
-    let held = trie.into_nodes()
+    let held = trie.into_source()
     for at in bad + 1..N {
         if held.used(at) { return false }
     }
@@ -575,7 +705,7 @@ fn partial_trie_rejects_malformed_nodes() {
     // A good leaf: its account reads.
     var good = Nodes::new()
     core::assert(good.add(leaf(KEY, depth: 0, value.span()).span()))
-    var trie = StateTrie::partial(root: keccak256_word(leaf(KEY, depth: 0, value.span()).span()), good)
+    var trie = StateTrie<Nodes>::partial(root: keccak256_word(leaf(KEY, depth: 0, value.span()).span()), good)
     core::assert(trie.account_keyed(KEY).unwrap().unwrap().balance == 1)
     // Trailing bytes.
     var rlp = Encoder::new()
@@ -806,7 +936,7 @@ fn partial_trie_rejects_malformed_extensions_and_branches() {
     let root = branch(children, empty.span())
     var held = Nodes::new()
     core::assert(held.add(root.span()) && held.add(gone.span()) && held.add(sibling.span()))
-    var trie = StateTrie::partial(root: keccak256_word(root.span()), held)
+    var trie = StateTrie<Nodes>::partial(root: keccak256_word(root.span()), held)
     trie.set_account_keyed(removed, Option::None)
     core::assert(match trie.root() {
         Result::Err(TrieFault::Malformed(hash)) => hash == keccak256_word(sibling.span()),
@@ -817,7 +947,7 @@ fn partial_trie_rejects_malformed_extensions_and_branches() {
 #[test]
 fn partial_trie_keeps_its_first_fault() {
     // Without the root's node: each read and `write_nodes` gives its fault.
-    var missing = StateTrie::partial(root: 0x1234, Nodes::new())
+    var missing = StateTrie<Nodes>::partial(root: 0x1234, Nodes::new())
     for _ in 0..2 {
         core::assert(match missing.account(1) {
             Result::Err(TrieFault::Missing(hash)) => hash == 0x1234,
@@ -840,7 +970,7 @@ fn partial_trie_keeps_its_first_fault() {
     let root = branch(children, filled(0, count: 0).span())
     var held = Nodes::new()
     core::assert(held.add(root.span()) && held.add(malformed.span()))
-    var trie = StateTrie::partial(root: keccak256_word(root.span()), held)
+    var trie = StateTrie<Nodes>::partial(root: keccak256_word(root.span()), held)
     for key in [path(0x1, count: 1), path(0x2, count: 1)] {
         core::assert(match trie.account_keyed(key) {
             Result::Err(TrieFault::Missing(hash)) => hash == 0x5678,
@@ -852,7 +982,7 @@ fn partial_trie_keeps_its_first_fault() {
         Result::Err(TrieFault::Missing(hash)) => hash == 0x5678,
         _ => false,
     })
-    core::assert(!trie.into_nodes().used(1))
+    core::assert(!trie.into_source().used(1))
 }
 
 const SENDER: u256 = 0x5e4d
@@ -931,7 +1061,7 @@ fn clears(remade: usize) {
     for at in 0..nodes.len() {
         if keccak256_word(nodes.node(at)) != storage_root { core::assert(held.add(nodes.node(at))) }
     }
-    var partial = StateTrie::partial(root, held)
+    var partial = StateTrie<Nodes>::partial(root, held)
     write_changes(mut partial, mut world, output.changes)
     let after = state_root(mut world).unwrap()
     core::assert(partial.root().unwrap() == after)
@@ -990,11 +1120,11 @@ fn sets_first(storage: bool) {
     var nodes = Nodes::new()
     core::assert(complete.write_nodes(mut nodes))
     let expected = apply(mut complete, setting)
-    var partial = StateTrie::partial(root, nodes)
+    var partial = StateTrie<Nodes>::partial(root, nodes)
     let seen = apply(mut partial, setting)
     core::assert(seen.len() == 1 && same(seen, expected, len: 1))
     // One node unread, the child at 2, which the other order needs.
-    let all = partial.into_nodes()
+    let all = partial.into_source()
     var unread: usize = 0
     var hash: u256 = 0
     for at in 0..all.len() {
@@ -1004,7 +1134,7 @@ fn sets_first(storage: bool) {
         }
     }
     core::assert(unread == 1)
-    var partial = StateTrie::partial(root, used(all, without: usize::max()))
+    var partial = StateTrie<Nodes>::partial(root, used(all, without: usize::max()))
     let _ = apply(mut partial, removing)
     core::assert(match partial.root() {
         Result::Err(TrieFault::Missing(missing)) => missing == hash,
@@ -1068,10 +1198,10 @@ fn reads(clears_first: bool) -> MemVec<bool> {
     let root = trie.root().unwrap()
     var nodes = Nodes::new()
     core::assert(trie.write_nodes(mut nodes))
-    var partial = StateTrie::partial(root, nodes)
+    var partial = StateTrie<Nodes>::partial(root, nodes)
     write_changes(mut partial, mut world, output.changes)
     core::assert(partial.root().unwrap() == state_root(mut world).unwrap())
-    let nodes = partial.into_nodes()
+    let nodes = partial.into_source()
     var read: MemVec<bool> = MemVec::new()
     for at in 0..nodes.len() { read.push(nodes.used(at)) }
     read
